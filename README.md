@@ -43,7 +43,7 @@ LLM-Manager 是一个功能强大的大型语言模型管理工具，旨在帮�
 required_gpus = {"rtx 4060", "v100"}  # 第116行
 
 # 修改为您的实际GPU，例如：
-required_gpus = {"rtx 3090", "gtx 1080 ti"}  # 根据您的GPU修改
+required_gpus = {"rtx 3090", "gtx 1080 ti"}  # 根据您的GPU修改，无需担心格式以及能否识别，程序采用的是模糊匹配
 ```
 
 **GPU名称格式**: 去除"NVIDIA"、"GeForce"等前缀，使用简化格式。您可以通过以下命令查看您的GPU名称：
