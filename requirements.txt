@@ -1,0 +1,11 @@
+# requirements.txt
+fastapi
+uvicorn[standard]
+httpx
+GPUtil
+gradio
+pystray
+pillow
+python-dotenv
+requests
+openai

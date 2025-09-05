@@ -1,0 +1,64 @@
+# 忽略日志文件
+*.log
+
+# 忽略可执行文件
+*.exe
+
+# 忽略动态链接库
+*.dll
+
+# 忽略构建目录
+/build/
+
+# 忽略日志目录
+/logs/
+
+# 忽略整个backend文件夹
+/backend/
+
+# 忽略CMake相关文件
+CMakeFiles/
+CMakeCache.txt
+CMakeOutput.log
+CMakeFiles/
+*.cmake
+
+# 忽略编译器生成的文件
+*.o
+*.obj
+*.so
+*.dylib
+
+# 忽略IDE相关文件
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 忽略系统生成文件
+Thumbs.db
+.DS_Store
+
+# 忽略Python缓存
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# 忽略虚拟环境
+venv/
+env/
+.venv/
+
+# 忽略Node.js相关文件
+node_modules/
+
+# 忽略其他临时文件
+*.tmp
+*.temp
+
+# 忽略配置文件中的敏感信息
+.env
+.config
