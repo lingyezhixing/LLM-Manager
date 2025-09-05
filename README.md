@@ -107,6 +107,46 @@ python -m vllm.entrypoints.openai.api_server \
     "webui_host": "127.0.0.1",  // Web界面访问地址
     "webui_port": 10000,       // Web界面端口
     "alive_time": 60           // 模型空闲超时时间（分钟）
+  },
+  
+  // 模型配置示例
+  "Qwen3-32B-Instruct": {
+    "aliases": ["Qwen3-32B-Instruct", "qwen3-32b", "qwen-32b"],
+    "bat_path": "Model_startup_script\\Qwen3-32B-Instruct.bat",
+    "mode": "Chat",
+    "gpu_mem_mb": {
+      "rtx 4090": 8192,        // 在RTX 4090上分配8GB显存
+      "rtx 3090": 8192,        // 在RTX 3090上分配8GB显存
+      "gtx 1080 ti": 0         // 在GTX 1080 Ti上不分配显存
+    },
+    "port": 10001,             // 模型服务端口
+    "auto_start": false        // 是否开机自动启动
+  },
+  
+  "GLM-4-9B-Chat": {
+    "aliases": ["GLM-4-9B-Chat", "glm-4-9b", "glm4-9b"],
+    "bat_path": "Model_startup_script\\GLM-4-9B-Chat.bat",
+    "mode": "Chat",
+    "gpu_mem_mb": {
+      "rtx 4090": 4096,        // 在RTX 4090上分配4GB显存
+      "rtx 3090": 4096,        // 在RTX 3090上分配4GB显存
+      "gtx 1080 ti": 6144      // 在GTX 1080 Ti上分配6GB显存
+    },
+    "port": 10002,             // 模型服务端口（避免冲突）
+    "auto_start": true         // 开机自动启动此模型
+  },
+  
+  "Llama-3-8B-Instruct": {
+    "aliases": ["Llama-3-8B-Instruct", "llama-3-8b", "llama3-8b"],
+    "bat_path": "Model_startup_script\\Llama-3-8B-Instruct.bat",
+    "mode": "Chat",
+    "gpu_mem_mb": {
+      "rtx 4090": 0,           // 在RTX 4090上不分配显存
+      "rtx 3090": 0,           // 在RTX 3090上不分配显存
+      "gtx 1080 ti": 8192      // 在GTX 1080 Ti上分配8GB显存
+    },
+    "port": 10003,             // 模型服务端口（避免冲突）
+    "auto_start": false        // 不自动启动
   }
 }
 ```

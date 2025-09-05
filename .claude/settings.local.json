@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:anthropic.com)",
+      "Bash(git add README.md)",
+      "Bash(git commit:*)",
+      "Bash(git push origin main)",
+      "Bash(git rm -r --cached LLM-Manager.code-workspace)",
+      "Bash(git add .gitignore)",
+      "Bash(cat .gitignore)",
+      "Bash(rm -rf LLM-Manager.code-workspace)",
+      "Bash(git rm --cached LLM-Manager.code-workspace)",
+      "Bash(git config:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
