@@ -8,6 +8,7 @@ LLM-Manager 是一个功能强大的大型语言模型管理工具，旨在帮�
 
 ### 🔧 模型管理
 - **多模型支持**: 同时管理多个LLM模型，包括Qwen、GLM、Sakura等系列
+- **多种模式支持**: 支持Chat、Base和Embedding三种模型模式
 - **智能别名系统**: 支持模型别名，灵活识别不同名称的模型
 - **自动启动**: 配置模型自动启动，系统启动时按需加载
 - **健康检查**: 自动检测模型状态，确保服务可用性
@@ -20,6 +21,7 @@ LLM-Manager 是一个功能强大的大型语言模型管理工具，旨在帮�
 
 ### 🌐 统一接口
 - **OpenAI兼容API**: 提供与OpenAI API兼容的统一接口
+- **多模式路由**: 支持Chat、Base和Embedding模式的专门路由
 - **流式响应支持**: 支持流式和非流式响应
 - **自动模型加载**: 请求时自动启动对应模型
 - **请求追踪**: 实时追踪模型请求状态和数量
@@ -147,6 +149,19 @@ python -m vllm.entrypoints.openai.api_server \
     },
     "port": 10003,             // 模型服务端口（避免冲突）
     "auto_start": false        // 不自动启动
+  },
+  
+  "Qwen3-Embedding-8B": {
+    "aliases": ["Qwen3-Embedding-8B", "Qwen3-Embedding", "qwen3-embedding"],
+    "bat_path": "Model_startup_script\\Qwen3-Embedding-8B-CPU.bat",
+    "mode": "Embedding",
+    "gpu_mem_mb": {
+      "rtx 4090": 0,           // CPU运行，不需要GPU显存
+      "rtx 3090": 0,           // CPU运行，不需要GPU显存
+      "gtx 1080 ti": 0         // CPU运行，不需要GPU显存
+    },
+    "port": 8081,              // 嵌入模型服务端口
+    "auto_start": false        // 不自动启动
   }
 }
 ```
@@ -218,6 +233,7 @@ python -m vllm.entrypoints.openai.api_server \
    - **启动模型**: 点击"启动"按钮启动对应模型
    - **停止模型**: 点击"停止"按钮停止运行中的模型
    - **查看状态**: 实时显示模型状态和待处理请求数
+   - **模式识别**: 界面显示模型模式（💬 Chat, 📝 Base, 🔍 Embedding）
 
 3. **日志查看**
    - 选择活动模型查看实时日志
@@ -252,6 +268,24 @@ curl -X POST http://localhost:8080/v1/completions \
     "max_tokens": 100
   }'
 ```
+
+#### 嵌入向量请求（Embedding模式）
+```bash
+curl -X POST http://localhost:8080/v1/embeddings \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "Qwen3-Embedding-8B",
+    "input": "Hello, world!",
+    "encoding_format": "float"
+  }'
+```
+
+#### 模式路由说明
+- **Chat模式**：仅支持 `/v1/chat/completions` 端点
+- **Base模式**：仅支持 `/v1/completions` 端点  
+- **Embedding模式**：仅支持 `/v1/embeddings` 端点
+
+系统会根据模型模式自动验证请求端点的兼容性。
 
 ### 系统托盘操作
 
@@ -393,3 +427,22 @@ LLM-Manager/
 ## 📄 许可证
 
 本项目采用 [MIT许可证](LICENSE)。
+
+## 📝 更新日志
+
+### v0.1.1 - 2025-09-06
+#### 新增功能
+- **Embedding模型支持**: 添加对Embedding模式模型的完整支持
+- **多模式路由**: 实现Chat、Base、Embedding三种模式的专门路由验证
+- **Web界面增强**: 在模型控制面板显示模式标识和图标
+- **健康检查扩展**: 支持embedding模型的功能性健康检查
+
+#### 技术改进
+- **API兼容性**: 严格验证模型模式与API端点的兼容性
+- **配置管理**: 支持embedding模型的配置文件管理
+- **错误处理**: 增强embedding模型启动和运行时的错误处理
+
+#### 文档更新
+- 添加embedding模型配置示例
+- 添加embedding API使用示例
+- 更新模式路由说明文档

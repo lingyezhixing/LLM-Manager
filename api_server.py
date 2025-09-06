@@ -59,8 +59,17 @@ async def proxy_request(request: Request, path: str):
     model_mode = model_config.get("mode", "Chat")
 
     is_chat_endpoint = "v1/chat/completions" in path
+    is_completion_endpoint = "v1/completions" in path
+    is_embedding_endpoint = "v1/embeddings" in path
+    
     if model_mode == "Base" and is_chat_endpoint:
         raise HTTPException(status_code=400, detail=f"模型 '{model_alias}' 是 'Base' 模式, 不支持聊天补全接口。")
+    if model_mode == "Chat" and is_completion_endpoint:
+        raise HTTPException(status_code=400, detail=f"模型 '{model_alias}' 是 'Chat' 模式, 不支持文本补全接口。")
+    if model_mode == "Embedding" and (is_chat_endpoint or is_completion_endpoint):
+        raise HTTPException(status_code=400, detail=f"模型 '{model_alias}' 是 'Embedding' 模式, 不支持聊天或文本补全接口。")
+    if model_mode in ["Chat", "Base"] and is_embedding_endpoint:
+        raise HTTPException(status_code=400, detail=f"模型 '{model_alias}' 是 '{model_mode}' 模式, 不支持嵌入接口。")
 
     # --- 逻辑修改：将请求计数和所有后续操作包裹在try/except中 ---
     # 1. 在任何耗时操作前，立即增加待处理请求计数

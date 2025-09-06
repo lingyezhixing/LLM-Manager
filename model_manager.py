@@ -97,6 +97,8 @@ class ModelManager:
             probe_path_display = "/v1/chat/completions"
         elif model_mode == "Base":
             probe_path_display = "/v1/completions"
+        elif model_mode == "Embedding":
+            probe_path_display = "/v1/embeddings"
         else:
             logger.info(f"模型 '{primary_name}' ({model_mode} 模式) 无需深度健康检查，跳过。")
             return True, "无需深度健康检查"
@@ -118,6 +120,10 @@ class ModelManager:
                 elif model_mode == "Base":
                     client.completions.create(
                         model=alias, prompt="hello", max_tokens=1, stream=False, timeout=5.0
+                    )
+                elif model_mode == "Embedding":
+                    client.embeddings.create(
+                        model=alias, input="hello", encoding_format="float", timeout=5.0
                     )
                 
                 logger.info(f"模型 '{primary_name}' 深度健康检查通过！")
@@ -334,7 +340,8 @@ class ModelManager:
                 "status": state['status'],
                 "pid": state['pid'],
                 "idle_time_sec": f"{idle_seconds:.0f}" if idle_seconds != -1 else "N/A",
-                "pending_requests": state.get('pending_requests', 0)
+                "pending_requests": state.get('pending_requests', 0),
+                "mode": config.get("mode", "Chat") if config else "Chat"
             }
         return status_copy
 

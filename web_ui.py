@@ -83,6 +83,9 @@ def create_model_control_row(primary_name: str, status_data: dict, index: int):
     with gr.Row(variant="panel"):
         with gr.Column(scale=3):
             gr.Markdown(f"**{primary_name}**")
+            mode_display = status_data.get('mode', 'Chat')
+            mode_emoji = {"Chat": "💬", "Base": "📝", "Embedding": "🔍"}.get(mode_display, "🤖")
+            gr.Markdown(f"<small>{mode_emoji} 模式: {mode_display}</small>")
             if status_data['aliases'][1:]:
                 aliases_str = ", ".join(status_data['aliases'][1:])
                 gr.Markdown(f"<small>别名: {aliases_str}</small>")
