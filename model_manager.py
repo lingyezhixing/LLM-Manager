@@ -77,6 +77,61 @@ class ModelManager:
             if key != "program" and model_cfg.get("aliases", []) and model_cfg["aliases"][0] == primary_name:
                 return model_cfg
         return None
+    
+    def get_adaptive_model_config(self, alias: str):
+        """
+        根据当前GPU状态获取自适应模型配置
+        按照配置文件中的优先级顺序尝试不同的配置方案
+        """
+        base_config = self.get_model_config(alias)
+        if not base_config:
+            return None
+            
+        # 获取当前在线的GPU
+        current_gpus = {gpu.simple_name for gpu in self.gpus}
+        
+        # 重新获取最新的GPU信息
+        self.gpus = get_gpu_info()
+        current_gpus = {gpu.simple_name for gpu in self.gpus}
+        logger.info(f"模型 '{alias}' 启动时检测到GPU: {current_gpus}")
+        
+        # 按优先级顺序尝试不同的配置方案
+        # 首先查找所有以GPU组合名称开头的配置键
+        priority_configs = []
+        for key in base_config.keys():
+            if key not in ["aliases", "bat_path", "mode", "gpu_mem_mb", "port", "auto_start", "alternate_config"]:
+                config_data = base_config[key]
+                if isinstance(config_data, dict) and "required_gpus" in config_data:
+                    priority_configs.append((key, config_data))
+        
+        # 按照配置文件中的顺序（即用户定义的优先级）进行尝试
+        for config_name, config_data in priority_configs:
+            required_gpus = set(config_data.get("required_gpus", []))
+            
+            if required_gpus.issubset(current_gpus):
+                logger.info(f"模型 '{alias}' 使用配置方案: {config_name}，需要GPU: {required_gpus}")
+                
+                # 构建完整的自适应配置
+                adaptive_config = base_config.copy()
+                
+                # 移除旧的配置键
+                for key in list(adaptive_config.keys()):
+                    if key not in ["aliases", "mode", "port", "auto_start"]:
+                        if key.startswith("RTX") or key in ["alternate_config"]:
+                            del adaptive_config[key]
+                
+                # 添加新的配置值
+                adaptive_config.update({
+                    "bat_path": config_data["bat_path"],
+                    "gpu_mem_mb": config_data["gpu_mem_mb"],
+                    "config_source": config_name  # 记录使用的配置来源
+                })
+                
+                return adaptive_config
+        
+        # 如果没有找到合适的配置，返回None表示不可用
+        logger.warning(f"模型 '{alias}' 没有找到适合当前GPU状态 {current_gpus} 的配置方案")
+        return None
         
     def _log_process_output(self, stream, log_list):
         try:
@@ -170,10 +225,20 @@ class ModelManager:
 
             # --- 以下是原有的加载逻辑，现在被全局锁保护 ---
             try:
+                # 使用自适应配置
+                model_config = self.get_adaptive_model_config(alias)
+                if not model_config:
+                    state['status'] = "stopped"
+                    current_gpus = {gpu.simple_name for gpu in self.gpus}
+                    error_msg = f"启动 '{primary_name}' 失败：没有适合当前GPU状态 {current_gpus} 的配置方案。"
+                    logger.error(error_msg)
+                    state['output_log'].append(f"[ERROR] {error_msg}")
+                    return False, error_msg
+                
                 global_disable_gpu_mon = self.config['program'].get('Disable_GPU_monitoring', False)
                 if not global_disable_gpu_mon and not bypass_vram_check:
                     logger.info(f"正在为模型 '{primary_name}' 检查显存...")
-                    if not self._check_and_free_vram(self.get_model_config(alias)):
+                    if not self._check_and_free_vram(model_config):
                         state['status'] = "stopped"
                         error_msg = f"启动 '{primary_name}' 失败：显存不足。"
                         logger.error(error_msg)
@@ -184,7 +249,10 @@ class ModelManager:
                     state['output_log'].append("[WARNING] GPU显存检查被跳过。")
 
                 logger.info(f"正在启动模型: {primary_name} (由别名 '{alias}' 触发)...")
-                model_config = self.get_model_config(alias)
+                config_source = model_config.get('config_source', '默认')
+                logger.info(f"使用配置方案: {config_source}")
+                logger.info(f"启动脚本: {model_config['bat_path']}")
+                logger.info(f"GPU需求: {model_config.get('gpu_mem_mb', {})}")
                 bat_path = model_config['bat_path']
                 
                 project_root = os.path.dirname(os.path.abspath(self.config_path))
@@ -334,14 +402,17 @@ class ModelManager:
         now = time.time()
         for primary_name, state in self.models_state.items():
             idle_seconds = (now - state['last_access']) if state.get('last_access') else -1
-            config = self.get_model_config(primary_name)
+            config = self.get_adaptive_model_config(primary_name)
             status_copy[primary_name] = {
                 "aliases": config.get("aliases", [primary_name]) if config else [primary_name],
                 "status": state['status'],
                 "pid": state['pid'],
                 "idle_time_sec": f"{idle_seconds:.0f}" if idle_seconds != -1 else "N/A",
                 "pending_requests": state.get('pending_requests', 0),
-                "mode": config.get("mode", "Chat") if config else "Chat"
+                "mode": config.get("mode", "Chat") if config else "Chat",
+                "is_available": bool(config),  # 是否有可用配置
+                "current_bat_path": config.get("bat_path", "") if config else "无可用配置",
+                "config_source": config.get("config_source", "N/A") if config else "N/A"
             }
         return status_copy
 
@@ -353,7 +424,7 @@ class ModelManager:
     def get_model_list(self):
         data = []
         for primary_name in self.models_state.keys():
-            config = self.get_model_config(primary_name)
+            config = self.get_adaptive_model_config(primary_name)
             if config:
                 data.append({
                     "id": primary_name,

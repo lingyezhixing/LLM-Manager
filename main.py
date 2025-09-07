@@ -113,26 +113,27 @@ def conditional_start_services():
     """
     global model_manager 
     
-    required_gpus = {"rtx 4060", "v100"}
-    logger.info(f"程序启动需要以下GPU同时存在: {', '.join(required_gpus)}")
+    # 移除GPU检测依赖，系统直接启动
+    logger.info("系统启动中，GPU检测将在模型启动时进行...")
     
-    while True:
-        gpus_info = get_gpu_info()
-        detected_gpus_simple_names = {gpu.simple_name for gpu in gpus_info}
-        
-        if required_gpus.issubset(detected_gpus_simple_names):
-            logger.info("所有必需的GPU均已检测到！准备启动核心服务...")
-            if tray_icon:
-                tray_icon.title = "LLM-Manager" # 更新托盘提示文字
-            break 
-        else:
-            found = required_gpus.intersection(detected_gpus_simple_names)
-            missing = required_gpus.difference(detected_gpus_simple_names)
-            logger.info(f"等待GPU就绪... (已找到: {list(found) if found else '无'}, 仍需: {list(missing)}). 5秒后重试...")
-            time.sleep(5)
+    # 立即启动核心服务
+    if tray_icon:
+        tray_icon.title = "LLM-Manager (启动中...)"
+    logger.info("准备启动核心服务...")
             
     try:
         model_manager = ModelManager('config.json')
+        
+        # 更新托盘标题显示当前GPU状态
+        current_gpus = {gpu.simple_name for gpu in model_manager.gpus}
+        if current_gpus:
+            tray_title = f"LLM-Manager (GPU: {', '.join(current_gpus)})"
+        else:
+            tray_title = "LLM-Manager (无GPU)"
+        if tray_icon:
+            tray_icon.title = tray_title
+        logger.info(f"系统启动完成，当前GPU: {current_gpus if current_gpus else '无'}")
+            
     except Exception as e:
         logger.error(f"加载配置或初始化模型管理器时出错: {e}")
         exit_application()
