@@ -183,14 +183,12 @@ class ModelManager:
                         model=alias, input="hello", encoding_format="float", timeout=5.0
                     )
                 elif model_mode == "Reranker":
-                    # Reranker模式的健康检查 - 使用HTTP POST请求
-                    import requests
-                    response = requests.post(
-                        f"http://127.0.0.1:{port}/v1/rerank",
+                    response = client._client.post(
+                        "rerank",
                         json={
                             "model": alias,
-                            "query": "test query",
-                            "documents": ["test document 1", "test document 2"],
+                            "query": "hello",
+                            "documents": ["hello world", "test document"],
                             "top_n": 1
                         },
                         timeout=5.0
@@ -220,8 +218,11 @@ class ModelManager:
 
         # 快速检查，避免不必要的全局锁等待
         with state['lock']:
-            if state['status'] in ["running", "starting"]:
-                return True, f"模型 '{primary_name}' 已在运行或正在启动中。"
+            if state['status'] == "running":
+                return True, f"模型 '{primary_name}' 已在运行。"
+            elif state['status'] == "starting":
+                # 模型正在启动，等待启动完成
+                pass  # 继续执行获取全局加载锁的逻辑
 
         # --- 修改核心逻辑：使用全局加载锁 ---
         logger.info(f"请求加载模型 '{primary_name}'，正在等待全局加载锁...")
@@ -233,7 +234,30 @@ class ModelManager:
                 if state['status'] == "running":
                     logger.info(f"模型 '{primary_name}' 在等待期间已被其他请求加载，跳过启动。")
                     return True, f"模型 {primary_name} 已成功启动。"
-                
+                elif state['status'] == "starting":
+                    # 模型正在启动，等待启动完成
+                    logger.info(f"模型 '{primary_name}' 正在启动中，等待完成...")
+                    # 等待启动完成，最多等待5分钟
+                    wait_start = time.time()
+                    max_wait_time = 300
+                    while state['status'] == "starting":
+                        if time.time() - wait_start > max_wait_time:
+                            state['lock'].release()  # 临时释放锁以允许其他操作
+                            logger.error(f"等待模型 '{primary_name}' 启动超时")
+                            return False, f"等待模型 '{primary_name}' 启动超时"
+                        # 释放锁让其他线程可以修改状态，然后重新获取
+                        state['lock'].release()
+                        time.sleep(0.5)
+                        state['lock'].acquire()
+
+                    # 重新检查状态
+                    if state['status'] == "running":
+                        logger.info(f"模型 '{primary_name}' 启动完成。")
+                        return True, f"模型 {primary_name} 已成功启动。"
+                    else:
+                        logger.error(f"模型 '{primary_name}' 启动失败。")
+                        return False, f"模型 {primary_name} 启动失败。"
+
                 # 确认由当前线程执行加载
                 state['status'] = "starting"
                 state['output_log'].clear()
