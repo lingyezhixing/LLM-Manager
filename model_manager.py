@@ -154,6 +154,8 @@ class ModelManager:
             probe_path_display = "/v1/completions"
         elif model_mode == "Embedding":
             probe_path_display = "/v1/embeddings"
+        elif model_mode == "Reranker":
+            probe_path_display = "/v1/rerank"
         else:
             logger.info(f"模型 '{primary_name}' ({model_mode} 模式) 无需深度健康检查，跳过。")
             return True, "无需深度健康检查"
@@ -180,6 +182,20 @@ class ModelManager:
                     client.embeddings.create(
                         model=alias, input="hello", encoding_format="float", timeout=5.0
                     )
+                elif model_mode == "Reranker":
+                    # Reranker模式的健康检查 - 使用HTTP POST请求
+                    import requests
+                    response = requests.post(
+                        f"http://127.0.0.1:{port}/v1/rerank",
+                        json={
+                            "model": alias,
+                            "query": "test query",
+                            "documents": ["test document 1", "test document 2"],
+                            "top_n": 1
+                        },
+                        timeout=5.0
+                    )
+                    response.raise_for_status()
                 
                 logger.info(f"模型 '{primary_name}' 深度健康检查通过！")
                 return True, "深度健康检查成功"
