@@ -12,7 +12,7 @@ class InterfacePlugin(ABC):
     def __init__(self, interface_name: str, model_manager=None):
         self.interface_name = interface_name
         self.model_manager = model_manager
-        logger.info(f"接口插件初始化: {interface_name}")
+        logger.debug(f"接口插件初始化: {interface_name}")
 
     @abstractmethod
     def health_check(self, model_alias: str, port: int, start_time: float = None, timeout_seconds: int = 300) -> Tuple[bool, str]:

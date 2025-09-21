@@ -42,7 +42,7 @@ class PluginLoader:
                     plugin_class = self._load_plugin_from_file(plugin_path, plugin_name)
                     if plugin_class:
                         plugins[plugin_name] = plugin_class
-                        logger.info(f"发现插件: {plugin_name}")
+                        logger.debug(f"发现插件: {plugin_name}")
                 except Exception as e:
                     logger.error(f"加载插件文件失败 {filename}: {e}")
 
@@ -127,7 +127,7 @@ class PluginLoader:
                 plugin_id = self._get_plugin_id(plugin_instance)
                 if plugin_id:
                     self.loaded_plugins[plugin_id] = plugin_instance
-                    logger.info(f"成功加载插件: {plugin_name} -> {plugin_id}")
+                    logger.debug(f"成功加载插件: {plugin_name} -> {plugin_id}")
                 else:
                     logger.warning(f"插件 {plugin_name} 没有返回有效的标识符")
 

@@ -164,7 +164,7 @@ class ModelController:
             if device_plugin.is_online():
                 online_devices.add(device_name)
 
-        logger.info(f"模型 '{alias}' 启动时检测到在线设备: {online_devices}")
+        logger.debug(f"模型 '{alias}' 启动时检测到在线设备: {online_devices}")
 
         # 按优先级顺序尝试不同的配置方案
         priority_configs = []
@@ -179,7 +179,7 @@ class ModelController:
             required_devices = set(config_data.get("required_devices", []))
 
             if required_devices.issubset(online_devices):
-                logger.info(f"模型 '{alias}' 使用配置方案: {config_name}，需要设备: {required_devices}")
+                logger.debug(f"模型 '{alias}' 使用配置方案: {config_name}，需要设备: {required_devices}")
 
                 # 构建完整的自适应配置
                 adaptive_config = base_config.copy()

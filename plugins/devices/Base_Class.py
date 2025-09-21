@@ -9,7 +9,7 @@ class DevicePlugin(ABC):
 
     def __init__(self, device_name: str):
         self.device_name = device_name
-        logger.info(f"设备插件初始化: {device_name}")
+        logger.debug(f"设备插件初始化: {device_name}")
 
     @abstractmethod
     def is_online(self) -> bool:
