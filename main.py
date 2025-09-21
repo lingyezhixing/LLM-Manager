@@ -12,9 +12,7 @@ import os
 from utils.logger import setup_logging, get_logger
 from core.model_controller import ModelController
 from core.api_server import run_api_server
-from core.tray import run_system_tray
 from core.webui import run_web_ui
-from webui.server import run_webui_server as run_modern_web_ui
 
 # 全局变量
 model_controller: ModelController = None
@@ -68,7 +66,7 @@ def start_core_services():
         # 启动现代化WebUI服务器
         webui_cfg = model_controller.config['program']
         webui_thread = threading.Thread(
-            target=run_modern_web_ui,
+            target=run_web_ui,
             args=(model_controller, webui_cfg['webui_host'], webui_cfg['webui_port']),
             daemon=True
         )
