@@ -1,174 +1,185 @@
-# main.py
+#!/usr/bin/env python3
+"""
+LLM-Manager 主程序入口
+重构版本 - 采用插件化架构
+"""
+
 import threading
 import time
 import logging
 import sys
-import webbrowser
 import os
-from PIL import Image
-from pystray import Icon as TrayIcon, Menu as TrayMenu, MenuItem as TrayMenuItem
-# Import project modules
-from gpu_utils import get_gpu_info, simplify_gpu_name
-# 模块导入可能在服务启动前发生，所以使用 try-except
-try:
-    from model_manager import ModelManager
-    from api_server import run_api_server
-    from web_ui import run_web_ui
-except ImportError as e:
-    # 这是一个兜底，理论上不应该发生
-    logging.error(f"核心模块导入失败: {e}")
-    sys.exit(1)
+from utils.logger import setup_logging, get_logger
+from core.model_controller import ModelController
+from core.api_server import run_api_server
+from core.tray import run_system_tray
+from core.webui import run_web_ui
+from webui.server import run_webui_server as run_modern_web_ui
 
-# Setup logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - [%(levelname)s] - %(message)s')
-logger = logging.getLogger(__name__)
-
-# --- Global Variables ---
-model_manager: ModelManager | None = None
-tray_icon: TrayIcon | None = None
+# 全局变量
+model_controller: ModelController = None
+tray_service = None
 threads = []
 
-# --- Tray Icon Functions (增强健壮性) ---
-def check_services_started():
-    """检查核心服务是否已启动"""
-    if model_manager is None:
-        logger.warning("核心服务正在等待GPU就绪，请稍后重试。")
-        return False
-    return True
-
-def open_webui():
-    """Opens the WebUI in the default browser."""
-    if not check_services_started():
-        return
-    webui_host = model_manager.config['program']['webui_host']
-    if webui_host == '0.0.0.0':
-        webui_host = '127.0.0.1'
-    port = model_manager.config['program']['webui_port']
-    url = f"http://{webui_host}:{port}"
-    logger.info(f"正在打开 WebUI: {url}")
-    webbrowser.open(url)
-
-def restart_auto_start_models():
-    """Stops all running models and starts the ones marked for auto-start."""
-    if not check_services_started():
-        return
-    logger.info("正在执行指令：重启所有 'auto_start' 模型...")
-    model_manager.unload_all_models()
-    time.sleep(3) # 等待模型完全卸载
-    # 使用主名称启动
-    for primary_name in model_manager.models_state.keys():
-        config = model_manager.get_model_config(primary_name)
-        if config and config.get("auto_start", False):
-            logger.info(f"正在自动启动模型: {primary_name}")
-            threading.Thread(target=model_manager.start_model, args=(primary_name,), daemon=True).start()
-
-def unload_all_models():
-    """Stops/unloads all currently running models."""
-    if not check_services_started():
-        return
-    logger.info("正在执行指令：卸载全部模型...")
-    model_manager.unload_all_models()
-    logger.info("全部模型卸载完毕。")
-
-def exit_application():
-    """Shuts down all services and exits the application."""
-    logger.info("正在退出应用程序...")
-    if tray_icon:
-        tray_icon.stop()
-    if model_manager: 
-        model_manager.shutdown()
-    os._exit(0)
-
-def setup_tray_icon():
-    """Creates and runs the system tray icon. This is a blocking call."""
-    global tray_icon
+def setup_signal_handlers():
+    """设置信号处理器"""
     try:
-        icon_path = os.path.join(os.path.dirname(__file__), 'icons', 'icon.ico')
-        if not os.path.exists(icon_path):
-             logger.error(f"图标文件未找到: {icon_path}。将使用默认图标。")
-             image = Image.new('RGB', (64, 64), 'black')
-        else:
-            image = Image.open(icon_path)
-        
-        menu = TrayMenu(
-            TrayMenuItem('打开 WebUI', open_webui, default=True),
-            TrayMenu.SEPARATOR,
-            TrayMenuItem('重启 Auto-Start 模型', restart_auto_start_models),
-            TrayMenuItem('卸载全部模型', unload_all_models),
-            TrayMenu.SEPARATOR,
-            TrayMenuItem('退出', exit_application)
+        import signal
+        def signal_handler(signum, frame):
+            logger.info(f"接收到信号 {signum}，正在关闭应用...")
+            shutdown_application()
+            # 给一些时间让清理完成
+            time.sleep(1)
+            sys.exit(0)
+
+        signal.signal(signal.SIGINT, signal_handler)
+        signal.signal(signal.SIGTERM, signal_handler)
+    except ImportError:
+        # Windows系统可能不支持signal模块
+        pass
+
+def start_core_services():
+    """启动核心服务"""
+    global model_controller, tray_service
+
+    logger.info("正在启动核心服务...")
+
+    try:
+        # 初始化模型控制器
+        config_path = 'config.json'
+        if not os.path.exists(config_path):
+            logger.error(f"配置文件不存在: {config_path}")
+            sys.exit(1)
+
+        model_controller = ModelController(config_path)
+        logger.info("模型控制器初始化完成")
+
+        # 启动API服务器
+        api_cfg = model_controller.config['program']
+        api_thread = threading.Thread(
+            target=run_api_server,
+            args=(model_controller, api_cfg['openai_host'], api_cfg['openai_port']),
+            daemon=True
         )
-        tray_icon = TrayIcon("LLM-Manager", image, "LLM-Manager (等待GPU...)", menu)
-        logger.info("系统托盘图标已创建。")
-        tray_icon.run() # 此处会阻塞主线程，保持程序运行
-    except Exception as e:
-        logger.error(f"创建系统托盘图标失败: {e}")
-        exit_application()
+        api_thread.start()
+        threads.append(api_thread)
+        logger.info(f"API服务器已启动: http://{api_cfg['openai_host']}:{api_cfg['openai_port']}")
 
-# --- Main Application Logic ---
-def conditional_start_services():
-    """
-    一个在后台运行的函数，它会循环监测GPU，
-    直到满足条件后才启动所有核心服务。
-    """
-    global model_manager 
-    
-    # 移除GPU检测依赖，系统直接启动
-    logger.info("系统启动中，GPU检测将在模型启动时进行...")
-    
-    # 立即启动核心服务
-    if tray_icon:
-        tray_icon.title = "LLM-Manager (启动中...)"
-    logger.info("准备启动核心服务...")
-            
-    try:
-        model_manager = ModelManager('config.json')
-        
-        # 更新托盘标题显示当前GPU状态
-        current_gpus = {gpu.simple_name for gpu in model_manager.gpus}
-        if current_gpus:
-            tray_title = f"LLM-Manager (GPU: {', '.join(current_gpus)})"
-        else:
-            tray_title = "LLM-Manager (无GPU)"
-        if tray_icon:
-            tray_icon.title = tray_title
-        logger.info(f"系统启动完成，当前GPU: {current_gpus if current_gpus else '无'}")
-            
+        # 启动现代化WebUI服务器
+        webui_cfg = model_controller.config['program']
+        webui_thread = threading.Thread(
+            target=run_modern_web_ui,
+            args=(model_controller, webui_cfg['webui_host'], webui_cfg['webui_port']),
+            daemon=True
+        )
+        webui_thread.start()
+        threads.append(webui_thread)
+        logger.info(f"现代化WebUI服务器已启动: http://{webui_cfg['webui_host']}:{webui_cfg['webui_port']}")
+
+        # 等待服务启动
+        time.sleep(3)
+
+        # 启动自动启动的模型
+        logger.info("检查需要自动启动的模型...")
+        for primary_name in model_controller.models_state.keys():
+            config = model_controller.get_model_config(primary_name)
+            if config and config.get("auto_start", False):
+                logger.info(f"正在自动启动模型: {primary_name}")
+                threading.Thread(
+                    target=model_controller.start_model,
+                    args=(primary_name,),
+                    daemon=True
+                ).start()
+
+        # 更新托盘状态
+        if tray_service:
+            tray_service.set_services_started(True)
+
+        logger.info("核心服务启动完成")
+
     except Exception as e:
-        logger.error(f"加载配置或初始化模型管理器时出错: {e}")
-        exit_application()
-    
-    api_cfg = model_manager.config['program']
-    api_thread = threading.Thread(
-        target=run_api_server,
-        args=(model_manager, api_cfg['openai_host'], api_cfg['openai_port']),
-        daemon=True
-    )
-    api_thread.start()
-    threads.append(api_thread)
-    
-    webui_cfg = model_manager.config['program']
-    webui_thread = threading.Thread(
-        target=run_web_ui,
-        args=(model_manager, webui_cfg['webui_host'], webui_cfg['webui_port']),
-        daemon=True
-    )
-    webui_thread.start()
-    threads.append(webui_thread)
-    
-    time.sleep(2)
-    logger.info("检查需要自动启动的模型...")
-    for primary_name in model_manager.models_state.keys():
-        config = model_manager.get_model_config(primary_name)
-        if config and config.get("auto_start", False):
-            threading.Thread(target=model_manager.start_model, args=(primary_name,), daemon=True).start()
+        logger.error(f"启动核心服务失败: {e}", exc_info=True)
+        shutdown_application()
+        sys.exit(1)
+
+def start_tray_service():
+    """启动系统托盘服务"""
+    global tray_service
+
+    try:
+        from core.tray import SystemTray
+
+        tray_service = SystemTray(model_controller)
+        tray_service.set_exit_callback(shutdown_application)
+
+        def tray_thread_func():
+            try:
+                tray_service.setup_tray_icon()
+            except Exception as e:
+                logger.error(f"托盘服务运行失败: {e}")
+                shutdown_application()
+
+        tray_thread = threading.Thread(target=tray_thread_func, daemon=False)
+        tray_thread.start()
+        threads.append(tray_thread)
+
+        logger.info("系统托盘服务已启动")
+
+    except Exception as e:
+        logger.error(f"启动托盘服务失败: {e}")
+
+def shutdown_application():
+    """快速关闭应用程序"""
+    logger.info("正在快速关闭应用程序...")
+
+    # 使用快速关闭方式强制停止所有模型
+    if model_controller:
+        try:
+            model_controller.shutdown()
+        except Exception as e:
+            logger.error(f"快速关闭模型控制器失败: {e}")
+
+    # 不等待线程结束，直接退出
+    logger.info("应用程序已快速关闭")
+
+def main():
+    """主函数"""
+    global logger
+
+    try:
+        # 设置日志
+        log_level = os.environ.get('LOG_LEVEL', 'INFO')
+        setup_logging(log_level=log_level)
+        logger = get_logger(__name__)
+
+        logger.info("LLM-Manager 启动中...")
+        logger.info(f"Python 版本: {sys.version}")
+        logger.info(f"工作目录: {os.getcwd()}")
+
+        # 设置信号处理器
+        setup_signal_handlers()
+
+        # 启动核心服务
+        start_core_services()
+
+        # 启动系统托盘服务
+        start_tray_service()
+
+        # 主循环
+        logger.info("LLM-Manager 运行中，按 Ctrl+C 退出...")
+        try:
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            logger.info("接收到键盘中断信号")
+        finally:
+            shutdown_application()
+
+    except Exception as e:
+        print(f"致命错误: {e}")
+        if 'logger' in locals():
+            logger.error(f"应用程序启动失败: {e}", exc_info=True)
+        sys.exit(1)
 
 if __name__ == "__main__":
-    logger.info("LLM-Manager 启动中...")
-    
-    services_thread = threading.Thread(target=conditional_start_services, daemon=True)
-    services_thread.start()
-    
-    setup_tray_icon()
-    
-    logger.info("LLM-Manager 已关闭。")
+    main()
