@@ -7,18 +7,33 @@ from PIL import Image
 from pystray import Icon as TrayIcon, Menu as TrayMenu, MenuItem as TrayMenuItem
 from typing import Optional
 from utils.logger import get_logger
+from core.config_manager import ConfigManager
 
 logger = get_logger(__name__)
 
 class SystemTray:
     """系统托盘服务"""
 
-    def __init__(self, api_host: str = '127.0.0.1', api_port: int = 8080):
+    def __init__(self, config_manager: ConfigManager):
+        # 接收配置管理器实例
+        self.config_manager = config_manager
+
+        # 从配置管理器获取API配置
+        api_cfg = self.config_manager.get_openai_config()
+        api_host = api_cfg['host']
+        api_port = api_cfg['port']
+
+        # 如果配置为0.0.0.0，使用localhost进行本地访问
+        if api_host == '0.0.0.0':
+            api_host = 'localhost'
+
         self.api_host = api_host
         self.api_port = api_port
         self.api_url = f"http://{api_host}:{api_port}"
         self.tray_icon: Optional[TrayIcon] = None
         self.exit_callback = None
+
+        logger.info(f"托盘服务初始化完成，连接到API: {self.api_url}")
 
     def open_webui(self):
         """打开WebUI"""
@@ -73,16 +88,25 @@ class SystemTray:
         return "LLM-Manager (设备状态未知)"
 
     def exit_application(self):
-        """退出应用程序 - 快速强制退出"""
-        logger.info("正在快速退出应用程序...")
+        """退出应用程序 - 通过API服务器关闭所有模型"""
+        logger.info("正在退出应用程序...")
 
-        # 先尝试通过API关闭所有模型
+        # 通过API服务器关闭所有模型
         try:
             logger.info("正在通过API关闭所有模型...")
-            requests.post(f"{self.api_url}/api/models/stop-all", timeout=10)
+            response = requests.post(f"{self.api_url}/api/models/stop-all", timeout=10)
+            if response.status_code == 200:
+                result = response.json()
+                if result.get("success"):
+                    logger.info("所有模型已通过API关闭")
+                else:
+                    logger.warning("通过API关闭模型失败")
+            else:
+                logger.warning("无法连接到API服务器关闭模型")
         except Exception as e:
-            logger.warning(f"通过API关闭模型失败: {e}")
+            logger.warning(f"通过API关闭模型时出错: {e}")
 
+        # 调用退出回调
         if self.exit_callback:
             logger.info("调用退出回调...")
             try:
@@ -90,10 +114,10 @@ class SystemTray:
             except Exception as e:
                 logger.error(f"退出回调执行失败: {e}")
 
-        logger.info("强制退出程序")
+        logger.info("程序退出")
         os._exit(0)
 
-    def setup_tray_icon(self):
+    def start_tray(self):
         """创建并运行系统托盘图标"""
         try:
             icon_path = os.path.join(os.path.dirname(__file__), '..', 'icons', 'icon.ico')
@@ -129,8 +153,3 @@ class SystemTray:
     def set_exit_callback(self, callback):
         """设置退出回调函数"""
         self.exit_callback = callback
-
-def run_system_tray(api_host: str = '127.0.0.1', api_port: int = 8080):
-    """运行系统托盘服务的便捷函数"""
-    tray = SystemTray(api_host, api_port)
-    return tray

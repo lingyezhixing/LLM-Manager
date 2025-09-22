@@ -99,6 +99,47 @@ class ModelController:
         except Exception as e:
             logger.error(f"自动加载插件失败: {e}")
 
+    def start_auto_start_models(self):
+        """启动所有标记为自动启动的模型"""
+        logger.info("检查需要自动启动的模型...")
+
+        # 检查设备在线状态
+        online_devices = [name for name, plugin in self.device_plugins.items() if plugin.is_online()]
+        if not online_devices:
+            logger.warning("没有在线设备，跳过自动启动模型")
+            return
+
+        started_models = []
+
+        for primary_name in self.config_manager.get_model_names():
+            if self.config_manager.is_auto_start(primary_name):
+                logger.info(f"正在自动启动模型: {primary_name}")
+
+                # 使用线程启动模型，避免阻塞初始化
+                def start_model_thread(model_name):
+                    try:
+                        success, message = self.start_model(model_name)
+                        if success:
+                            logger.info(f"自动启动模型 {model_name} 成功")
+                            started_models.append(model_name)
+                        else:
+                            logger.error(f"自动启动模型 {model_name} 失败: {message}")
+                    except Exception as e:
+                        logger.error(f"自动启动模型 {model_name} 时发生异常: {e}")
+
+                # 使用daemon线程，这样程序退出时会自动终止
+                thread = threading.Thread(
+                    target=start_model_thread,
+                    args=(primary_name,),
+                    daemon=True
+                )
+                thread.start()
+
+        if started_models:
+            logger.info(f"成功启动了 {len(started_models)} 个自动启动模型: {started_models}")
+        else:
+            logger.info("没有需要自动启动的模型")
+
     def resolve_primary_name(self, alias: str) -> str:
         """解析模型别名为主名称"""
         return self.config_manager.resolve_primary_name(alias)

@@ -1,7 +1,6 @@
 from fastapi import FastAPI, Request, HTTPException, Response
 from fastapi.responses import StreamingResponse, JSONResponse
 from typing import Dict, List, Optional
-import logging
 import json
 import asyncio
 from utils.logger import get_logger
@@ -13,12 +12,24 @@ logger = get_logger(__name__)
 class APIServer:
     """API服务器 - 提供统一的OpenAI API接口"""
 
-    def __init__(self, model_controller: ModelController):
-        self.model_controller = model_controller
-        self.config_manager = model_controller.config_manager
+    def __init__(self, config_manager: ConfigManager):
+        # 接收配置管理器实例
+        self.config_manager = config_manager
+
+        # 初始化模型控制器
+        self.model_controller = ModelController(self.config_manager)
+
+        # 初始化FastAPI应用
         self.app = FastAPI(title="LLM-Manager API", version="1.0.0")
         self.async_clients: Dict[int, any] = {}
+
+        # 设置路由
         self._setup_routes()
+
+        # 自动启动标记为auto_start的模型
+        self.model_controller.start_auto_start_models()
+
+        logger.info("API服务器初始化完成")
 
     def _setup_routes(self):
         """设置基础路由"""
@@ -304,9 +315,16 @@ class APIServer:
             # 对于其他未知异常，包装成500错误
             raise HTTPException(status_code=500, detail=f"内部服务器错误: {str(e)}")
 
-    def run(self, host: str, port: int):
+    def run(self, host: Optional[str] = None, port: Optional[int] = None):
         """运行API服务器"""
         import uvicorn
+
+        # 如果没有指定主机和端口，从配置中获取
+        if host is None or port is None:
+            api_cfg = self.config_manager.get_openai_config()
+            host = host or api_cfg['host']
+            port = port or api_cfg['port']
+
         logger.info(f"统一API接口将在 http://{host}:{port} 上启动")
         uvicorn.run(self.app, host=host, port=port, log_level="warning")
 
@@ -314,14 +332,21 @@ class APIServer:
 app: Optional[FastAPI] = None
 api_server: Optional[APIServer] = None
 
-def initialize_api_server(model_controller: ModelController) -> APIServer:
+def initialize_api_server(config_manager: ConfigManager) -> APIServer:
     """初始化API服务器"""
     global app, api_server
-    api_server = APIServer(model_controller)
+    api_server = APIServer(config_manager)
     app = api_server.app
     return api_server
 
-def run_api_server(model_controller: ModelController, host: str, port: int):
+def run_api_server(config_manager: ConfigManager, host: Optional[str] = None, port: Optional[int] = None):
     """运行API服务器的便捷函数"""
-    server = initialize_api_server(model_controller)
+    # 初始化API服务器
+    server = initialize_api_server(config_manager)
+
+    # 设置全局实例以便外部访问
+    global api_server
+    api_server = server
+
+    # 运行服务器
     server.run(host, port)
