@@ -167,11 +167,15 @@ class Monitor:
             for model_name in model_names:
                 safe_name = self.get_safe_model_name(model_name)
 
-                # 在映射表中记录对应关系
+                # 在映射表中记录对应关系 - 先检查是否存在
                 cursor.execute('''
-                    INSERT OR IGNORE INTO model_name_mapping (original_name, safe_name)
-                    VALUES (?, ?)
-                ''', (model_name, safe_name))
+                    SELECT COUNT(*) FROM model_name_mapping WHERE original_name = ?
+                ''', (model_name,))
+                if cursor.fetchone()[0] == 0:
+                    cursor.execute('''
+                        INSERT INTO model_name_mapping (original_name, safe_name)
+                        VALUES (?, ?)
+                    ''', (model_name, safe_name))
 
                 # 创建模型运行时间表
                 cursor.execute(f'''

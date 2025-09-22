@@ -14,6 +14,7 @@ from utils.logger import setup_logging, get_logger
 from core.config_manager import ConfigManager
 from core.openai_api_router import run_api_server
 from core.process_manager import get_process_manager, cleanup_process_manager
+from core.monitor import Monitor
 
 CONFIG_PATH = 'config.json'
 
@@ -28,6 +29,9 @@ class Application:
         self.threads = []
         self.logger = None
         self.running = False
+        self.monitor: Optional[Monitor] = None
+        self.monitor_thread = None
+        self.stop_monitor = False
 
     def setup_logging(self) -> None:
         """设置日志系统"""
@@ -57,6 +61,55 @@ class Application:
 
         self.config_manager = ConfigManager(self.config_path)
         self.logger.info("配置管理器初始化完成")
+
+    def initialize_monitor(self) -> None:
+        """初始化监控器"""
+        try:
+            self.logger.info("正在初始化监控器...")
+
+            # 创建监控器实例
+            self.monitor = Monitor()
+
+            # 读取模型主别名列表
+            model_names = self.config_manager.get_model_names()
+            self.logger.info(f"读取到 {len(model_names)} 个模型别名: {', '.join(model_names)}")
+
+            # 数据库已在Monitor初始化时自动完成
+            self.logger.info("数据库初始化完成")
+
+            # 记录程序启动时间戳
+            start_time = time.time()
+            self.monitor.add_program_runtime_start(start_time)
+            self.logger.info(f"已记录程序启动时间戳: {start_time}")
+
+            # 启动监控线程
+            self.start_monitor_thread()
+
+        except Exception as e:
+            self.logger.error(f"初始化监控器失败: {e}")
+            raise
+
+    def start_monitor_thread(self) -> None:
+        """启动监控线程"""
+        if not self.monitor:
+            raise RuntimeError("监控器未初始化")
+
+        def monitor_loop():
+            self.logger.info("监控线程启动")
+            while not self.stop_monitor:
+                try:
+                    current_time = time.time()
+                    self.monitor.update_program_runtime_end(current_time)
+                    time.sleep(10)  # 每10秒更新一次
+                except Exception as e:
+                    self.logger.error(f"监控线程更新失败: {e}")
+                    time.sleep(10)
+            self.logger.info("监控线程停止")
+
+        self.monitor_thread = threading.Thread(target=monitor_loop, daemon=True)
+        self.monitor_thread.start()
+        self.threads.append(self.monitor_thread)
+        self.logger.info("监控线程已启动")
 
     def start_api_server(self) -> None:
         """启动API服务器"""
@@ -124,6 +177,9 @@ class Application:
         # 初始化配置管理器
         self.initialize_config_manager()
 
+        # 初始化监控器
+        self.initialize_monitor()
+
         # 初始化进程管理器
         process_manager = get_process_manager()
         self.logger.info("进程管理器初始化完成")
@@ -167,6 +223,23 @@ class Application:
         self.running = False
 
         try:
+            # 停止监控线程
+            if self.monitor_thread and self.monitor_thread.is_alive():
+                self.stop_monitor = True
+                self.monitor_thread.join(timeout=5)
+                self.logger.info("监控线程已停止")
+
+            # 更新程序结束时间戳
+            if self.monitor:
+                try:
+                    end_time = time.time()
+                    self.monitor.update_program_runtime_end(end_time)
+                    self.logger.info(f"已更新程序结束时间戳: {end_time}")
+                    self.monitor.close()
+                    self.logger.info("监控器已关闭")
+                except Exception as e:
+                    self.logger.error(f"关闭监控器失败: {e}")
+
             # 清理进程管理器
             try:
                 cleanup_process_manager()
@@ -178,7 +251,6 @@ class Application:
             self.logger.error(f"关闭应用程序时发生错误: {e}")
         finally:
             self.logger.info("应用程序已退出")
-            sys.exit(0)
 
     def handle_startup_error(self, error: Exception) -> None:
         """处理启动错误"""
