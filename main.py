@@ -18,8 +18,8 @@ from core.openai_api_router import run_api_server
 CONFIG_PATH = 'config.json'
 
 # 全局变量
-config_manager: ConfigManager = None
-model_controller: ModelController = None
+config_manager = None
+model_controller = None
 tray_service = None
 threads = []
 
@@ -42,7 +42,7 @@ def setup_signal_handlers():
 
 def start_core_services():
     """启动核心服务"""
-    global model_controller, tray_service
+    global config_manager, model_controller, tray_service
 
     logger.info("正在启动核心服务...")
 
@@ -89,7 +89,8 @@ def start_core_services():
 
         # 更新托盘状态
         if tray_service:
-            tray_service.set_services_started(True)
+            # 托盘服务不再需要set_services_started方法
+            logger.info("系统托盘服务已就绪")
 
         logger.info("核心服务启动完成")
 
@@ -100,12 +101,26 @@ def start_core_services():
 
 def start_tray_service():
     """启动系统托盘服务"""
-    global tray_service
+    global tray_service, config_manager
 
     try:
         from core.tray import SystemTray
 
-        tray_service = SystemTray(model_controller)
+        # 获取API配置
+        if config_manager is None:
+            logger.error("配置管理器未初始化，无法启动托盘服务")
+            return
+
+        api_cfg = config_manager.get_openai_config()
+        api_host = api_cfg['host']
+        api_port = api_cfg['port']
+
+        # 如果配置为0.0.0.0，使用localhost进行本地访问
+        if api_host == '0.0.0.0':
+            api_host = 'localhost'
+
+        logger.info(f"托盘服务连接到API: {api_host}:{api_port}")
+        tray_service = SystemTray(api_host, api_port)
         tray_service.set_exit_callback(shutdown_application)
 
         def tray_thread_func():
@@ -115,6 +130,7 @@ def start_tray_service():
                 logger.error(f"托盘服务运行失败: {e}")
                 shutdown_application()
 
+        # 注意：托盘线程不能设置为daemon=True，否则程序会立即退出
         tray_thread = threading.Thread(target=tray_thread_func, daemon=False)
         tray_thread.start()
         threads.append(tray_thread)

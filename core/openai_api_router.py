@@ -6,6 +6,7 @@ import json
 import asyncio
 from utils.logger import get_logger
 from core.model_controller import ModelController
+from core.config_manager import ConfigManager
 
 logger = get_logger(__name__)
 
@@ -14,6 +15,7 @@ class APIServer:
 
     def __init__(self, model_controller: ModelController):
         self.model_controller = model_controller
+        self.config_manager = model_controller.config_manager
         self.app = FastAPI(title="LLM-Manager API", version="1.0.0")
         self.async_clients: Dict[int, any] = {}
         self._setup_routes()
@@ -77,6 +79,81 @@ class APIServer:
                 return logs
             except Exception as e:
                 return []
+
+        @self.app.post("/api/models/restart-autostart")
+        async def restart_autostart_models():
+            """重启所有autostart模型"""
+            try:
+                logger.info("通过API重启所有autostart模型...")
+
+                # 先卸载所有模型
+                await asyncio.to_thread(self.model_controller.unload_all_models)
+
+                # 等待一下
+                await asyncio.sleep(2)
+
+                # 启动所有autostart模型
+                started_models = []
+                for primary_name in self.config_manager.get_model_names():
+                    if self.config_manager.is_auto_start(primary_name):
+                        success, message = await asyncio.to_thread(
+                            self.model_controller.start_model, primary_name
+                        )
+                        if success:
+                            started_models.append(primary_name)
+                        else:
+                            logger.warning(f"自动启动模型 {primary_name} 失败: {message}")
+
+                return {
+                    "success": True,
+                    "message": f"已重启 {len(started_models)} 个autostart模型",
+                    "started_models": started_models
+                }
+            except Exception as e:
+                logger.error(f"重启autostart模型失败: {e}")
+                return {"success": False, "message": str(e)}
+
+        @self.app.post("/api/models/stop-all")
+        async def stop_all_models():
+            """关闭所有模型"""
+            try:
+                logger.info("通过API关闭所有模型...")
+                await asyncio.to_thread(self.model_controller.unload_all_models)
+                return {
+                    "success": True,
+                    "message": "所有模型已关闭"
+                }
+            except Exception as e:
+                logger.error(f"关闭所有模型失败: {e}")
+                return {"success": False, "message": str(e)}
+
+        @self.app.get("/api/devices/info")
+        async def get_device_info():
+            """获取设备信息"""
+            try:
+                devices_info = {}
+
+                for device_name, device_plugin in self.model_controller.device_plugins.items():
+                    try:
+                        device_info = device_plugin.get_devices_info()
+                        devices_info[device_name] = {
+                            "online": device_plugin.is_online(),
+                            "info": device_info
+                        }
+                    except Exception as e:
+                        logger.error(f"获取设备 {device_name} 信息失败: {e}")
+                        devices_info[device_name] = {
+                            "online": False,
+                            "error": str(e)
+                        }
+
+                return {
+                    "success": True,
+                    "devices": devices_info
+                }
+            except Exception as e:
+                logger.error(f"获取设备信息失败: {e}")
+                return {"success": False, "message": str(e)}
 
         @self.app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD"])
         async def handle_all_requests(request: Request, path: str):
