@@ -35,7 +35,7 @@ class Application:
 
     def setup_logging(self) -> None:
         """设置日志系统"""
-        log_level = os.environ.get('LOG_LEVEL', 'INFO')
+        log_level = os.environ.get('LOG_LEVEL', 'DEBUG')  # 修改为DEBUG级别
         setup_logging(log_level=log_level)
         self.logger = get_logger(__name__)
 

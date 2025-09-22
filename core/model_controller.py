@@ -142,30 +142,10 @@ class ModelController:
         else:
             logger.info("没有需要自动启动的模型")
 
-    def resolve_primary_name(self, alias: str) -> str:
-        """解析模型别名为主名称"""
-        return self.config_manager.resolve_primary_name(alias)
-
-    def get_model_config(self, alias: str) -> Optional[Dict[str, Any]]:
-        """获取模型配置"""
-        return self.config_manager.get_model_config(alias)
-
-    def get_adaptive_model_config(self, alias: str) -> Optional[Dict[str, Any]]:
-        """
-        根据当前设备状态获取自适应模型配置
-        按优先级顺序尝试不同的配置方案
-        """
-        # 获取当前在线的设备
-        online_devices = set()
-        for device_name, device_plugin in self.device_plugins.items():
-            if device_plugin.is_online():
-                online_devices.add(device_name)
-
-        return self.config_manager.get_adaptive_model_config(alias, online_devices)
-
-    def start_model(self, alias: str) -> Tuple[bool, str]:
-        """启动模型"""
-        primary_name = self.resolve_primary_name(alias)
+  
+    
+    def start_model(self, primary_name: str) -> Tuple[bool, str]:
+        """启动模型 - 接受主名称"""
         state = self.models_state[primary_name]
 
         # 快速检查，避免不必要的全局锁等待
@@ -216,7 +196,7 @@ class ModelController:
                 state['output_log'].append(f"--- {time.ctime()} --- 启动模型 '{primary_name}'")
 
             try:
-                return self._start_model_intelligent(alias)
+                return self._start_model_intelligent(primary_name)
             except Exception as e:
                 with state['lock']:
                     state['status'] = ModelStatus.FAILED.value
@@ -224,13 +204,18 @@ class ModelController:
                 logger.error(f"启动模型 {primary_name} 失败: {e}", exc_info=True)
                 return False, f"启动模型 {primary_name} 失败: {e}"
 
-    def _start_model_intelligent(self, alias: str) -> Tuple[bool, str]:
+    def _start_model_intelligent(self, primary_name: str) -> Tuple[bool, str]:
         """智能启动模型 - 包含设备检查和资源管理"""
-        primary_name = self.resolve_primary_name(alias)
         state = self.models_state[primary_name]
 
         # 获取自适应配置
-        model_config = self.get_adaptive_model_config(alias)
+        # 获取当前在线的设备
+        online_devices = set()
+        for device_name, device_plugin in self.device_plugins.items():
+            if device_plugin.is_online():
+                online_devices.add(device_name)
+
+        model_config = self.config_manager.get_adaptive_model_config(primary_name, online_devices)
         if not model_config:
             current_devices = [name for name, plugin in self.device_plugins.items() if plugin.is_online()]
             error_msg = f"启动 '{primary_name}' 失败：没有适合当前设备状态 {current_devices} 的配置方案"
@@ -302,7 +287,7 @@ class ModelController:
                 })
 
             # 执行健康检查
-            return self._perform_health_checks(alias, model_config)
+            return self._perform_health_checks(primary_name, model_config)
 
         except Exception as e:
             logger.error(f"启动模型进程失败: {e}")
@@ -391,9 +376,8 @@ class ModelController:
         logger.warning("无法释放足够的资源")
         return False
 
-    def _perform_health_checks(self, alias: str, model_config: Dict[str, Any]) -> Tuple[bool, str]:
+    def _perform_health_checks(self, primary_name: str, model_config: Dict[str, Any]) -> Tuple[bool, str]:
         """执行健康检查"""
-        primary_name = self.resolve_primary_name(alias)
         state = self.models_state[primary_name]
         port = model_config['port']
         timeout_seconds = 300
@@ -410,7 +394,7 @@ class ModelController:
 
         if interface_plugin:
             # 使用插件的统一健康检查方法
-            health_success, health_message = interface_plugin.health_check(alias, port, start_time, timeout_seconds)
+            health_success, health_message = interface_plugin.health_check(primary_name, port, start_time, timeout_seconds)
             if health_success:
                 logger.info(f"模型 '{primary_name}' 健康检查通过")
                 with state['lock']:
@@ -421,19 +405,18 @@ class ModelController:
                 logger.error(f"模型 '{primary_name}' 健康检查失败: {health_message}")
                 state['status'] = ModelStatus.FAILED.value
                 state['failure_reason'] = health_message
-                self.stop_model(alias)
+                self.stop_model(primary_name)
                 return False, f"健康检查失败: {health_message}"
         else:
             msg = f"未找到模式 '{model_mode}' 的接口插件，无法进行健康检查"
             logger.error(msg)
             state['status'] = ModelStatus.FAILED.value
             state['failure_reason'] = msg
-            self.stop_model(alias)
+            self.stop_model(primary_name)
             return False, msg
 
-    def stop_model(self, alias: str) -> Tuple[bool, str]:
-        """停止模型"""
-        primary_name = self.resolve_primary_name(alias)
+    def stop_model(self, primary_name: str) -> Tuple[bool, str]:
+        """停止模型 - 接受主名称"""
         state = self.models_state[primary_name]
 
         with state['lock']:
@@ -500,18 +483,16 @@ class ModelController:
 
         logger.info(f"所有模型均已卸载，共终止 {len(terminated_models)} 个模型进程")
 
-    def increment_pending_requests(self, alias: str):
-        """增加待处理请求计数"""
-        primary_name = self.resolve_primary_name(alias)
+    def increment_pending_requests(self, primary_name: str):
+        """增加待处理请求计数 - 接受主名称"""
         state = self.models_state[primary_name]
 
         with state['lock']:
             state['pending_requests'] += 1
             logger.info(f"模型 {primary_name} 新请求进入，当前待处理: {state['pending_requests']}")
 
-    def mark_request_completed(self, alias: str):
-        """标记请求完成"""
-        primary_name = self.resolve_primary_name(alias)
+    def mark_request_completed(self, primary_name: str):
+        """标记请求完成 - 接受主名称"""
         state = self.models_state[primary_name]
 
         with state['lock']:
@@ -556,7 +537,13 @@ class ModelController:
         for primary_name, state in self.models_state.items():
             idle_seconds = (now - state['last_access']) if state.get('last_access') else -1
             config = self.config_manager.get_model_config(primary_name)
-            adaptive_config = self.get_adaptive_model_config(primary_name)
+
+            # 获取当前在线的设备
+            online_devices = set()
+            for device_name, device_plugin in self.device_plugins.items():
+                if device_plugin.is_online():
+                    online_devices.add(device_name)
+            adaptive_config = self.config_manager.get_adaptive_model_config(primary_name, online_devices)
 
             status_copy[primary_name] = {
                 "aliases": config.get("aliases", [primary_name]) if config else [primary_name],
@@ -579,13 +566,9 @@ class ModelController:
             return self.models_state[primary_name].get('output_log', [])
         return ["错误：未找到指定的模型"]
 
-    def get_model_logs(self, model_alias: str) -> List[Dict[str, Any]]:
-        """获取模型的结构化日志"""
+    def get_model_logs(self, primary_name: str) -> List[Dict[str, Any]]:
+        """获取模型的结构化日志 - 接受主名称"""
         try:
-            primary_name = self.config_manager.resolve_primary_name(model_alias)
-            if not primary_name:
-                return [{"timestamp": time.time(), "level": "error", "message": f"模型别名 '{model_alias}' 未找到"}]
-
             if primary_name not in self.models_state:
                 return [{"timestamp": time.time(), "level": "error", "message": f"模型 '{primary_name}' 状态不存在"}]
 

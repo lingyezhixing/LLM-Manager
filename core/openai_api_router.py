@@ -1,11 +1,13 @@
 from fastapi import FastAPI, Request, HTTPException, Response
 from fastapi.responses import StreamingResponse, JSONResponse
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 import json
+import time
 import asyncio
 from utils.logger import get_logger
 from core.model_controller import ModelController
 from core.config_manager import ConfigManager
+from core.monitor import Monitor
 
 logger = get_logger(__name__)
 
@@ -19,6 +21,10 @@ class APIServer:
         # 初始化模型控制器
         self.model_controller = ModelController(self.config_manager)
 
+        # 初始化监控器
+        self.monitor = Monitor()
+        logger.debug("[TOKEN_LOGGER] 监控器初始化完成，token记录功能已激活")
+
         # 初始化FastAPI应用
         self.app = FastAPI(title="LLM-Manager API", version="1.0.0")
         self.async_clients: Dict[int, any] = {}
@@ -30,7 +36,8 @@ class APIServer:
         self.model_controller.start_auto_start_models()
 
         logger.info("API服务器初始化完成")
-
+        logger.debug("[TOKEN_LOGGER] API服务器token记录功能已准备就绪")
+  
     def _setup_routes(self):
         """设置基础路由"""
 
@@ -62,32 +69,44 @@ class APIServer:
 
         @self.app.post("/api/models/{model_alias}/start")
         async def start_model_api(model_alias: str):
-            """启动模型API"""
+            """启动模型API - 在入口处解析别名"""
             try:
+                # 先解析别名为主名称
+                primary_name = self.config_manager.resolve_primary_name(model_alias)
                 success, message = await asyncio.to_thread(
-                    self.model_controller.start_model, model_alias
+                    self.model_controller.start_model, primary_name
                 )
                 return {"success": success, "message": message}
+            except KeyError as e:
+                return {"success": False, "message": f"模型别名 '{model_alias}' 未找到"}
             except Exception as e:
                 return {"success": False, "message": str(e)}
 
         @self.app.post("/api/models/{model_alias}/stop")
         async def stop_model_api(model_alias: str):
-            """停止模型API"""
+            """停止模型API - 在入口处解析别名"""
             try:
+                # 先解析别名为主名称
+                primary_name = self.config_manager.resolve_primary_name(model_alias)
                 success, message = await asyncio.to_thread(
-                    self.model_controller.stop_model, model_alias
+                    self.model_controller.stop_model, primary_name
                 )
                 return {"success": success, "message": message}
+            except KeyError as e:
+                return {"success": False, "message": f"模型别名 '{model_alias}' 未找到"}
             except Exception as e:
                 return {"success": False, "message": str(e)}
 
         @self.app.get("/api/models/{model_alias}/logs")
         async def get_model_logs(model_alias: str):
-            """获取模型日志API"""
+            """获取模型日志API - 在入口处解析别名"""
             try:
-                logs = self.model_controller.get_model_logs(model_alias)
+                # 先解析别名为主名称
+                primary_name = self.config_manager.resolve_primary_name(model_alias)
+                logs = self.model_controller.get_model_logs(primary_name)
                 return logs
+            except KeyError as e:
+                return [{"timestamp": time.time(), "level": "error", "message": f"模型别名 '{model_alias}' 未找到"}]
             except Exception as e:
                 return []
 
@@ -183,14 +202,14 @@ class APIServer:
             )
         return self.async_clients[port]
 
-    async def stream_proxy_wrapper(self, model_alias: str, response: any):
+    async def stream_proxy_wrapper(self, primary_name: str, response: any):
         """包装流式响应，以在结束后更新请求计数器"""
         try:
             async for chunk in response.aiter_bytes():
                 yield chunk
         finally:
             await response.aclose()
-            self.model_controller.mark_request_completed(model_alias)
+            self.model_controller.mark_request_completed(primary_name)
 
     def create_error_response(self, detail: str, status_code: int = 500) -> JSONResponse:
         """创建错误响应"""
@@ -198,6 +217,150 @@ class APIServer:
             status_code=status_code,
             content={"error": True, "message": detail}
         )
+
+    def extract_tokens_from_usage(self, usage_data: Dict[str, Any]) -> tuple[int, int]:
+        """从usage数据中提取输入和输出token数量"""
+        prompt_tokens = usage_data.get("prompt_tokens", 0)
+        completion_tokens = usage_data.get("completion_tokens", 0)
+        return prompt_tokens, completion_tokens
+
+    def extract_tokens_from_response(self, response_content: bytes) -> tuple[int, int]:
+        """从响应内容中提取token信息"""
+        try:
+            logger.debug(f"[TOKEN_LOGGER] 开始提取token信息，响应大小: {len(response_content)} bytes")
+
+            # 处理流式响应（SSE格式）
+            content_str = response_content.decode('utf-8')
+
+            # 如果是SSE格式，需要提取最后的JSON数据
+            if "data: " in content_str:
+                logger.debug(f"[TOKEN_LOGGER] 检测到SSE格式响应，尝试提取JSON数据")
+
+                # 找到最后一个data: 行，通常包含完整的usage信息
+                lines = content_str.split('\n')
+                last_json_line = None
+
+                for line in reversed(lines):
+                    if line.startswith('data: '):
+                        data_str = line[6:]  # 去掉 "data: " 前缀
+                        if data_str.strip():  # 确保不是空行
+                            last_json_line = data_str
+                            break
+
+                if last_json_line:
+                    logger.debug(f"[TOKEN_LOGGER] 找到最后JSON数据: {last_json_line[:100]}...")
+                    data = json.loads(last_json_line)
+                else:
+                    logger.debug(f"[TOKEN_LOGGER] 未找到有效的JSON数据行")
+                    return 0, 0
+            else:
+                # 普通JSON响应
+                logger.debug(f"[TOKEN_LOGGER] 检测到普通JSON响应")
+                data = json.loads(content_str)
+
+            logger.debug(f"[TOKEN_LOGGER] JSON解析成功，响应字段: {list(data.keys())}")
+
+            # 检查是否有usage字段
+            if "usage" in data:
+                usage = data["usage"]
+                logger.debug(f"[TOKEN_LOGGER] 找到usage字段: {usage}")
+                input_tokens, output_tokens = self.extract_tokens_from_usage(usage)
+                logger.debug(f"[TOKEN_LOGGER] Token提取成功 - 输入: {input_tokens}, 输出: {output_tokens}")
+                return input_tokens, output_tokens
+
+            # 如果没有usage字段，返回0
+            logger.debug(f"[TOKEN_LOGGER] 响应中未找到usage字段")
+            return 0, 0
+        except json.JSONDecodeError as e:
+            logger.debug(f"[TOKEN_LOGGER] JSON解析失败: {e}")
+            # 尝试更宽松的解析方式
+            try:
+                content_str = response_content.decode('utf-8')
+                # 尝试找到任何看起来像JSON的部分
+                import re
+                json_pattern = r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}'
+                json_matches = re.findall(json_pattern, content_str)
+
+                for match in json_matches:
+                    try:
+                        data = json.loads(match)
+                        if "usage" in data:
+                            usage = data["usage"]
+                            logger.debug(f"[TOKEN_LOGGER] 通过正则提取找到usage字段: {usage}")
+                            input_tokens, output_tokens = self.extract_tokens_from_usage(usage)
+                            logger.debug(f"[TOKEN_LOGGER] Token提取成功 - 输入: {input_tokens}, 输出: {output_tokens}")
+                            return input_tokens, output_tokens
+                    except:
+                        continue
+
+                logger.debug(f"[TOKEN_LOGGER] 正则表达式也未找到有效的usage数据")
+                return 0, 0
+            except Exception as e2:
+                logger.debug(f"[TOKEN_LOGGER] 正则表达式提取也失败: {e2}")
+                return 0, 0
+        except Exception as e:
+            logger.debug(f"[TOKEN_LOGGER] Token提取失败: {e}")
+            return 0, 0
+
+    async def async_log_request_tokens(self, primary_name: str, input_tokens: int, output_tokens: int):
+        """异步记录请求token到数据库"""
+        try:
+            import time
+            timestamp = time.time()
+
+            logger.debug(f"[TOKEN_LOGGER] 开始异步记录token - 模型: {primary_name}")
+            logger.debug(f"[TOKEN_LOGGER] Token信息 - 输入: {input_tokens}, 输出: {output_tokens}, 时间戳: {timestamp}")
+
+            # 检查是否有token需要记录
+            if input_tokens == 0 and output_tokens == 0:
+                logger.debug(f"[TOKEN_LOGGER] 跳过记录 - token数为0")
+                return
+
+            # 使用异步方式写入数据库
+            logger.debug(f"[TOKEN_LOGGER] 调用monitor.add_model_request方法")
+            await asyncio.to_thread(
+                self.monitor.add_model_request,
+                primary_name,
+                [timestamp, input_tokens, output_tokens]
+            )
+
+            logger.debug(f"[TOKEN_LOGGER] 异步记录token成功 - 模型: {primary_name}, 总token数: {input_tokens + output_tokens}")
+        except Exception as e:
+            logger.error(f"[TOKEN_LOGGER] 异步记录token失败 - 模型: {primary_name}, 错误: {e}")
+            # 不抛出异常，避免影响主要请求流程
+
+    async def stream_with_token_logging(self, primary_name: str, response: any):
+        """流式响应包装器，在结束后记录token使用"""
+        content_chunks = []
+        try:
+            logger.debug(f"[TOKEN_LOGGER] 开始流式响应处理 - 模型: {primary_name}")
+            async for chunk in response.aiter_bytes():
+                content_chunks.append(chunk)
+                yield chunk
+        finally:
+            await response.aclose()
+            self.model_controller.mark_request_completed(primary_name)
+            logger.debug(f"[TOKEN_LOGGER] 流式响应结束 - 模型: {primary_name}, 收到 {len(content_chunks)} 个数据块")
+
+            # 处理token记录
+            try:
+                # 合并所有内容块
+                full_content = b''.join(content_chunks)
+                logger.debug(f"[TOKEN_LOGGER] 合并流式响应内容，总大小: {len(full_content)} bytes")
+
+                # 提取token信息
+                input_tokens, output_tokens = self.extract_tokens_from_response(full_content)
+
+                # 异步记录到数据库
+                if input_tokens > 0 or output_tokens > 0:
+                    logger.debug(f"[TOKEN_LOGGER] 准备异步记录token - 模型: {primary_name}, 总token数: {input_tokens + output_tokens}")
+                    await self.async_log_request_tokens(primary_name, input_tokens, output_tokens)
+                else:
+                    logger.debug(f"[TOKEN_LOGGER] 跳过token记录 - 模型: {primary_name}, token数为0")
+
+            except Exception as e:
+                logger.error(f"[TOKEN_LOGGER] 流式响应token记录失败 - 模型: {primary_name}, 错误: {e}")
+                # 不抛出异常，避免影响主要请求流程
 
     async def handle_request(self, request: Request, path: str) -> Response:
         """统一请求处理器"""
@@ -224,16 +387,16 @@ class APIServer:
         if not model_alias:
             raise HTTPException(status_code=400, detail="请求体(JSON)中缺少 'model' 字段")
 
-        # 检查模型别名是否存在
+        # 在API入口处解析别名为主名称
         try:
-            self.model_controller.resolve_primary_name(model_alias)
+            primary_model_name = self.config_manager.resolve_primary_name(model_alias)
         except KeyError:
             raise HTTPException(status_code=404, detail=f"模型别名 '{model_alias}' 未在配置中找到")
 
         # 获取模型配置并验证模式
-        model_config = self.model_controller.get_model_config(model_alias)
+        model_config = self.config_manager.get_model_config(primary_model_name)
         if not model_config:
-            raise HTTPException(status_code=404, detail=f"模型 '{model_alias}' 配置未找到")
+            raise HTTPException(status_code=404, detail=f"模型 '{primary_model_name}' 配置未找到")
 
         model_mode = model_config.get("mode", "Chat")
 
@@ -242,18 +405,18 @@ class APIServer:
         if not interface_plugin:
             raise HTTPException(status_code=400, detail=f"不支持的模型模式: {model_mode}")
 
-        # 使用插件进行请求验证
-        is_valid, error_message = interface_plugin.validate_request(path, model_alias)
+        # 使用插件进行请求验证（使用主名称）
+        is_valid, error_message = interface_plugin.validate_request(path, primary_model_name)
         if not is_valid:
             raise HTTPException(status_code=400, detail=error_message)
 
-        # 增加待处理请求计数
-        self.model_controller.increment_pending_requests(model_alias)
+        # 增加待处理请求计数（使用主名称）
+        self.model_controller.increment_pending_requests(primary_model_name)
 
         try:
-            # 启动模型（如果未运行）
+            # 启动模型（如果未运行）- 使用主名称
             success, message = await asyncio.to_thread(
-                self.model_controller.start_model, model_alias
+                self.model_controller.start_model, primary_model_name
             )
             if not success:
                 raise HTTPException(status_code=503, detail=message)
@@ -288,15 +451,29 @@ class APIServer:
 
             if is_streaming:
                 return StreamingResponse(
-                    self.stream_proxy_wrapper(model_alias, response),
+                    self.stream_with_token_logging(primary_model_name, response),
                     status_code=response.status_code,
                     headers=dict(response.headers)
                 )
             else:
                 # 处理非流式响应
+                logger.debug(f"[TOKEN_LOGGER] 开始处理非流式响应 - 模型: {primary_model_name}")
                 content = await response.aread()
                 await response.aclose()
-                self.model_controller.mark_request_completed(model_alias)
+                self.model_controller.mark_request_completed(primary_model_name)
+                logger.debug(f"[TOKEN_LOGGER] 非流式响应读取完成 - 模型: {primary_model_name}, 响应大小: {len(content)} bytes")
+
+                # 提取token信息并异步记录
+                try:
+                    input_tokens, output_tokens = self.extract_tokens_from_response(content)
+                    if input_tokens > 0 or output_tokens > 0:
+                        logger.debug(f"[TOKEN_LOGGER] 准备异步记录非流式响应token - 模型: {primary_model_name}, 总token数: {input_tokens + output_tokens}")
+                        await self.async_log_request_tokens(primary_model_name, input_tokens, output_tokens)
+                    else:
+                        logger.debug(f"[TOKEN_LOGGER] 跳过非流式响应token记录 - 模型: {primary_model_name}, token数为0")
+                except Exception as e:
+                    logger.error(f"[TOKEN_LOGGER] 非流式响应token记录失败 - 模型: {primary_model_name}, 错误: {e}")
+                    # 不抛出异常，避免影响主要请求流程
 
                 return Response(
                     content=content,
@@ -306,8 +483,8 @@ class APIServer:
 
         except Exception as e:
             # 统一的异常处理
-            logger.error(f"处理对 '{model_alias}' 的请求时出错: {e}", exc_info=True)
-            self.model_controller.mark_request_completed(model_alias)
+            logger.error(f"处理对 '{primary_model_name}' 的请求时出错: {e}", exc_info=True)
+            self.model_controller.mark_request_completed(primary_model_name)
 
             if isinstance(e, HTTPException):
                 raise e
