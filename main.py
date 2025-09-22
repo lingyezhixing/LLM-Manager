@@ -11,7 +11,7 @@ import sys
 import os
 from utils.logger import setup_logging, get_logger
 from core.model_controller import ModelController
-from core.api_server import run_api_server
+from core.openai_api_router import run_api_server
 # from core.webui import run_web_ui  # WebUI 模块已删除，待重构
 
 # 全局变量
