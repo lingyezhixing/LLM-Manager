@@ -1,7 +1,7 @@
 {
   "program": {
     "openai_host": "0.0.0.0",
-    "openai_port": 8080,
+    "openai_port": 8081,
     "webui_host": "127.0.0.1",
     "webui_port": 10000,
     "Disable_GPU_monitoring": false,

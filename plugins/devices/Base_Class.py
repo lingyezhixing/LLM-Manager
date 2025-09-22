@@ -20,9 +20,16 @@ class DevicePlugin(ABC):
         pass
 
     @abstractmethod
-    def get_memory_info(self) -> Tuple[int, int, int]:
+    def get_devices_info(self) -> Dict[str, Any]:
         """
-        获取设备内存信息
-        返回: (总内存MB, 可用内存MB, 已用内存MB)
+        获取设备详细信息
+        返回: {
+            'device_type': str,  # 设备类型，由插件自定义
+            'memory_type': str,  # 内存类型，由插件自定义
+            'total_memory_mb': int,  # 总内存MB
+            'available_memory_mb': int,  # 可用内存MB
+            'used_memory_mb': int,  # 已用内存MB
+            'usage_percentage': float,  # 使用率百分比
+        }
         """
         pass

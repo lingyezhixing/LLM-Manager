@@ -12,7 +12,7 @@ import os
 from utils.logger import setup_logging, get_logger
 from core.model_controller import ModelController
 from core.api_server import run_api_server
-from core.webui import run_web_ui
+# from core.webui import run_web_ui  # WebUI 模块已删除，待重构
 
 # 全局变量
 model_controller: ModelController = None
@@ -63,16 +63,8 @@ def start_core_services():
         threads.append(api_thread)
         logger.info(f"API服务器已启动: http://{api_cfg['openai_host']}:{api_cfg['openai_port']}")
 
-        # 启动现代化WebUI服务器
-        webui_cfg = model_controller.config['program']
-        webui_thread = threading.Thread(
-            target=run_web_ui,
-            args=(model_controller, webui_cfg['webui_host'], webui_cfg['webui_port']),
-            daemon=True
-        )
-        webui_thread.start()
-        threads.append(webui_thread)
-        logger.info(f"现代化WebUI服务器已启动: http://{webui_cfg['webui_host']}:{webui_cfg['webui_port']}")
+        # WebUI 服务器已删除，待重构
+        logger.info("WebUI 服务器已暂时移除，等待重构")
 
         # 等待服务启动
         time.sleep(3)

@@ -355,7 +355,8 @@ class ModelController:
                     resource_ok = False
                     break
 
-                total_mb, available_mb, used_mb = device_plugin.get_memory_info()
+                device_info = device_plugin.get_devices_info()
+                available_mb = device_info['available_memory_mb']
                 if available_mb < required_mb:
                     deficit = required_mb - available_mb
                     deficit_devices[device_name] = deficit

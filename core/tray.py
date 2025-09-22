@@ -19,15 +19,9 @@ class SystemTray:
 
     def open_webui(self):
         """打开WebUI"""
-        webui_host = self.model_controller.config['program']['webui_host']
-        if webui_host == '0.0.0.0':
-            webui_host = '127.0.0.1'
-
-        port = self.model_controller.config['program']['webui_port']
-        url = f"http://{webui_host}:{port}"
-
-        logger.info(f"正在打开 WebUI: {url}")
-        webbrowser.open(url)
+        logger.info("WebUI 已暂时移除，等待重构")
+        logger.info("可通过 API 服务器访问: http://127.0.0.1:8000")
+        # WebUI 重构后此处需要更新
 
     def restart_auto_start_models(self):
         """重启所有auto_start模型"""
