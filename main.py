@@ -10,11 +10,15 @@ import logging
 import sys
 import os
 from utils.logger import setup_logging, get_logger
+from core.config_manager import ConfigManager
 from core.model_controller import ModelController
 from core.openai_api_router import run_api_server
 # from core.webui import run_web_ui  # WebUI 模块已删除，待重构
 
+CONFIG_PATH = 'config.json'
+
 # 全局变量
+config_manager: ConfigManager = None
 model_controller: ModelController = None
 tray_service = None
 threads = []
@@ -43,25 +47,28 @@ def start_core_services():
     logger.info("正在启动核心服务...")
 
     try:
-        # 初始化模型控制器
-        config_path = 'config.json'
-        if not os.path.exists(config_path):
-            logger.error(f"配置文件不存在: {config_path}")
+        # 初始化配置管理器
+        if not os.path.exists(CONFIG_PATH):
+            logger.error(f"配置文件不存在: {CONFIG_PATH}")
             sys.exit(1)
 
-        model_controller = ModelController(config_path)
+        config_manager = ConfigManager(CONFIG_PATH)
+        logger.info("配置管理器初始化完成")
+
+        # 初始化模型控制器
+        model_controller = ModelController(config_manager)
         logger.info("模型控制器初始化完成")
 
         # 启动API服务器
-        api_cfg = model_controller.config['program']
+        api_cfg = config_manager.get_openai_config()
         api_thread = threading.Thread(
             target=run_api_server,
-            args=(model_controller, api_cfg['openai_host'], api_cfg['openai_port']),
+            args=(model_controller, api_cfg['host'], api_cfg['port']),
             daemon=True
         )
         api_thread.start()
         threads.append(api_thread)
-        logger.info(f"API服务器已启动: http://{api_cfg['openai_host']}:{api_cfg['openai_port']}")
+        logger.info(f"API服务器已启动: http://{api_cfg['host']}:{api_cfg['port']}")
 
         # WebUI 服务器已删除，待重构
         logger.info("WebUI 服务器已暂时移除，等待重构")
@@ -71,9 +78,8 @@ def start_core_services():
 
         # 启动自动启动的模型
         logger.info("检查需要自动启动的模型...")
-        for primary_name in model_controller.models_state.keys():
-            config = model_controller.get_model_config(primary_name)
-            if config and config.get("auto_start", False):
+        for primary_name in config_manager.get_model_names():
+            if config_manager.is_auto_start(primary_name):
                 logger.info(f"正在自动启动模型: {primary_name}")
                 threading.Thread(
                     target=model_controller.start_model,

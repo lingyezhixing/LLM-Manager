@@ -1,15 +1,15 @@
-import json
 import subprocess
 import time
 import threading
 import logging
 import os
-from typing import Dict, List, Tuple, Optional, Any
+from typing import Dict, List, Tuple, Optional, Any, Set
 from enum import Enum
 from utils.logger import get_logger
 from plugins.devices.Base_Class import DevicePlugin
 from plugins.interfaces.Base_Class import InterfacePlugin
 from .plugin_system import PluginManager
+from .config_manager import ConfigManager
 
 logger = get_logger(__name__)
 
@@ -25,14 +25,11 @@ class ModelStatus(Enum):
 class ModelController:
     """模型控制器 - 负责模型的启动、停止和资源管理"""
 
-    def __init__(self, config_path: str = 'config-rebuild.json'):
-        self.config_path = config_path
-        self.config = {}
+    def __init__(self, config_manager: ConfigManager):
+        self.config_manager = config_manager
         self.device_plugins: Dict[str, DevicePlugin] = {}
         self.interface_plugins: Dict[str, InterfacePlugin] = {}
         self.models_state: Dict[str, Dict[str, Any]] = {}
-        self.alias_to_primary_name: Dict[str, str] = {}
-        self.config_lock = threading.Lock()
         self.loading_lock = threading.Lock()
         self.is_running = True
         self.plugin_manager: Optional[PluginManager] = None
@@ -41,46 +38,21 @@ class ModelController:
         self.idle_check_thread = threading.Thread(target=self.idle_check_loop, daemon=True)
         self.idle_check_thread.start()
 
-        self.load_config()
+        self._init_model_states()
         self.load_plugins()
 
     def load_config(self):
-        """加载配置文件"""
-        with self.config_lock:
-            try:
-                with open(self.config_path, 'r', encoding='utf-8') as f:
-                    self.config = json.load(f)
-                self._init_model_states()
-                logger.info(f"配置文件加载成功: {self.config_path}")
-            except Exception as e:
-                logger.error(f"加载配置文件失败: {e}")
-                raise
+        """重新加载配置文件"""
+        self.config_manager.reload_config()
+        self._init_model_states()
+        logger.info("配置文件重新加载完成")
 
     def _init_model_states(self):
         """初始化模型状态"""
         new_states = {}
-        self.alias_to_primary_name.clear()
-        all_aliases_check = set()
+        model_names = self.config_manager.get_model_names()
 
-        if "program" not in self.config:
-            raise ValueError("配置文件中缺少 'program' 部分")
-
-        for key, model_cfg in self.config.items():
-            # 跳过非模型配置部分
-            if key in ["program"]:
-                continue
-
-            aliases = model_cfg.get("aliases")
-            if not isinstance(aliases, list) or not aliases:
-                raise ValueError(f"模型配置 '{key}' 缺少 'aliases' 或其为空列表")
-
-            primary_name = aliases[0]
-            for alias in aliases:
-                if alias in all_aliases_check:
-                    raise ValueError(f"配置错误: 别名 '{alias}' 重复")
-                all_aliases_check.add(alias)
-                self.alias_to_primary_name[alias] = primary_name
-
+        for primary_name in model_names:
             if primary_name in self.models_state:
                 new_states[primary_name] = self.models_state[primary_name]
             else:
@@ -101,10 +73,9 @@ class ModelController:
 
     def load_plugins(self):
         """加载设备插件和接口插件"""
-        # 从配置获取插件目录
-        plugin_dirs = self.config.get('program', {})
-        device_dir = plugin_dirs.get('device_plugin_dir', 'plugins/devices')
-        interface_dir = plugin_dirs.get('interface_plugin_dir', 'plugins/interfaces')
+        # 从配置管理器获取插件目录
+        device_dir = self.config_manager.get_device_plugin_dir()
+        interface_dir = self.config_manager.get_interface_plugin_dir()
 
         # 创建插件管理器
         self.plugin_manager = PluginManager(device_dir, interface_dir)
@@ -130,76 +101,24 @@ class ModelController:
 
     def resolve_primary_name(self, alias: str) -> str:
         """解析模型别名为主名称"""
-        primary_name = self.alias_to_primary_name.get(alias)
-        if not primary_name:
-            raise KeyError(f"无法解析模型别名 '{alias}'")
-        return primary_name
+        return self.config_manager.resolve_primary_name(alias)
 
     def get_model_config(self, alias: str) -> Optional[Dict[str, Any]]:
         """获取模型配置"""
-        primary_name = self.alias_to_primary_name.get(alias)
-        if not primary_name:
-            return None
-
-        for key, model_cfg in self.config.items():
-            # 跳过非模型配置部分
-            if key in ["program"]:
-                continue
-            if model_cfg.get("aliases", []) and model_cfg["aliases"][0] == primary_name:
-                return model_cfg
-        return None
+        return self.config_manager.get_model_config(alias)
 
     def get_adaptive_model_config(self, alias: str) -> Optional[Dict[str, Any]]:
         """
         根据当前设备状态获取自适应模型配置
         按优先级顺序尝试不同的配置方案
         """
-        base_config = self.get_model_config(alias)
-        if not base_config:
-            return None
-
         # 获取当前在线的设备
         online_devices = set()
         for device_name, device_plugin in self.device_plugins.items():
             if device_plugin.is_online():
                 online_devices.add(device_name)
 
-        logger.debug(f"模型 '{alias}' 启动时检测到在线设备: {online_devices}")
-
-        # 按优先级顺序尝试不同的配置方案
-        priority_configs = []
-        for key in base_config.keys():
-            if key not in ["aliases", "mode", "port", "auto_start"]:
-                config_data = base_config[key]
-                if isinstance(config_data, dict) and "required_devices" in config_data:
-                    priority_configs.append((key, config_data))
-
-        # 按照配置文件中的顺序进行尝试
-        for config_name, config_data in priority_configs:
-            required_devices = set(config_data.get("required_devices", []))
-
-            if required_devices.issubset(online_devices):
-                logger.debug(f"模型 '{alias}' 使用配置方案: {config_name}，需要设备: {required_devices}")
-
-                # 构建完整的自适应配置
-                adaptive_config = base_config.copy()
-
-                # 移除旧的配置键
-                for key in list(adaptive_config.keys()):
-                    if key not in ["aliases", "mode", "port", "auto_start"]:
-                        del adaptive_config[key]
-
-                # 添加新的配置值
-                adaptive_config.update({
-                    "bat_path": config_data["bat_path"],
-                    "memory_mb": config_data["memory_mb"],
-                    "config_source": config_name
-                })
-
-                return adaptive_config
-
-        logger.warning(f"模型 '{alias}' 没有找到适合当前设备状态 {online_devices} 的配置方案")
-        return None
+        return self.config_manager.get_adaptive_model_config(alias, online_devices)
 
     def start_model(self, alias: str) -> Tuple[bool, str]:
         """启动模型"""
@@ -298,7 +217,7 @@ class ModelController:
 
         try:
             # 启动进程
-            project_root = os.path.dirname(os.path.abspath(self.config_path))
+            project_root = os.path.dirname(os.path.abspath(self.config_manager.config_path))
             process = subprocess.Popen(
                 model_config['bat_path'],
                 shell=True,
@@ -569,7 +488,7 @@ class ModelController:
                 break
 
             try:
-                alive_time_min = self.config['program'].get('alive_time', 0)
+                alive_time_min = self.config_manager.get_alive_time()
                 if alive_time_min <= 0:
                     continue
 
@@ -597,7 +516,8 @@ class ModelController:
 
         for primary_name, state in self.models_state.items():
             idle_seconds = (now - state['last_access']) if state.get('last_access') else -1
-            config = self.get_adaptive_model_config(primary_name)
+            config = self.config_manager.get_model_config(primary_name)
+            adaptive_config = self.get_adaptive_model_config(primary_name)
 
             status_copy[primary_name] = {
                 "aliases": config.get("aliases", [primary_name]) if config else [primary_name],
@@ -606,9 +526,9 @@ class ModelController:
                 "idle_time_sec": f"{idle_seconds:.0f}" if idle_seconds != -1 else "N/A",
                 "pending_requests": state.get('pending_requests', 0),
                 "mode": config.get("mode", "Chat") if config else "Chat",
-                "is_available": bool(config),
-                "current_bat_path": config.get("bat_path", "") if config else "无可用配置",
-                "config_source": config.get("config_source", "N/A") if config else "N/A",
+                "is_available": bool(adaptive_config),
+                "current_bat_path": adaptive_config.get("bat_path", "") if adaptive_config else "无可用配置",
+                "config_source": adaptive_config.get("config_source", "N/A") if adaptive_config else "N/A",
                 "failure_reason": state.get('failure_reason')
             }
 
@@ -623,7 +543,7 @@ class ModelController:
     def get_model_logs(self, model_alias: str) -> List[Dict[str, Any]]:
         """获取模型的结构化日志"""
         try:
-            primary_name = self.alias_to_primary_name.get(model_alias)
+            primary_name = self.config_manager.resolve_primary_name(model_alias)
             if not primary_name:
                 return [{"timestamp": time.time(), "level": "error", "message": f"模型别名 '{model_alias}' 未找到"}]
 
@@ -677,7 +597,7 @@ class ModelController:
         """获取模型列表"""
         data = []
         for primary_name in self.models_state.keys():
-            config = self.get_adaptive_model_config(primary_name)
+            config = self.config_manager.get_model_config(primary_name)
             if config:
                 data.append({
                     "id": primary_name,

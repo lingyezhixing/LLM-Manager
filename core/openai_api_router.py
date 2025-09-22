@@ -136,7 +136,10 @@ class APIServer:
         if not model_alias:
             raise HTTPException(status_code=400, detail="请求体(JSON)中缺少 'model' 字段")
 
-        if model_alias not in self.model_controller.alias_to_primary_name:
+        # 检查模型别名是否存在
+        try:
+            self.model_controller.resolve_primary_name(model_alias)
+        except KeyError:
             raise HTTPException(status_code=404, detail=f"模型别名 '{model_alias}' 未在配置中找到")
 
         # 获取模型配置并验证模式
