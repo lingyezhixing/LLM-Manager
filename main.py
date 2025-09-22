@@ -12,6 +12,7 @@ import os
 from utils.logger import setup_logging, get_logger
 from core.config_manager import ConfigManager
 from core.openai_api_router import run_api_server
+from core.process_manager import get_process_manager, cleanup_process_manager
 
 CONFIG_PATH = 'config.json'
 
@@ -26,6 +27,9 @@ def setup_signal_handlers():
         import signal
         def signal_handler(signum, frame):
             logger.info(f"接收到信号 {signum}，正在关闭应用...")
+            # 清理进程管理器
+            process_manager = get_process_manager()
+            process_manager.cleanup()
             # 通过托盘服务关闭应用
             if tray_service:
                 tray_service.exit_application()
@@ -54,6 +58,10 @@ def start_core_services():
 
         config_manager = ConfigManager(CONFIG_PATH)
         logger.info("配置管理器初始化完成")
+
+        # 初始化进程管理器
+        process_manager = get_process_manager()
+        logger.info("进程管理器初始化完成")
 
         # 启动API服务器，传递配置管理器实例
         api_thread = threading.Thread(
@@ -136,6 +144,12 @@ def main():
         except KeyboardInterrupt:
             logger.info("接收到键盘中断信号")
         finally:
+            # 清理进程管理器
+            try:
+                cleanup_process_manager()
+                logger.info("进程管理器已清理")
+            except Exception as e:
+                logger.error(f"清理进程管理器失败: {e}")
             # 通过托盘服务关闭应用
             if tray_service:
                 tray_service.exit_application()

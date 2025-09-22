@@ -10,6 +10,7 @@ from plugins.devices.Base_Class import DevicePlugin
 from plugins.interfaces.Base_Class import InterfacePlugin
 from .plugin_system import PluginManager
 from .config_manager import ConfigManager
+from .process_manager import get_process_manager
 
 logger = get_logger(__name__)
 
@@ -33,6 +34,7 @@ class ModelController:
         self.loading_lock = threading.Lock()
         self.is_running = True
         self.plugin_manager: Optional[PluginManager] = None
+        self.process_manager = get_process_manager()
 
         # 启动空闲检查线程
         self.idle_check_thread = threading.Thread(target=self.idle_check_loop, daemon=True)
@@ -257,34 +259,47 @@ class ModelController:
         state['output_log'].append(f"[INFO] 启动脚本: {model_config['bat_path']}")
 
         try:
-            # 启动进程
+            # 使用进程管理器启动模型进程
             project_root = os.path.dirname(os.path.abspath(self.config_manager.config_path))
-            process = subprocess.Popen(
-                model_config['bat_path'],
-                shell=True,
-                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
+            process_name = f"model_{primary_name}"
+
+            success, message, pid = self.process_manager.start_process(
+                name=process_name,
+                command=model_config['bat_path'],
                 cwd=project_root,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                encoding='utf-8',
-                errors='replace',
-                bufsize=1
+                description=f"模型进程: {primary_name}",
+                shell=True,
+                creation_flags=subprocess.CREATE_NEW_PROCESS_GROUP,
+                capture_output=True
             )
 
-            # 启动日志线程
-            log_thread = threading.Thread(
-                target=self._log_process_output,
-                args=(process.stdout, state['output_log']),
-                daemon=True
-            )
-            log_thread.start()
+            if not success:
+                error_msg = f"启动模型进程失败: {message}"
+                state['status'] = ModelStatus.FAILED.value
+                state['failure_reason'] = error_msg
+                return False, error_msg
 
-            state.update({
-                "process": process,
-                "pid": process.pid,
-                "log_thread": log_thread
-            })
+            # 启动日志线程（从进程管理器获取输出流）
+            process_info = self.process_manager.get_process_info(process_name)
+            if process_info and process_info.get('process'):
+                # 启动日志线程
+                log_thread = threading.Thread(
+                    target=self._log_process_output,
+                    args=(process_info['process'].stdout, state['output_log']),
+                    daemon=True
+                )
+                log_thread.start()
+                state.update({
+                    "process": process_info['process'],
+                    "pid": pid,
+                    "log_thread": log_thread
+                })
+            else:
+                state.update({
+                    "process": None,
+                    "pid": pid,
+                    "log_thread": None
+                })
 
             # 执行健康检查
             return self._perform_health_checks(alias, model_config)
@@ -427,35 +442,15 @@ class ModelController:
 
             pid = state.get('pid')
             if pid:
-                logger.info(f"正在停止模型 {primary_name} (PID: {pid})")
-                try:
-                    # 尝试正常终止
-                    subprocess.run(
-                        f"taskkill /F /T /PID {pid}",
-                        check=True,
-                        shell=True,
-                        capture_output=True,
-                        text=True,
-                        encoding='utf-8',
-                        errors='ignore'
-                    )
+                logger.info(f"正在强制停止模型 {primary_name} (PID: {pid})")
+                # 使用进程管理器强制终止模型进程
+                process_name = f"model_{primary_name}"
+                success, message = self.process_manager.stop_process(process_name, force=True)
+
+                if success:
                     logger.info(f"模型 {primary_name} (PID: {pid}) 已成功终止")
-                except subprocess.CalledProcessError as e:
-                    logger.warning(f"终止模型 {primary_name} PID:{pid} 时出错: {e.stderr or e.stdout}")
-                    # 尝试更强力的终止方式
-                    try:
-                        subprocess.run(
-                            f"taskkill /F /IM python.exe /FI \"PID eq {pid}\"",
-                            check=True,
-                            shell=True,
-                            capture_output=True,
-                            text=True,
-                            encoding='utf-8',
-                            errors='ignore'
-                        )
-                        logger.info(f"模型 {primary_name} (PID: {pid}) 已强制终止")
-                    except subprocess.CalledProcessError as e2:
-                        logger.error(f"强制终止模型 {primary_name} PID:{pid} 失败: {e2.stderr or e2.stdout}")
+                else:
+                    logger.warning(f"终止模型 {primary_name} PID:{pid} 失败: {message}")
 
             self._mark_model_as_stopped(primary_name, acquire_lock=False)
             return True, f"模型 {primary_name} 已停止"
@@ -487,20 +482,23 @@ class ModelController:
         logger.info("正在卸载所有运行中的模型...")
         primary_names = list(self.models_state.keys())
 
-        threads = []
+        # 使用进程管理器批量停止所有模型进程
+        terminated_models = []
         for name in primary_names:
             state = self.models_state[name]
             with state['lock']:
                 if state['status'] not in [ModelStatus.STOPPED.value, ModelStatus.FAILED.value]:
-                    thread = threading.Thread(target=self.stop_model, args=(name,))
-                    threads.append(thread)
+                    process_name = f"model_{name}"
+                    success, message = self.process_manager.stop_process(process_name, force=True)
+                    if success:
+                        terminated_models.append(name)
 
-        for thread in threads:
-            thread.start()
-        for thread in threads:
-            thread.join()
+                    # 更新状态
+                    state['status'] = ModelStatus.STOPPED.value
+                    state['pid'] = None
+                    state['process'] = None
 
-        logger.info("所有模型均已卸载")
+        logger.info(f"所有模型均已卸载，共终止 {len(terminated_models)} 个模型进程")
 
     def increment_pending_requests(self, alias: str):
         """增加待处理请求计数"""
@@ -545,7 +543,7 @@ class ModelController:
 
                         if is_idle and (now - state['last_access']) > alive_time_sec:
                             logger.info(f"模型 {name} 空闲超过 {alive_time_min} 分钟，正在自动关闭...")
-                            threading.Thread(target=self.stop_model, args=(name,)).start()
+                            self.stop_model(name)
 
             except Exception as e:
                 logger.error(f"空闲检查线程出错: {e}", exc_info=True)
@@ -666,36 +664,20 @@ class ModelController:
         logger.info("正在快速关闭模型控制器...")
         self.is_running = False
 
-        # 立即终止所有模型进程，不等待线程完成
-        terminated_pids = []
+        # 使用进程管理器强制终止所有模型进程
+        terminated_models = []
         for primary_name, state in self.models_state.items():
             with state['lock']:
                 pid = state.get('pid')
                 if pid:
-                    try:
-                        # 直接强制终止进程
-                        subprocess.run(
-                            f"taskkill /F /T /PID {pid}",
-                            shell=True,
-                            capture_output=True,
-                            text=True,
-                            encoding='utf-8',
-                            errors='ignore',
-                            timeout=1
-                        )
-                        terminated_pids.append(pid)
-                        state['pid'] = None
-                        state['status'] = ModelStatus.STOPPED.value
-                        state['process'] = None
-                    except Exception:
-                        # 忽略错误，继续处理其他进程
-                        pass
+                    process_name = f"model_{primary_name}"
+                    success, message = self.process_manager.stop_process(process_name, force=True)
+                    if success:
+                        terminated_models.append(primary_name)
 
-        # 清理所有进程引用
-        for primary_name, state in self.models_state.items():
-            with state['lock']:
-                state['process'] = None
-                state['pid'] = None
-                state['status'] = ModelStatus.STOPPED.value
+                    # 更新状态
+                    state['pid'] = None
+                    state['status'] = ModelStatus.STOPPED.value
+                    state['process'] = None
 
-        logger.info(f"快速关闭完成，已终止 {len(terminated_pids)} 个进程")
+        logger.info(f"快速关闭完成，已终止 {len(terminated_models)} 个模型进程")
