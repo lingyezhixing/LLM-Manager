@@ -512,19 +512,6 @@ class APIServer:
         logger.info(f"[API_SERVER] 统一API接口将在 http://{host}:{port} 上启动")
         uvicorn.run(self.app, host=host, port=port, log_level="warning")
 
-    def run(self, host: Optional[str] = None, port: Optional[int] = None):
-        """运行API服务器"""
-        import uvicorn
-
-        # 如果没有指定主机和端口，从配置中获取
-        if host is None or port is None:
-            api_cfg = self.config_manager.get_openai_config()
-            host = host or api_cfg['host']
-            port = port or api_cfg['port']
-
-        logger.info(f"[API_SERVER] 统一API接口将在 http://{host}:{port} 上启动")
-        uvicorn.run(self.app, host=host, port=port, log_level="warning")
-
 
 # 全局变量
 _app_instance: Optional[FastAPI] = None
