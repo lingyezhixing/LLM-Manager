@@ -8,7 +8,6 @@ import time
 import threading
 import logging
 import os
-import signal
 import psutil
 import concurrent.futures
 from typing import Dict, Optional, Tuple, List, Any, Callable
@@ -286,32 +285,28 @@ class ProcessManager:
             return False
 
     def _kill_process_tree(self, pid: int) -> bool:
-        """优化的强制终止进程树"""
+        """强制终止进程树"""
+        # 首先尝试psutil
         try:
-            # 首先尝试psutil的优雅终止
-            try:
-                process = psutil.Process(pid)
-                children = process.children(recursive=True)
+            process = psutil.Process(pid)
+            children = process.children(recursive=True)
 
-                # 先终止子进程
-                for child in children:
-                    try:
-                        child.kill()
-                    except Exception:
-                        pass
+            # 终止子进程
+            for child in children:
+                try:
+                    child.kill()
+                except Exception:
+                    pass
 
-                # 终止主进程
-                process.kill()
-                logger.info(f"psutil成功终止进程树: {pid}")
-                return True
+            # 终止主进程
+            process.kill()
+            logger.info(f"psutil成功终止进程树: {pid}")
+            return True
 
-            except psutil.NoSuchProcess:
-                return True
+        except (psutil.NoSuchProcess, Exception):
+            pass
 
-        except Exception as e:
-            logger.error(f"psutil强制终止进程树 {pid} 失败: {e}")
-
-        # 如果psutil失败，使用taskkill作为备选
+        # 备选方案：使用taskkill
         try:
             result = subprocess.run(
                 ['taskkill', '/F', '/T', '/PID', str(pid)],
@@ -321,19 +316,9 @@ class ProcessManager:
                 errors='ignore',
                 timeout=3
             )
+            return result.returncode == 0
 
-            if result.returncode == 0:
-                logger.info(f"taskkill成功终止进程树: {pid}")
-                return True
-            else:
-                logger.warning(f"taskkill终止进程树失败: {pid} - {result.stderr}")
-                return False
-
-        except subprocess.TimeoutExpired:
-            logger.error(f"taskkill命令超时: {pid}")
-            return False
-        except Exception as e:
-            logger.error(f"taskkill终止进程树 {pid} 失败: {e}")
+        except Exception:
             return False
 
     def _is_process_alive(self, pid: int) -> bool:

@@ -9,9 +9,7 @@ import threading
 import logging
 import os
 import concurrent.futures
-import asyncio
 import queue
-import json
 from typing import Dict, List, Tuple, Optional, Any
 from enum import Enum
 from utils.logger import get_logger
@@ -62,7 +60,7 @@ class LogManager:
                 logger.debug(f"已注销模型日志管理: {model_name}")
 
     def add_log_entry(self, model_name: str, message: str, level: str = "info"):
-        """添加日志条目"""
+        """添加日志条目（系统日志，用于管理操作）"""
         if model_name not in self.model_logs:
             self.register_model(model_name)
 
@@ -79,9 +77,8 @@ class LogManager:
         # 通知订阅者
         self._notify_subscribers(model_name, log_entry)
 
-    
     def add_raw_output(self, model_name: str, message: str):
-        """添加原始输出"""
+        """添加原始输出（模型进程输出）"""
         log_entry = {
             "timestamp": time.time(),
             "message": message
@@ -423,11 +420,7 @@ class ModelController:
         self.idle_check_thread = threading.Thread(target=self.idle_check_loop, daemon=True)
         self.idle_check_thread.start()
 
-        self._init_model_states()
-        self.load_plugins()
-
-    def _init_model_states(self):
-        """优化的初始化模型状态"""
+        # 初始化模型状态
         new_states = {}
         model_names = self.config_manager.get_model_names()
 
@@ -451,6 +444,7 @@ class ModelController:
                 self.log_manager.register_model(primary_name)
 
         self.models_state = new_states
+        self.load_plugins()
 
     def load_plugins(self):
         """加载设备插件和接口插件"""
@@ -689,21 +683,13 @@ class ModelController:
                 self.log_manager.add_log_entry(primary_name, error_msg, "error")
                 return False, error_msg
 
-                state.update({
-                    "process": process,
-                    "pid": pid,
-                    "log_thread": stdout_thread,  # 保持兼容性
-                    "stdout_thread": stdout_thread,
-                    "stderr_thread": stderr_thread
-                })
-            else:
-                state.update({
-                    "process": None,
-                    "pid": pid,
-                    "log_thread": None,
-                    "stdout_thread": None,
-                    "stderr_thread": None
-                })
+            state.update({
+                "process": None,
+                "pid": pid,
+                "log_thread": None,
+                "stdout_thread": None,
+                "stderr_thread": None
+            })
 
             # 执行健康检查
             return self._perform_health_checks(primary_name, model_config)
@@ -1017,27 +1003,7 @@ class ModelController:
 
         return status_copy
 
-    def get_model_log(self, primary_name: str) -> List[str]:
-        """
-        获取模型日志（旧接口，保持向后兼容）
-
-        Args:
-            primary_name: 模型主名称
-
-        Returns:
-            日志列表
-        """
-        try:
-            logs = self.log_manager.get_logs(primary_name)
-            # 转换为旧格式
-            raw_logs = []
-            for log_entry in logs:
-                raw_logs.append(log_entry['message'])
-            return raw_logs
-        except Exception as e:
-            logger.error(f"获取模型日志失败: {e}")
-            return [f"错误：未找到指定的模型或获取日志失败"]
-
+    
     def get_model_logs(self, primary_name: str) -> List[Dict[str, Any]]:
         """
         获取模型的结构化日志 - 接受主名称
