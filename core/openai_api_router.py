@@ -509,21 +509,9 @@ class APIServer:
 app: Optional[FastAPI] = None
 api_server: Optional[APIServer] = None
 
-def initialize_api_server(config_manager: ConfigManager) -> APIServer:
-    """初始化API服务器"""
+def run_api_server(config_manager: ConfigManager, host: Optional[str] = None, port: Optional[int] = None):
+    """运行API服务器的便捷函数"""
     global app, api_server
     api_server = APIServer(config_manager)
     app = api_server.app
-    return api_server
-
-def run_api_server(config_manager: ConfigManager, host: Optional[str] = None, port: Optional[int] = None):
-    """运行API服务器的便捷函数"""
-    # 初始化API服务器
-    server = initialize_api_server(config_manager)
-
-    # 设置全局实例以便外部访问
-    global api_server
-    api_server = server
-
-    # 运行服务器
-    server.run(host, port)
+    api_server.run(host, port)
