@@ -2,6 +2,7 @@
 """
 LLM-Manager 主程序入口
 重构版本 - 使用Application类封装所有功能
+优化版本：支持并行初始化和快速关闭
 """
 
 import threading
@@ -20,11 +21,17 @@ from core.model_controller import ModelController
 
 CONFIG_PATH = 'config.json'
 
+
 class Application:
     """优化的LLM-Manager应用程序主类"""
 
     def __init__(self, config_path: str = CONFIG_PATH):
-        """初始化应用程序"""
+        """
+        初始化应用程序
+
+        Args:
+            config_path: 配置文件路径
+        """
         self.config_path = config_path
         self.config_manager: Optional[ConfigManager] = None
         self.tray_service = None
@@ -49,6 +56,7 @@ class Application:
         """设置信号处理器"""
         try:
             import signal
+
             def signal_handler(signum, frame):
                 self.logger.info(f"接收到信号 {signum}，正在关闭应用...")
                 self.shutdown()
@@ -342,7 +350,7 @@ class Application:
             self.logger.info(f"关闭完成: {completed}/{len(shutdown_tasks)}")
 
             # 关闭线程池
-            self.executor.shutdown(wait=True, timeout=3)
+            self.executor.shutdown(wait=True)
 
         except Exception as e:
             self.logger.error(f"关闭应用程序时发生错误: {e}")
@@ -365,10 +373,12 @@ class Application:
             self.logger.error(f"应用程序启动失败: {error}", exc_info=True)
         sys.exit(1)
 
+
 def main():
     """主函数入口"""
     app = Application()
     app.start()
+
 
 if __name__ == "__main__":
     main()

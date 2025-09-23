@@ -1,9 +1,13 @@
+"""
+模型控制器 - 负责模型的启动、停止和资源管理
+优化版本：支持并行启动和智能资源管理
+"""
+
 import subprocess
 import time
 import threading
 import logging
 import os
-import asyncio
 import concurrent.futures
 from typing import Dict, List, Tuple, Optional, Any
 from enum import Enum
@@ -14,6 +18,7 @@ from .process_manager import get_process_manager
 from .monitor import Monitor
 
 logger = get_logger(__name__)
+
 
 class ModelRuntimeMonitor:
     """模型运行时间监控器 - 负责记录模型运行时间到数据库"""
@@ -31,12 +36,15 @@ class ModelRuntimeMonitor:
 
         logger.info("模型运行时间监控器初始化完成")
 
-    def record_model_start(self, model_name: str):
+    def record_model_start(self, model_name: str) -> bool:
         """
         记录模型启动时间并启动定时器
 
         Args:
             model_name: 模型名称
+
+        Returns:
+            是否成功记录
         """
         start_time = time.time()
 
@@ -86,12 +94,15 @@ class ModelRuntimeMonitor:
                 timer.start()
                 self.active_models[model_name] = timer
 
-    def record_model_stop(self, model_name: str):
+    def record_model_stop(self, model_name: str) -> bool:
         """
         记录模型停止时间并停止定时器
 
         Args:
             model_name: 模型名称
+
+        Returns:
+            是否成功记录
         """
         end_time = time.time()
 
@@ -151,8 +162,9 @@ class ModelRuntimeMonitor:
         """析构函数"""
         try:
             self.shutdown()
-        except:
+        except Exception:
             pass
+
 
 class ModelStatus(Enum):
     """模型状态枚举"""
@@ -163,10 +175,17 @@ class ModelStatus(Enum):
     ROUTING = "routing"
     FAILED = "failed"
 
+
 class ModelController:
     """优化的模型控制器 - 支持并行启动和智能资源管理"""
 
     def __init__(self, config_manager: ConfigManager):
+        """
+        初始化模型控制器
+
+        Args:
+            config_manager: 配置管理器实例
+        """
         self.config_manager = config_manager
         self.models_state: Dict[str, Dict[str, Any]] = {}
         self.is_running = True
@@ -288,7 +307,15 @@ class ModelController:
             logger.info(f"成功启动的模型: {started_models}")
 
     def start_model(self, primary_name: str) -> Tuple[bool, str]:
-        """优化的启动模型 - 支持并行启动，接受主名称"""
+        """
+        优化的启动模型 - 支持并行启动，接受主名称
+
+        Args:
+            primary_name: 模型主名称
+
+        Returns:
+            (成功状态, 消息)
+        """
         state = self.models_state[primary_name]
         model_lock = self.startup_locks[primary_name]
 
@@ -336,7 +363,16 @@ class ModelController:
             model_lock.release()
 
     def _wait_for_model_startup(self, primary_name: str, state: Dict[str, Any]) -> Tuple[bool, str]:
-        """等待模型启动完成"""
+        """
+        等待模型启动完成
+
+        Args:
+            primary_name: 模型名称
+            state: 模型状态
+
+        Returns:
+            (成功状态, 消息)
+        """
         wait_start = time.time()
         max_wait_time = 30  # 减少等待时间到30秒
 
@@ -355,7 +391,15 @@ class ModelController:
             return False, f"模型 {primary_name} 启动失败"
 
     def _start_model_intelligent(self, primary_name: str) -> Tuple[bool, str]:
-        """智能启动模型 - 包含设备检查和资源管理"""
+        """
+        智能启动模型 - 包含设备检查和资源管理
+
+        Args:
+            primary_name: 模型主名称
+
+        Returns:
+            (成功状态, 消息)
+        """
         state = self.models_state[primary_name]
 
         # 获取自适应配置
@@ -446,7 +490,15 @@ class ModelController:
             return False, f"启动模型进程失败: {e}"
 
     def _check_and_free_resources(self, model_config: Dict[str, Any]) -> bool:
-        """检查并释放设备资源"""
+        """
+        检查并释放设备资源
+
+        Args:
+            model_config: 模型配置
+
+        Returns:
+            是否有足够资源
+        """
         required_memory = model_config.get("memory_mb", {})
 
         for attempt in range(3):  # 增加到3次尝试
@@ -495,7 +547,16 @@ class ModelController:
         return False
 
     def _stop_idle_models_for_resources(self, deficit_devices: Dict[str, int], model_to_start: Dict[str, Any]) -> bool:
-        """停止空闲模型以释放资源"""
+        """
+        停止空闲模型以释放资源
+
+        Args:
+            deficit_devices: 缺乏资源的设备列表
+            model_to_start: 要启动的模型配置
+
+        Returns:
+            是否成功释放资源
+        """
         idle_candidates = []
 
         for name, state in self.models_state.items():
@@ -526,7 +587,16 @@ class ModelController:
         return False
 
     def _perform_health_checks(self, primary_name: str, model_config: Dict[str, Any]) -> Tuple[bool, str]:
-        """执行健康检查"""
+        """
+        执行健康检查
+
+        Args:
+            primary_name: 模型主名称
+            model_config: 模型配置
+
+        Returns:
+            (成功状态, 消息)
+        """
         state = self.models_state[primary_name]
         port = model_config['port']
         timeout_seconds = 300
@@ -569,7 +639,15 @@ class ModelController:
             return False, msg
 
     def stop_model(self, primary_name: str) -> Tuple[bool, str]:
-        """停止模型 - 接受主名称"""
+        """
+        停止模型 - 接受主名称
+
+        Args:
+            primary_name: 模型主名称
+
+        Returns:
+            (成功状态, 消息)
+        """
         state = self.models_state[primary_name]
 
         with state['lock']:
@@ -590,13 +668,20 @@ class ModelController:
 
             self._mark_model_as_stopped(primary_name, acquire_lock=False)
 
-        # 记录模型停止时间并停止定时监控
-        self.runtime_monitor.record_model_stop(primary_name)
+        # 只有在模型被监控时才记录停止时间
+        if self.runtime_monitor.is_model_monitored(primary_name):
+            self.runtime_monitor.record_model_stop(primary_name)
 
         return True, f"模型 {primary_name} 已停止"
 
     def _mark_model_as_stopped(self, primary_name: str, acquire_lock: bool = True):
-        """标记模型为已停止状态"""
+        """
+        标记模型为已停止状态
+
+        Args:
+            primary_name: 模型主名称
+            acquire_lock: 是否获取锁
+        """
         state = self.models_state[primary_name]
 
         def update():
@@ -637,8 +722,9 @@ class ModelController:
                     state['pid'] = None
                     state['process'] = None
 
-                    # 记录模型停止时间并停止定时监控
-                    self.runtime_monitor.record_model_stop(name)
+                    # 只有在模型被监控时才记录停止时间
+                    if self.runtime_monitor.is_model_monitored(name):
+                        self.runtime_monitor.record_model_stop(name)
 
         logger.info(f"所有模型均已卸载，共终止 {len(terminated_models)} 个模型进程")
 
@@ -671,7 +757,12 @@ class ModelController:
                 logger.error(f"空闲检查线程出错: {e}", exc_info=True)
 
     def get_all_models_status(self) -> Dict[str, Dict[str, Any]]:
-        """获取所有模型状态"""
+        """
+        获取所有模型状态
+
+        Returns:
+            模型状态字典
+        """
         status_copy = {}
         now = time.time()
 
@@ -701,13 +792,29 @@ class ModelController:
         return status_copy
 
     def get_model_log(self, primary_name: str) -> List[str]:
-        """获取模型日志"""
+        """
+        获取模型日志
+
+        Args:
+            primary_name: 模型主名称
+
+        Returns:
+            日志列表
+        """
         if primary_name in self.models_state:
             return self.models_state[primary_name].get('output_log', [])
         return ["错误：未找到指定的模型"]
 
     def get_model_logs(self, primary_name: str) -> List[Dict[str, Any]]:
-        """获取模型的结构化日志 - 接受主名称"""
+        """
+        获取模型的结构化日志 - 接受主名称
+
+        Args:
+            primary_name: 模型主名称
+
+        Returns:
+            结构化日志列表
+        """
         try:
             if primary_name not in self.models_state:
                 return [{"timestamp": time.time(), "level": "error", "message": f"模型 '{primary_name}' 状态不存在"}]
@@ -756,7 +863,12 @@ class ModelController:
             return [{"timestamp": time.time(), "level": "error", "message": f"获取日志失败: {str(e)}"}]
 
     def get_model_list(self) -> Dict[str, Any]:
-        """获取模型列表"""
+        """
+        获取模型列表
+
+        Returns:
+            模型列表字典
+        """
         data = []
         for primary_name in self.models_state.keys():
             config = self.config_manager.get_model_config(primary_name)
@@ -773,7 +885,13 @@ class ModelController:
         return {"object": "list", "data": data}
 
     def _log_process_output(self, stream, log_list):
-        """记录进程输出"""
+        """
+        记录进程输出
+
+        Args:
+            stream: 输出流
+            log_list: 日志列表
+        """
         try:
             for line in iter(stream.readline, ''):
                 log_list.append(line.strip())
@@ -846,14 +964,15 @@ class ModelController:
         except concurrent.futures.TimeoutError:
             logger.error("模型停止超时")
 
-        # 记录所有模型的停止时间
-        for primary_name in self.models_state.keys():
-            self.runtime_monitor.record_model_stop(primary_name)
+        # 只记录正在运行的模型的停止时间
+        for primary_name, state in self.models_state.items():
+            if self.runtime_monitor.is_model_monitored(primary_name):
+                self.runtime_monitor.record_model_stop(primary_name)
 
         # 关闭运行时间监控器
         self.runtime_monitor.shutdown()
 
         # 关闭线程池
-        self.executor.shutdown(wait=True, timeout=5)
+        self.executor.shutdown(wait=True)
 
         logger.info(f"模型控制器关闭完成，已终止 {len(terminated_models)} 个模型进程")

@@ -10,14 +10,14 @@ import logging
 import os
 import signal
 import psutil
-import asyncio
 import concurrent.futures
-from typing import Dict, Optional, Tuple, List, Any, Callable
+from typing import Dict, Optional, Tuple, List, Any
 from dataclasses import dataclass
 from enum import Enum
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
+
 
 class ProcessStatus(Enum):
     """进程状态枚举"""
@@ -26,6 +26,7 @@ class ProcessStatus(Enum):
     STARTING = "starting"
     STOPPING = "stopping"
     FAILED = "failed"
+
 
 @dataclass
 class ProcessInfo:
@@ -40,10 +41,12 @@ class ProcessInfo:
     command: Optional[str] = None
     description: Optional[str] = None
 
+
 class ProcessManager:
     """优化的统一进程管理器 - 支持并行操作和快速终止"""
 
     def __init__(self):
+        """初始化进程管理器"""
         self.processes: Dict[str, ProcessInfo] = {}
         self.lock = threading.RLock()  # 使用RLock支持重入
         self.monitor_thread = None
@@ -58,14 +61,16 @@ class ProcessManager:
 
         logger.info("进程管理器初始化完成")
 
-    def start_process(self,
-                     name: str,
-                     command: str,
-                     cwd: Optional[str] = None,
-                     description: Optional[str] = None,
-                     shell: bool = True,
-                     creation_flags: Optional[int] = None,
-                     capture_output: bool = False) -> Tuple[bool, str, Optional[int]]:
+    def start_process(
+        self,
+        name: str,
+        command: str,
+        cwd: Optional[str] = None,
+        description: Optional[str] = None,
+        shell: bool = True,
+        creation_flags: Optional[int] = None,
+        capture_output: bool = False
+    ) -> Tuple[bool, str, Optional[int]]:
         """
         启动进程
 
@@ -146,7 +151,12 @@ class ProcessManager:
             logger.error(f"启动进程失败: {name} - {e}")
             return False, f"启动进程失败: {e}", None
 
-    def stop_process(self, name: str, force: bool = False, timeout: int = 10) -> Tuple[bool, str]:
+    def stop_process(
+        self,
+        name: str,
+        force: bool = False,
+        timeout: int = 10
+    ) -> Tuple[bool, str]:
         """
         停止进程
 
@@ -242,7 +252,7 @@ class ProcessManager:
                 for child in children:
                     try:
                         child.kill()
-                    except:
+                    except Exception:
                         pass
 
                 # 终止主进程
@@ -318,7 +328,7 @@ class ProcessManager:
                                 try:
                                     if process_info.process:
                                         process_info.exit_code = process_info.process.poll()
-                                except:
+                                except Exception:
                                     pass
 
                     # 优化清理策略 - 只保留最近50个已停止进程
@@ -436,7 +446,7 @@ class ProcessManager:
             logger.warning("进程清理超时，强制退出")
 
         # 关闭线程池
-        self.executor.shutdown(wait=True, timeout=5)
+        self.executor.shutdown(wait=True)
 
         # 等待监控线程结束
         if self.monitor_thread and self.monitor_thread.is_alive():
@@ -448,11 +458,13 @@ class ProcessManager:
         """析构函数"""
         try:
             self.cleanup()
-        except:
+        except Exception:
             pass
+
 
 # 全局进程管理器实例
 _global_process_manager = None
+
 
 def get_process_manager() -> ProcessManager:
     """获取全局进程管理器实例"""
@@ -461,6 +473,7 @@ def get_process_manager() -> ProcessManager:
         _global_process_manager = ProcessManager()
     return _global_process_manager
 
+
 def initialize_process_manager():
     """初始化全局进程管理器"""
     global _global_process_manager
@@ -468,6 +481,7 @@ def initialize_process_manager():
         _global_process_manager.cleanup()
     _global_process_manager = ProcessManager()
     return _global_process_manager
+
 
 def cleanup_process_manager():
     """清理全局进程管理器"""
