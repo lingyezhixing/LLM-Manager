@@ -39,12 +39,6 @@ class ModelController:
         self._init_model_states()
         self.load_plugins()
 
-    def load_config(self):
-        """重新加载配置文件"""
-        self.config_manager.reload_config()
-        self._init_model_states()
-        logger.info("配置文件重新加载完成")
-
     def _init_model_states(self):
         """初始化模型状态"""
         new_states = {}
@@ -59,7 +53,6 @@ class ModelController:
                     "status": ModelStatus.STOPPED.value,
                     "last_access": None,
                     "pid": None,
-                    "pending_requests": 0,
                     "lock": threading.Lock(),
                     "output_log": [],
                     "log_thread": None,
@@ -135,8 +128,6 @@ class ModelController:
         else:
             logger.info("没有需要自动启动的模型")
 
-  
-    
     def start_model(self, primary_name: str) -> Tuple[bool, str]:
         """启动模型 - 接受主名称"""
         state = self.models_state[primary_name]
@@ -343,8 +334,7 @@ class ModelController:
 
         for name, state in self.models_state.items():
             with state['lock']:
-                if (state['status'] == ModelStatus.ROUTING.value and
-                    state.get('pending_requests', 0) == 0):
+                if state['status'] == ModelStatus.ROUTING.value:
                     idle_candidates.append(name)
 
         # 按最后访问时间排序
@@ -441,7 +431,6 @@ class ModelController:
                 "pid": None,
                 "status": ModelStatus.STOPPED.value,
                 "last_access": None,
-                "pending_requests": state.get('pending_requests', 0),
                 "log_thread": None,
                 "current_config": None,
                 "failure_reason": None
@@ -476,23 +465,6 @@ class ModelController:
 
         logger.info(f"所有模型均已卸载，共终止 {len(terminated_models)} 个模型进程")
 
-    def increment_pending_requests(self, primary_name: str):
-        """增加待处理请求计数 - 接受主名称"""
-        state = self.models_state[primary_name]
-
-        with state['lock']:
-            state['pending_requests'] += 1
-            logger.info(f"模型 {primary_name} 新请求进入，当前待处理: {state['pending_requests']}")
-
-    def mark_request_completed(self, primary_name: str):
-        """标记请求完成 - 接受主名称"""
-        state = self.models_state[primary_name]
-
-        with state['lock']:
-            state['pending_requests'] = max(0, state['pending_requests'] - 1)
-            state['last_access'] = time.time()
-            logger.info(f"模型 {primary_name} 请求完成，剩余待处理: {state['pending_requests']}")
-
     def idle_check_loop(self):
         """空闲检查循环"""
         while self.is_running:
@@ -512,8 +484,7 @@ class ModelController:
                     state = self.models_state[name]
                     with state['lock']:
                         is_idle = (state['status'] == ModelStatus.ROUTING.value and
-                                   state['last_access'] and
-                                   state.get('pending_requests', 0) == 0)
+                                   state['last_access'])
 
                         if is_idle and (now - state['last_access']) > alive_time_sec:
                             logger.info(f"模型 {name} 空闲超过 {alive_time_min} 分钟，正在自动关闭...")
@@ -543,7 +514,6 @@ class ModelController:
                 "status": state['status'],
                 "pid": state['pid'],
                 "idle_time_sec": f"{idle_seconds:.0f}" if idle_seconds != -1 else "N/A",
-                "pending_requests": state.get('pending_requests', 0),
                 "mode": config.get("mode", "Chat") if config else "Chat",
                 "is_available": bool(adaptive_config),
                 "current_bat_path": adaptive_config.get("bat_path", "") if adaptive_config else "无可用配置",

@@ -29,6 +29,9 @@ class APIServer:
         self.app = FastAPI(title="LLM-Manager API", version="1.0.0")
         self.async_clients: Dict[int, any] = {}
 
+        # 请求管理状态
+        self.pending_requests: Dict[str, int] = {}
+
         # 设置路由
         self._setup_routes()
 
@@ -209,7 +212,7 @@ class APIServer:
                 yield chunk
         finally:
             await response.aclose()
-            self.model_controller.mark_request_completed(primary_name)
+            self.mark_request_completed(primary_name)
 
     def create_error_response(self, detail: str, status_code: int = 500) -> JSONResponse:
         """创建错误响应"""
@@ -339,7 +342,7 @@ class APIServer:
                 yield chunk
         finally:
             await response.aclose()
-            self.model_controller.mark_request_completed(primary_name)
+            self.mark_request_completed(primary_name)
             logger.debug(f"[TOKEN_LOGGER] 流式响应结束 - 模型: {primary_name}, 收到 {len(content_chunks)} 个数据块")
 
             # 处理token记录
@@ -411,7 +414,7 @@ class APIServer:
             raise HTTPException(status_code=400, detail=error_message)
 
         # 增加待处理请求计数（使用主名称）
-        self.model_controller.increment_pending_requests(primary_model_name)
+        self.increment_pending_requests(primary_model_name)
 
         try:
             # 启动模型（如果未运行）- 使用主名称
@@ -460,7 +463,7 @@ class APIServer:
                 logger.debug(f"[TOKEN_LOGGER] 开始处理非流式响应 - 模型: {primary_model_name}")
                 content = await response.aread()
                 await response.aclose()
-                self.model_controller.mark_request_completed(primary_model_name)
+                self.mark_request_completed(primary_model_name)
                 logger.debug(f"[TOKEN_LOGGER] 非流式响应读取完成 - 模型: {primary_model_name}, 响应大小: {len(content)} bytes")
 
                 # 提取token信息并异步记录
@@ -484,13 +487,26 @@ class APIServer:
         except Exception as e:
             # 统一的异常处理
             logger.error(f"处理对 '{primary_model_name}' 的请求时出错: {e}", exc_info=True)
-            self.model_controller.mark_request_completed(primary_model_name)
+            self.mark_request_completed(primary_model_name)
 
             if isinstance(e, HTTPException):
                 raise e
 
             # 对于其他未知异常，包装成500错误
             raise HTTPException(status_code=500, detail=f"内部服务器错误: {str(e)}")
+
+    def increment_pending_requests(self, primary_name: str):
+        """增加待处理请求计数"""
+        if primary_name not in self.pending_requests:
+            self.pending_requests[primary_name] = 0
+        self.pending_requests[primary_name] += 1
+        logger.info(f"模型 {primary_name} 新请求进入，当前待处理: {self.pending_requests[primary_name]}")
+
+    def mark_request_completed(self, primary_name: str):
+        """标记请求完成"""
+        if primary_name in self.pending_requests:
+            self.pending_requests[primary_name] = max(0, self.pending_requests[primary_name] - 1)
+            logger.info(f"模型 {primary_name} 请求完成，剩余待处理: {self.pending_requests[primary_name]}")
 
     def run(self, host: Optional[str] = None, port: Optional[int] = None):
         """运行API服务器"""
