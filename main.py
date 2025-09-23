@@ -9,17 +9,19 @@ import time
 import logging
 import sys
 import os
+import concurrent.futures
 from typing import Optional
 from utils.logger import setup_logging, get_logger
 from core.config_manager import ConfigManager
 from core.openai_api_router import run_api_server
 from core.process_manager import get_process_manager, cleanup_process_manager
 from core.monitor import Monitor
+from core.model_controller import ModelController
 
 CONFIG_PATH = 'config.json'
 
 class Application:
-    """LLM-Manager 应用程序主类"""
+    """优化的LLM-Manager应用程序主类"""
 
     def __init__(self, config_path: str = CONFIG_PATH):
         """初始化应用程序"""
@@ -32,6 +34,10 @@ class Application:
         self.monitor: Optional[Monitor] = None
         self.monitor_thread = None
         self.stop_monitor = False
+        self.model_controller: Optional[ModelController] = None
+        self.startup_complete = threading.Event()
+        self.shutdown_event = threading.Event()
+        self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=3)
 
     def setup_logging(self) -> None:
         """设置日志系统"""
@@ -54,7 +60,7 @@ class Application:
             pass
 
     def initialize_config_manager(self) -> None:
-        """初始化配置管理器"""
+        """优化的初始化配置管理器"""
         if not os.path.exists(self.config_path):
             self.logger.error(f"配置文件不存在: {self.config_path}")
             raise FileNotFoundError(f"配置文件不存在: {self.config_path}")
@@ -164,7 +170,7 @@ class Application:
         self.shutdown()
 
     def initialize(self) -> None:
-        """初始化应用程序"""
+        """优化的初始化应用程序 - 并行初始化组件"""
         self.setup_logging()
 
         self.logger.info("LLM-Manager 启动中...")
@@ -174,28 +180,79 @@ class Application:
         # 设置信号处理器
         self.setup_signal_handlers()
 
-        # 初始化配置管理器
-        self.initialize_config_manager()
+        # 并行初始化核心组件
+        def init_config():
+            self.initialize_config_manager()
+            return "config_manager"
 
-        # 初始化监控器
-        self.initialize_monitor()
+        def init_process_manager():
+            process_manager = get_process_manager()
+            self.logger.info("进程管理器初始化完成")
+            return "process_manager"
 
-        # 初始化进程管理器
-        process_manager = get_process_manager()
-        self.logger.info("进程管理器初始化完成")
+        def init_monitor():
+            self.initialize_monitor()
+            return "monitor"
+
+        # 提交初始化任务
+        futures = []
+        futures.append(self.executor.submit(init_config))
+        futures.append(self.executor.submit(init_process_manager))
+        futures.append(self.executor.submit(init_monitor))
+
+        # 等待所有初始化完成
+        for future in concurrent.futures.as_completed(futures, timeout=30):
+            try:
+                component = future.result()
+                self.logger.debug(f"组件 {component} 初始化完成")
+            except Exception as e:
+                self.logger.error(f"组件初始化失败: {e}")
+                raise
+
+        # 初始化模型控制器
+        self.model_controller = ModelController(self.config_manager)
+        self.logger.info("模型控制器初始化完成")
 
     def start(self) -> None:
-        """启动应用程序"""
+        """优化的启动应用程序"""
         try:
+            # 并行初始化
             self.initialize()
 
-            # 启动核心服务
-            self.start_api_server()
+            # 启动自动启动模型（在后台线程中）
+            auto_start_future = self.executor.submit(self._start_auto_start_models)
 
-            # 启动系统托盘服务
-            self.start_tray_service()
+            # 并行启动核心服务
+            def start_services():
+                # 启动API服务器
+                self.start_api_server()
+                # 启动系统托盘服务
+                self.start_tray_service()
+                return "services"
+
+            services_future = self.executor.submit(start_services)
+
+            # 等待服务启动完成
+            try:
+                services_result = services_future.result(timeout=15)
+                self.logger.info(f"{services_result} 启动完成")
+            except concurrent.futures.TimeoutError:
+                self.logger.error("服务启动超时")
+                raise
+
+            # 等待自动启动模型完成（不阻塞主线程）
+            def check_auto_start():
+                try:
+                    auto_start_future.result(timeout=60)
+                    self.logger.info("自动启动模型完成")
+                except concurrent.futures.TimeoutError:
+                    self.logger.warning("自动启动模型超时")
+
+            check_thread = threading.Thread(target=check_auto_start, daemon=True)
+            check_thread.start()
 
             self.running = True
+            self.startup_complete.set()
             self.logger.info("LLM-Manager 运行中，按 Ctrl+C 退出...")
 
             # 主循环
@@ -215,42 +272,90 @@ class Application:
             self.shutdown()
 
     def shutdown(self) -> None:
-        """关闭应用程序"""
+        """优化的关闭应用程序 - 快速并行关闭"""
         if not self.running:
             return
 
-        self.logger.info("正在关闭应用程序...")
+        self.logger.info("正在快速关闭应用程序...")
         self.running = False
+        self.shutdown_event.set()
 
         try:
-            # 停止监控线程
-            if self.monitor_thread and self.monitor_thread.is_alive():
-                self.stop_monitor = True
-                self.monitor_thread.join(timeout=5)
-                self.logger.info("监控线程已停止")
+            # 并行关闭各个组件
+            def stop_monitor_thread():
+                if self.monitor_thread and self.monitor_thread.is_alive():
+                    self.stop_monitor = True
+                    self.monitor_thread.join(timeout=3)
+                    return "monitor_thread"
+                return "monitor_thread_stopped"
 
-            # 更新程序结束时间戳
-            if self.monitor:
+            def close_monitor():
+                if self.monitor:
+                    try:
+                        end_time = time.time()
+                        self.monitor.update_program_runtime_end(end_time)
+                        self.logger.debug(f"已更新程序结束时间戳: {end_time}")
+                        self.monitor.close()
+                        return "monitor"
+                    except Exception as e:
+                        self.logger.error(f"关闭监控器失败: {e}")
+                        return "monitor_failed"
+                return "monitor_none"
+
+            def cleanup_processes():
                 try:
-                    end_time = time.time()
-                    self.monitor.update_program_runtime_end(end_time)
-                    self.logger.info(f"已更新程序结束时间戳: {end_time}")
-                    self.monitor.close()
-                    self.logger.info("监控器已关闭")
+                    cleanup_process_manager()
+                    return "process_manager"
                 except Exception as e:
-                    self.logger.error(f"关闭监控器失败: {e}")
+                    self.logger.error(f"清理进程管理器失败: {e}")
+                    return "process_manager_failed"
 
-            # 清理进程管理器
-            try:
-                cleanup_process_manager()
-                self.logger.info("进程管理器已清理")
-            except Exception as e:
-                self.logger.error(f"清理进程管理器失败: {e}")
+            def shutdown_model_controller():
+                if self.model_controller:
+                    try:
+                        self.model_controller.shutdown()
+                        return "model_controller"
+                    except Exception as e:
+                        self.logger.error(f"关闭模型控制器失败: {e}")
+                        return "model_controller_failed"
+                return "model_controller_none"
+
+            # 提交关闭任务
+            shutdown_tasks = [
+                self.executor.submit(stop_monitor_thread),
+                self.executor.submit(close_monitor),
+                self.executor.submit(cleanup_processes),
+                self.executor.submit(shutdown_model_controller)
+            ]
+
+            # 等待关闭任务完成，设置总超时
+            timeout = 10  # 总超时10秒
+            completed = []
+            for future in concurrent.futures.as_completed(shutdown_tasks, timeout=timeout):
+                try:
+                    result = future.result()
+                    completed.append(result)
+                    self.logger.debug(f"{result} 关闭完成")
+                except Exception as e:
+                    self.logger.error(f"关闭任务失败: {e}")
+
+            self.logger.info(f"关闭完成: {completed}/{len(shutdown_tasks)}")
+
+            # 关闭线程池
+            self.executor.shutdown(wait=True, timeout=3)
 
         except Exception as e:
             self.logger.error(f"关闭应用程序时发生错误: {e}")
         finally:
             self.logger.info("应用程序已退出")
+
+    def _start_auto_start_models(self):
+        """启动自动启动模型"""
+        if self.model_controller:
+            try:
+                self.model_controller.start_auto_start_models()
+            except Exception as e:
+                self.logger.error(f"启动自动启动模型失败: {e}")
 
     def handle_startup_error(self, error: Exception) -> None:
         """处理启动错误"""

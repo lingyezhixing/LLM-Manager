@@ -10,7 +10,9 @@ import logging
 import os
 import signal
 import psutil
-from typing import Dict, Optional, Tuple, List, Any
+import asyncio
+import concurrent.futures
+from typing import Dict, Optional, Tuple, List, Any, Callable
 from dataclasses import dataclass
 from enum import Enum
 from utils.logger import get_logger
@@ -39,13 +41,16 @@ class ProcessInfo:
     description: Optional[str] = None
 
 class ProcessManager:
-    """统一的进程管理器"""
+    """优化的统一进程管理器 - 支持并行操作和快速终止"""
 
     def __init__(self):
         self.processes: Dict[str, ProcessInfo] = {}
-        self.lock = threading.Lock()
+        self.lock = threading.RLock()  # 使用RLock支持重入
         self.monitor_thread = None
         self.is_monitoring = True
+        self.shutdown_event = threading.Event()
+        self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=10)
+        self._process_cleanup_complete = threading.Event()
 
         # 启动监控线程
         self.monitor_thread = threading.Thread(target=self._monitor_processes, daemon=True)
@@ -204,15 +209,15 @@ class ProcessManager:
             return False, f"停止进程失败: {e}"
 
     def _terminate_process(self, pid: int, timeout: int) -> bool:
-        """正常终止进程"""
+        """优化的正常终止进程"""
         try:
             # 尝试正常终止
             process = psutil.Process(pid)
             process.terminate()
 
-            # 等待进程结束
+            # 减少等待时间，提高性能
             try:
-                process.wait(timeout=timeout)
+                process.wait(timeout=min(timeout, 5))  # 最多等待5秒
                 return True
             except psutil.TimeoutExpired:
                 logger.warning(f"进程 {pid} 超时未结束，尝试强制终止")
@@ -226,16 +231,40 @@ class ProcessManager:
             return False
 
     def _kill_process_tree(self, pid: int) -> bool:
-        """强制终止进程树"""
+        """优化的强制终止进程树"""
         try:
-            # 使用taskkill强制终止进程树
+            # 首先尝试psutil的优雅终止
+            try:
+                process = psutil.Process(pid)
+                children = process.children(recursive=True)
+
+                # 先终止子进程
+                for child in children:
+                    try:
+                        child.kill()
+                    except:
+                        pass
+
+                # 终止主进程
+                process.kill()
+                logger.info(f"psutil成功终止进程树: {pid}")
+                return True
+
+            except psutil.NoSuchProcess:
+                return True
+
+        except Exception as e:
+            logger.error(f"psutil强制终止进程树 {pid} 失败: {e}")
+
+        # 如果psutil失败，使用taskkill作为备选
+        try:
             result = subprocess.run(
                 ['taskkill', '/F', '/T', '/PID', str(pid)],
                 capture_output=True,
                 text=True,
                 encoding='utf-8',
                 errors='ignore',
-                timeout=5
+                timeout=3
             )
 
             if result.returncode == 0:
@@ -243,23 +272,13 @@ class ProcessManager:
                 return True
             else:
                 logger.warning(f"taskkill终止进程树失败: {pid} - {result.stderr}")
-
-                # 尝试使用psutil
-                try:
-                    process = psutil.Process(pid)
-                    process.kill()
-                    return True
-                except psutil.NoSuchProcess:
-                    return True
-                except Exception as e:
-                    logger.error(f"psutil强制终止进程 {pid} 失败: {e}")
-                    return False
+                return False
 
         except subprocess.TimeoutExpired:
             logger.error(f"taskkill命令超时: {pid}")
             return False
         except Exception as e:
-            logger.error(f"强制终止进程树 {pid} 失败: {e}")
+            logger.error(f"taskkill终止进程树 {pid} 失败: {e}")
             return False
 
     def _is_process_alive(self, pid: int) -> bool:
@@ -274,10 +293,14 @@ class ProcessManager:
             return False
 
     def _monitor_processes(self):
-        """监控进程状态"""
+        """优化的进程监控状态"""
         while self.is_monitoring:
             try:
-                time.sleep(5)  # 每5秒检查一次
+                # 减少监控频率，提高性能
+                if self.shutdown_event.is_set():
+                    break
+
+                time.sleep(10)  # 改为每10秒检查一次
 
                 with self.lock:
                     dead_processes = []
@@ -298,21 +321,23 @@ class ProcessManager:
                                 except:
                                     pass
 
-                    # 清理已停止的进程（保留最近停止的100个）
+                    # 优化清理策略 - 只保留最近50个已停止进程
                     stopped_count = sum(1 for p in self.processes.values()
                                      if p.status == ProcessStatus.STOPPED)
-                    if stopped_count > 100:
+                    if stopped_count > 50:
                         # 按停止时间排序，删除最旧的
                         stopped_processes = [(name, p) for name, p in self.processes.items()
                                           if p.status == ProcessStatus.STOPPED]
                         stopped_processes.sort(key=lambda x: x[1].stop_time or 0)
 
-                        for name, _ in stopped_processes[:stopped_count - 100]:
+                        for name, _ in stopped_processes[:stopped_count - 50]:
                             del self.processes[name]
                             logger.debug(f"清理已停止进程记录: {name}")
 
             except Exception as e:
                 logger.error(f"进程监控线程出错: {e}")
+                if self.shutdown_event.is_set():
+                    break
 
     def get_process_info(self, name: str) -> Optional[Dict[str, Any]]:
         """获取进程信息"""
@@ -352,29 +377,70 @@ class ProcessManager:
             return processes
 
     def stop_all_processes(self, force: bool = False) -> Dict[str, Tuple[bool, str]]:
-        """停止所有进程"""
+        """优化的并行停止所有进程"""
         results = {}
 
         with self.lock:
             process_names = list(self.processes.keys())
 
-        for name in process_names:
-            success, message = self.stop_process(name, force)
-            results[name] = (success, message)
+        if not process_names:
+            return results
 
+        logger.info(f"并行停止 {len(process_names)} 个进程...")
+
+        # 使用线程池并行停止进程
+        def stop_single_process(name):
+            success, message = self.stop_process(name, force, timeout=3 if force else 5)
+            return name, (success, message)
+
+        # 提交所有停止任务
+        future_to_name = {}
+        for name in process_names:
+            future = self.executor.submit(stop_single_process, name)
+            future_to_name[future] = name
+
+        # 收集结果，设置超时
+        timeout = len(process_names) * 2  # 总超时时间
+        try:
+            for future in concurrent.futures.as_completed(future_to_name, timeout=timeout):
+                name = future_to_name[future]
+                try:
+                    name, result = future.result()
+                    results[name] = result
+                except Exception as e:
+                    logger.error(f"停止进程 {name} 时发生异常: {e}")
+                    results[name] = (False, f"停止进程异常: {e}")
+        except concurrent.futures.TimeoutError:
+            logger.error("停止所有进程超时")
+            # 处理未完成的进程
+            for future, name in future_to_name.items():
+                if not future.done():
+                    future.cancel()
+                    results[name] = (False, "停止进程超时")
+
+        self._process_cleanup_complete.set()
+        logger.info(f"进程停止完成，成功: {sum(1 for r in results.values() if r[0])}/{len(results)}")
         return results
 
     def cleanup(self):
-        """清理进程管理器"""
+        """优化的清理进程管理器"""
         logger.info("正在清理进程管理器...")
         self.is_monitoring = False
+        self.shutdown_event.set()
 
         # 停止所有进程
         self.stop_all_processes(force=True)
 
+        # 等待进程清理完成或超时
+        if not self._process_cleanup_complete.wait(timeout=15):
+            logger.warning("进程清理超时，强制退出")
+
+        # 关闭线程池
+        self.executor.shutdown(wait=True, timeout=5)
+
         # 等待监控线程结束
         if self.monitor_thread and self.monitor_thread.is_alive():
-            self.monitor_thread.join(timeout=5)
+            self.monitor_thread.join(timeout=3)
 
         logger.info("进程管理器清理完成")
 

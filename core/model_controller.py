@@ -3,6 +3,8 @@ import time
 import threading
 import logging
 import os
+import asyncio
+import concurrent.futures
 from typing import Dict, List, Tuple, Optional, Any
 from enum import Enum
 from utils.logger import get_logger
@@ -162,16 +164,19 @@ class ModelStatus(Enum):
     FAILED = "failed"
 
 class ModelController:
-    """模型控制器 - 负责模型的启动、停止和资源管理"""
+    """优化的模型控制器 - 支持并行启动和智能资源管理"""
 
     def __init__(self, config_manager: ConfigManager):
         self.config_manager = config_manager
         self.models_state: Dict[str, Dict[str, Any]] = {}
-        self.loading_lock = threading.Lock()
         self.is_running = True
         self.plugin_manager: Optional[PluginManager] = None
         self.process_manager = get_process_manager()
         self.runtime_monitor = ModelRuntimeMonitor()
+        self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=5)
+        self.startup_futures: Dict[str, concurrent.futures.Future] = {}
+        self.startup_locks: Dict[str, threading.Lock] = {}  # 每个模型的专用锁
+        self.shutdown_event = threading.Event()
 
         # 启动空闲检查线程
         self.idle_check_thread = threading.Thread(target=self.idle_check_loop, daemon=True)
@@ -181,7 +186,7 @@ class ModelController:
         self.load_plugins()
 
     def _init_model_states(self):
-        """初始化模型状态"""
+        """优化的初始化模型状态"""
         new_states = {}
         model_names = self.config_manager.get_model_names()
 
@@ -200,6 +205,8 @@ class ModelController:
                     "current_config": None,
                     "failure_reason": None
                 }
+                # 为每个模型创建专用的启动锁
+                self.startup_locks[primary_name] = threading.Lock()
 
         self.models_state = new_states
 
@@ -229,7 +236,7 @@ class ModelController:
             logger.error(f"自动加载插件失败: {e}")
 
     def start_auto_start_models(self):
-        """启动所有标记为自动启动的模型"""
+        """优化的启动所有标记为自动启动的模型 - 支持并行启动"""
         logger.info("检查需要自动启动的模型...")
 
         # 检查设备在线状态
@@ -238,82 +245,79 @@ class ModelController:
             logger.warning("没有在线设备，跳过自动启动模型")
             return
 
-        started_models = []
+        auto_start_models = [
+            primary_name for primary_name in self.config_manager.get_model_names()
+            if self.config_manager.is_auto_start(primary_name)
+        ]
 
-        for primary_name in self.config_manager.get_model_names():
-            if self.config_manager.is_auto_start(primary_name):
-                logger.info(f"正在自动启动模型: {primary_name}")
-
-                # 使用线程启动模型，避免阻塞初始化
-                def start_model_thread(model_name):
-                    try:
-                        success, message = self.start_model(model_name)
-                        if success:
-                            logger.info(f"自动启动模型 {model_name} 成功")
-                            started_models.append(model_name)
-                        else:
-                            logger.error(f"自动启动模型 {model_name} 失败: {message}")
-                    except Exception as e:
-                        logger.error(f"自动启动模型 {model_name} 时发生异常: {e}")
-
-                # 使用daemon线程，这样程序退出时会自动终止
-                thread = threading.Thread(
-                    target=start_model_thread,
-                    args=(primary_name,),
-                    daemon=True
-                )
-                thread.start()
-
-        if started_models:
-            logger.info(f"成功启动了 {len(started_models)} 个自动启动模型: {started_models}")
-        else:
+        if not auto_start_models:
             logger.info("没有需要自动启动的模型")
+            return
+
+        logger.info(f"准备并行启动 {len(auto_start_models)} 个自动启动模型: {auto_start_models}")
+
+        def start_single_model(model_name):
+            try:
+                success, message = self.start_model(model_name)
+                return model_name, success, message
+            except Exception as e:
+                logger.error(f"自动启动模型 {model_name} 时发生异常: {e}")
+                return model_name, False, f"启动异常: {e}"
+
+        # 使用线程池并行启动模型
+        futures = []
+        for model_name in auto_start_models:
+            future = self.executor.submit(start_single_model, model_name)
+            futures.append(future)
+
+        # 收集结果
+        started_models = []
+        for future in concurrent.futures.as_completed(futures, timeout=120):
+            try:
+                model_name, success, message = future.result()
+                if success:
+                    logger.info(f"自动启动模型 {model_name} 成功")
+                    started_models.append(model_name)
+                else:
+                    logger.error(f"自动启动模型 {model_name} 失败: {message}")
+            except Exception as e:
+                logger.error(f"处理模型启动结果时发生异常: {e}")
+
+        logger.info(f"自动启动完成，成功: {len(started_models)}/{len(auto_start_models)}")
+        if started_models:
+            logger.info(f"成功启动的模型: {started_models}")
 
     def start_model(self, primary_name: str) -> Tuple[bool, str]:
-        """启动模型 - 接受主名称"""
+        """优化的启动模型 - 支持并行启动，接受主名称"""
         state = self.models_state[primary_name]
+        model_lock = self.startup_locks[primary_name]
 
-        # 快速检查，避免不必要的全局锁等待
+        # 快速检查，避免不必要的锁等待
         with state['lock']:
             if state['status'] == ModelStatus.ROUTING.value:
                 return True, f"模型 '{primary_name}' 已在运行"
             elif state['status'] == ModelStatus.STARTING.value:
-                # 模型正在启动，等待启动完成
-                pass
+                # 模型正在启动，等待启动完成（最多等待30秒）
+                return self._wait_for_model_startup(primary_name, state)
 
-        # 使用全局加载锁确保一次只加载一个模型
-        logger.info(f"请求加载模型 '{primary_name}'，正在等待全局加载锁...")
-        with self.loading_lock:
-            logger.info(f"已获得 '{primary_name}' 的全局加载锁，开始加载流程")
+        # 使用模型专用锁而不是全局锁，允许并行启动
+        if not model_lock.acquire(blocking=False):
+            # 如果锁被占用，返回等待信息
+            return False, f"模型 '{primary_name}' 正在启动中，请稍后再试"
 
-            # 双重检查：在等待锁之后，再次确认模型状态
+        try:
+            logger.info(f"开始启动模型 '{primary_name}'")
+
+            # 双重检查：在获取锁后再次确认模型状态
             with state['lock']:
                 if state['status'] == ModelStatus.ROUTING.value:
-                    logger.info(f"模型 '{primary_name}' 在等待期间已被其他请求加载，跳过启动")
+                    logger.info(f"模型 '{primary_name}' 已被其他线程启动")
                     return True, f"模型 {primary_name} 已成功启动"
                 elif state['status'] == ModelStatus.STARTING.value:
-                    # 模型正在启动，等待启动完成
                     logger.info(f"模型 '{primary_name}' 正在启动中，等待完成...")
-                    # 等待启动完成，最多等待5分钟
-                    wait_start = time.time()
-                    max_wait_time = 300
-                    while state['status'] == ModelStatus.STARTING.value:
-                        if time.time() - wait_start > max_wait_time:
-                            state['lock'].release()
-                            logger.error(f"等待模型 '{primary_name}' 启动超时")
-                            return False, f"等待模型 '{primary_name}' 启动超时"
-                        # 释放锁让其他线程可以修改状态，然后重新获取
-                        state['lock'].release()
-                        time.sleep(0.5)
-                        state['lock'].acquire()
-
-                    # 重新检查状态
-                    if state['status'] == ModelStatus.ROUTING.value:
-                        logger.info(f"模型 '{primary_name}' 启动完成")
-                        return True, f"模型 {primary_name} 已成功启动"
-                    else:
-                        logger.error(f"模型 '{primary_name}' 启动失败")
-                        return False, f"模型 {primary_name} 启动失败"
+                    # 释放模型锁并等待
+                    model_lock.release()
+                    return self._wait_for_model_startup(primary_name, state)
 
                 # 确认由当前线程执行加载
                 state['status'] = ModelStatus.STARTING.value
@@ -328,6 +332,27 @@ class ModelController:
                     state['failure_reason'] = str(e)
                 logger.error(f"启动模型 {primary_name} 失败: {e}", exc_info=True)
                 return False, f"启动模型 {primary_name} 失败: {e}"
+        finally:
+            model_lock.release()
+
+    def _wait_for_model_startup(self, primary_name: str, state: Dict[str, Any]) -> Tuple[bool, str]:
+        """等待模型启动完成"""
+        wait_start = time.time()
+        max_wait_time = 30  # 减少等待时间到30秒
+
+        while state['status'] == ModelStatus.STARTING.value:
+            if time.time() - wait_start > max_wait_time:
+                logger.error(f"等待模型 '{primary_name}' 启动超时")
+                return False, f"等待模型 '{primary_name}' 启动超时"
+            time.sleep(0.5)
+
+        # 重新检查状态
+        if state['status'] == ModelStatus.ROUTING.value:
+            logger.info(f"模型 '{primary_name}' 启动完成")
+            return True, f"模型 {primary_name} 已成功启动"
+        else:
+            logger.error(f"模型 '{primary_name}' 启动失败")
+            return False, f"模型 {primary_name} 启动失败"
 
     def _start_model_intelligent(self, primary_name: str) -> Tuple[bool, str]:
         """智能启动模型 - 包含设备检查和资源管理"""
@@ -758,30 +783,77 @@ class ModelController:
             stream.close()
 
     def shutdown(self):
-        """关闭模型控制器 - 快速强制终止所有进程"""
+        """优化的关闭模型控制器 - 并行终止所有进程"""
         logger.info("正在快速关闭模型控制器...")
         self.is_running = False
+        self.shutdown_event.set()
 
-        # 使用进程管理器强制终止所有模型进程
+        # 取消所有未完成的启动任务
+        for model_name, future in self.startup_futures.items():
+            if not future.done():
+                future.cancel()
+                logger.info(f"取消模型 {model_name} 的启动任务")
+
+        # 使用进程管理器并行终止所有模型进程
+        logger.info("正在并行终止所有模型进程...")
         terminated_models = []
+
+        # 构建停止任务列表
+        stop_tasks = []
         for primary_name, state in self.models_state.items():
             with state['lock']:
                 pid = state.get('pid')
                 if pid:
                     process_name = f"model_{primary_name}"
-                    success, message = self.process_manager.stop_process(process_name, force=True)
+                    stop_tasks.append((primary_name, process_name))
+
+        # 并行停止进程
+        def stop_model_task(primary_name, process_name):
+            try:
+                success, message = self.process_manager.stop_process(process_name, force=True, timeout=3)
+                if success:
+                    return primary_name, True, None
+                else:
+                    return primary_name, False, message
+            except Exception as e:
+                return primary_name, False, str(e)
+
+        # 提交停止任务
+        stop_futures = []
+        for primary_name, process_name in stop_tasks:
+            future = self.executor.submit(stop_model_task, primary_name, process_name)
+            stop_futures.append(future)
+
+        # 收集结果，设置超时
+        timeout = len(stop_tasks) * 2 + 5  # 总超时时间
+        try:
+            for future in concurrent.futures.as_completed(stop_futures, timeout=timeout):
+                try:
+                    primary_name, success, message = future.result()
                     if success:
                         terminated_models.append(primary_name)
 
-                    # 更新状态
-                    state['pid'] = None
-                    state['status'] = ModelStatus.STOPPED.value
-                    state['process'] = None
+                        # 更新状态
+                        state = self.models_state[primary_name]
+                        with state['lock']:
+                            state['pid'] = None
+                            state['status'] = ModelStatus.STOPPED.value
+                            state['process'] = None
+                    else:
+                        logger.warning(f"停止模型 {primary_name} 失败: {message}")
+                except Exception as e:
+                    logger.error(f"处理模型停止结果时发生异常: {e}")
+        except concurrent.futures.TimeoutError:
+            logger.error("模型停止超时")
 
-                # 记录模型停止时间并停止定时监控
-                self.runtime_monitor.record_model_stop(primary_name)
+        # 记录所有模型的停止时间
+        for primary_name in self.models_state.keys():
+            self.runtime_monitor.record_model_stop(primary_name)
 
         # 关闭运行时间监控器
         self.runtime_monitor.shutdown()
 
-        logger.info(f"快速关闭完成，已终止 {len(terminated_models)} 个模型进程")
+        # 关闭线程池
+        self.executor.shutdown(wait=True, timeout=5)
+
+        logger.info(f"模型控制器关闭完成，已终止 {len(terminated_models)} 个模型进程")
