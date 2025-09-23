@@ -44,11 +44,14 @@ class Application:
         self.model_controller: Optional[ModelController] = None
         self.startup_complete = threading.Event()
         self.shutdown_event = threading.Event()
-        self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=3)
+        self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
 
     def setup_logging(self) -> None:
         """设置日志系统"""
-        log_level = os.environ.get('LOG_LEVEL', 'DEBUG')  # 修改为DEBUG级别
+        if self.config_manager:
+            log_level = self.config_manager.get_log_level()
+        else:
+            log_level = os.environ.get('LOG_LEVEL', 'INFO')
         setup_logging(log_level=log_level)
         self.logger = get_logger(__name__)
 
@@ -171,6 +174,8 @@ class Application:
 
         except Exception as e:
             self.logger.error(f"启动托盘服务失败: {e}")
+
+
 
     def _on_tray_exit(self) -> None:
         """托盘退出回调"""

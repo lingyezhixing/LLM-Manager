@@ -36,10 +36,17 @@ class SystemTray:
         logger.info(f"托盘服务初始化完成，连接到API: {self.api_url}")
 
     def open_webui(self):
-        """打开WebUI"""
-        logger.info("WebUI 已暂时移除，等待重构")
-        logger.info("可通过 API 服务器访问: http://127.0.0.1:8000")
-        # WebUI 重构后此处需要更新
+        """打开WebUI - 为未来接入做准备"""
+        logger.info("正在打开WebUI...")
+        try:
+            import webbrowser
+            # 默认WebUI地址，未来可以从配置文件读取
+            webui_url = "http://localhost:7860"
+            webbrowser.open(webui_url)
+            logger.info(f"已在浏览器中打开WebUI: {webui_url}")
+        except Exception as e:
+            logger.error(f"打开WebUI失败: {e}")
+            logger.info("请手动访问WebUI地址")
 
     def restart_auto_start_models(self):
         """重启所有auto_start模型"""

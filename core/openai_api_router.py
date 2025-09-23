@@ -618,7 +618,111 @@ class APIServer:
                 logger.error(f"[API_SERVER] 清理日志失败: {e}")
                 return {"success": False, "message": str(e)}
 
-        
+        @self.app.get("/api/models/{model_alias}/info")
+        async def get_model_info(model_alias: str):
+            """获取模型信息 - 包括启停状态和待处理请求数
+
+            Args:
+                model_alias: 模型别名或"all-models"获取全部模型信息
+            """
+            try:
+                # 处理all-models特殊情况
+                if model_alias == "all-models":
+                    all_models_info = {}
+
+                    # 获取所有模型的状态
+                    all_models_status = self.model_controller.get_all_models_status()
+
+                    for model_name, model_status in all_models_status.items():
+                        # 获取待处理请求数
+                        pending_requests = self.api_router.pending_requests.get(model_name, 0)
+
+                        # 构建模型信息
+                        model_info = {
+                            "model_name": model_name,
+                            "aliases": model_status.get("aliases", [model_name]),
+                            "status": model_status.get("status", "unknown"),
+                            "pid": model_status.get("pid"),
+                            "idle_time_sec": model_status.get("idle_time_sec", "N/A"),
+                            "mode": model_status.get("mode", "Chat"),
+                            "is_available": model_status.get("is_available", False),
+                            "current_bat_path": model_status.get("current_bat_path", ""),
+                            "config_source": model_status.get("config_source", "N/A"),
+                            "failure_reason": model_status.get("failure_reason"),
+                            "pending_requests": pending_requests
+                        }
+
+                        all_models_info[model_name] = model_info
+
+                    return {
+                        "success": True,
+                        "models": all_models_info,
+                        "total_models": len(all_models_info),
+                        "running_models": len([
+                            m for m in all_models_info.values()
+                            if m["status"] == "routing"
+                        ]),
+                        "total_pending_requests": sum(m["pending_requests"] for m in all_models_info.values())
+                    }
+
+                # 处理单个模型
+                else:
+                    # 解析模型名称
+                    model_name = self.config_manager.resolve_primary_name(model_alias)
+
+                    # 检查模型是否存在
+                    if model_name not in self.model_controller.models_state:
+                        return JSONResponse(
+                            status_code=404,
+                            content={"success": False, "error": f"模型 '{model_alias}' 不存在"}
+                        )
+
+                    # 获取模型状态
+                    all_models_status = self.model_controller.get_all_models_status()
+                    model_status = all_models_status.get(model_name)
+
+                    if not model_status:
+                        return JSONResponse(
+                            status_code=404,
+                            content={"success": False, "error": f"模型 '{model_alias}' 状态信息未找到"}
+                        )
+
+                    # 获取待处理请求数
+                    pending_requests = self.api_router.pending_requests.get(model_name, 0)
+
+                    # 构建模型信息
+                    model_info = {
+                        "model_name": model_name,
+                        "aliases": model_status.get("aliases", [model_name]),
+                        "status": model_status.get("status", "unknown"),
+                        "pid": model_status.get("pid"),
+                        "idle_time_sec": model_status.get("idle_time_sec", "N/A"),
+                        "mode": model_status.get("mode", "Chat"),
+                        "is_available": model_status.get("is_available", False),
+                        "current_bat_path": model_status.get("current_bat_path", ""),
+                        "config_source": model_status.get("config_source", "N/A"),
+                        "failure_reason": model_status.get("failure_reason"),
+                        "pending_requests": pending_requests
+                    }
+
+                    return {
+                        "success": True,
+                        "model": model_info
+                    }
+
+            except KeyError:
+                return JSONResponse(
+                    status_code=404,
+                    content={"success": False, "error": f"模型别名 '{model_alias}' 未找到"}
+                )
+            except Exception as e:
+                logger.error(f"[API_SERVER] 获取模型信息失败: {e}")
+                return JSONResponse(
+                    status_code=500,
+                    content={"success": False, "error": f"服务器内部错误: {str(e)}"}
+                )
+
+
 
         @self.app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD"])
         async def handle_all_requests(request: Request, path: str):
