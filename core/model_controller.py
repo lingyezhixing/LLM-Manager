@@ -711,6 +711,11 @@ class ModelController:
         Returns:
             是否有足够资源
         """
+        # 如果禁用了GPU监控，跳过所有资源检查
+        if self.config_manager.is_gpu_monitoring_disabled():
+            logger.info("GPU监控已禁用，跳过资源检查")
+            return True
+
         required_memory = model_config.get("memory_mb", {})
 
         for attempt in range(3):  # 增加到3次尝试
@@ -769,6 +774,11 @@ class ModelController:
         Returns:
             是否成功释放资源
         """
+        # 如果禁用了GPU监控，不进行资源释放
+        if self.config_manager.is_gpu_monitoring_disabled():
+            logger.info("GPU监控已禁用，不进行资源释放")
+            return False
+
         idle_candidates = []
 
         for name, state in self.models_state.items():
