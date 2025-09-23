@@ -1,1 +1,0 @@
-{"program": {"openai_host": "0.0.0.0", "openai_port": 8080}, "test_model": {"aliases": ["test_model"], "mode": "Chat", "port": 8081, "auto_start": false, "config1": {"required_devices": ["cpu"], "bat_path": "test.bat", "memory_mb": 1024}}}
