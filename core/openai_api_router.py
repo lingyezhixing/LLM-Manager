@@ -163,7 +163,7 @@ class APIServer:
             try:
                 devices_info = {}
 
-                for device_name, device_plugin in self.model_controller.device_plugins.items():
+                for device_name, device_plugin in self.model_controller.plugin_manager.get_all_device_plugins().items():
                     try:
                         device_info = device_plugin.get_devices_info()
                         devices_info[device_name] = {
@@ -401,7 +401,7 @@ class APIServer:
         model_mode = model_config.get("mode", "Chat")
 
         # 获取接口插件
-        interface_plugin = self.model_controller.interface_plugins.get(model_mode)
+        interface_plugin = self.model_controller.plugin_manager.get_interface_plugin(model_mode)
         if not interface_plugin:
             raise HTTPException(status_code=400, detail=f"不支持的模型模式: {model_mode}")
 
@@ -510,7 +510,7 @@ app: Optional[FastAPI] = None
 api_server: Optional[APIServer] = None
 
 def run_api_server(config_manager: ConfigManager, host: Optional[str] = None, port: Optional[int] = None):
-    """运行API服务器的便捷函数"""
+    """运行API服务器"""
     global app, api_server
     api_server = APIServer(config_manager)
     app = api_server.app

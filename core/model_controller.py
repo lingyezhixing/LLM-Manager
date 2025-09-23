@@ -3,11 +3,9 @@ import time
 import threading
 import logging
 import os
-from typing import Dict, List, Tuple, Optional, Any, Set
+from typing import Dict, List, Tuple, Optional, Any
 from enum import Enum
 from utils.logger import get_logger
-from plugins.devices.Base_Class import DevicePlugin
-from plugins.interfaces.Base_Class import InterfacePlugin
 from .plugin_system import PluginManager
 from .config_manager import ConfigManager
 from .process_manager import get_process_manager
@@ -28,8 +26,6 @@ class ModelController:
 
     def __init__(self, config_manager: ConfigManager):
         self.config_manager = config_manager
-        self.device_plugins: Dict[str, DevicePlugin] = {}
-        self.interface_plugins: Dict[str, InterfacePlugin] = {}
         self.models_state: Dict[str, Dict[str, Any]] = {}
         self.loading_lock = threading.Lock()
         self.is_running = True
@@ -85,14 +81,11 @@ class ModelController:
         # 加载所有插件
         try:
             result = self.plugin_manager.load_all_plugins(model_manager=self)
-            self.device_plugins = self.plugin_manager.get_all_device_plugins()
-            self.interface_plugins = self.plugin_manager.get_all_interface_plugins()
-
-            logger.info(f"设备插件自动加载完成: {list(self.device_plugins.keys())}")
-            logger.info(f"接口插件自动加载完成: {list(self.interface_plugins.keys())}")
+            logger.info(f"设备插件自动加载完成: {list(self.plugin_manager.get_all_device_plugins().keys())}")
+            logger.info(f"接口插件自动加载完成: {list(self.plugin_manager.get_all_interface_plugins().keys())}")
 
             # 检查是否有设备在线
-            online_devices = [name for name, plugin in self.device_plugins.items() if plugin.is_online()]
+            online_devices = [name for name, plugin in self.plugin_manager.get_all_device_plugins().items() if plugin.is_online()]
             if online_devices:
                 logger.info(f"在线设备: {online_devices}")
             else:
@@ -106,7 +99,7 @@ class ModelController:
         logger.info("检查需要自动启动的模型...")
 
         # 检查设备在线状态
-        online_devices = [name for name, plugin in self.device_plugins.items() if plugin.is_online()]
+        online_devices = [name for name, plugin in self.plugin_manager.get_all_device_plugins().items() if plugin.is_online()]
         if not online_devices:
             logger.warning("没有在线设备，跳过自动启动模型")
             return
@@ -211,13 +204,13 @@ class ModelController:
         # 获取自适应配置
         # 获取当前在线的设备
         online_devices = set()
-        for device_name, device_plugin in self.device_plugins.items():
+        for device_name, device_plugin in self.plugin_manager.get_all_device_plugins().items():
             if device_plugin.is_online():
                 online_devices.add(device_name)
 
         model_config = self.config_manager.get_adaptive_model_config(primary_name, online_devices)
         if not model_config:
-            current_devices = [name for name, plugin in self.device_plugins.items() if plugin.is_online()]
+            current_devices = [name for name, plugin in self.plugin_manager.get_all_device_plugins().items() if plugin.is_online()]
             error_msg = f"启动 '{primary_name}' 失败：没有适合当前设备状态 {current_devices} 的配置方案"
             state['status'] = ModelStatus.FAILED.value
             state['failure_reason'] = error_msg
@@ -305,11 +298,11 @@ class ModelController:
 
             # 检查每个设备的内存
             for device_name, required_mb in required_memory.items():
-                if device_name not in self.device_plugins:
+                device_plugin = self.plugin_manager.get_device_plugin(device_name)
+                if not device_plugin:
                     logger.warning(f"配置中的设备 '{device_name}' 未找到插件，跳过")
                     continue
 
-                device_plugin = self.device_plugins[device_name]
                 if not device_plugin.is_online():
                     logger.warning(f"设备 '{device_name}' 不在线")
                     resource_ok = False
@@ -390,7 +383,7 @@ class ModelController:
         logger.info(f"正在对模型 '{primary_name}' 进行健康检查")
 
         model_mode = model_config.get("mode", "Chat")
-        interface_plugin = self.interface_plugins.get(model_mode)
+        interface_plugin = self.plugin_manager.get_interface_plugin(model_mode)
 
         if interface_plugin:
             # 使用插件的统一健康检查方法
@@ -540,7 +533,7 @@ class ModelController:
 
             # 获取当前在线的设备
             online_devices = set()
-            for device_name, device_plugin in self.device_plugins.items():
+            for device_name, device_plugin in self.plugin_manager.get_all_device_plugins().items():
                 if device_plugin.is_online():
                     online_devices.add(device_name)
             adaptive_config = self.config_manager.get_adaptive_model_config(primary_name, online_devices)
