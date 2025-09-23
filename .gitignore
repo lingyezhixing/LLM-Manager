@@ -77,3 +77,20 @@ LLM-Manager.code-workspace
 
 # 忽略Claude Code相关文件
 .claude/
+
+# 忽略所有包含test的文件和文件夹
+*test*
+**/*test*/
+**/test_*
+
+# 忽略指定的markdown文档
+monitor_manual.md
+openai_api_manual.md
+
+# 忽略所有数据库文件
+*.db
+*.sqlite
+*.sqlite3
+**/*.db
+**/*.sqlite
+**/*.sqlite3
