@@ -4,6 +4,8 @@ from typing import Dict, List, Optional, Any
 import json
 import time
 import asyncio
+import queue
+import threading
 from utils.logger import get_logger
 from core.model_controller import ModelController
 from core.config_manager import ConfigManager
@@ -406,17 +408,100 @@ class APIServer:
             except Exception as e:
                 return {"success": False, "message": str(e)}
 
-        @self.app.get("/api/models/{model_alias}/logs")
-        async def get_model_logs(model_alias: str):
-            """获取模型日志API - 在入口处解析别名"""
+        
+        @self.app.get("/api/models/{model_alias}/logs/stream")
+        async def stream_model_logs(model_alias: str):
+            """流式获取模型日志API - 实时推送日志"""
             try:
+                # 解析模型名称
                 model_name = self.config_manager.resolve_primary_name(model_alias)
-                logs = self.model_controller.get_model_logs(model_name)
-                return logs
-            except KeyError as e:
-                return [{"timestamp": time.time(), "level": "error", "message": f"模型别名 '{model_alias}' 未找到"}]
+
+                # 检查模型是否存在
+                if model_name not in self.model_controller.models_state:
+                    return JSONResponse(
+                        status_code=404,
+                        content={"error": f"模型 '{model_alias}' 不存在"}
+                    )
+
+                # 检查模型是否启动
+                model_status = self.model_controller.models_state[model_name].get('status')
+                if model_status not in ['routing', 'starting', 'init_script', 'health_check']:
+                    return JSONResponse(
+                        status_code=400,
+                        content={"error": f"模型 '{model_alias}' 未启动或已停止 (当前状态: {model_status})"}
+                    )
+
+                # 获取历史日志
+                historical_logs = self.model_controller.get_model_logs(model_name)
+
+                async def log_stream_generator():
+                    # 首先发送历史日志
+                    for log_entry in historical_logs:
+                        data = {
+                            "type": "historical",
+                            "log": log_entry
+                        }
+                        yield f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
+                        await asyncio.sleep(0.01)  # 避免发送过快
+
+                    # 发送历史日志结束标记
+                    yield f"data: {json.dumps({'type': 'historical_complete'}, ensure_ascii=False)}\n\n"
+
+                    # 订阅实时日志
+                    subscriber_queue = self.model_controller.subscribe_to_model_logs(model_name)
+
+                    try:
+                        while True:
+                            try:
+                                # 使用非阻塞方式获取日志
+                                log_entry = await asyncio.to_thread(subscriber_queue.get, timeout=1.0)
+
+                                if log_entry is None:
+                                    # 收到结束信号
+                                    yield f"data: {json.dumps({'type': 'stream_end'}, ensure_ascii=False)}\n\n"
+                                    break
+
+                                # 发送实时日志
+                                data = {
+                                    "type": "realtime",
+                                    "log": log_entry
+                                }
+                                yield f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+                            except queue.Empty:
+                                # 超时，检查连接是否仍然活跃
+                                continue
+                            except Exception as e:
+                                logger.error(f"流式日志推送错误: {e}")
+                                yield f"data: {json.dumps({'type': 'error', 'message': str(e)}, ensure_ascii=False)}\n\n"
+                                break
+
+                    finally:
+                        # 取消订阅
+                        self.model_controller.unsubscribe_from_model_logs(model_name, subscriber_queue)
+
+                return StreamingResponse(
+                    log_stream_generator(),
+                    media_type="text/event-stream",
+                    headers={
+                        "Cache-Control": "no-cache",
+                        "Connection": "keep-alive",
+                        "Access-Control-Allow-Origin": "*",
+                        "Access-Control-Allow-Headers": "*"
+                    }
+                )
+
+            except KeyError:
+                return JSONResponse(
+                    status_code=404,
+                    content={"error": f"模型别名 '{model_alias}' 未找到"}
+                )
             except Exception as e:
-                return []
+                logger.error(f"流式日志接口错误: {e}")
+                return JSONResponse(
+                    status_code=500,
+                    content={"error": f"服务器内部错误: {str(e)}"}
+                )
 
         @self.app.post("/api/models/restart-autostart")
         async def restart_autostart_models():
@@ -492,6 +577,48 @@ class APIServer:
             except Exception as e:
                 logger.error(f"[API_SERVER] 获取设备信息失败: {e}")
                 return {"success": False, "message": str(e)}
+
+        @self.app.get("/api/logs/stats")
+        async def get_log_stats():
+            """获取日志统计信息"""
+            try:
+                stats = self.model_controller.get_log_stats()
+                return {
+                    "success": True,
+                    "stats": stats
+                }
+            except Exception as e:
+                logger.error(f"[API_SERVER] 获取日志统计失败: {e}")
+                return {"success": False, "message": str(e)}
+
+        @self.app.post("/api/logs/{model_alias}/clear")
+        async def clear_model_logs(model_alias: str, keep_minutes: int = 0):
+            """清理模型日志 - 保留最近N分钟的日志
+
+            Args:
+                model_alias: 模型别名
+                keep_minutes: 保留最近多少分钟的日志 (0表示清空所有)
+            """
+            try:
+                model_name = self.config_manager.resolve_primary_name(model_alias)
+
+                if keep_minutes == 0:
+                    # 清空所有日志
+                    self.model_controller.log_manager.clear_logs(model_name)
+                    message = f"模型 '{model_alias}' 所有日志已清空"
+                else:
+                    # 清理指定分钟数之前的日志
+                    removed_count = self.model_controller.log_manager.cleanup_old_logs(model_name, keep_minutes)
+                    message = f"模型 '{model_alias}' 已清理 {keep_minutes} 分钟前的日志，删除 {removed_count} 条"
+
+                return {"success": True, "message": message}
+            except KeyError as e:
+                return {"success": False, "message": f"模型别名 '{model_alias}' 未找到"}
+            except Exception as e:
+                logger.error(f"[API_SERVER] 清理日志失败: {e}")
+                return {"success": False, "message": str(e)}
+
+        
 
         @self.app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD"])
         async def handle_all_requests(request: Request, path: str):

@@ -9,6 +9,9 @@ import threading
 import logging
 import os
 import concurrent.futures
+import asyncio
+import queue
+import json
 from typing import Dict, List, Tuple, Optional, Any
 from enum import Enum
 from utils.logger import get_logger
@@ -18,6 +21,224 @@ from .process_manager import get_process_manager
 from .monitor import Monitor
 
 logger = get_logger(__name__)
+
+
+class LogManager:
+    """日志管理器 - 负责模型日志的收集、存储和流式推送"""
+
+    def __init__(self):
+        """初始化日志管理器"""
+        self.model_logs: Dict[str, List[Dict[str, Any]]] = {}
+        self.log_subscribers: Dict[str, List[queue.Queue]] = {}
+        self.log_locks: Dict[str, threading.Lock] = {}
+        self.global_lock = threading.Lock()
+        self._running = True
+
+        logger.info("日志管理器初始化完成")
+
+    def register_model(self, model_name: str):
+        """注册模型日志管理"""
+        with self.global_lock:
+            if model_name not in self.model_logs:
+                self.model_logs[model_name] = []
+                self.log_subscribers[model_name] = []
+                self.log_locks[model_name] = threading.Lock()
+                logger.debug(f"已注册模型日志管理: {model_name}")
+
+    def unregister_model(self, model_name: str):
+        """注销模型日志管理"""
+        with self.global_lock:
+            if model_name in self.model_logs:
+                # 通知所有订阅者连接关闭
+                for subscriber_queue in self.log_subscribers[model_name]:
+                    try:
+                        subscriber_queue.put(None)  # 发送结束信号
+                    except:
+                        pass
+
+                del self.model_logs[model_name]
+                del self.log_subscribers[model_name]
+                del self.log_locks[model_name]
+                logger.debug(f"已注销模型日志管理: {model_name}")
+
+    def add_log_entry(self, model_name: str, message: str, level: str = "info"):
+        """添加日志条目"""
+        if model_name not in self.model_logs:
+            self.register_model(model_name)
+
+        log_entry = {
+            "timestamp": time.time(),
+            "level": level,
+            "message": message
+        }
+
+        model_lock = self.log_locks[model_name]
+        with model_lock:
+            self.model_logs[model_name].append(log_entry)
+
+        # 通知订阅者
+        self._notify_subscribers(model_name, log_entry)
+
+    
+    def add_raw_output(self, model_name: str, message: str):
+        """添加原始输出"""
+        log_entry = {
+            "timestamp": time.time(),
+            "message": message
+        }
+
+        if model_name not in self.model_logs:
+            self.register_model(model_name)
+
+        model_lock = self.log_locks[model_name]
+        with model_lock:
+            self.model_logs[model_name].append(log_entry)
+
+        # 通知订阅者
+        self._notify_subscribers(model_name, log_entry)
+
+    def get_logs(self, model_name: str, limit: Optional[int] = None) -> List[Dict[str, Any]]:
+        """获取模型日志"""
+        if model_name not in self.model_logs:
+            return []
+
+        model_lock = self.log_locks[model_name]
+        with model_lock:
+            logs = self.model_logs[model_name].copy()
+
+        if limit is not None:
+            logs = logs[-limit:]
+
+        return logs
+
+    def get_all_logs(self) -> Dict[str, List[Dict[str, Any]]]:
+        """获取所有模型日志"""
+        with self.global_lock:
+            result = {}
+            for model_name in self.model_logs:
+                result[model_name] = self.get_logs(model_name)
+            return result
+
+    def clear_logs(self, model_name: str):
+        """清空模型日志"""
+        if model_name in self.model_logs:
+            model_lock = self.log_locks[model_name]
+            with model_lock:
+                self.model_logs[model_name].clear()
+            logger.debug(f"已清空模型日志: {model_name}")
+
+    def cleanup_old_logs(self, model_name: str, keep_minutes: int) -> int:
+        """
+        清理指定分钟数之前的日志
+
+        Args:
+            model_name: 模型名称
+            keep_minutes: 保留最近多少分钟的日志
+
+        Returns:
+            删除的日志条目数量
+        """
+        if model_name not in self.model_logs:
+            return 0
+
+        current_time = time.time()
+        cutoff_time = current_time - (keep_minutes * 60)
+
+        model_lock = self.log_locks[model_name]
+        with model_lock:
+            original_count = len(self.model_logs[model_name])
+
+            # 保留在截止时间之后的日志
+            self.model_logs[model_name] = [
+                log for log in self.model_logs[model_name]
+                if log['timestamp'] > cutoff_time
+            ]
+
+            removed_count = original_count - len(self.model_logs[model_name])
+
+        if removed_count > 0:
+            logger.debug(f"已清理模型 '{model_name}' {keep_minutes} 分钟前的日志，删除 {removed_count} 条")
+
+        return removed_count
+
+    def subscribe_to_logs(self, model_name: str) -> queue.Queue:
+        """订阅模型日志流"""
+        if model_name not in self.model_logs:
+            self.register_model(model_name)
+
+        subscriber_queue = queue.Queue()
+
+        with self.global_lock:
+            self.log_subscribers[model_name].append(subscriber_queue)
+
+        logger.debug(f"新订阅者加入模型日志流: {model_name}")
+        return subscriber_queue
+
+    def unsubscribe_from_logs(self, model_name: str, subscriber_queue: queue.Queue):
+        """取消订阅模型日志流"""
+        if model_name in self.log_subscribers:
+            with self.global_lock:
+                if subscriber_queue in self.log_subscribers[model_name]:
+                    self.log_subscribers[model_name].remove(subscriber_queue)
+                    logger.debug(f"订阅者离开模型日志流: {model_name}")
+
+    def _notify_subscribers(self, model_name: str, log_entry: Dict[str, Any]):
+        """通知所有订阅者新的日志条目"""
+        if model_name not in self.log_subscribers:
+            return
+
+        # 创建副本以避免在迭代时修改列表
+        subscribers_copy = self.log_subscribers[model_name].copy()
+
+        for subscriber_queue in subscribers_copy:
+            try:
+                # 非阻塞方式发送，如果队列满则跳过
+                subscriber_queue.put_nowait(log_entry)
+            except queue.Full:
+                # 订阅者队列已满，移除该订阅者
+                with self.global_lock:
+                    if subscriber_queue in self.log_subscribers[model_name]:
+                        self.log_subscribers[model_name].remove(subscriber_queue)
+                        logger.debug(f"移除已满的订阅者队列: {model_name}")
+            except Exception:
+                # 其他错误，移除订阅者
+                with self.global_lock:
+                    if subscriber_queue in self.log_subscribers[model_name]:
+                        self.log_subscribers[model_name].remove(subscriber_queue)
+                        logger.debug(f"移除异常的订阅者队列: {model_name}")
+
+    def get_log_stats(self) -> Dict[str, Any]:
+        """获取日志统计信息"""
+        with self.global_lock:
+            stats = {
+                "total_models": len(self.model_logs),
+                "total_log_entries": sum(len(logs) for logs in self.model_logs.values()),
+                "total_subscribers": sum(len(subscribers) for subscribers in self.log_subscribers.values()),
+                "model_stats": {}
+            }
+
+            for model_name, logs in self.model_logs.items():
+                stats["model_stats"][model_name] = {
+                    "log_count": len(logs),
+                    "subscriber_count": len(self.log_subscribers[model_name])
+                }
+
+            return stats
+
+    def shutdown(self):
+        """关闭日志管理器"""
+        self._running = False
+
+        # 通知所有订阅者
+        with self.global_lock:
+            for model_name, subscribers in self.log_subscribers.items():
+                for subscriber_queue in subscribers:
+                    try:
+                        subscriber_queue.put(None)  # 发送结束信号
+                    except:
+                        pass
+
+        logger.info("日志管理器已关闭")
 
 
 class ModelRuntimeMonitor:
@@ -192,6 +413,7 @@ class ModelController:
         self.plugin_manager: Optional[PluginManager] = None
         self.process_manager = get_process_manager()
         self.runtime_monitor = ModelRuntimeMonitor()
+        self.log_manager = LogManager()
         self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=5)
         self.startup_futures: Dict[str, concurrent.futures.Future] = {}
         self.startup_locks: Dict[str, threading.Lock] = {}  # 每个模型的专用锁
@@ -219,13 +441,14 @@ class ModelController:
                     "last_access": None,
                     "pid": None,
                     "lock": threading.Lock(),
-                    "output_log": [],
                     "log_thread": None,
                     "current_config": None,
                     "failure_reason": None
                 }
                 # 为每个模型创建专用的启动锁
                 self.startup_locks[primary_name] = threading.Lock()
+                # 注册模型到日志管理器
+                self.log_manager.register_model(primary_name)
 
         self.models_state = new_states
 
@@ -348,8 +571,8 @@ class ModelController:
 
                 # 确认由当前线程执行加载
                 state['status'] = ModelStatus.STARTING.value
-                state['output_log'].clear()
-                state['output_log'].append(f"--- {time.ctime()} --- 启动模型 '{primary_name}'")
+                # 使用新的日志管理器
+                self.log_manager.add_log_entry(primary_name, f"--- {time.ctime()} --- 启动模型 '{primary_name}'", "info")
 
             try:
                 return self._start_model_intelligent(primary_name)
@@ -415,7 +638,7 @@ class ModelController:
             error_msg = f"启动 '{primary_name}' 失败：没有适合当前设备状态 {current_devices} 的配置方案"
             state['status'] = ModelStatus.FAILED.value
             state['failure_reason'] = error_msg
-            state['output_log'].append(f"[ERROR] {error_msg}")
+            self.log_manager.add_log_entry(primary_name, error_msg, "error")
             return False, error_msg
 
         state['current_config'] = model_config
@@ -429,18 +652,24 @@ class ModelController:
             error_msg = f"启动 '{primary_name}' 失败：设备资源不足"
             state['status'] = ModelStatus.FAILED.value
             state['failure_reason'] = error_msg
-            state['output_log'].append(f"[ERROR] {error_msg}")
+            self.log_manager.add_log_entry(primary_name, error_msg, "error")
             return False, error_msg
 
         # 启动模型
         logger.info(f"正在启动模型: {primary_name} (配置方案: {model_config.get('config_source', '默认')})")
-        state['output_log'].append(f"[INFO] 使用配置方案: {model_config.get('config_source', '默认')}")
-        state['output_log'].append(f"[INFO] 启动脚本: {model_config['bat_path']}")
+        self.log_manager.add_log_entry(primary_name, f"使用配置方案: {model_config.get('config_source', '默认')}", "info")
+        self.log_manager.add_log_entry(primary_name, f"启动脚本: {model_config['bat_path']}", "info")
 
         try:
             # 使用进程管理器启动模型进程
             project_root = os.path.dirname(os.path.abspath(self.config_manager.config_path))
             process_name = f"model_{primary_name}"
+
+            # 定义输出回调函数，将进程输出转发到日志管理器
+            def output_callback(stream_type: str, message: str):
+                """进程输出回调函数"""
+                # 直接记录原始输出，不添加任何级别标记
+                self.log_manager.add_raw_output(primary_name, message)
 
             success, message, pid = self.process_manager.start_process(
                 name=process_name,
@@ -449,35 +678,31 @@ class ModelController:
                 description=f"模型进程: {primary_name}",
                 shell=True,
                 creation_flags=subprocess.CREATE_NEW_PROCESS_GROUP,
-                capture_output=True
+                capture_output=True,
+                output_callback=output_callback
             )
 
             if not success:
                 error_msg = f"启动模型进程失败: {message}"
                 state['status'] = ModelStatus.FAILED.value
                 state['failure_reason'] = error_msg
+                self.log_manager.add_log_entry(primary_name, error_msg, "error")
                 return False, error_msg
 
-            # 启动日志线程（从进程管理器获取输出流）
-            process_info = self.process_manager.get_process_info(process_name)
-            if process_info and process_info.get('process'):
-                # 启动日志线程
-                log_thread = threading.Thread(
-                    target=self._log_process_output,
-                    args=(process_info['process'].stdout, state['output_log']),
-                    daemon=True
-                )
-                log_thread.start()
                 state.update({
-                    "process": process_info['process'],
+                    "process": process,
                     "pid": pid,
-                    "log_thread": log_thread
+                    "log_thread": stdout_thread,  # 保持兼容性
+                    "stdout_thread": stdout_thread,
+                    "stderr_thread": stderr_thread
                 })
             else:
                 state.update({
                     "process": None,
                     "pid": pid,
-                    "log_thread": None
+                    "log_thread": None,
+                    "stdout_thread": None,
+                    "stderr_thread": None
                 })
 
             # 执行健康检查
@@ -487,6 +712,7 @@ class ModelController:
             logger.error(f"启动模型进程失败: {e}")
             state['status'] = ModelStatus.FAILED.value
             state['failure_reason'] = str(e)
+            self.log_manager.add_log_entry(primary_name, f"启动模型进程失败: {e}", "error")
             return False, f"启动模型进程失败: {e}"
 
     def _check_and_free_resources(self, model_config: Dict[str, Any]) -> bool:
@@ -793,7 +1019,7 @@ class ModelController:
 
     def get_model_log(self, primary_name: str) -> List[str]:
         """
-        获取模型日志
+        获取模型日志（旧接口，保持向后兼容）
 
         Args:
             primary_name: 模型主名称
@@ -801,9 +1027,16 @@ class ModelController:
         Returns:
             日志列表
         """
-        if primary_name in self.models_state:
-            return self.models_state[primary_name].get('output_log', [])
-        return ["错误：未找到指定的模型"]
+        try:
+            logs = self.log_manager.get_logs(primary_name)
+            # 转换为旧格式
+            raw_logs = []
+            for log_entry in logs:
+                raw_logs.append(log_entry['message'])
+            return raw_logs
+        except Exception as e:
+            logger.error(f"获取模型日志失败: {e}")
+            return [f"错误：未找到指定的模型或获取日志失败"]
 
     def get_model_logs(self, primary_name: str) -> List[Dict[str, Any]]:
         """
@@ -816,51 +1049,41 @@ class ModelController:
             结构化日志列表
         """
         try:
-            if primary_name not in self.models_state:
-                return [{"timestamp": time.time(), "level": "error", "message": f"模型 '{primary_name}' 状态不存在"}]
-
-            logs = self.models_state[primary_name].get('output_log', [])
-            structured_logs = []
-
-            for log_entry in logs:
-                # 解析日志条目，假设格式为 "[时间] [级别] 消息"
-                try:
-                    # 简单的日志解析
-                    if " - " in log_entry:
-                        time_part, message_part = log_entry.split(" - ", 1)
-                        timestamp = time.time()  # 如果无法解析时间，使用当前时间
-
-                        # 确定日志级别
-                        level = "info"
-                        if any(word in message_part.lower() for word in ["error", "错误", "failed"]):
-                            level = "error"
-                        elif any(word in message_part.lower() for word in ["warning", "警告", "warn"]):
-                            level = "warning"
-                        elif any(word in message_part.lower() for word in ["success", "成功", "completed"]):
-                            level = "success"
-
-                        structured_logs.append({
-                            "timestamp": timestamp,
-                            "level": level,
-                            "message": message_part
-                        })
-                    else:
-                        structured_logs.append({
-                            "timestamp": time.time(),
-                            "level": "info",
-                            "message": log_entry
-                        })
-                except Exception:
-                    structured_logs.append({
-                        "timestamp": time.time(),
-                        "level": "info",
-                        "message": log_entry
-                    })
-
-            return structured_logs[-100:]  # 返回最近100条日志
+            return self.log_manager.get_logs(primary_name)
         except Exception as e:
             logger.error(f"获取模型日志失败: {e}")
             return [{"timestamp": time.time(), "level": "error", "message": f"获取日志失败: {str(e)}"}]
+
+    def subscribe_to_model_logs(self, primary_name: str) -> queue.Queue:
+        """
+        订阅模型日志流
+
+        Args:
+            primary_name: 模型主名称
+
+        Returns:
+            订阅队列
+        """
+        return self.log_manager.subscribe_to_logs(primary_name)
+
+    def unsubscribe_from_model_logs(self, primary_name: str, subscriber_queue: queue.Queue):
+        """
+        取消订阅模型日志流
+
+        Args:
+            primary_name: 模型主名称
+            subscriber_queue: 订阅队列
+        """
+        self.log_manager.unsubscribe_from_logs(primary_name, subscriber_queue)
+
+    def get_log_stats(self) -> Dict[str, Any]:
+        """
+        获取日志统计信息
+
+        Returns:
+            统计信息字典
+        """
+        return self.log_manager.get_log_stats()
 
     def get_model_list(self) -> Dict[str, Any]:
         """
@@ -884,22 +1107,8 @@ class ModelController:
 
         return {"object": "list", "data": data}
 
-    def _log_process_output(self, stream, log_list):
-        """
-        记录进程输出
-
-        Args:
-            stream: 输出流
-            log_list: 日志列表
-        """
-        try:
-            for line in iter(stream.readline, ''):
-                log_list.append(line.strip())
-                if len(log_list) > 200:  # 保持最近200行日志
-                    log_list.pop(0)
-        finally:
-            stream.close()
-
+    
+    
     def shutdown(self):
         """优化的关闭模型控制器 - 并行终止所有进程"""
         logger.info("正在快速关闭模型控制器...")
@@ -971,6 +1180,9 @@ class ModelController:
 
         # 关闭运行时间监控器
         self.runtime_monitor.shutdown()
+
+        # 关闭日志管理器
+        self.log_manager.shutdown()
 
         # 关闭线程池
         self.executor.shutdown(wait=True)

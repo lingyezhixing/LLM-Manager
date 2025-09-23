@@ -11,7 +11,7 @@ import os
 import signal
 import psutil
 import concurrent.futures
-from typing import Dict, Optional, Tuple, List, Any
+from typing import Dict, Optional, Tuple, List, Any, Callable
 from dataclasses import dataclass
 from enum import Enum
 from utils.logger import get_logger
@@ -40,6 +40,9 @@ class ProcessInfo:
     exit_code: Optional[int] = None
     command: Optional[str] = None
     description: Optional[str] = None
+    output_callback: Optional[Callable[[str, str], None]] = None
+    stdout_thread: Optional[threading.Thread] = None
+    stderr_thread: Optional[threading.Thread] = None
 
 
 class ProcessManager:
@@ -69,7 +72,8 @@ class ProcessManager:
         description: Optional[str] = None,
         shell: bool = True,
         creation_flags: Optional[int] = None,
-        capture_output: bool = False
+        capture_output: bool = False,
+        output_callback: Optional[Callable[[str, str], None]] = None
     ) -> Tuple[bool, str, Optional[int]]:
         """
         启动进程
@@ -82,6 +86,7 @@ class ProcessManager:
             shell: 是否使用shell
             creation_flags: 进程创建标志
             capture_output: 是否捕获输出
+            output_callback: 输出回调函数 (stream_type, message)
 
         Returns:
             (成功状态, 消息, 进程ID)
@@ -101,7 +106,8 @@ class ProcessManager:
                 name=name,
                 status=ProcessStatus.STARTING,
                 command=command,
-                description=description
+                description=description,
+                output_callback=output_callback
             )
 
             self.processes[name] = process_info
@@ -126,7 +132,7 @@ class ProcessManager:
             if capture_output:
                 startup_params.update({
                     'stdout': subprocess.PIPE,
-                    'stderr': subprocess.STDOUT,
+                    'stderr': subprocess.PIPE,
                     'bufsize': 1
                 })
 
@@ -140,6 +146,21 @@ class ProcessManager:
                 process_info.start_time = time.time()
                 process_info.status = ProcessStatus.RUNNING
 
+            # 如果需要捕获输出，启动输出监控线程
+            if capture_output and output_callback:
+                process_info.stdout_thread = threading.Thread(
+                    target=self._monitor_output,
+                    args=(process, process_info, 'stdout', output_callback),
+                    daemon=True
+                )
+                process_info.stderr_thread = threading.Thread(
+                    target=self._monitor_output,
+                    args=(process, process_info, 'stderr', output_callback),
+                    daemon=True
+                )
+                process_info.stdout_thread.start()
+                process_info.stderr_thread.start()
+
             logger.info(f"进程启动成功: {name} (PID: {process.pid})")
             return True, f"进程启动成功", process.pid
 
@@ -150,6 +171,26 @@ class ProcessManager:
 
             logger.error(f"启动进程失败: {name} - {e}")
             return False, f"启动进程失败: {e}", None
+
+    def _monitor_output(self, process: subprocess.Popen, process_info: ProcessInfo, stream_type: str, callback: Callable[[str, str], None]):
+        """监控进程输出流"""
+        stream = getattr(process, stream_type)
+
+        try:
+            for line in iter(stream.readline, ''):
+                if line:
+                    line = line.rstrip('\n\r')
+                    if line.strip():  # 只处理非空行
+                        callback(stream_type, line)
+                else:
+                    break
+        except Exception as e:
+            logger.debug(f"监控 {process_info.name} 的 {stream_type} 输出时出错: {e}")
+        finally:
+            try:
+                stream.close()
+            except:
+                pass
 
     def stop_process(
         self,
@@ -206,11 +247,15 @@ class ProcessManager:
                     logger.warning(f"正常关闭进程失败: {name} (PID: {pid})")
                     message = f"正常关闭进程失败"
 
-            # 更新进程状态
+            # 更新进程状态并清理资源
             with self.lock:
                 process_info.status = ProcessStatus.STOPPED
                 process_info.stop_time = time.time()
                 process_info.process = None
+
+                # 清理输出监控线程引用
+                process_info.stdout_thread = None
+                process_info.stderr_thread = None
 
             return success, message
 
