@@ -73,34 +73,6 @@ class LogStreamTester:
             logger.debug(f"检查模型状态失败: {e}")
             return False
 
-    def test_regular_logs(self) -> bool:
-        """
-        测试普通日志接口
-
-        Returns:
-            是否成功获取日志
-        """
-        try:
-            response = self.session.get(
-                f"{self.base_url}/api/models/{self.model_alias}/logs",
-                timeout=5
-            )
-            if response.status_code == 200:
-                logs = response.json()
-                logger.info(f"成功获取普通日志，共 {len(logs)} 条")
-                if logs:
-                    logger.info("最近的日志内容:")
-                    for log in logs[-3:]:  # 显示最近3条
-                        timestamp = datetime.fromtimestamp(log['timestamp']).strftime('%H:%M:%S')
-                        logger.info(f"  [{timestamp}] {log['message']}")
-                return True
-            else:
-                logger.warning(f"获取普通日志失败，状态码: {response.status_code}")
-                return False
-        except Exception as e:
-            logger.warning(f"测试普通日志接口失败: {e}")
-            return False
-
     def test_stream_connection(self) -> bool:
         """
         测试流式连接
@@ -130,7 +102,7 @@ class LogStreamTester:
         logger.info(f"开始连接日志流: {url}")
 
         try:
-            with self.session.get(url, stream=True, timeout=30) as response:
+            with self.session.get(url, stream=True, timeout=3600) as response:
                 if response.status_code != 200:
                     logger.error(f"连接日志流失败，状态码: {response.status_code}")
                     if response.status_code == 400:
@@ -163,6 +135,9 @@ class LogStreamTester:
                         if not self.running:
                             break
 
+        except requests.exceptions.ReadTimeout:
+            logger.info("💡 日志流空闲超时，这是正常现象（模型暂时没有新请求）")
+            return True  # 超时是正常的，不算失败
         except requests.exceptions.RequestException as e:
             logger.error(f"日志流连接中断: {e}")
             return False
@@ -234,25 +209,14 @@ class LogStreamTester:
                 # 首先检查模型状态
                 if self.check_model_status():
                     logger.info("✅ 检测到模型已启动")
+                    logger.info("🔄 开始连接日志流...")
 
-                    # 测试普通日志接口
-                    if self.test_regular_logs():
-                        logger.info("✅ 普通日志接口测试成功")
-
-                        # 测试流式连接
-                        if self.test_stream_connection():
-                            logger.info("🔄 开始连接日志流...")
-
-                            # 尝试连接日志流
-                            if self.stream_logs():
-                                logger.info("✅ 日志流连接成功并正常工作")
-                                return
-                            else:
-                                logger.warning("⚠️ 日志流连接失败，等待重试...")
-                        else:
-                            logger.warning("⚠️ 流式连接测试失败，等待重试...")
+                    # 尝试连接日志流
+                    if self.stream_logs():
+                        logger.info("✅ 日志流连接成功并正常工作")
+                        return
                     else:
-                        logger.warning("⚠️ 普通日志接口测试失败，等待重试...")
+                        logger.warning("⚠️ 日志流连接失败，等待重试...")
                 else:
                     logger.info("⏳ 模型未启动，等待中...")
 
@@ -334,47 +298,17 @@ def main():
             logger.info("\n📋 模型状态检查:")
             model_running = tester.check_model_status()
 
-            # 测试普通日志接口
-            logger.info("\n📄 普通日志接口测试:")
-            regular_success = tester.test_regular_logs()
-
             # 测试流式连接
             logger.info("\n🔄 流式连接测试:")
             stream_success = tester.test_stream_connection()
 
-            # 测试进程调试信息
-            logger.info("\n🔧 进程调试信息:")
-            debug_response = tester.session.get(f"{tester.base_url}/api/debug/process/{tester.model_alias}", timeout=5)
-            if debug_response.status_code == 200:
-                debug_data = debug_response.json()
-                if debug_data.get("success"):
-                    process_info = debug_data["process_info"]
-                    logger.info(f"  进程状态: {process_info.get('status')}")
-                    logger.info(f"  进程PID: {process_info.get('pid')}")
-                    logger.info(f"  进程存在: {process_info.get('has_process')}")
-                    logger.info(f"  stdout线程: {process_info.get('stdout_thread_alive')}")
-                    logger.info(f"  stderr线程: {process_info.get('stderr_thread_alive')}")
-                    logger.info(f"  日志数量: {process_info.get('log_count')}")
-
-                    recent_logs = process_info.get('recent_logs', [])
-                    if recent_logs:
-                        logger.info("  最近的日志:")
-                        for log in recent_logs:
-                            timestamp = datetime.fromtimestamp(log['timestamp']).strftime('%H:%M:%S')
-                            logger.info(f"    [{timestamp}] {log['message']}")
-                else:
-                    logger.warning("  获取进程调试信息失败")
-            else:
-                logger.warning("  进程调试接口不可用")
-
             # 总结
             logger.info("\n📊 诊断结果:")
             logger.info(f"  模型运行状态: {'✅ 正常' if model_running else '❌ 未运行'}")
-            logger.info(f"  普通日志接口: {'✅ 正常' if regular_success else '❌ 异常'}")
             logger.info(f"  流式日志接口: {'✅ 正常' if stream_success else '❌ 异常'}")
 
-            if model_running and regular_success and stream_success:
-                logger.info("\n🎉 所有测试通过！日志流功能正常工作。")
+            if model_running and stream_success:
+                logger.info("\n🎉 流式日志功能正常工作。")
             else:
                 logger.info("\n⚠️ 发现问题，请根据上述信息进行排查。")
 

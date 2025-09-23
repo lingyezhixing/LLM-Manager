@@ -16,13 +16,13 @@ if "%choice%"=="2" (
     echo.
     echo 运行诊断模式...
     echo.
-    python test_log_stream.py --model Qwen3-8B-AWQ --diagnose
+    python test_log_stream.py --model Qwen3-30B-A3B-Instruct-2507 --diagnose
 ) else (
     echo.
     echo 启动正常监控模式...
     echo 模型: Qwen3-30B-A3B-Instruct-2507
     echo.
-    python test_log_stream.py --model Qwen3-8B-AWQ
+    python test_log_stream.py --model Qwen3-30B-A3B-Instruct-2507
 )
 
 echo.
