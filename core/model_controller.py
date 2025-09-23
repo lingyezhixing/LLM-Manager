@@ -9,8 +9,148 @@ from utils.logger import get_logger
 from .plugin_system import PluginManager
 from .config_manager import ConfigManager
 from .process_manager import get_process_manager
+from .monitor import Monitor
 
 logger = get_logger(__name__)
+
+class ModelRuntimeMonitor:
+    """模型运行时间监控器 - 负责记录模型运行时间到数据库"""
+
+    def __init__(self, db_path: Optional[str] = None):
+        """
+        初始化模型运行时间监控器
+
+        Args:
+            db_path: 数据库路径，默认使用monitor的默认路径
+        """
+        self.monitor = Monitor(db_path)
+        self.active_models: Dict[str, threading.Timer] = {}
+        self.lock = threading.Lock()
+
+        logger.info("模型运行时间监控器初始化完成")
+
+    def record_model_start(self, model_name: str):
+        """
+        记录模型启动时间并启动定时器
+
+        Args:
+            model_name: 模型名称
+        """
+        start_time = time.time()
+
+        # 记录启动时间到数据库
+        try:
+            self.monitor.add_model_runtime_start(model_name, start_time)
+            logger.info(f"已记录模型 '{model_name}' 启动时间: {start_time}")
+        except Exception as e:
+            logger.error(f"记录模型 '{model_name}' 启动时间失败: {e}")
+            return False
+
+        # 启动定时更新线程
+        with self.lock:
+            # 停止已有的定时器（如果有）
+            if model_name in self.active_models:
+                self.active_models[model_name].cancel()
+
+            # 创建新的定时器，每10秒更新一次
+            timer = threading.Timer(10.0, self._update_runtime_periodically, args=[model_name])
+            timer.daemon = True
+            timer.start()
+            self.active_models[model_name] = timer
+
+        logger.info(f"已启动模型 '{model_name}' 的运行时间定时更新器")
+        return True
+
+    def _update_runtime_periodically(self, model_name: str):
+        """
+        定期更新模型运行时间
+
+        Args:
+            model_name: 模型名称
+        """
+        with self.lock:
+            # 如果模型仍在活动状态，继续定时更新
+            if model_name in self.active_models:
+                end_time = time.time()
+                try:
+                    self.monitor.update_model_runtime_end(model_name, end_time)
+                    logger.debug(f"已更新模型 '{model_name}' 运行时间: {end_time}")
+                except Exception as e:
+                    logger.error(f"更新模型 '{model_name}' 运行时间失败: {e}")
+
+                # 创建下一个定时器
+                timer = threading.Timer(10.0, self._update_runtime_periodically, args=[model_name])
+                timer.daemon = True
+                timer.start()
+                self.active_models[model_name] = timer
+
+    def record_model_stop(self, model_name: str):
+        """
+        记录模型停止时间并停止定时器
+
+        Args:
+            model_name: 模型名称
+        """
+        end_time = time.time()
+
+        # 停止定时器
+        with self.lock:
+            if model_name in self.active_models:
+                self.active_models[model_name].cancel()
+                del self.active_models[model_name]
+
+        # 记录最终停止时间到数据库
+        try:
+            self.monitor.update_model_runtime_end(model_name, end_time)
+            logger.info(f"已记录模型 '{model_name}' 停止时间: {end_time}")
+            return True
+        except Exception as e:
+            logger.error(f"记录模型 '{model_name}' 停止时间失败: {e}")
+            return False
+
+    def is_model_monitored(self, model_name: str) -> bool:
+        """
+        检查模型是否正在被监控
+
+        Args:
+            model_name: 模型名称
+
+        Returns:
+            是否正在监控
+        """
+        with self.lock:
+            return model_name in self.active_models
+
+    def get_active_models(self) -> List[str]:
+        """
+        获取正在被监控的模型列表
+
+        Returns:
+            正在监控的模型名称列表
+        """
+        with self.lock:
+            return list(self.active_models.keys())
+
+    def shutdown(self):
+        """关闭监控器，停止所有定时器"""
+        with self.lock:
+            for model_name, timer in self.active_models.items():
+                timer.cancel()
+                logger.info(f"已停止模型 '{model_name}' 的运行时间监控")
+            self.active_models.clear()
+
+        try:
+            self.monitor.close()
+            logger.info("模型运行时间监控器已关闭")
+        except Exception as e:
+            logger.error(f"关闭模型运行时间监控器失败: {e}")
+
+    def __del__(self):
+        """析构函数"""
+        try:
+            self.shutdown()
+        except:
+            pass
 
 class ModelStatus(Enum):
     """模型状态枚举"""
@@ -31,6 +171,7 @@ class ModelController:
         self.is_running = True
         self.plugin_manager: Optional[PluginManager] = None
         self.process_manager = get_process_manager()
+        self.runtime_monitor = ModelRuntimeMonitor()
 
         # 启动空闲检查线程
         self.idle_check_thread = threading.Thread(target=self.idle_check_loop, daemon=True)
@@ -383,6 +524,10 @@ class ModelController:
                 with state['lock']:
                     state['status'] = ModelStatus.ROUTING.value
                     state['last_access'] = time.time()
+
+                # 记录模型启动时间并启动定时监控
+                self.runtime_monitor.record_model_start(primary_name)
+
                 return True, f"模型 {primary_name} 启动成功"
             else:
                 logger.error(f"模型 '{primary_name}' 健康检查失败: {health_message}")
@@ -419,7 +564,11 @@ class ModelController:
                     logger.warning(f"终止模型 {primary_name} PID:{pid} 失败: {message}")
 
             self._mark_model_as_stopped(primary_name, acquire_lock=False)
-            return True, f"模型 {primary_name} 已停止"
+
+        # 记录模型停止时间并停止定时监控
+        self.runtime_monitor.record_model_stop(primary_name)
+
+        return True, f"模型 {primary_name} 已停止"
 
     def _mark_model_as_stopped(self, primary_name: str, acquire_lock: bool = True):
         """标记模型为已停止状态"""
@@ -462,6 +611,9 @@ class ModelController:
                     state['status'] = ModelStatus.STOPPED.value
                     state['pid'] = None
                     state['process'] = None
+
+                    # 记录模型停止时间并停止定时监控
+                    self.runtime_monitor.record_model_stop(name)
 
         logger.info(f"所有模型均已卸载，共终止 {len(terminated_models)} 个模型进程")
 
@@ -625,5 +777,11 @@ class ModelController:
                     state['pid'] = None
                     state['status'] = ModelStatus.STOPPED.value
                     state['process'] = None
+
+                # 记录模型停止时间并停止定时监控
+                self.runtime_monitor.record_model_stop(primary_name)
+
+        # 关闭运行时间监控器
+        self.runtime_monitor.shutdown()
 
         logger.info(f"快速关闭完成，已终止 {len(terminated_models)} 个模型进程")
