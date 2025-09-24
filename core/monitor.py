@@ -42,6 +42,8 @@ class TierPricing:
     end_tokens: int
     input_price_per_million: float
     output_price_per_million: float
+    support_cache: bool
+    cache_hit_price_per_million: float
 
 @dataclass
 class ModelBilling:
@@ -207,9 +209,27 @@ class Monitor:
                         start_tokens INTEGER NOT NULL,
                         end_tokens INTEGER NOT NULL,
                         input_price_per_million REAL NOT NULL,
-                        output_price_per_million REAL NOT NULL
+                        output_price_per_million REAL NOT NULL,
+                        support_cache BOOLEAN NOT NULL DEFAULT 0,
+                        cache_hit_price_per_million REAL NOT NULL DEFAULT 0.0
                     )
                 ''')
+
+                # 检查表是否有新字段，如果没有则添加
+                cursor.execute(f"PRAGMA table_info({safe_name}_tier_pricing)")
+                columns = [column[1] for column in cursor.fetchall()]
+
+                if 'support_cache' not in columns:
+                    cursor.execute(f'''
+                        ALTER TABLE {safe_name}_tier_pricing
+                        ADD COLUMN support_cache BOOLEAN NOT NULL DEFAULT 0
+                    ''')
+
+                if 'cache_hit_price_per_million' not in columns:
+                    cursor.execute(f'''
+                        ALTER TABLE {safe_name}_tier_pricing
+                        ADD COLUMN cache_hit_price_per_million REAL NOT NULL DEFAULT 0.0
+                    ''')
 
                 # 检查是否有默认数据，没有则插入
                 cursor.execute(f'''
@@ -218,8 +238,8 @@ class Monitor:
                 if cursor.fetchone()[0] == 0:
                     cursor.execute(f'''
                         INSERT INTO {safe_name}_tier_pricing
-                        (tier_index, start_tokens, end_tokens, input_price_per_million, output_price_per_million)
-                        VALUES (1, 0, 32768, 0, 0)
+                        (tier_index, start_tokens, end_tokens, input_price_per_million, output_price_per_million, support_cache, cache_hit_price_per_million)
+                        VALUES (1, 0, 32768, 0, 0, 0, 0.0)
                     ''')
 
                 # 创建模型按时计费价格表
@@ -344,55 +364,56 @@ class Monitor:
             ''', (timestamp, input_tokens, output_tokens, cache_n, prompt_n))
             conn.commit()
 
-    def add_tier_pricing(self, model_name: str, tier_data: List[Union[int, int, int, float, float]]):
+    def add_tier_pricing(self, model_name: str, tier_data: List[Union[int, int, int, float, float, bool, float]]):
         """
         添加计费阶梯
 
         Args:
             model_name: 模型名称
-            tier_data: [阶梯索引, 起始token数, 结束token数, 输入价格/百万token, 输出价格/百万token]
+            tier_data: [阶梯索引, 起始token数, 结束token数, 输入价格/百万token, 输出价格/百万token, 是否支持缓存, 缓存命中价格/百万token]
         """
-        if len(tier_data) != 5:
-            raise ValueError("阶梯数据格式错误")
+        if len(tier_data) != 7:
+            raise ValueError("阶梯数据格式错误，应为 [阶梯索引, 起始token数, 结束token数, 输入价格/百万token, 输出价格/百万token, 是否支持缓存, 缓存命中价格/百万token]")
 
         safe_name = self.get_model_safe_name(model_name)
         if not safe_name:
             raise ValueError(f"模型 '{model_name}' 不存在")
 
-        tier_index, start_tokens, end_tokens, input_price, output_price = tier_data
+        tier_index, start_tokens, end_tokens, input_price, output_price, support_cache, cache_hit_price = tier_data
         with get_db_connection(self.connection_pool) as conn:
             cursor = conn.cursor()
             cursor.execute(f'''
                 INSERT INTO {safe_name}_tier_pricing
-                (tier_index, start_tokens, end_tokens, input_price_per_million, output_price_per_million)
-                VALUES (?, ?, ?, ?, ?)
-            ''', (tier_index, start_tokens, end_tokens, input_price, output_price))
+                (tier_index, start_tokens, end_tokens, input_price_per_million, output_price_per_million, support_cache, cache_hit_price_per_million)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            ''', (tier_index, start_tokens, end_tokens, input_price, output_price, 1 if support_cache else 0, cache_hit_price))
             conn.commit()
 
-    def update_tier_pricing(self, model_name: str, tier_data: List[Union[int, int, int, float, float]]):
+    def update_tier_pricing(self, model_name: str, tier_data: List[Union[int, int, int, float, float, bool, float]]):
         """
         更新计费阶梯
 
         Args:
             model_name: 模型名称
-            tier_data: [阶梯索引, 起始token数, 结束token数, 输入价格/百万token, 输出价格/百万token]
+            tier_data: [阶梯索引, 起始token数, 结束token数, 输入价格/百万token, 输出价格/百万token, 是否支持缓存, 缓存命中价格/百万token]
         """
-        if len(tier_data) != 5:
-            raise ValueError("阶梯数据格式错误")
+        if len(tier_data) != 7:
+            raise ValueError("阶梯数据格式错误，应为 [阶梯索引, 起始token数, 结束token数, 输入价格/百万token, 输出价格/百万token, 是否支持缓存, 缓存命中价格/百万token]")
 
         safe_name = self.get_model_safe_name(model_name)
         if not safe_name:
             raise ValueError(f"模型 '{model_name}' 不存在")
 
-        tier_index, start_tokens, end_tokens, input_price, output_price = tier_data
+        tier_index, start_tokens, end_tokens, input_price, output_price, support_cache, cache_hit_price = tier_data
         with get_db_connection(self.connection_pool) as conn:
             cursor = conn.cursor()
             cursor.execute(f'''
                 UPDATE {safe_name}_tier_pricing
                 SET start_tokens = ?, end_tokens = ?,
-                    input_price_per_million = ?, output_price_per_million = ?
+                    input_price_per_million = ?, output_price_per_million = ?,
+                    support_cache = ?, cache_hit_price_per_million = ?
                 WHERE tier_index = ?
-            ''', (start_tokens, end_tokens, input_price, output_price, tier_index))
+            ''', (start_tokens, end_tokens, input_price, output_price, 1 if support_cache else 0, cache_hit_price, tier_index))
             conn.commit()
 
     def delete_tier_pricing(self, model_name: str, tier_index: int):
@@ -608,13 +629,14 @@ class Monitor:
             # 获取阶梯价格
             cursor.execute(f'''
                 SELECT tier_index, start_tokens, end_tokens,
-                       input_price_per_million, output_price_per_million
+                       input_price_per_million, output_price_per_million,
+                       support_cache, cache_hit_price_per_million
                 FROM {safe_name}_tier_pricing
                 ORDER BY tier_index
             ''')
 
             tier_pricing = [
-                TierPricing(row[0], row[1], row[2], row[3], row[4])
+                TierPricing(row[0], row[1], row[2], row[3], row[4], bool(row[5]), row[6])
                 for row in cursor.fetchall()
             ]
 
