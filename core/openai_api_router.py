@@ -411,7 +411,7 @@ class APIServer:
         
         @self.app.get("/api/models/{model_alias}/logs/stream")
         async def stream_model_logs(model_alias: str):
-            """流式获取模型日志API - 实时推送日志"""
+            """流式获取模型控制台日志API - 实时推送模型控制台输出"""
             try:
                 # 解析模型名称
                 model_name = self.config_manager.resolve_primary_name(model_alias)
@@ -580,7 +580,7 @@ class APIServer:
 
         @self.app.get("/api/logs/stats")
         async def get_log_stats():
-            """获取日志统计信息"""
+            """获取模型控制台日志统计信息"""
             try:
                 stats = self.model_controller.get_log_stats()
                 return {
@@ -593,7 +593,7 @@ class APIServer:
 
         @self.app.post("/api/logs/{model_alias}/clear")
         async def clear_model_logs(model_alias: str, keep_minutes: int = 0):
-            """清理模型日志 - 保留最近N分钟的日志
+            """清理模型控制台日志 - 保留最近N分钟的日志
 
             Args:
                 model_alias: 模型别名

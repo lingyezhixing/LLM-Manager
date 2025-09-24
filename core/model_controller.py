@@ -22,7 +22,7 @@ logger = get_logger(__name__)
 
 
 class LogManager:
-    """日志管理器 - 负责模型日志的收集、存储和流式推送"""
+    """日志管理器 - 负责模型控制台日志的收集、存储和流式推送"""
 
     def __init__(self):
         """初始化日志管理器"""
@@ -59,33 +59,15 @@ class LogManager:
                 del self.log_locks[model_name]
                 logger.debug(f"已注销模型日志管理: {model_name}")
 
-    def add_log_entry(self, model_name: str, message: str, level: str = "info"):
-        """添加日志条目（系统日志，用于管理操作）"""
+    def add_console_log(self, model_name: str, message: str):
+        """添加模型控制台日志"""
         if model_name not in self.model_logs:
             self.register_model(model_name)
 
         log_entry = {
             "timestamp": time.time(),
-            "level": level,
             "message": message
         }
-
-        model_lock = self.log_locks[model_name]
-        with model_lock:
-            self.model_logs[model_name].append(log_entry)
-
-        # 通知订阅者
-        self._notify_subscribers(model_name, log_entry)
-
-    def add_raw_output(self, model_name: str, message: str):
-        """添加原始输出（模型进程输出）"""
-        log_entry = {
-            "timestamp": time.time(),
-            "message": message
-        }
-
-        if model_name not in self.model_logs:
-            self.register_model(model_name)
 
         model_lock = self.log_locks[model_name]
         with model_lock:
@@ -565,8 +547,8 @@ class ModelController:
 
                 # 确认由当前线程执行加载
                 state['status'] = ModelStatus.STARTING.value
-                # 使用新的日志管理器
-                self.log_manager.add_log_entry(primary_name, f"--- {time.ctime()} --- 启动模型 '{primary_name}'", "info")
+                # 使用系统日志记录器记录启动操作
+                logger.info(f"启动模型 '{primary_name}'")
 
             try:
                 return self._start_model_intelligent(primary_name)
@@ -632,7 +614,7 @@ class ModelController:
             error_msg = f"启动 '{primary_name}' 失败：没有适合当前设备状态 {current_devices} 的配置方案"
             state['status'] = ModelStatus.FAILED.value
             state['failure_reason'] = error_msg
-            self.log_manager.add_log_entry(primary_name, error_msg, "error")
+            logger.error(error_msg)
             return False, error_msg
 
         state['current_config'] = model_config
@@ -646,13 +628,13 @@ class ModelController:
             error_msg = f"启动 '{primary_name}' 失败：设备资源不足"
             state['status'] = ModelStatus.FAILED.value
             state['failure_reason'] = error_msg
-            self.log_manager.add_log_entry(primary_name, error_msg, "error")
+            logger.error(error_msg)
             return False, error_msg
 
         # 启动模型
         logger.info(f"正在启动模型: {primary_name} (配置方案: {model_config.get('config_source', '默认')})")
-        self.log_manager.add_log_entry(primary_name, f"使用配置方案: {model_config.get('config_source', '默认')}", "info")
-        self.log_manager.add_log_entry(primary_name, f"启动脚本: {model_config['bat_path']}", "info")
+        logger.info(f"使用配置方案: {model_config.get('config_source', '默认')}")
+        logger.info(f"启动脚本: {model_config['bat_path']}")
 
         try:
             # 使用进程管理器启动模型进程
@@ -662,8 +644,8 @@ class ModelController:
             # 定义输出回调函数，将进程输出转发到日志管理器
             def output_callback(stream_type: str, message: str):
                 """进程输出回调函数"""
-                # 直接记录原始输出，不添加任何级别标记
-                self.log_manager.add_raw_output(primary_name, message)
+                # 记录模型控制台输出
+                self.log_manager.add_console_log(primary_name, message)
 
             success, message, pid = self.process_manager.start_process(
                 name=process_name,
@@ -680,7 +662,7 @@ class ModelController:
                 error_msg = f"启动模型进程失败: {message}"
                 state['status'] = ModelStatus.FAILED.value
                 state['failure_reason'] = error_msg
-                self.log_manager.add_log_entry(primary_name, error_msg, "error")
+                logger.error(error_msg)
                 return False, error_msg
 
             state.update({
@@ -698,7 +680,6 @@ class ModelController:
             logger.error(f"启动模型进程失败: {e}")
             state['status'] = ModelStatus.FAILED.value
             state['failure_reason'] = str(e)
-            self.log_manager.add_log_entry(primary_name, f"启动模型进程失败: {e}", "error")
             return False, f"启动模型进程失败: {e}"
 
     def _check_and_free_resources(self, model_config: Dict[str, Any]) -> bool:
@@ -1016,23 +997,23 @@ class ModelController:
     
     def get_model_logs(self, primary_name: str) -> List[Dict[str, Any]]:
         """
-        获取模型的结构化日志 - 接受主名称
+        获取模型的控制台日志 - 接受主名称
 
         Args:
             primary_name: 模型主名称
 
         Returns:
-            结构化日志列表
+            模型控制台日志列表
         """
         try:
             return self.log_manager.get_logs(primary_name)
         except Exception as e:
             logger.error(f"获取模型日志失败: {e}")
-            return [{"timestamp": time.time(), "level": "error", "message": f"获取日志失败: {str(e)}"}]
+            return [{"timestamp": time.time(), "message": f"获取模型控制台日志失败: {str(e)}"}]
 
     def subscribe_to_model_logs(self, primary_name: str) -> queue.Queue:
         """
-        订阅模型日志流
+        订阅模型控制台日志流
 
         Args:
             primary_name: 模型主名称
@@ -1044,7 +1025,7 @@ class ModelController:
 
     def unsubscribe_from_model_logs(self, primary_name: str, subscriber_queue: queue.Queue):
         """
-        取消订阅模型日志流
+        取消订阅模型控制台日志流
 
         Args:
             primary_name: 模型主名称
@@ -1054,7 +1035,7 @@ class ModelController:
 
     def get_log_stats(self) -> Dict[str, Any]:
         """
-        获取日志统计信息
+        获取模型控制台日志统计信息
 
         Returns:
             统计信息字典
