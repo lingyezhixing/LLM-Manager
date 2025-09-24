@@ -51,7 +51,7 @@ class Application:
         if self.config_manager:
             log_level = self.config_manager.get_log_level()
         else:
-            log_level = os.environ.get('LOG_LEVEL', 'DEBUG')
+            log_level = os.environ.get('LOG_LEVEL', 'INFO')
         setup_logging(log_level=log_level)
         self.logger = get_logger(__name__)
 
@@ -77,6 +77,13 @@ class Application:
             raise FileNotFoundError(f"配置文件不存在: {self.config_path}")
 
         self.config_manager = ConfigManager(self.config_path)
+
+        # 配置管理器初始化完成后，重新设置日志级别以应用配置文件中的设置
+        log_level = self.config_manager.get_log_level()
+        from utils.logger import _log_manager
+        if _log_manager:
+            _log_manager.set_level(log_level)
+
         self.logger.info("配置管理器初始化完成")
 
     def initialize_monitor(self) -> None:

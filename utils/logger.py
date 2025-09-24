@@ -52,10 +52,12 @@ class LogManager:
         """设置日志级别"""
         self.log_level = level
         numeric_level = getattr(logging, level.upper(), None)
-        if isinstance(numeric_level, int):
-            logging.getLogger().setLevel(numeric_level)
-            for handler in logging.getLogger().handlers:
-                handler.setLevel(numeric_level)
+        if not isinstance(numeric_level, int):
+            raise ValueError(f'Invalid log level: {level}')
+
+        logging.getLogger().setLevel(numeric_level)
+        for handler in logging.getLogger().handlers:
+            handler.setLevel(numeric_level)
 
 # 全局日志管理器实例
 _log_manager = None
