@@ -31,6 +31,8 @@ class ModelRequest:
     timestamp: float
     input_tokens: int
     output_tokens: int
+    cache_n: int
+    prompt_n: int
 
 @dataclass
 class TierPricing:
@@ -192,7 +194,9 @@ class Monitor:
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         timestamp REAL NOT NULL,
                         input_tokens INTEGER NOT NULL,
-                        output_tokens INTEGER NOT NULL
+                        output_tokens INTEGER NOT NULL,
+                        cache_n INTEGER NOT NULL,
+                        prompt_n INTEGER NOT NULL
                     )
                 ''')
 
@@ -316,28 +320,28 @@ class Monitor:
             ''', (end_time,))
             conn.commit()
 
-    def add_model_request(self, model_name: str, request_data: List[Union[float, int, int]]):
+    def add_model_request(self, model_name: str, request_data: List[Union[float, int, int, int, int]]):
         """
         添加模型请求记录
 
         Args:
             model_name: 模型名称
-            request_data: [时间戳, 输入token数, 输出token数]
+            request_data: [时间戳, 输入token数, 输出token数, cache_n, prompt_n]
         """
-        if len(request_data) != 3:
-            raise ValueError("请求数据格式错误，应为 [时间戳, 输入token数, 输出token数]")
+        if len(request_data) != 5:
+            raise ValueError("请求数据格式错误，应为 [时间戳, 输入token数, 输出token数, cache_n, prompt_n]")
 
         safe_name = self.get_model_safe_name(model_name)
         if not safe_name:
             raise ValueError(f"模型 '{model_name}' 不存在")
 
-        timestamp, input_tokens, output_tokens = request_data
+        timestamp, input_tokens, output_tokens, cache_n, prompt_n = request_data
         with get_db_connection(self.connection_pool) as conn:
             cursor = conn.cursor()
             cursor.execute(f'''
-                INSERT INTO {safe_name}_requests (timestamp, input_tokens, output_tokens)
-                VALUES (?, ?, ?)
-            ''', (timestamp, input_tokens, output_tokens))
+                INSERT INTO {safe_name}_requests (timestamp, input_tokens, output_tokens, cache_n, prompt_n)
+                VALUES (?, ?, ?, ?, ?)
+            ''', (timestamp, input_tokens, output_tokens, cache_n, prompt_n))
             conn.commit()
 
     def add_tier_pricing(self, model_name: str, tier_data: List[Union[int, int, int, float, float]]):
@@ -554,19 +558,19 @@ class Monitor:
             if minutes > 0:
                 cutoff_time = time.time() - (minutes * 60)
                 cursor.execute(f'''
-                    SELECT id, timestamp, input_tokens, output_tokens
+                    SELECT id, timestamp, input_tokens, output_tokens, cache_n, prompt_n
                     FROM {safe_name}_requests
                     WHERE timestamp >= ?
                     ORDER BY id DESC
                 ''', (cutoff_time,))
             else:
                 cursor.execute(f'''
-                    SELECT id, timestamp, input_tokens, output_tokens
+                    SELECT id, timestamp, input_tokens, output_tokens, cache_n, prompt_n
                     FROM {safe_name}_requests
                     ORDER BY id DESC
                 ''')
 
-            return [ModelRequest(row[0], row[1], row[2], row[3]) for row in cursor.fetchall()]
+            return [ModelRequest(row[0], row[1], row[2], row[3], row[4], row[5]) for row in cursor.fetchall()]
 
     def get_model_billing(self, model_name: str) -> Optional[ModelBilling]:
         """

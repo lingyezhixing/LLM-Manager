@@ -21,101 +21,133 @@ class TokenTracker:
         self.monitor = monitor
         logger.info("Token跟踪器初始化完成")
 
-    def extract_tokens_from_usage(self, usage_data: Dict[str, Any]) -> tuple[int, int]:
-        """从usage数据中提取输入和输出token数量"""
+    def extract_tokens_from_usage(self, usage_data: Dict[str, Any]) -> tuple[int, int, int, int]:
+        """从usage数据中提取token数量"""
         prompt_tokens = usage_data.get("prompt_tokens", 0)
         completion_tokens = usage_data.get("completion_tokens", 0)
-        return prompt_tokens, completion_tokens
+        cache_n = usage_data.get("cache_n", 0)
+        prompt_n = usage_data.get("prompt_n", 0)
+        return prompt_tokens, completion_tokens, cache_n, prompt_n
 
-    def extract_tokens_from_response(self, response_content: bytes) -> tuple[int, int]:
+    def extract_tokens_from_response(self, response_content: bytes) -> tuple[int, int, int, int]:
         """从响应内容中提取token信息"""
         try:
+            content_str = response_content.decode('utf-8')
             logger.debug(f"[TOKEN_TRACKER] 开始提取token信息，响应大小: {len(response_content)} bytes")
 
-            # 处理流式响应（SSE格式）
-            content_str = response_content.decode('utf-8')
-
-            # 如果是SSE格式，需要提取最后的JSON数据
+            # 处理SSE格式响应
             if "data: " in content_str:
-                logger.debug(f"[TOKEN_TRACKER] 检测到SSE格式响应，尝试提取JSON数据")
+                logger.debug(f"[TOKEN_TRACKER] 检测到SSE格式响应")
 
-                # 找到最后一个data: 行，通常包含完整的usage信息
+                # 从后向前查找包含usage/timings的JSON数据，跳过[DONE]标记
                 lines = content_str.split('\n')
-                last_json_line = None
-
                 for line in reversed(lines):
-                    if line.startswith('data: '):
-                        data_str = line[6:]  # 去掉 "data: " 前缀
-                        if data_str.strip():  # 确保不是空行
-                            last_json_line = data_str
-                            break
-
-                if last_json_line:
-                    logger.debug(f"[TOKEN_TRACKER] 找到最后JSON数据: {last_json_line[:100]}...")
-                    data = json.loads(last_json_line)
-                else:
-                    logger.debug(f"[TOKEN_TRACKER] 未找到有效的JSON数据行")
-                    return 0, 0
-            else:
-                # 普通JSON响应
-                logger.debug(f"[TOKEN_TRACKER] 检测到普通JSON响应")
-                data = json.loads(content_str)
-
-            logger.debug(f"[TOKEN_TRACKER] JSON解析成功，响应字段: {list(data.keys())}")
-
-            # 检查是否有usage字段
-            if "usage" in data:
-                usage = data["usage"]
-                logger.debug(f"[TOKEN_TRACKER] 找到usage字段: {usage}")
-                input_tokens, output_tokens = self.extract_tokens_from_usage(usage)
-                logger.debug(f"[TOKEN_TRACKER] Token提取成功 - 输入: {input_tokens}, 输出: {output_tokens}")
-                return input_tokens, output_tokens
-
-            # 如果没有usage字段，返回0
-            logger.debug(f"[TOKEN_TRACKER] 响应中未找到usage字段")
-            return 0, 0
-        except json.JSONDecodeError as e:
-            logger.debug(f"[TOKEN_TRACKER] JSON解析失败: {e}")
-            # 尝试更宽松的解析方式
-            try:
-                content_str = response_content.decode('utf-8')
-                # 尝试找到任何看起来像JSON的部分
-                import re
-                json_pattern = r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}'
-                json_matches = re.findall(json_pattern, content_str)
-
-                for match in json_matches:
-                    try:
-                        data = json.loads(match)
-                        if "usage" in data:
-                            usage = data["usage"]
-                            logger.debug(f"[TOKEN_TRACKER] 通过正则提取找到usage字段: {usage}")
-                            input_tokens, output_tokens = self.extract_tokens_from_usage(usage)
-                            logger.debug(f"[TOKEN_TRACKER] Token提取成功 - 输入: {input_tokens}, 输出: {output_tokens}")
-                            return input_tokens, output_tokens
-                    except:
+                    if not line.startswith('data: '):
                         continue
 
-                logger.debug(f"[TOKEN_TRACKER] 正则表达式也未找到有效的usage数据")
-                return 0, 0
-            except Exception as e2:
-                logger.debug(f"[TOKEN_TRACKER] 正则表达式提取也失败: {e2}")
-                return 0, 0
+                    data_str = line[6:].strip()
+                    if not data_str or data_str == "[DONE]":
+                        continue
+
+                    try:
+                        data = json.loads(data_str)
+                        # 检查是否包含token相关信息
+                        if "usage" in data or "timings" in data:
+                            input_tokens = output_tokens = cache_n = prompt_n = 0
+
+                            # 从usage字段提取token数量
+                            if "usage" in data:
+                                usage = data["usage"]
+                                input_tokens = usage.get("prompt_tokens", 0)
+                                output_tokens = usage.get("completion_tokens", 0)
+                                logger.debug(f"[TOKEN_TRACKER] 从usage提取到: input={input_tokens}, output={output_tokens}")
+
+                            # 从timings字段提取cache_n和prompt_n
+                            if "timings" in data:
+                                timings = data["timings"]
+                                cache_n = timings.get("cache_n", 0)
+                                prompt_n = timings.get("prompt_n", 0)
+                                logger.debug(f"[TOKEN_TRACKER] 从timings提取到: cache_n={cache_n}, prompt_n={prompt_n}")
+
+                            if input_tokens > 0 or output_tokens > 0 or cache_n > 0 or prompt_n > 0:
+                                logger.debug(f"[TOKEN_TRACKER] SSE解析成功: {input_tokens}, {output_tokens}, {cache_n}, {prompt_n}")
+                                return input_tokens, output_tokens, cache_n, prompt_n
+                    except json.JSONDecodeError:
+                        continue
+
+            # 处理普通JSON响应
+            try:
+                data = json.loads(content_str)
+                input_tokens = output_tokens = cache_n = prompt_n = 0
+
+                # 从usage字段提取token数量
+                if "usage" in data:
+                    usage = data["usage"]
+                    input_tokens = usage.get("prompt_tokens", 0)
+                    output_tokens = usage.get("completion_tokens", 0)
+                    logger.debug(f"[TOKEN_TRACKER] 从usage提取到: input={input_tokens}, output={output_tokens}")
+
+                # 从timings字段提取cache_n和prompt_n
+                if "timings" in data:
+                    timings = data["timings"]
+                    cache_n = timings.get("cache_n", 0)
+                    prompt_n = timings.get("prompt_n", 0)
+                    logger.debug(f"[TOKEN_TRACKER] 从timings提取到: cache_n={cache_n}, prompt_n={prompt_n}")
+
+                if input_tokens > 0 or output_tokens > 0 or cache_n > 0 or prompt_n > 0:
+                    logger.debug(f"[TOKEN_TRACKER] JSON解析成功: {input_tokens}, {output_tokens}, {cache_n}, {prompt_n}")
+                    return input_tokens, output_tokens, cache_n, prompt_n
+            except json.JSONDecodeError:
+                logger.debug(f"[TOKEN_TRACKER] 普通JSON解析失败，尝试正则提取")
+
+            # 使用正则表达式提取JSON对象
+            import re
+            json_pattern = r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}'
+            json_matches = re.findall(json_pattern, content_str)
+
+            for match in json_matches:
+                try:
+                    data = json.loads(match)
+                    input_tokens = output_tokens = cache_n = prompt_n = 0
+
+                    # 从usage字段提取token数量
+                    if "usage" in data:
+                        usage = data["usage"]
+                        input_tokens = usage.get("prompt_tokens", 0)
+                        output_tokens = usage.get("completion_tokens", 0)
+                        logger.debug(f"[TOKEN_TRACKER] 正则提取到usage: input={input_tokens}, output={output_tokens}")
+
+                    # 从timings字段提取cache_n和prompt_n
+                    if "timings" in data:
+                        timings = data["timings"]
+                        cache_n = timings.get("cache_n", 0)
+                        prompt_n = timings.get("prompt_n", 0)
+                        logger.debug(f"[TOKEN_TRACKER] 正则提取到timings: cache_n={cache_n}, prompt_n={prompt_n}")
+
+                    if input_tokens > 0 or output_tokens > 0 or cache_n > 0 or prompt_n > 0:
+                        logger.debug(f"[TOKEN_TRACKER] 正则提取成功: {input_tokens}, {output_tokens}, {cache_n}, {prompt_n}")
+                        return input_tokens, output_tokens, cache_n, prompt_n
+                except json.JSONDecodeError:
+                    continue
+
+            logger.debug(f"[TOKEN_TRACKER] 未找到有效的token信息")
+            return 0, 0, 0, 0
+
         except Exception as e:
             logger.debug(f"[TOKEN_TRACKER] Token提取失败: {e}")
-            return 0, 0
+            return 0, 0, 0, 0
 
-    async def record_request_tokens(self, model_name: str, input_tokens: int, output_tokens: int):
+    async def record_request_tokens(self, model_name: str, input_tokens: int, output_tokens: int, cache_n: int = 0, prompt_n: int = 0):
         """异步记录请求token到数据库"""
         try:
             timestamp = time.time()
 
             logger.debug(f"[TOKEN_TRACKER] 开始异步记录token - 模型: {model_name}")
-            logger.debug(f"[TOKEN_TRACKER] Token信息 - 输入: {input_tokens}, 输出: {output_tokens}, 时间戳: {timestamp}")
+            logger.debug(f"[TOKEN_TRACKER] Token信息 - 输入: {input_tokens}, 输出: {output_tokens}, cache_n: {cache_n}, prompt_n: {prompt_n}, 时间戳: {timestamp}")
 
             # 检查是否有token需要记录
-            if input_tokens == 0 and output_tokens == 0:
-                logger.debug(f"[TOKEN_TRACKER] 跳过记录 - token数为0")
+            if input_tokens == 0 and output_tokens == 0 and cache_n == 0 and prompt_n == 0:
+                logger.debug(f"[TOKEN_TRACKER] 跳过记录 - 所有token数为0")
                 return
 
             # 使用异步方式写入数据库
@@ -123,10 +155,10 @@ class TokenTracker:
             await asyncio.to_thread(
                 self.monitor.add_model_request,
                 model_name,
-                [timestamp, input_tokens, output_tokens]
+                [timestamp, input_tokens, output_tokens, cache_n, prompt_n]
             )
 
-            logger.debug(f"[TOKEN_TRACKER] 异步记录token成功 - 模型: {model_name}, 总token数: {input_tokens + output_tokens}")
+            logger.debug(f"[TOKEN_TRACKER] 异步记录token成功 - 模型: {model_name}, 总token数: {input_tokens + output_tokens}, cache_n: {cache_n}, prompt_n: {prompt_n}")
         except Exception as e:
             logger.error(f"[TOKEN_TRACKER] 异步记录token失败 - 模型: {model_name}, 错误: {e}")
             # 不抛出异常，避免影响主要请求流程
@@ -150,14 +182,14 @@ class TokenTracker:
                 logger.debug(f"[TOKEN_TRACKER] 合并流式响应内容，总大小: {len(full_content)} bytes")
 
                 # 提取token信息
-                input_tokens, output_tokens = self.extract_tokens_from_response(full_content)
+                input_tokens, output_tokens, cache_n, prompt_n = self.extract_tokens_from_response(full_content)
 
                 # 异步记录到数据库
-                if input_tokens > 0 or output_tokens > 0:
-                    logger.debug(f"[TOKEN_TRACKER] 准备异步记录token - 模型: {model_name}, 总token数: {input_tokens + output_tokens}")
-                    await self.record_request_tokens(model_name, input_tokens, output_tokens)
+                if input_tokens > 0 or output_tokens > 0 or cache_n > 0 or prompt_n > 0:
+                    logger.debug(f"[TOKEN_TRACKER] 准备异步记录token - 模型: {model_name}, 总token数: {input_tokens + output_tokens}, cache_n: {cache_n}, prompt_n: {prompt_n}")
+                    await self.record_request_tokens(model_name, input_tokens, output_tokens, cache_n, prompt_n)
                 else:
-                    logger.debug(f"[TOKEN_TRACKER] 跳过token记录 - 模型: {model_name}, token数为0")
+                    logger.debug(f"[TOKEN_TRACKER] 跳过token记录 - 模型: {model_name}, 所有token数为0")
 
             except Exception as e:
                 logger.error(f"[TOKEN_TRACKER] 流式响应token记录失败 - 模型: {model_name}, 错误: {e}")
@@ -301,12 +333,12 @@ class APIRouter:
 
                 # 提取token信息并异步记录
                 try:
-                    input_tokens, output_tokens = token_tracker.extract_tokens_from_response(content)
-                    if input_tokens > 0 or output_tokens > 0:
-                        logger.debug(f"[API_ROUTER] 准备异步记录非流式响应token - 模型: {model_name}, 总token数: {input_tokens + output_tokens}")
-                        await token_tracker.record_request_tokens(model_name, input_tokens, output_tokens)
+                    input_tokens, output_tokens, cache_n, prompt_n = token_tracker.extract_tokens_from_response(content)
+                    if input_tokens > 0 or output_tokens > 0 or cache_n > 0 or prompt_n > 0:
+                        logger.debug(f"[API_ROUTER] 准备异步记录非流式响应token - 模型: {model_name}, 总token数: {input_tokens + output_tokens}, cache_n: {cache_n}, prompt_n: {prompt_n}")
+                        await token_tracker.record_request_tokens(model_name, input_tokens, output_tokens, cache_n, prompt_n)
                     else:
-                        logger.debug(f"[API_ROUTER] 跳过非流式响应token记录 - 模型: {model_name}, token数为0")
+                        logger.debug(f"[API_ROUTER] 跳过非流式响应token记录 - 模型: {model_name}, 所有token数为0")
                 except Exception as e:
                     logger.error(f"[API_ROUTER] 非流式响应token记录失败 - 模型: {model_name}, 错误: {e}")
                     # 不抛出异常，避免影响主要请求流程

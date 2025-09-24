@@ -51,7 +51,7 @@ class Application:
         if self.config_manager:
             log_level = self.config_manager.get_log_level()
         else:
-            log_level = os.environ.get('LOG_LEVEL', 'INFO')
+            log_level = os.environ.get('LOG_LEVEL', 'DEBUG')
         setup_logging(log_level=log_level)
         self.logger = get_logger(__name__)
 
