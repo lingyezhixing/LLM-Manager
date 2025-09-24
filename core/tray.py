@@ -36,12 +36,18 @@ class SystemTray:
         logger.info(f"托盘服务初始化完成，连接到API: {self.api_url}")
 
     def open_webui(self):
-        """打开WebUI - 为未来接入做准备"""
+        """打开WebUI"""
         logger.info("正在打开WebUI...")
         try:
-            import webbrowser
-            # 默认WebUI地址，未来可以从配置文件读取
-            webui_url = "http://localhost:7860"
+            webui_config = self.config_manager.get_webui_config()
+            webui_host = webui_config['host']
+            webui_port = webui_config['port']
+
+            # 如果配置为0.0.0.0，使用localhost进行本地访问
+            if webui_host == '0.0.0.0':
+                webui_host = 'localhost'
+
+            webui_url = f"http://{webui_host}:{webui_port}"
             webbrowser.open(webui_url)
             logger.info(f"已在浏览器中打开WebUI: {webui_url}")
         except Exception as e:
