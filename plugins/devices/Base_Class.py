@@ -30,6 +30,7 @@ class DevicePlugin(ABC):
             'available_memory_mb': int,  # 可用内存MB
             'used_memory_mb': int,  # 已用内存MB
             'usage_percentage': float,  # 使用率百分比
+            'temperature_celsius': float | None,  # 设备温度（摄氏度），不可用时为None
         }
         """
         pass

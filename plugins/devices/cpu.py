@@ -22,7 +22,21 @@ class CPUDevice(DevicePlugin):
             total_mb = memory.total // (1024 * 1024)
             available_mb = memory.available // (1024 * 1024)
             used_mb = memory.used // (1024 * 1024)
-            usage_percentage = memory.percent
+            usage_percentage = psutil.cpu_percent(interval=1)
+
+            temperature = None
+            try:
+                if hasattr(psutil, 'sensors_temperatures'):
+                    temps = psutil.sensors_temperatures()
+                    if temps:
+                        for name, entries in temps.items():
+                            if entries:
+                                temp = entries[0].current
+                                if temp is not None:
+                                    temperature = temp
+                                    break
+            except Exception:
+                temperature = None
 
             device_info = {
                 'device_type': 'CPU',
@@ -30,7 +44,8 @@ class CPUDevice(DevicePlugin):
                 'total_memory_mb': total_mb,
                 'available_memory_mb': available_mb,
                 'used_memory_mb': used_mb,
-                'usage_percentage': usage_percentage
+                'usage_percentage': usage_percentage,
+                'temperature_celsius': temperature
             }
 
             logger.debug(f"CPU设备: {device_info}")
@@ -44,5 +59,6 @@ class CPUDevice(DevicePlugin):
                 'total_memory_mb': 0,
                 'available_memory_mb': 0,
                 'used_memory_mb': 0,
-                'usage_percentage': 0.0
+                'usage_percentage': 0.0,
+                'temperature_celsius': None
             }

@@ -34,7 +34,8 @@ class V100Device(DevicePlugin):
                     total_mb = int(gpu.memoryTotal)
                     used_mb = int(gpu.memoryUsed)
                     available_mb = int(gpu.memoryFree)
-                    usage_percentage = gpu.memoryUtil * 100
+                    usage_percentage = gpu.load * 100
+                    temperature = gpu.temperature
 
                     device_info = {
                         'device_type': 'GPU',
@@ -42,7 +43,8 @@ class V100Device(DevicePlugin):
                         'total_memory_mb': total_mb,
                         'available_memory_mb': available_mb,
                         'used_memory_mb': used_mb,
-                        'usage_percentage': usage_percentage
+                        'usage_percentage': usage_percentage,
+                        'temperature_celsius': temperature
                     }
 
                     logger.debug(f"V100设备: {device_info}")
@@ -55,7 +57,8 @@ class V100Device(DevicePlugin):
                 'total_memory_mb': 0,
                 'available_memory_mb': 0,
                 'used_memory_mb': 0,
-                'usage_percentage': 0.0
+                'usage_percentage': 0.0,
+                'temperature_celsius': None
             }
 
         except Exception as e:
@@ -66,6 +69,7 @@ class V100Device(DevicePlugin):
                 'total_memory_mb': 0,
                 'available_memory_mb': 0,
                 'used_memory_mb': 0,
-                'usage_percentage': 0.0
+                'usage_percentage': 0.0,
+                'temperature_celsius': None
             }
 
