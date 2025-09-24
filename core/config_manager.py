@@ -167,10 +167,17 @@ class ConfigManager:
         }
 
     def get_webui_config(self) -> Dict[str, Any]:
-        """获取WebUI配置"""
+        """获取WebUI前端配置"""
         return {
             "host": self.get_program_config().get('webui_host', '127.0.0.1'),
             "port": self.get_program_config().get('webui_port', 10000)
+        }
+
+    def get_webui_backend_config(self) -> Dict[str, Any]:
+        """获取WebUI后端API配置"""
+        return {
+            "host": self.get_program_config().get('webui_backend_host', '127.0.0.1'),
+            "port": self.get_program_config().get('webui_backend_port', 9999)
         }
 
     def get_alive_time(self) -> int:
