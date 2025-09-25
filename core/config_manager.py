@@ -173,13 +173,6 @@ class ConfigManager:
             "port": self.get_program_config().get('webui_port', 10000)
         }
 
-    def get_webui_backend_config(self) -> Dict[str, Any]:
-        """获取WebUI后端API配置"""
-        return {
-            "host": self.get_program_config().get('webui_backend_host', '127.0.0.1'),
-            "port": self.get_program_config().get('webui_backend_port', 9999)
-        }
-
     def get_alive_time(self) -> int:
         """获取模型存活时间（分钟）"""
         return self.get_program_config().get('alive_time', 0)
