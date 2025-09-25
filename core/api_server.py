@@ -408,7 +408,718 @@ class APIServer:
                     content={"success": False, "error": f"服务器内部错误: {str(e)}"}
                 )
 
+        @self.app.get("/api/metrics/throughput/realtime")
+        async def get_realtime_throughput():
+            """获取实时吞吐量数据（最近5秒）"""
+            try:
+                import time
+                current_time = time.time()
+                five_seconds_ago = current_time - 5
 
+                total_input_tokens = 0
+                total_output_tokens = 0
+                total_cache_n = 0
+                total_prompt_n = 0
+
+                # 遍历所有模型，获取最近5秒的请求数据
+                for model_name in self.config_manager.get_model_names():
+                    requests = self.monitor.get_model_requests(model_name, minutes=0)  # 获取所有请求
+                    recent_requests = [
+                        req for req in requests
+                        if req.timestamp >= five_seconds_ago
+                    ]
+
+                    for req in recent_requests:
+                        total_input_tokens += req.input_tokens
+                        total_output_tokens += req.output_tokens
+                        total_cache_n += req.cache_n
+                        total_prompt_n += req.prompt_n
+
+                # 计算每秒吞吐量
+                time_window = max(5, current_time - five_seconds_ago)  # 避免除零
+
+                throughput_data = {
+                    "throughput": {
+                        "input_tokens_per_sec": total_input_tokens / time_window,
+                        "output_tokens_per_sec": total_output_tokens / time_window,
+                        "total_tokens_per_sec": (total_input_tokens + total_output_tokens) / time_window,
+                        "cache_hit_tokens_per_sec": total_cache_n / time_window,
+                        "cache_miss_tokens_per_sec": total_prompt_n / time_window
+                    }
+                }
+
+                return {
+                    "success": True,
+                    "data": throughput_data
+                }
+
+            except Exception as e:
+                logger.error(f"[API_SERVER] 获取实时吞吐量失败: {e}")
+                return {"success": False, "error": str(e)}
+
+        @self.app.get("/api/metrics/throughput/current-session")
+        async def get_current_session_total():
+            """获取本次运行总消耗"""
+            try:
+                # 获取程序启动时间
+                program_runtime = self.monitor.get_program_runtime(limit=1)
+                if not program_runtime:
+                    # 如果没有启动时间记录，返回默认值
+                    return {
+                        "success": True,
+                        "data": {
+                            "session_total": {
+                                "total_cost_yuan": 0.0,
+                                "total_input_tokens": 0,
+                                "total_output_tokens": 0,
+                                "total_cache_n": 0,
+                                "total_prompt_n": 0,
+                                "session_start_time": None
+                            }
+                        }
+                    }
+
+                start_time = program_runtime[0].start_time
+                total_input_tokens = 0
+                total_output_tokens = 0
+                total_cache_n = 0
+                total_prompt_n = 0
+                total_cost = 0.0
+
+                # 遍历所有模型，获取本次运行的所有请求数据
+                for model_name in self.config_manager.get_model_names():
+                    requests = self.monitor.get_model_requests(model_name, minutes=0)
+                    billing = self.monitor.get_model_billing(model_name)
+
+                    for req in requests:
+                        if req.timestamp >= start_time:
+                            total_input_tokens += req.input_tokens
+                            total_output_tokens += req.output_tokens
+                            total_cache_n += req.cache_n
+                            total_prompt_n += req.prompt_n
+
+                            # 计算成本
+                            if billing:
+                                if billing.use_tier_pricing and billing.tier_pricing:
+                                    # 阶梯计费
+                                    total_tokens = req.input_tokens + req.output_tokens
+                                    cost = 0.0
+                                    remaining_tokens = total_tokens
+
+                                    for tier in billing.tier_pricing:
+                                        if remaining_tokens <= 0:
+                                            break
+
+                                        tier_tokens = min(remaining_tokens, tier.end_tokens - tier.start_tokens)
+                                        input_cost = (req.input_tokens * tier.input_price_per_million) / 1000000
+                                        output_cost = (req.output_tokens * tier.output_price_per_million) / 1000000
+                                        cost += input_cost + output_cost
+                                        remaining_tokens -= tier_tokens
+
+                                    total_cost += cost
+                                else:
+                                    # 按时计费（这里简化处理，实际需要运行时间）
+                                    total_cost += billing.hourly_price * 0.001  # 简化计算
+
+                return {
+                    "success": True,
+                    "data": {
+                        "session_total": {
+                            "total_cost_yuan": round(total_cost, 6),
+                            "total_input_tokens": total_input_tokens,
+                            "total_output_tokens": total_output_tokens,
+                            "total_cache_n": total_cache_n,
+                            "total_prompt_n": total_prompt_n,
+                            "session_start_time": start_time
+                        }
+                    }
+                }
+
+            except Exception as e:
+                logger.error(f"[API_SERVER] 获取本次运行总消耗失败: {e}")
+                return {"success": False, "error": str(e)}
+
+        @self.app.get("/api/analytics/token-distribution/{time_range}")
+        async def get_token_distribution(time_range: str):
+            """获取Token分布比例数据"""
+            try:
+                # 解析时间范围
+                time_mapping = {
+                    "10min": 10, "30min": 30, "1h": 60, "12h": 720,
+                    "1d": 1440, "1w": 10080, "1m": 43200,
+                    "3m": 129600, "6m": 259200, "1y": 525600, "all": 0
+                }
+
+                minutes = time_mapping.get(time_range)
+                if minutes is None:
+                    return {"success": False, "error": "无效的时间范围参数"}
+
+                import time
+                end_time = time.time()
+                start_time = end_time - (minutes * 60) if minutes > 0 else 0
+
+                model_token_data = {}
+
+                for model_name in self.config_manager.get_model_names():
+                    requests = self.monitor.get_model_requests(model_name, minutes=minutes)
+
+                    # 过滤时间范围内的请求
+                    time_filtered_requests = [
+                        req for req in requests
+                        if req.timestamp >= start_time
+                    ]
+
+                    if time_filtered_requests:
+                        total_tokens = sum(req.input_tokens + req.output_tokens for req in time_filtered_requests)
+                        model_token_data[model_name] = total_tokens
+
+                # 按时间分段聚合数据（每10分钟一个数据点）
+                time_points = []
+                current_time = start_time
+                point_interval = max(600, minutes * 60 / 100)  # 至少10分钟一个点，最多100个点
+
+                while current_time < end_time:
+                    point_end_time = min(current_time + point_interval, end_time)
+
+                    point_data = {}
+                    for model_name in self.config_manager.get_model_names():
+                        requests = self.monitor.get_model_requests(model_name, minutes=minutes)
+                        point_requests = [
+                            req for req in requests
+                            if current_time <= req.timestamp < point_end_time
+                        ]
+
+                        if point_requests:
+                            total_tokens = sum(req.input_tokens + req.output_tokens for req in point_requests)
+                            point_data[model_name] = total_tokens
+
+                    time_points.append({
+                        "timestamp": current_time,
+                        "data": point_data
+                    })
+
+                    current_time = point_end_time
+
+                return {
+                    "success": True,
+                    "data": {
+                        "time_range": time_range,
+                        "time_points": time_points,
+                        "model_token_data": model_token_data
+                    }
+                }
+
+            except Exception as e:
+                logger.error(f"[API_SERVER] 获取Token分布失败: {e}")
+                return {"success": False, "error": str(e)}
+
+        @self.app.get("/api/analytics/token-trends/{time_range}")
+        async def get_token_trends(time_range: str):
+            """获取Token消耗趋势数据"""
+            try:
+                # 解析时间范围
+                time_mapping = {
+                    "10min": 10, "30min": 30, "1h": 60, "12h": 720,
+                    "1d": 1440, "1w": 10080, "1m": 43200,
+                    "3m": 129600, "6m": 259200, "1y": 525600, "all": 0
+                }
+
+                minutes = time_mapping.get(time_range)
+                if minutes is None:
+                    return {"success": False, "error": "无效的时间范围参数"}
+
+                import time
+                end_time = time.time()
+                start_time = end_time - (minutes * 60) if minutes > 0 else 0
+
+                # 按时间分段聚合数据
+                time_points = []
+                point_interval = max(300, minutes * 60 / 50)  # 至少5分钟一个点，最多50个点
+
+                current_time = start_time
+                while current_time < end_time:
+                    point_end_time = min(current_time + point_interval, end_time)
+
+                    point_data = {
+                        "input_tokens": 0,
+                        "output_tokens": 0,
+                        "total_tokens": 0,
+                        "cache_hit_tokens": 0,
+                        "cache_miss_tokens": 0
+                    }
+
+                    for model_name in self.config_manager.get_model_names():
+                        requests = self.monitor.get_model_requests(model_name, minutes=minutes)
+                        point_requests = [
+                            req for req in requests
+                            if current_time <= req.timestamp < point_end_time
+                        ]
+
+                        for req in point_requests:
+                            point_data["input_tokens"] += req.input_tokens
+                            point_data["output_tokens"] += req.output_tokens
+                            point_data["total_tokens"] += req.input_tokens + req.output_tokens
+                            point_data["cache_hit_tokens"] += req.cache_n
+                            point_data["cache_miss_tokens"] += req.prompt_n
+
+                    time_points.append({
+                        "timestamp": current_time,
+                        "data": point_data
+                    })
+
+                    current_time = point_end_time
+
+                return {
+                    "success": True,
+                    "data": {
+                        "time_range": time_range,
+                        "time_points": time_points
+                    }
+                }
+
+            except Exception as e:
+                logger.error(f"[API_SERVER] 获取Token趋势失败: {e}")
+                return {"success": False, "error": str(e)}
+
+        @self.app.get("/api/analytics/cost-trends/{time_range}")
+        async def get_cost_trends(time_range: str):
+            """获取成本趋势数据"""
+            try:
+                # 解析时间范围
+                time_mapping = {
+                    "10min": 10, "30min": 30, "1h": 60, "12h": 720,
+                    "1d": 1440, "1w": 10080, "1m": 43200,
+                    "3m": 129600, "6m": 259200, "1y": 525600, "all": 0
+                }
+
+                minutes = time_mapping.get(time_range)
+                if minutes is None:
+                    return {"success": False, "error": "无效的时间范围参数"}
+
+                import time
+                end_time = time.time()
+                start_time = end_time - (minutes * 60) if minutes > 0 else 0
+
+                # 按时间分段聚合数据
+                time_points = []
+                point_interval = max(300, minutes * 60 / 50)  # 至少5分钟一个点，最多50个点
+
+                current_time = start_time
+                while current_time < end_time:
+                    point_end_time = min(current_time + point_interval, end_time)
+
+                    point_cost = 0.0
+
+                    for model_name in self.config_manager.get_model_names():
+                        requests = self.monitor.get_model_requests(model_name, minutes=minutes)
+                        billing = self.monitor.get_model_billing(model_name)
+
+                        point_requests = [
+                            req for req in requests
+                            if current_time <= req.timestamp < point_end_time
+                        ]
+
+                        if billing and point_requests:
+                            if billing.use_tier_pricing and billing.tier_pricing:
+                                for req in point_requests:
+                                    total_tokens = req.input_tokens + req.output_tokens
+                                    cost = 0.0
+                                    remaining_tokens = total_tokens
+
+                                    for tier in billing.tier_pricing:
+                                        if remaining_tokens <= 0:
+                                            break
+
+                                        tier_tokens = min(remaining_tokens, tier.end_tokens - tier.start_tokens)
+                                        input_cost = (req.input_tokens * tier.input_price_per_million) / 1000000
+                                        output_cost = (req.output_tokens * tier.output_price_per_million) / 1000000
+                                        cost += input_cost + output_cost
+                                        remaining_tokens -= tier_tokens
+
+                                    point_cost += cost
+                            else:
+                                # 按时计费（简化处理）
+                                point_cost += billing.hourly_price * (point_interval / 3600)
+
+                    time_points.append({
+                        "timestamp": current_time,
+                        "cost": point_cost
+                    })
+
+                    current_time = point_end_time
+
+                return {
+                    "success": True,
+                    "data": {
+                        "time_range": time_range,
+                        "time_points": time_points
+                    }
+                }
+
+            except Exception as e:
+                logger.error(f"[API_SERVER] 获取成本趋势失败: {e}")
+                return {"success": False, "error": str(e)}
+
+        @self.app.get("/api/analytics/model-stats/{model_name}/{time_range}")
+        async def get_model_stats(model_name: str, time_range: str):
+            """获取单模型统计数据"""
+            try:
+                # 解析时间范围
+                time_mapping = {
+                    "10min": 10, "30min": 30, "1h": 60, "12h": 720,
+                    "1d": 1440, "1w": 10080, "1m": 43200,
+                    "3m": 129600, "6m": 259200, "1y": 525600, "all": 0
+                }
+
+                minutes = time_mapping.get(time_range)
+                if minutes is None:
+                    return {"success": False, "error": "无效的时间范围参数"}
+
+                import time
+                end_time = time.time()
+                start_time = end_time - (minutes * 60) if minutes > 0 else 0
+
+                # 获取模型请求数据
+                requests = self.monitor.get_model_requests(model_name, minutes=minutes)
+                time_filtered_requests = [
+                    req for req in requests
+                    if req.timestamp >= start_time
+                ]
+
+                # 计算统计数据
+                total_input_tokens = sum(req.input_tokens for req in time_filtered_requests)
+                total_output_tokens = sum(req.output_tokens for req in time_filtered_requests)
+                total_cache_n = sum(req.cache_n for req in time_filtered_requests)
+                total_prompt_n = sum(req.prompt_n for req in time_filtered_requests)
+
+                # 计算成本
+                billing = self.monitor.get_model_billing(model_name)
+                total_cost = 0.0
+
+                if billing and time_filtered_requests:
+                    if billing.use_tier_pricing and billing.tier_pricing:
+                        for req in time_filtered_requests:
+                            total_tokens = req.input_tokens + req.output_tokens
+                            cost = 0.0
+                            remaining_tokens = total_tokens
+
+                            for tier in billing.tier_pricing:
+                                if remaining_tokens <= 0:
+                                    break
+
+                                tier_tokens = min(remaining_tokens, tier.end_tokens - tier.start_tokens)
+                                input_cost = (req.input_tokens * tier.input_price_per_million) / 1000000
+                                output_cost = (req.output_tokens * tier.output_price_per_million) / 1000000
+                                cost += input_cost + output_cost
+                                remaining_tokens -= tier_tokens
+
+                            total_cost += cost
+                    else:
+                        # 按时计费（简化处理）
+                        total_cost += billing.hourly_price * (minutes / 60)
+
+                # 按时间分段数据
+                time_points = []
+                point_interval = max(300, minutes * 60 / 50)
+
+                current_time = start_time
+                while current_time < end_time:
+                    point_end_time = min(current_time + point_interval, end_time)
+
+                    point_data = {
+                        "input_tokens": 0,
+                        "output_tokens": 0,
+                        "total_tokens": 0,
+                        "cache_hit_tokens": 0,
+                        "cache_miss_tokens": 0,
+                        "cost": 0.0
+                    }
+
+                    point_requests = [
+                        req for req in time_filtered_requests
+                        if current_time <= req.timestamp < point_end_time
+                    ]
+
+                    for req in point_requests:
+                        point_data["input_tokens"] += req.input_tokens
+                        point_data["output_tokens"] += req.output_tokens
+                        point_data["total_tokens"] += req.input_tokens + req.output_tokens
+                        point_data["cache_hit_tokens"] += req.cache_n
+                        point_data["cache_miss_tokens"] += req.prompt_n
+
+                    time_points.append({
+                        "timestamp": current_time,
+                        "data": point_data
+                    })
+
+                    current_time = point_end_time
+
+                return {
+                    "success": True,
+                    "data": {
+                        "model_name": model_name,
+                        "time_range": time_range,
+                        "summary": {
+                            "total_input_tokens": total_input_tokens,
+                            "total_output_tokens": total_output_tokens,
+                            "total_tokens": total_input_tokens + total_output_tokens,
+                            "total_cache_n": total_cache_n,
+                            "total_prompt_n": total_prompt_n,
+                            "total_cost": round(total_cost, 6),
+                            "request_count": len(time_filtered_requests)
+                        },
+                        "time_points": time_points
+                    }
+                }
+
+            except Exception as e:
+                logger.error(f"[API_SERVER] 获取模型统计数据失败: {e}")
+                return {"success": False, "error": str(e)}
+
+        @self.app.get("/api/billing/models/{model_name}/pricing")
+        async def get_model_pricing(model_name: str):
+            """获取模型计费配置"""
+            try:
+                # 解析模型名称
+                primary_name = self.config_manager.resolve_primary_name(model_name)
+
+                billing = self.monitor.get_model_billing(primary_name)
+                if not billing:
+                    return {"success": False, "error": f"模型 '{model_name}' 的计费配置不存在"}
+
+                return {
+                    "success": True,
+                    "data": {
+                        "model_name": primary_name,
+                        "pricing_type": "tier" if billing.use_tier_pricing else "hourly",
+                        "tier_pricing": [
+                            {
+                                "tier_index": tier.tier_index,
+                                "start_tokens": tier.start_tokens,
+                                "end_tokens": tier.end_tokens,
+                                "input_price_per_million": tier.input_price_per_million,
+                                "output_price_per_million": tier.output_price_per_million,
+                                "support_cache": tier.support_cache,
+                                "cache_hit_price_per_million": tier.cache_hit_price_per_million
+                            }
+                            for tier in billing.tier_pricing
+                        ],
+                        "hourly_price": billing.hourly_price
+                    }
+                }
+
+            except KeyError:
+                return {"success": False, "error": f"模型 '{model_name}' 不存在"}
+            except Exception as e:
+                logger.error(f"[API_SERVER] 获取模型计费配置失败: {e}")
+                return {"success": False, "error": str(e)}
+
+        @self.app.post("/api/billing/models/{model_name}/pricing/tier")
+        async def set_tier_pricing(model_name: str, pricing_data: dict):
+            """设置模型阶梯计费"""
+            try:
+                # 解析模型名称
+                primary_name = self.config_manager.resolve_primary_name(model_name)
+
+                # 验证数据
+                required_fields = ["tier_index", "start_tokens", "end_tokens",
+                                 "input_price_per_million", "output_price_per_million",
+                                 "support_cache", "cache_hit_price_per_million"]
+
+                for field in required_fields:
+                    if field not in pricing_data:
+                        return {"success": False, "error": f"缺少必要字段: {field}"}
+
+                # 设置阶梯计费
+                tier_data = [
+                    pricing_data["tier_index"],
+                    pricing_data["start_tokens"],
+                    pricing_data["end_tokens"],
+                    pricing_data["input_price_per_million"],
+                    pricing_data["output_price_per_million"],
+                    pricing_data["support_cache"],
+                    pricing_data["cache_hit_price_per_million"]
+                ]
+
+                self.monitor.update_tier_pricing(primary_name, tier_data)
+                self.monitor.update_billing_method(primary_name, True)
+
+                return {
+                    "success": True,
+                    "message": f"模型 '{model_name}' 阶梯计费配置已更新"
+                }
+
+            except KeyError:
+                return {"success": False, "error": f"模型 '{model_name}' 不存在"}
+            except Exception as e:
+                logger.error(f"[API_SERVER] 设置阶梯计费失败: {e}")
+                return {"success": False, "error": str(e)}
+
+        @self.app.post("/api/billing/models/{model_name}/pricing/hourly")
+        async def set_hourly_pricing(model_name: str, pricing_data: dict):
+            """设置模型按时计费"""
+            try:
+                # 解析模型名称
+                primary_name = self.config_manager.resolve_primary_name(model_name)
+
+                # 验证数据
+                if "hourly_price" not in pricing_data:
+                    return {"success": False, "error": "缺少必要字段: hourly_price"}
+
+                # 设置按时计费
+                hourly_price = float(pricing_data["hourly_price"])
+                self.monitor.update_hourly_price(primary_name, hourly_price)
+                self.monitor.update_billing_method(primary_name, False)
+
+                return {
+                    "success": True,
+                    "message": f"模型 '{model_name}' 按时计费配置已更新"
+                }
+
+            except KeyError:
+                return {"success": False, "error": f"模型 '{model_name}' 不存在"}
+            except Exception as e:
+                logger.error(f"[API_SERVER] 设置按时计费失败: {e}")
+                return {"success": False, "error": str(e)}
+
+        @self.app.get("/api/data/models/orphaned")
+        async def get_orphaned_models():
+            """获取孤立模型数据（配置中不存在但数据库中有数据的模型）"""
+            try:
+                import os
+                import sqlite3
+
+                # 获取配置中的模型名称
+                configured_models = set(self.config_manager.get_model_names())
+
+                # 获取数据库中的所有模型表
+                orphaned_models = []
+
+                if os.path.exists(self.monitor.db_path):
+                    conn = sqlite3.connect(self.monitor.db_path)
+                    cursor = conn.cursor()
+
+                    # 获取所有表名
+                    cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+                    tables = cursor.fetchall()
+
+                    for table in tables:
+                        table_name = table[0]
+                        if table_name.endswith('_requests'):
+                            # 从表名提取模型名称
+                            model_name = table_name[:-9]  # 移除 '_requests' 后缀
+
+                            # 检查是否在映射表中
+                            cursor.execute('''
+                                SELECT original_name FROM model_name_mapping
+                                WHERE safe_name = ?
+                            ''', (model_name,))
+                            result = cursor.fetchone()
+
+                            if result:
+                                original_name = result[0]
+                                if original_name not in configured_models:
+                                    orphaned_models.append(original_name)
+
+                    conn.close()
+
+                return {
+                    "success": True,
+                    "data": {
+                        "orphaned_models": orphaned_models,
+                        "count": len(orphaned_models)
+                    }
+                }
+
+            except Exception as e:
+                logger.error(f"[API_SERVER] 获取孤立模型数据失败: {e}")
+                return {"success": False, "error": str(e)}
+
+        @self.app.delete("/api/data/models/{model_name}")
+        async def delete_model_data(model_name: str):
+            """删除指定模型的数据"""
+            try:
+                # 检查模型是否在配置中
+                configured_models = self.config_manager.get_model_names()
+                if model_name in configured_models:
+                    return {"success": False, "error": f"模型 '{model_name}' 仍在配置中，无法删除"}
+
+                # 删除模型数据
+                self.monitor.delete_model_tables(model_name)
+
+                return {
+                    "success": True,
+                    "message": f"模型 '{model_name}' 的数据已删除"
+                }
+
+            except Exception as e:
+                logger.error(f"[API_SERVER] 删除模型数据失败: {e}")
+                return {"success": False, "error": str(e)}
+
+        @self.app.get("/api/data/storage/stats")
+        async def get_storage_stats():
+            """获取存储统计信息"""
+            try:
+                import os
+                import sqlite3
+
+                stats = {
+                    "database_exists": False,
+                    "database_size_mb": 0,
+                    "total_models_with_data": 0,
+                    "total_requests": 0,
+                    "models_data": {}
+                }
+
+                if os.path.exists(self.monitor.db_path):
+                    stats["database_exists"] = True
+                    stats["database_size_mb"] = round(os.path.getsize(self.monitor.db_path) / (1024 * 1024), 2)
+
+                    conn = sqlite3.connect(self.monitor.db_path)
+                    cursor = conn.cursor()
+
+                    # 获取配置中的模型名称
+                    configured_models = self.config_manager.get_model_names()
+
+                    total_requests = 0
+
+                    for model_name in configured_models:
+                        safe_name = self.monitor.get_model_safe_name(model_name)
+                        if safe_name:
+                            # 获取请求数量
+                            cursor.execute(f"SELECT COUNT(*) FROM {safe_name}_requests")
+                            request_count = cursor.fetchone()[0]
+                            total_requests += request_count
+
+                            stats["models_data"][model_name] = {
+                                "request_count": request_count,
+                                "has_runtime_data": False,
+                                "has_billing_data": False
+                            }
+
+                            # 检查是否有运行时间数据
+                            cursor.execute(f"SELECT COUNT(*) FROM {safe_name}_runtime")
+                            if cursor.fetchone()[0] > 0:
+                                stats["models_data"][model_name]["has_runtime_data"] = True
+
+                            # 检查是否有计费数据
+                            cursor.execute(f"SELECT COUNT(*) FROM {safe_name}_tier_pricing")
+                            if cursor.fetchone()[0] > 0:
+                                stats["models_data"][model_name]["has_billing_data"] = True
+
+                    stats["total_models_with_data"] = len([m for m in stats["models_data"].values() if m["request_count"] > 0])
+                    stats["total_requests"] = total_requests
+
+                    conn.close()
+
+                return {
+                    "success": True,
+                    "data": stats
+                }
+
+            except Exception as e:
+                logger.error(f"[API_SERVER] 获取存储统计失败: {e}")
+                return {"success": False, "error": str(e)}
 
         @self.app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD"])
         async def handle_all_requests(request: Request, path: str):
