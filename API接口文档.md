@@ -432,15 +432,21 @@ curl -X POST "http://localhost:8080/api/logs/Qwen3-8B-AWQ/clear?keep_minutes=10"
 
 ---
 
-### 14. 实时吞吐量统计
+### 14. 吞吐量趋势分析
 
-**接口地址**: `GET /api/metrics/throughput/realtime`
+**接口地址**: `GET /api/metrics/throughput/{start_time}/{end_time}/{n_samples}`
 
-**功能**: 获取实时吞吐量数据（最近5秒窗口）
+**功能**: 获取指定时间段内，所有模型合并计算的吞吐量趋势数据。
+
+**路径参数**:
+- `start_time`: 开始时间戳 (Unix Timestamp, float)
+- `end_time`: 结束时间戳 (Unix Timestamp, float)
+- `n_samples`: 采样点数量 (integer)，API 会将指定时间段均匀划分为 `n_samples` 个区间进行统计。
 
 **请求示例**:
 ```bash
-curl http://localhost:8080/api/metrics/throughput/realtime
+# 获取从 1758820000 到 1758822000 时间段内，分为10个采样点的吞吐量数据
+curl http://localhost:8080/api/metrics/throughput/1758820000/1758822000/10
 ```
 
 **返回结构**:
@@ -448,23 +454,32 @@ curl http://localhost:8080/api/metrics/throughput/realtime
 {
   "success": true,
   "data": {
-    "throughput": {
-      "input_tokens_per_sec": 150.5,
-      "output_tokens_per_sec": 45.2,
-      "total_tokens_per_sec": 195.7,
-      "cache_hit_tokens_per_sec": 80.3,
-      "cache_miss_tokens_per_sec": 115.4
-    }
+    "time_points": [
+      {
+        "timestamp": 1758820200.0,
+        "data": {
+          "input_tokens_per_sec": 150.5,
+          "output_tokens_per_sec": 45.2,
+          "total_tokens_per_sec": 195.7,
+          "cache_hit_tokens_per_sec": 80.3,
+          "cache_miss_tokens_per_sec": 70.2 
+        }
+      }
+      // ... more data points
+    ]
   }
 }
 ```
 
 **返回字段说明**:
-- `input_tokens_per_sec`: 输入token每秒处理量
-- `output_tokens_per_sec`: 输出token每秒处理量
-- `total_tokens_per_sec`: 总token每秒处理量
-- `cache_hit_tokens_per_sec`: 缓存命中token每秒处理量
-- `cache_miss_tokens_per_sec`: 缓存未命中token每秒处理量
+- `time_points`: 时间点数据数组，长度等于 `n_samples`
+  - `timestamp`: 每个采样区间的**结束时间戳**
+  - `data`: 该时间区间的吞吐量统计
+    - `input_tokens_per_sec`: 输入token每秒处理量
+    - `output_tokens_per_sec`: 输出token每秒处理量
+    - `total_tokens_per_sec`: 总token每秒处理量
+    - `cache_hit_tokens_per_sec`: 缓存命中token每秒处理量
+    - `cache_miss_tokens_per_sec`: 缓存未命中token每秒处理量
 
 ---
 
@@ -472,7 +487,7 @@ curl http://localhost:8080/api/metrics/throughput/realtime
 
 **接口地址**: `GET /api/metrics/throughput/current-session`
 
-**功能**: 获取本次程序运行的总消耗统计
+**功能**: 获取本次程序运行的总消耗统计 (此接口保持不变)。
 
 **请求示例**:
 ```bash
@@ -489,7 +504,7 @@ curl http://localhost:8080/api/metrics/throughput/current-session
       "total_input_tokens": 85000,
       "total_output_tokens": 25000,
       "total_cache_n": 30000,
-      "total_prompt_n": 80000,
+      "total_prompt_n": 55000,
       "session_start_time": 1758800530.9786587
     }
   }
@@ -501,23 +516,24 @@ curl http://localhost:8080/api/metrics/throughput/current-session
 - `total_input_tokens`: 总输入token数
 - `total_output_tokens`: 总输出token数
 - `total_cache_n`: 总缓存命中token数
-- `total_prompt_n`: 总未缓存token数
+- `total_prompt_n`: 总缓存未命中token数
 - `session_start_time`: 程序启动时间戳
 
 ---
 
-### 16. Token分布比例
+### 16. Token分布
 
-**接口地址**: `GET /api/analytics/token-distribution/{time_range}`
+**接口地址**: `GET /api/analytics/token-distribution/{start_time}/{end_time}`
 
-**功能**: 获取Token分布比例数据，支持不同时间范围的分析
+**功能**: 获取在指定时间范围内，各个模型消耗的Token总量分布。
 
 **路径参数**:
-- `time_range`: 时间范围 (`10min`, `30min`, `1h`, `12h`, `1d`, `1w`, `1m`, `3m`, `6m`, `1y`, `all`)
+- `start_time`: 开始时间戳 (Unix Timestamp, float)
+- `end_time`: 结束时间戳 (Unix Timestamp, float)
 
 **请求示例**:
 ```bash
-curl http://localhost:8080/api/analytics/token-distribution/1h
+curl http://localhost:8080/api/analytics/token-distribution/1758820000/1758822000
 ```
 
 **返回结构**:
@@ -525,45 +541,33 @@ curl http://localhost:8080/api/analytics/token-distribution/1h
 {
   "success": true,
   "data": {
-    "time_range": "1h",
-    "time_points": [
-      {
-        "timestamp": 1758800014.797687,
-        "data": {
-          "Qwen3-8B-AWQ": 1500,
-          "Qwen3-14B-AWQ": 800
-        }
-      }
-    ],
-    "model_token_data": {
-      "Qwen3-8B-AWQ": 1500,
-      "Qwen3-14B-AWQ": 800
+    "model_token_distribution": {
+      "Qwen3-8B-AWQ": 15000,
+      "Qwen3-14B-AWQ": 8000
     }
   }
 }
 ```
 
 **返回字段说明**:
-- `time_range`: 查询的时间范围
-- `time_points`: 时间点数据数组
-  - `timestamp`: 时间戳
-  - `data`: 各模型在该时间点的token数量
-- `model_token_data`: 各模型在整个时间范围内的总token数
+- `model_token_distribution`: 一个字典，键为模型名称，值为该模型在指定时间范围内的总Token消耗（输入+输出）。
 
 ---
 
 ### 17. Token消耗趋势
 
-**接口地址**: `GET /api/analytics/token-trends/{time_range}`
+**接口地址**: `GET /api/analytics/token-trends/{start_time}/{end_time}/{n_samples}`
 
-**功能**: 获取Token消耗趋势数据
+**功能**: 获取在指定时间范围内，所有模型合并计算的Token消耗总量趋势。
 
 **路径参数**:
-- `time_range`: 时间范围 (`10min`, `30min`, `1h`, `12h`, `1d`, `1w`, `1m`, `3m`, `6m`, `1y`, `all`)
+- `start_time`: 开始时间戳 (Unix Timestamp, float)
+- `end_time`: 结束时间戳 (Unix Timestamp, float)
+- `n_samples`: 采样点数量 (integer)
 
 **请求示例**:
 ```bash
-curl http://localhost:8080/api/analytics/token-trends/1h
+curl http://localhost:8080/api/analytics/token-trends/1758820000/1758822000/10
 ```
 
 **返回结构**:
@@ -571,28 +575,27 @@ curl http://localhost:8080/api/analytics/token-trends/1h
 {
   "success": true,
   "data": {
-    "time_range": "1h",
     "time_points": [
       {
-        "timestamp": 1758800014.797687,
+        "timestamp": 1758820200.0,
         "data": {
           "input_tokens": 800,
           "output_tokens": 400,
           "total_tokens": 1200,
           "cache_hit_tokens": 300,
-          "cache_miss_tokens": 900
+          "cache_miss_tokens": 500
         }
       }
+      // ... more data points
     ]
   }
 }
 ```
 
 **返回字段说明**:
-- `time_range`: 查询的时间范围
-- `time_points`: 时间点数据数组
-  - `timestamp`: 时间戳
-  - `data`: 该时间点的token统计数据
+- `time_points`: 时间点数据数组，长度等于 `n_samples`
+  - `timestamp`: 每个采样区间的**结束时间戳**
+  - `data`: 该时间区间的Token消耗总量
     - `input_tokens`: 输入token数
     - `output_tokens`: 输出token数
     - `total_tokens`: 总token数
@@ -603,16 +606,18 @@ curl http://localhost:8080/api/analytics/token-trends/1h
 
 ### 18. 成本趋势
 
-**接口地址**: `GET /api/analytics/cost-trends/{time_range}`
+**接口地址**: `GET /api/analytics/cost-trends/{start_time}/{end_time}/{n_samples}`
 
-**功能**: 获取成本趋势数据
+**功能**: 获取在指定时间范围内，所有模型合并计算的成本趋势。
 
 **路径参数**:
-- `time_range`: 时间范围 (`10min`, `30min`, `1h`, `12h`, `1d`, `1w`, `1m`, `3m`, `6m`, `1y`, `all`)
+- `start_time`: 开始时间戳 (Unix Timestamp, float)
+- `end_time`: 结束时间戳 (Unix Timestamp, float)
+- `n_samples`: 采样点数量 (integer)
 
 **请求示例**:
 ```bash
-curl http://localhost:8080/api/analytics/cost-trends/1h
+curl http://localhost:8080/api/analytics/cost-trends/1758820000/1758822000/10
 ```
 
 **返回结构**:
@@ -620,38 +625,39 @@ curl http://localhost:8080/api/analytics/cost-trends/1h
 {
   "success": true,
   "data": {
-    "time_range": "1h",
     "time_points": [
       {
-        "timestamp": 1758800014.797687,
+        "timestamp": 1758820200.0,
         "cost": 0.025
       }
+      // ... more data points
     ]
   }
 }
 ```
 
 **返回字段说明**:
-- `time_range`: 查询的时间范围
-- `time_points`: 时间点数据数组
-  - `timestamp`: 时间戳
-  - `cost`: 该时间段的成本（元）
+- `time_points`: 时间点数据数组，长度等于 `n_samples`
+  - `timestamp`: 每个采样区间的**结束时间戳**
+  - `cost`: 该时间区间的总成本（元）
 
 ---
 
 ### 19. 单模型统计数据
 
-**接口地址**: `GET /api/analytics/model-stats/{model_name}/{time_range}`
+**接口地址**: `GET /api/analytics/model-stats/{model_name_alias}/{start_time}/{end_time}/{n_samples}`
 
-**功能**: 获取指定模型的详细统计数据
+**功能**: 获取指定模型在特定时间范围内的详细统计数据，包括总体概览和分时趋势。
 
 **路径参数**:
-- `model_name`: 模型名称
-- `time_range`: 时间范围 (`10min`, `30min`, `1h`, `12h`, `1d`, `1w`, `1m`, `3m`, `6m`, `1y`, `all`)
+- `model_name_alias`: 模型别名
+- `start_time`: 开始时间戳 (Unix Timestamp, float)
+- `end_time`: 结束时间戳 (Unix Timestamp, float)
+- `n_samples`: 采样点数量 (integer)
 
 **请求示例**:
 ```bash
-curl http://localhost:8080/api/analytics/model-stats/Qwen3-8B-AWQ/1h
+curl http://localhost:8080/api/analytics/model-stats/Qwen3-8B-AWQ/1758820000/1758822000/10
 ```
 
 **返回结构**:
@@ -660,28 +666,28 @@ curl http://localhost:8080/api/analytics/model-stats/Qwen3-8B-AWQ/1h
   "success": true,
   "data": {
     "model_name": "Qwen3-8B-AWQ",
-    "time_range": "1h",
     "summary": {
       "total_input_tokens": 8000,
       "total_output_tokens": 2000,
       "total_tokens": 10000,
       "total_cache_n": 3000,
-      "total_prompt_n": 7000,
+      "total_prompt_n": 5000,
       "total_cost": 0.025,
       "request_count": 15
     },
     "time_points": [
       {
-        "timestamp": 1758800014.797687,
+        "timestamp": 1758820200.0,
         "data": {
           "input_tokens": 500,
           "output_tokens": 200,
           "total_tokens": 700,
           "cache_hit_tokens": 200,
-          "cache_miss_tokens": 500,
+          "cache_miss_tokens": 300,
           "cost": 0.002
         }
       }
+      // ... more data points
     ]
   }
 }
@@ -689,16 +695,23 @@ curl http://localhost:8080/api/analytics/model-stats/Qwen3-8B-AWQ/1h
 
 **返回字段说明**:
 - `model_name`: 模型名称
-- `time_range`: 查询的时间范围
-- `summary`: 汇总统计
+- `summary`: 在整个时间范围内的汇总统计
   - `total_input_tokens`: 总输入token数
   - `total_output_tokens`: 总输出token数
   - `total_tokens`: 总token数
   - `total_cache_n`: 总缓存命中token数
-  - `total_prompt_n`: 总未缓存token数
+  - `total_prompt_n`: 总缓存未命中token数
   - `total_cost`: 总成本（元）
   - `request_count`: 请求总数
-- `time_points`: 时间点数据数组
+- `time_points`: 时间点数据数组，长度等于 `n_samples`
+  - `timestamp`: 每个采样区间的**结束时间戳**
+  - `data`: 该时间区间的统计数据
+    - `input_tokens`: 该区间的输入token数
+    - `output_tokens`: 该区间的输出token数
+    - `total_tokens`: 该区间的总token数
+    - `cache_hit_tokens`: 该区间的缓存命中token数
+    - `cache_miss_tokens`: 该区间的缓存未命中token数
+    - `cost`: 该区间的成本（元）
 
 ---
 
