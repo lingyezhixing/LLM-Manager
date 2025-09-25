@@ -7,7 +7,7 @@ import asyncio
 from utils.logger import get_logger
 from core.model_controller import ModelController
 from core.config_manager import ConfigManager
-from core.monitor import Monitor
+from core.data_manager import Monitor
 
 logger = get_logger(__name__)
 

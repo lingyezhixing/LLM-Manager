@@ -9,7 +9,7 @@ import threading
 from utils.logger import get_logger
 from core.config_manager import ConfigManager
 from core.model_controller import ModelController
-from core.monitor import Monitor
+from core.data_manager import Monitor
 from core.api_router import APIRouter, TokenTracker
 
 logger = get_logger(__name__)

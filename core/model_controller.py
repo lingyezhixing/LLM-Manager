@@ -16,7 +16,7 @@ from utils.logger import get_logger
 from .plugin_system import PluginManager
 from .config_manager import ConfigManager
 from .process_manager import get_process_manager
-from .monitor import Monitor
+from .data_manager import Monitor
 
 logger = get_logger(__name__)
 
