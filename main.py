@@ -14,7 +14,7 @@ import concurrent.futures
 from typing import Optional
 from utils.logger import setup_logging, get_logger
 from core.config_manager import ConfigManager
-from core.openai_api_router import run_api_server
+from core.api_server import run_api_server
 from core.process_manager import get_process_manager, cleanup_process_manager
 from core.monitor import Monitor
 from core.model_controller import ModelController
