@@ -559,39 +559,69 @@ class Monitor:
 
             return [ModelRunTime(row[0], row[1], row[2]) for row in cursor.fetchall()]
 
-    def get_model_requests(self, model_name: str, minutes: int = 0) -> List[ModelRequest]:
+    def get_model_requests(self, model_name: str, start_time: float = 0, end_time: float = 0, buffer_count: int = 20) -> List[ModelRequest]:
         """
-        获取模型请求记录
+        【已升级】高效获取指定时间范围内的模型请求记录，处理时间戳乱序问题。
+
+        从数据库反向拉取数据，当找到第一个早于 start_time 的记录后，再多拉取 buffer_count 条记录
+        以确保捕获因异步写入导致时间戳乱序的数据。最终在内存中精确过滤。
 
         Args:
             model_name: 模型名称
-            minutes: 限制返回的分钟数，0表示返回所有记录
+            start_time: 开始时间戳。如果为 0，则从最早的记录开始。
+            end_time: 结束时间戳。如果为 0，则到最新的记录为止。
+            buffer_count: 边界缓冲数量，用于处理时间戳乱序。
 
         Returns:
-            模型请求记录列表
+            模型请求记录列表 (按时间戳升序)
         """
         safe_name = self.get_model_safe_name(model_name)
         if not safe_name:
-            raise ValueError(f"模型 '{model_name}' 不存在")
+            return []
+
+        if end_time == 0:
+            end_time = time.time() # 默认为当前时间
 
         with get_db_connection(self.connection_pool) as conn:
             cursor = conn.cursor()
-            if minutes > 0:
-                cutoff_time = time.time() - (minutes * 60)
-                cursor.execute(f'''
-                    SELECT id, timestamp, input_tokens, output_tokens, cache_n, prompt_n
-                    FROM {safe_name}_requests
-                    WHERE timestamp >= ?
-                    ORDER BY id DESC
-                ''', (cutoff_time,))
-            else:
-                cursor.execute(f'''
-                    SELECT id, timestamp, input_tokens, output_tokens, cache_n, prompt_n
-                    FROM {safe_name}_requests
-                    ORDER BY id DESC
-                ''')
+            # 从最新的记录开始反向查询
+            cursor.execute(f'''
+                SELECT id, timestamp, input_tokens, output_tokens, cache_n, prompt_n
+                FROM {safe_name}_requests
+                WHERE timestamp < ?
+                ORDER BY id DESC
+            ''', (end_time,))
 
-            return [ModelRequest(row[0], row[1], row[2], row[3], row[4], row[5]) for row in cursor.fetchall()]
+            candidate_requests = []
+            buffer_countdown = buffer_count
+            boundary_found = False
+
+            while True:
+                row = cursor.fetchone()
+                if not row:
+                    break
+
+                req = ModelRequest(row[0], row[1], row[2], row[3], row[4], row[5])
+                candidate_requests.append(req)
+
+                # 检查是否触及左边界
+                if start_time > 0 and not boundary_found and req.timestamp < start_time:
+                    boundary_found = True
+                
+                # 如果触及边界，开始倒数 buffer 数量
+                if boundary_found:
+                    buffer_countdown -= 1
+                    if buffer_countdown <= 0:
+                        break
+            
+            # 在内存中进行最终的精确过滤
+            final_requests = [
+                req for req in candidate_requests 
+                if req.timestamp >= start_time
+            ]
+            
+            # 返回前按时间正序排列
+            return sorted(final_requests, key=lambda r: r.timestamp)
 
     def get_model_billing(self, model_name: str) -> Optional[ModelBilling]:
         """

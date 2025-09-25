@@ -348,13 +348,13 @@ curl http://localhost:8080/api/devices/info
 
 **返回字段说明**:
 - `online`: 设备是否在线
-- `device_type`: 设备类型 (`CPU`/`GPU`等)
+- `device_type`: 设备类型 (`CPU`/`GPU`等，由于设备类型过多，未来可能出现其他类型，所以不要写死，用`device_type`字段，获取到什么就是什么，内存类型同理)
 - `memory_type`: 内存类型 (`RAM`/`VRAM`等)
 - `total_memory_mb`: 总内存 (MB)
 - `available_memory_mb`: 可用内存 (MB)
 - `used_memory_mb`: 已用内存 (MB)
 - `usage_percentage`: 使用率百分比（非内存使用率百分比，这是设备使用率百分比，如需内存使用率百分比请自行计算）
-- `temperature_celsius`: 温度 (摄氏度，一些设备不支持可能为None)
+- `temperature_celsius`: 温度 (摄氏度，一些不支持检测的设备这个字段可能为None)
 
 ---
 
