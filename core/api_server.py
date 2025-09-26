@@ -213,14 +213,54 @@ class APIServer:
                 logger.info("[API_SERVER] 通过API重启所有autostart模型...")
                 await asyncio.to_thread(self.model_controller.unload_all_models)
                 await asyncio.sleep(2)
+
+                # 并发启动所有autostart模型
+                async def start_autostart_model_async(model_name: str):
+                    """并发启动单个autostart模型"""
+                    if not self.config_manager.is_auto_start(model_name):
+                        return model_name, False, "模型未配置为自动启动"
+
+                    try:
+                        success, message = await asyncio.wait_for(
+                            asyncio.to_thread(self.model_controller.start_model, model_name),
+                            timeout=30.0  # 模型启动可能需要较长时间
+                        )
+                        return model_name, success, message
+                    except asyncio.TimeoutError:
+                        logger.warning(f"[API_SERVER] 启动模型 {model_name} 超时")
+                        return model_name, False, "启动模型超时"
+                    except Exception as e:
+                        logger.error(f"[API_SERVER] 启动模型 {model_name} 失败: {e}")
+                        return model_name, False, str(e)
+
+                # 获取需要启动的模型
+                autostart_models = [
+                    model_name for model_name in self.config_manager.get_model_names()
+                    if self.config_manager.is_auto_start(model_name)
+                ]
+
+                if not autostart_models:
+                    return {"success": True, "message": "没有配置autostart模型", "started_models": []}
+
+                # 创建并发任务
+                tasks = [start_autostart_model_async(model_name) for model_name in autostart_models]
+
+                # 并发执行所有任务
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+
+                # 处理结果
                 started_models = []
-                for model_name in self.config_manager.get_model_names():
-                    if self.config_manager.is_auto_start(model_name):
-                        success, message = await asyncio.to_thread(self.model_controller.start_model, model_name)
-                        if success:
-                            started_models.append(model_name)
-                        else:
-                            logger.warning(f"[API_SERVER] 自动启动模型 {model_name} 失败: {message}")
+                for result in results:
+                    if isinstance(result, Exception):
+                        logger.error(f"[API_SERVER] 模型启动任务异常: {result}")
+                        continue
+
+                    model_name, success, message = result
+                    if success:
+                        started_models.append(model_name)
+                    else:
+                        logger.warning(f"[API_SERVER] 自动启动模型 {model_name} 失败: {message}")
+
                 return {"success": True, "message": f"已重启 {len(started_models)} 个autostart模型", "started_models": started_models}
             except Exception as e:
                 logger.error(f"[API_SERVER] 重启autostart模型失败: {e}")
@@ -247,12 +287,12 @@ class APIServer:
                         # 使用 asyncio.wait_for 设置超时，并在线程池中执行IO操作
                         is_online = await asyncio.wait_for(
                             asyncio.to_thread(device_plugin.is_online),
-                            timeout=5.0
+                            timeout=15.0
                         )
 
                         device_info = await asyncio.wait_for(
                             asyncio.to_thread(device_plugin.get_devices_info),
-                            timeout=5.0
+                            timeout=15.0
                         )
 
                         return device_name, {"online": is_online, "info": device_info}
@@ -316,11 +356,48 @@ class APIServer:
         async def get_model_info(model_alias: str):
             try:
                 if model_alias == "all-models":
+                    # 并发获取所有模型状态和待处理请求数
+                    async def get_model_info_async(model_name: str, model_status: dict):
+                        """并发获取单个模型的完整信息"""
+                        try:
+                            pending_requests = self.api_router.pending_requests.get(model_name, 0)
+                            return model_name, {**model_status, "pending_requests": pending_requests}
+                        except Exception as e:
+                            logger.error(f"[API_SERVER] 获取模型 {model_name} 信息失败: {e}")
+                            return model_name, {**model_status, "pending_requests": 0, "error": str(e)}
+
+                    # 获取所有模型状态
+                    all_models_status = await asyncio.wait_for(
+                        asyncio.to_thread(self.model_controller.get_all_models_status),
+                        timeout=15.0
+                    )
+
+                    # 创建并发任务
+                    tasks = [
+                        get_model_info_async(model_name, model_status)
+                        for model_name, model_status in all_models_status.items()
+                    ]
+
+                    # 并发执行所有任务
+                    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+                    # 处理结果
                     all_models_info = {}
-                    all_models_status = self.model_controller.get_all_models_status()
-                    for model_name, model_status in all_models_status.items():
-                        all_models_info[model_name] = {**model_status, "pending_requests": self.api_router.pending_requests.get(model_name, 0)}
-                    return {"success": True, "models": all_models_info, "total_models": len(all_models_info), "running_models": len([m for m in all_models_info.values() if m["status"] == "routing"]), "total_pending_requests": sum(m["pending_requests"] for m in all_models_info.values())}
+                    for result in results:
+                        if isinstance(result, Exception):
+                            logger.error(f"[API_SERVER] 模型信息获取任务异常: {result}")
+                            continue
+
+                        model_name, model_info = result
+                        all_models_info[model_name] = model_info
+
+                    return {
+                        "success": True,
+                        "models": all_models_info,
+                        "total_models": len(all_models_info),
+                        "running_models": len([m for m in all_models_info.values() if m["status"] == "routing"]),
+                        "total_pending_requests": sum(m["pending_requests"] for m in all_models_info.values())
+                    }
                 else:
                     model_name = self.config_manager.resolve_primary_name(model_alias)
                     if model_name not in self.model_controller.models_state:
@@ -345,9 +422,37 @@ class APIServer:
 
                 total_duration = end_time - start_time
                 interval = total_duration / n_samples
-                
-                # 1. 一次性获取所有相关数据
-                all_requests_as_dicts = [req.__dict__ for model_name in self.config_manager.get_model_names() for req in self.monitor.get_model_requests(model_name, start_time, end_time)]
+
+                # 1. 并发获取所有模型数据
+                async def get_model_requests_for_throughput(model_name: str):
+                    """并发获取单个模型的请求数据用于吞吐量计算"""
+                    try:
+                        requests = await asyncio.wait_for(
+                            asyncio.to_thread(self.monitor.get_model_requests, model_name, start_time, end_time),
+                            timeout=15.0
+                        )
+                        return [req.__dict__ for req in requests]
+                    except asyncio.TimeoutError:
+                        logger.warning(f"[API_SERVER] 获取模型 {model_name} 吞吐量数据超时")
+                        return []
+                    except Exception as e:
+                        logger.error(f"[API_SERVER] 获取模型 {model_name} 吞吐量数据失败: {e}")
+                        return []
+
+                # 创建并发任务
+                model_names = self.config_manager.get_model_names()
+                tasks = [get_model_requests_for_throughput(model_name) for model_name in model_names]
+
+                # 并发执行所有任务
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+
+                # 合并结果
+                all_requests_as_dicts = []
+                for result in results:
+                    if isinstance(result, Exception):
+                        logger.error(f"[API_SERVER] 模型吞吐量数据获取任务异常: {result}")
+                        continue
+                    all_requests_as_dicts.extend(result)
                 
                 if not all_requests_as_dicts:
                     # 返回 n_samples 个空数据点
@@ -395,7 +500,10 @@ class APIServer:
         async def get_current_session_total():
             """【已优化】获取本次运行总消耗"""
             try:
-                program_runtime = self.monitor.get_program_runtime(limit=1)
+                program_runtime = await asyncio.wait_for(
+                    asyncio.to_thread(self.monitor.get_program_runtime, 1),
+                    timeout=15.0
+                )
                 default_data = {"total_cost_yuan": 0.0, "total_input_tokens": 0, "total_output_tokens": 0, "total_cache_n": 0, "total_prompt_n": 0, "session_start_time": None}
                 if not program_runtime:
                     return {"success": True, "data": {"session_total": default_data}}
@@ -403,16 +511,71 @@ class APIServer:
                 start_time = program_runtime[0].start_time
                 summary = {k: v for k, v in default_data.items() if k != "session_start_time"}
 
-                for model_name in self.config_manager.get_model_names():
-                    requests = self.monitor.get_model_requests(model_name, minutes=0)
-                    billing = self.monitor.get_model_billing(model_name)
-                    for req in requests:
-                        if req.timestamp >= start_time:
-                            summary["total_input_tokens"] += req.input_tokens
-                            summary["total_output_tokens"] += req.output_tokens
-                            summary["total_cache_n"] += req.cache_n
-                            summary["total_prompt_n"] += req.prompt_n
-                            summary["total_cost_yuan"] += self._calculate_request_cost(req, billing)
+                # 并发获取所有模型数据
+                async def process_model_session_async(model_name: str):
+                    """并发处理单个模型的会话数据"""
+                    try:
+                        requests = await asyncio.wait_for(
+                            asyncio.to_thread(self.monitor.get_model_requests, model_name, minutes=0),
+                            timeout=15.0
+                        )
+
+                        billing = await asyncio.wait_for(
+                            asyncio.to_thread(self.monitor.get_model_billing, model_name),
+                            timeout=15.0
+                        )
+
+                        model_summary = {
+                            "total_input_tokens": 0,
+                            "total_output_tokens": 0,
+                            "total_cache_n": 0,
+                            "total_prompt_n": 0,
+                            "total_cost_yuan": 0.0
+                        }
+
+                        for req in requests:
+                            if req.timestamp >= start_time:
+                                model_summary["total_input_tokens"] += req.input_tokens
+                                model_summary["total_output_tokens"] += req.output_tokens
+                                model_summary["total_cache_n"] += req.cache_n
+                                model_summary["total_prompt_n"] += req.prompt_n
+                                model_summary["total_cost_yuan"] += self._calculate_request_cost(req, billing)
+
+                        return model_summary
+                    except asyncio.TimeoutError:
+                        logger.warning(f"[API_SERVER] 获取模型 {model_name} 会话数据超时")
+                        return {
+                            "total_input_tokens": 0,
+                            "total_output_tokens": 0,
+                            "total_cache_n": 0,
+                            "total_prompt_n": 0,
+                            "total_cost_yuan": 0.0
+                        }
+                    except Exception as e:
+                        logger.error(f"[API_SERVER] 获取模型 {model_name} 会话数据失败: {e}")
+                        return {
+                            "total_input_tokens": 0,
+                            "total_output_tokens": 0,
+                            "total_cache_n": 0,
+                            "total_prompt_n": 0,
+                            "total_cost_yuan": 0.0
+                        }
+
+                # 创建并发任务
+                model_names = self.config_manager.get_model_names()
+                tasks = [process_model_session_async(model_name) for model_name in model_names]
+
+                # 并发执行所有任务
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+
+                # 合并结果
+                for result in results:
+                    if isinstance(result, Exception):
+                        logger.error(f"[API_SERVER] 模型会话数据获取任务异常: {result}")
+                        continue
+
+                    for key in summary.keys():
+                        summary[key] += result[key]
                 
                 summary["total_cost_yuan"] = round(summary["total_cost_yuan"], 6)
                 summary["session_start_time"] = start_time
@@ -428,14 +591,36 @@ class APIServer:
                 if start_time >= end_time:
                     return JSONResponse(status_code=400, content={"success": False, "error": "无效的时间范围"})
 
-                # 1. 一次性获取所有模型数据，并附加上模型名称
+                # 1. 并发获取所有模型数据
+                async def get_model_requests_with_name(model_name: str):
+                    """并发获取单个模型的请求数据"""
+                    try:
+                        requests = await asyncio.wait_for(
+                            asyncio.to_thread(self.monitor.get_model_requests, model_name, start_time, end_time),
+                            timeout=15.0
+                        )
+                        return [(req.__dict__ | {'model_name': model_name}) for req in requests]
+                    except asyncio.TimeoutError:
+                        logger.warning(f"[API_SERVER] 获取模型 {model_name} 请求数据超时")
+                        return []
+                    except Exception as e:
+                        logger.error(f"[API_SERVER] 获取模型 {model_name} 请求数据失败: {e}")
+                        return []
+
+                # 创建并发任务
+                model_names = self.config_manager.get_model_names()
+                tasks = [get_model_requests_with_name(model_name) for model_name in model_names]
+
+                # 并发执行所有任务
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+
+                # 合并结果
                 all_requests_with_model = []
-                for model_name in self.config_manager.get_model_names():
-                    requests = self.monitor.get_model_requests(model_name, start_time, end_time)
-                    for req in requests:
-                        req_dict = req.__dict__
-                        req_dict['model_name'] = model_name
-                        all_requests_with_model.append(req_dict)
+                for result in results:
+                    if isinstance(result, Exception):
+                        logger.error(f"[API_SERVER] 模型请求数据获取任务异常: {result}")
+                        continue
+                    all_requests_with_model.extend(result)
 
                 if not all_requests_with_model:
                     return {"success": True, "data": {"model_token_distribution": {}}}
@@ -463,11 +648,36 @@ class APIServer:
                 if start_time >= end_time or n_samples <= 0:
                     return JSONResponse(status_code=400, content={"success": False, "error": "无效的时间范围或采样点数"})
 
-                # 1. 获取所有数据
+                # 1. 并发获取所有模型数据
+                async def get_model_requests_async(model_name: str):
+                    """并发获取单个模型的请求数据"""
+                    try:
+                        requests = await asyncio.wait_for(
+                            asyncio.to_thread(self.monitor.get_model_requests, model_name, start_time, end_time),
+                            timeout=15.0
+                        )
+                        return [req.__dict__ for req in requests]
+                    except asyncio.TimeoutError:
+                        logger.warning(f"[API_SERVER] 获取模型 {model_name} token趋势数据超时")
+                        return []
+                    except Exception as e:
+                        logger.error(f"[API_SERVER] 获取模型 {model_name} token趋势数据失败: {e}")
+                        return []
+
+                # 创建并发任务
+                model_names = self.config_manager.get_model_names()
+                tasks = [get_model_requests_async(model_name) for model_name in model_names]
+
+                # 并发执行所有任务
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+
+                # 合并结果
                 all_requests_as_dicts = []
-                for model_name in self.config_manager.get_model_names():
-                    requests = self.monitor.get_model_requests(model_name, start_time, end_time)
-                    all_requests_as_dicts.extend([req.__dict__ for req in requests])
+                for result in results:
+                    if isinstance(result, Exception):
+                        logger.error(f"[API_SERVER] 模型token趋势数据获取任务异常: {result}")
+                        continue
+                    all_requests_as_dicts.extend(result)
 
                 interval = (end_time - start_time) / n_samples
                 
@@ -524,19 +734,52 @@ class APIServer:
             try:
                 if start_time >= end_time or n_samples <= 0:
                     return JSONResponse(status_code=400, content={"success": False, "error": "无效的时间范围或采样点数"})
-                
+
                 total_duration = end_time - start_time
                 interval = total_duration / n_samples
 
+                # 并发获取所有模型数据
+                async def get_model_data_async(model_name: str):
+                    """并发获取单个模型的请求数据和计费信息"""
+                    try:
+                        billing = await asyncio.wait_for(
+                            asyncio.to_thread(self.monitor.get_model_billing, model_name),
+                            timeout=15.0
+                        )
+
+                        requests = await asyncio.wait_for(
+                            asyncio.to_thread(self.monitor.get_model_requests, model_name, start_time, end_time),
+                            timeout=15.0
+                        )
+
+                        requests_with_model = [(req.__dict__ | {'model_name': model_name}) for req in requests]
+                        return model_name, billing, requests_with_model
+                    except asyncio.TimeoutError:
+                        logger.warning(f"[API_SERVER] 获取模型 {model_name} 成本数据超时")
+                        return model_name, None, []
+                    except Exception as e:
+                        logger.error(f"[API_SERVER] 获取模型 {model_name} 成本数据失败: {e}")
+                        return model_name, None, []
+
+                # 创建并发任务
+                model_names = self.config_manager.get_model_names()
+                tasks = [get_model_data_async(name) for name in model_names]
+
+                # 并发执行所有任务
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+
+                # 处理结果
                 all_requests_with_model = []
                 model_billings = {}
-                for name in self.config_manager.get_model_names():
-                    model_billings[name] = self.monitor.get_model_billing(name)
-                    requests = self.monitor.get_model_requests(name, start_time, end_time)
-                    for req in requests:
-                        req_dict = req.__dict__
-                        req_dict['model_name'] = name
-                        all_requests_with_model.append(req_dict)
+                for result in results:
+                    if isinstance(result, Exception):
+                        logger.error(f"[API_SERVER] 模型成本数据获取任务异常: {result}")
+                        continue
+
+                    model_name, billing, requests = result
+                    if billing is not None:
+                        model_billings[model_name] = billing
+                    all_requests_with_model.extend(requests)
 
                 if not all_requests_with_model:
                     time_points = [{"timestamp": start_time + (i + 1) * interval, "cost": 0.0} for i in range(n_samples)]
@@ -839,42 +1082,53 @@ class APIServer:
                     stats["database_exists"] = True
                     stats["database_size_mb"] = round(os.path.getsize(self.monitor.db_path) / (1024 * 1024), 2)
 
-                    conn = sqlite3.connect(self.monitor.db_path)
-                    cursor = conn.cursor()
-
-                    # 获取配置中的模型名称
-                    configured_models = self.config_manager.get_model_names()
-
-                    total_requests = 0
-
-                    for model_name in configured_models:
-                        safe_name = self.monitor.get_model_safe_name(model_name)
-                        if safe_name:
-                            # 获取请求数量
-                            cursor.execute(f"SELECT COUNT(*) FROM {safe_name}_requests")
-                            request_count = cursor.fetchone()[0]
-                            total_requests += request_count
-
-                            stats["models_data"][model_name] = {
-                                "request_count": request_count,
+                    # 并发获取所有模型统计信息
+                    async def get_model_storage_stats_async(model_name: str):
+                        """并发获取单个模型的存储统计信息"""
+                        try:
+                            # 在线程池中执行数据库操作
+                            result = await asyncio.wait_for(
+                                asyncio.to_thread(self._get_single_model_storage_stats, model_name),
+                                timeout=15.0
+                            )
+                            return model_name, result
+                        except asyncio.TimeoutError:
+                            logger.warning(f"[API_SERVER] 获取模型 {model_name} 存储统计超时")
+                            return model_name, {
+                                "request_count": 0,
+                                "has_runtime_data": False,
+                                "has_billing_data": False
+                            }
+                        except Exception as e:
+                            logger.error(f"[API_SERVER] 获取模型 {model_name} 存储统计失败: {e}")
+                            return model_name, {
+                                "request_count": 0,
                                 "has_runtime_data": False,
                                 "has_billing_data": False
                             }
 
-                            # 检查是否有运行时间数据
-                            cursor.execute(f"SELECT COUNT(*) FROM {safe_name}_runtime")
-                            if cursor.fetchone()[0] > 0:
-                                stats["models_data"][model_name]["has_runtime_data"] = True
+                    # 获取配置中的模型名称
+                    configured_models = self.config_manager.get_model_names()
 
-                            # 检查是否有计费数据
-                            cursor.execute(f"SELECT COUNT(*) FROM {safe_name}_tier_pricing")
-                            if cursor.fetchone()[0] > 0:
-                                stats["models_data"][model_name]["has_billing_data"] = True
+                    # 创建并发任务
+                    tasks = [get_model_storage_stats_async(model_name) for model_name in configured_models]
+
+                    # 并发执行所有任务
+                    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+                    # 处理结果
+                    total_requests = 0
+                    for result in results:
+                        if isinstance(result, Exception):
+                            logger.error(f"[API_SERVER] 模型存储统计任务异常: {result}")
+                            continue
+
+                        model_name, model_stats = result
+                        stats["models_data"][model_name] = model_stats
+                        total_requests += model_stats["request_count"]
 
                     stats["total_models_with_data"] = len([m for m in stats["models_data"].values() if m["request_count"] > 0])
                     stats["total_requests"] = total_requests
-
-                    conn.close()
 
                 return {
                     "success": True,
@@ -884,6 +1138,50 @@ class APIServer:
             except Exception as e:
                 logger.error(f"[API_SERVER] 获取存储统计失败: {e}")
                 return {"success": False, "error": str(e)}
+
+        def _get_single_model_storage_stats(self, model_name: str):
+            """同步获取单个模型的存储统计信息（在线程池中执行）"""
+            import sqlite3
+
+            safe_name = self.monitor.get_model_safe_name(model_name)
+            if not safe_name:
+                return {
+                    "request_count": 0,
+                    "has_runtime_data": False,
+                    "has_billing_data": False
+                }
+
+            try:
+                conn = sqlite3.connect(self.monitor.db_path)
+                cursor = conn.cursor()
+
+                # 获取请求数量
+                cursor.execute(f"SELECT COUNT(*) FROM {safe_name}_requests")
+                request_count = cursor.fetchone()[0]
+
+                # 检查是否有运行时间数据
+                cursor.execute(f"SELECT COUNT(*) FROM {safe_name}_runtime")
+                has_runtime_data = cursor.fetchone()[0] > 0
+
+                # 检查是否有计费数据
+                cursor.execute(f"SELECT COUNT(*) FROM {safe_name}_tier_pricing")
+                has_billing_data = cursor.fetchone()[0] > 0
+
+                conn.close()
+
+                return {
+                    "request_count": request_count,
+                    "has_runtime_data": has_runtime_data,
+                    "has_billing_data": has_billing_data
+                }
+
+            except Exception as e:
+                logger.error(f"[API_SERVER] 获取模型 {model_name} 存储统计详情失败: {e}")
+                return {
+                    "request_count": 0,
+                    "has_runtime_data": False,
+                    "has_billing_data": False
+                }
 
         @self.app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD"])
         async def handle_all_requests(request: Request, path: str):
