@@ -15,9 +15,11 @@ logger = get_logger(__name__)
 class TokenTracker:
     """Token消耗跟踪器 - 负责token提取和记录"""
 
-    def __init__(self, monitor: Monitor):
+    def __init__(self, monitor: Monitor, config_manager: ConfigManager):
         self.monitor = monitor
+        self.config_manager = config_manager
         logger.info("Token跟踪器初始化完成")
+        logger.info(f"Token追踪模式: {self.config_manager.get_token_tracker_modes()}")
 
     def extract_tokens_from_usage(self, usage_data: Dict[str, Any]) -> tuple[int, int, int, int]:
         """从usage数据中提取token数量"""
@@ -140,7 +142,13 @@ class TokenTracker:
         try:
             timestamp = time.time()
 
-            logger.debug(f"[TOKEN_TRACKER] 开始异步记录token - 模型: {model_name}")
+            # 检查模型模式是否需要追踪token
+            model_mode = self.config_manager.get_model_mode(model_name)
+            if not self.config_manager.should_track_tokens_for_mode(model_mode):
+                logger.debug(f"[TOKEN_TRACKER] 跳过记录 - 模型 {model_name} 的模式 {model_mode} 不在追踪列表中")
+                return
+
+            logger.debug(f"[TOKEN_TRACKER] 开始异步记录token - 模型: {model_name}, 模式: {model_mode}")
             logger.debug(f"[TOKEN_TRACKER] Token信息 - 输入: {input_tokens}, 输出: {output_tokens}, cache_n: {cache_n}, prompt_n: {prompt_n}, 时间戳: {timestamp}")
 
             # 检查是否有token需要记录
@@ -156,7 +164,7 @@ class TokenTracker:
                 [timestamp, input_tokens, output_tokens, cache_n, prompt_n]
             )
 
-            logger.debug(f"[TOKEN_TRACKER] 异步记录token成功 - 模型: {model_name}, 总token数: {input_tokens + output_tokens}, cache_n: {cache_n}, prompt_n: {prompt_n}")
+            logger.debug(f"[TOKEN_TRACKER] 异步记录token成功 - 模型: {model_name}, 模式: {model_mode}, 总token数: {input_tokens + output_tokens}, cache_n: {cache_n}, prompt_n: {prompt_n}")
         except Exception as e:
             logger.error(f"[TOKEN_TRACKER] 异步记录token失败 - 模型: {model_name}, 错误: {e}")
             # 不抛出异常，避免影响主要请求流程

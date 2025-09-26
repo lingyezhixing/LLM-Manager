@@ -166,6 +166,15 @@ class ConfigManager:
             "port": self.get_program_config().get('openai_port', 8080)
         }
 
+    def get_token_tracker_modes(self) -> List[str]:
+        """获取需要追踪token的模型模式列表"""
+        return self.get_program_config().get('TokenTracker', ["Chat", "Base", "Embedding", "Reranker"])
+
+    def should_track_tokens_for_mode(self, mode: str) -> bool:
+        """检查指定模式的模型是否需要追踪token"""
+        tracked_modes = self.get_token_tracker_modes()
+        return mode in tracked_modes
+
     def get_webui_config(self) -> Dict[str, Any]:
         """获取WebUI前端配置"""
         return {

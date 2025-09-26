@@ -8,7 +8,8 @@
     "alive_time": 60,
     "device_plugin_dir": "plugins/devices",
     "interface_plugin_dir": "plugins/interfaces",
-    "log_level": "DEBUG"
+    "log_level": "DEBUG",
+    "TokenTracker": ["Chat", "Base", "Embedding", "Reranker"]
   },
     "Qwen3-Coder-30B-A3B-Instruct-UD-64K": {
     "aliases": [
