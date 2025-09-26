@@ -1,3 +1,4 @@
+# api_server.py
 from fastapi import FastAPI, Request, HTTPException, Response
 from fastapi.responses import StreamingResponse, JSONResponse
 from typing import Dict, List, Optional, Any
@@ -129,6 +130,52 @@ class APIServer:
             )
         
         return total_cost
+
+    async def _get_enriched_requests_dataframe(self, start_time: float, end_time: float) -> pd.DataFrame:
+        """
+        【新增辅助函数】并发获取所有模型的请求数据，并用模型模式(mode)丰富数据，返回一个统一的DataFrame。
+        """
+        async def get_model_requests_with_mode(model_name: str):
+            """并发获取单个模型的请求数据并添加模式信息"""
+            try:
+                # 获取模型模式
+                mode = self.config_manager.get_model_mode(model_name)
+                # 检查此模式是否需要追踪
+                if not self.config_manager.should_track_tokens_for_mode(mode):
+                    return []
+                
+                requests = await asyncio.wait_for(
+                    asyncio.to_thread(self.monitor.get_model_requests, model_name, start_time, end_time),
+                    timeout=15.0
+                )
+                # 为每条记录添加 model_name 和 model_mode
+                return [(req.__dict__ | {'model_name': model_name, 'model_mode': mode}) for req in requests]
+            except asyncio.TimeoutError:
+                logger.warning(f"[API_SERVER] 获取模型 {model_name} 请求数据超时")
+                return []
+            except Exception as e:
+                logger.error(f"[API_SERVER] 获取模型 {model_name} 请求数据失败: {e}")
+                return []
+
+        # 创建并发任务
+        model_names = self.config_manager.get_model_names()
+        tasks = [get_model_requests_with_mode(model_name) for model_name in model_names]
+
+        # 并发执行所有任务
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # 合并结果
+        all_requests = []
+        for result in results:
+            if isinstance(result, Exception):
+                logger.error(f"[API_SERVER] 模型请求数据获取任务异常: {result}")
+                continue
+            all_requests.extend(result)
+
+        if not all_requests:
+            return pd.DataFrame()
+        
+        return pd.DataFrame(all_requests)
 
     def _setup_routes(self):
         """设置基础路由"""
@@ -415,85 +462,72 @@ class APIServer:
 
         @self.app.get("/api/metrics/throughput/{start_time}/{end_time}/{n_samples}")
         async def get_throughput(start_time: float, end_time: float, n_samples: int):
-            """【向量化重构-微调版】获取指定时间段内的吞吐量趋势"""
+            """【全新升级】获取吞吐量趋势，并按模型模式分解"""
             try:
                 if start_time >= end_time or n_samples <= 0:
                     return JSONResponse(status_code=400, content={"success": False, "error": "无效的时间范围或采样点数"})
 
-                total_duration = end_time - start_time
-                interval = total_duration / n_samples
-
-                # 1. 并发获取所有模型数据
-                async def get_model_requests_for_throughput(model_name: str):
-                    """并发获取单个模型的请求数据用于吞吐量计算"""
-                    try:
-                        requests = await asyncio.wait_for(
-                            asyncio.to_thread(self.monitor.get_model_requests, model_name, start_time, end_time),
-                            timeout=15.0
-                        )
-                        return [req.__dict__ for req in requests]
-                    except asyncio.TimeoutError:
-                        logger.warning(f"[API_SERVER] 获取模型 {model_name} 吞吐量数据超时")
-                        return []
-                    except Exception as e:
-                        logger.error(f"[API_SERVER] 获取模型 {model_name} 吞吐量数据失败: {e}")
-                        return []
-
-                # 创建并发任务
-                model_names = self.config_manager.get_model_names()
-                tasks = [get_model_requests_for_throughput(model_name) for model_name in model_names]
-
-                # 并发执行所有任务
-                results = await asyncio.gather(*tasks, return_exceptions=True)
-
-                # 合并结果
-                all_requests_as_dicts = []
-                for result in results:
-                    if isinstance(result, Exception):
-                        logger.error(f"[API_SERVER] 模型吞吐量数据获取任务异常: {result}")
-                        continue
-                    all_requests_as_dicts.extend(result)
-                
-                if not all_requests_as_dicts:
-                    # 返回 n_samples 个空数据点
-                    point_template = {"input_tokens_per_sec": 0, "output_tokens_per_sec": 0, "total_tokens_per_sec": 0, "cache_hit_tokens_per_sec": 0, "cache_miss_tokens_per_sec": 0}
-                    time_points = [{"timestamp": start_time + (i + 1) * interval, "data": point_template} for i in range(n_samples)]
-                    return {"success": True, "data": {"time_points": time_points}}
-
-                # 2. 转换为 Pandas DataFrame
-                df = pd.DataFrame(all_requests_as_dicts)
-
-                # 3. 向量化计算分桶索引
-                bin_indices = np.floor((df['timestamp'] - start_time) / interval)
-                df['bin_index'] = np.clip(bin_indices, 0, n_samples - 1).astype(int)
-
-                # 4. 使用 groupby 进行高效聚合
-                agg_cols = {"input_tokens": "sum", "output_tokens": "sum", "cache_n": "sum", "prompt_n": "sum"}
-                agg_df = df.groupby('bin_index')[list(agg_cols.keys())].agg(agg_cols)
-                agg_df['total_tokens'] = agg_df['input_tokens'] + agg_df['output_tokens']
-                
-                # 5. 补全空桶并格式化输出
-                all_bins_df = pd.DataFrame(index=pd.RangeIndex(start=0, stop=n_samples, name='bin_index'))
-                final_agg_df = agg_df.reindex(all_bins_df.index, fill_value=0)
-                
-                result_points = []
+                interval = (end_time - start_time) / n_samples
                 safe_interval = max(interval, 1e-9)
+                tracked_modes = self.config_manager.get_token_tracker_modes()
+                point_template = {"input_tokens_per_sec": 0, "output_tokens_per_sec": 0, "total_tokens_per_sec": 0, "cache_hit_tokens_per_sec": 0, "cache_miss_tokens_per_sec": 0}
+
+                # 1. 使用辅助函数获取包含模式信息的DataFrame
+                df = await self._get_enriched_requests_dataframe(start_time, end_time)
+
+                # 2. 处理无数据的情况
+                if df.empty:
+                    time_points = [{"timestamp": start_time + (i + 1) * interval, "data": point_template} for i in range(n_samples)]
+                    mode_breakdown = {mode: list(time_points) for mode in tracked_modes}
+                    return {"success": True, "data": {"time_points": time_points, "mode_breakdown": mode_breakdown}}
                 
-                for bin_index, row in final_agg_df.iterrows():
-                    result_points.append({
-                        "timestamp": start_time + (bin_index + 1) * interval,
-                        "data": {
+                # 3. 向量化计算
+                df['bin_index'] = np.clip(np.floor((df['timestamp'] - start_time) / interval), 0, n_samples - 1).astype(int)
+                agg_cols = {"input_tokens": "sum", "output_tokens": "sum", "cache_n": "sum", "prompt_n": "sum"}
+                
+                # 4. 聚合总数据和按模式分解的数据
+                overall_agg = df.groupby('bin_index')[list(agg_cols.keys())].agg(agg_cols)
+                mode_agg = df.groupby(['bin_index', 'model_mode'])[list(agg_cols.keys())].agg(agg_cols)
+                
+                # 5. 格式化输出
+                time_points = []
+                mode_breakdown = {mode: [] for mode in tracked_modes}
+
+                for i in range(n_samples):
+                    ts = start_time + (i + 1) * interval
+                    
+                    # 总体数据点
+                    if i in overall_agg.index:
+                        row = overall_agg.loc[i]
+                        total_tokens = row["input_tokens"] + row["output_tokens"]
+                        time_points.append({"timestamp": ts, "data": {
                             "input_tokens_per_sec": row["input_tokens"] / safe_interval,
                             "output_tokens_per_sec": row["output_tokens"] / safe_interval,
-                            "total_tokens_per_sec": row["total_tokens"] / safe_interval,
+                            "total_tokens_per_sec": total_tokens / safe_interval,
                             "cache_hit_tokens_per_sec": row["cache_n"] / safe_interval,
                             "cache_miss_tokens_per_sec": row["prompt_n"] / safe_interval
-                        }
-                    })
+                        }})
+                    else:
+                        time_points.append({"timestamp": ts, "data": point_template})
+                    
+                    # 按模式分解的数据点
+                    for mode in tracked_modes:
+                        if (i, mode) in mode_agg.index:
+                            row = mode_agg.loc[(i, mode)]
+                            total_tokens = row["input_tokens"] + row["output_tokens"]
+                            mode_breakdown[mode].append({"timestamp": ts, "data": {
+                                "input_tokens_per_sec": row["input_tokens"] / safe_interval,
+                                "output_tokens_per_sec": row["output_tokens"] / safe_interval,
+                                "total_tokens_per_sec": total_tokens / safe_interval,
+                                "cache_hit_tokens_per_sec": row["cache_n"] / safe_interval,
+                                "cache_miss_tokens_per_sec": row["prompt_n"] / safe_interval
+                            }})
+                        else:
+                            mode_breakdown[mode].append({"timestamp": ts, "data": point_template})
 
-                return {"success": True, "data": {"time_points": result_points}}
+                return {"success": True, "data": {"time_points": time_points, "mode_breakdown": mode_breakdown}}
             except Exception as e:
-                logger.error(f"[API_SERVER] 获取吞吐量趋势失败: {e}")
+                logger.error(f"[API_SERVER] 获取吞吐量趋势失败: {e}", exc_info=True)
                 return {"success": False, "error": str(e)}
 
         @self.app.get("/api/metrics/throughput/current-session")
@@ -584,232 +618,160 @@ class APIServer:
                 logger.error(f"[API_SERVER] 获取本次运行总消耗失败: {e}")
                 return {"success": False, "error": str(e)}
 
-        @self.app.get("/api/analytics/token-distribution/{start_time}/{end_time}")
-        async def get_token_distribution(start_time: float, end_time: float):
-            """【向量化重构】获取指定时间范围内各模型的Token分布比例"""
+        @self.app.get("/api/analytics/token-distribution/{start_time}/{end_time}/{n_samples}")
+        async def get_token_distribution(start_time: float, end_time: float, n_samples: int):
+            """【全新升级】获取Token消耗分布趋势，按模型模式分解。注意：此接口现返回时间序列数据。"""
             try:
-                if start_time >= end_time:
-                    return JSONResponse(status_code=400, content={"success": False, "error": "无效的时间范围"})
+                if start_time >= end_time or n_samples <= 0:
+                    return JSONResponse(status_code=400, content={"success": False, "error": "无效的时间范围或采样点数"})
 
-                # 1. 并发获取所有模型数据
-                async def get_model_requests_with_name(model_name: str):
-                    """并发获取单个模型的请求数据"""
-                    try:
-                        requests = await asyncio.wait_for(
-                            asyncio.to_thread(self.monitor.get_model_requests, model_name, start_time, end_time),
-                            timeout=15.0
-                        )
-                        return [(req.__dict__ | {'model_name': model_name}) for req in requests]
-                    except asyncio.TimeoutError:
-                        logger.warning(f"[API_SERVER] 获取模型 {model_name} 请求数据超时")
-                        return []
-                    except Exception as e:
-                        logger.error(f"[API_SERVER] 获取模型 {model_name} 请求数据失败: {e}")
-                        return []
+                interval = (end_time - start_time) / n_samples
+                tracked_modes = self.config_manager.get_token_tracker_modes()
+                point_template = {"total_tokens": 0}
 
-                # 创建并发任务
-                model_names = self.config_manager.get_model_names()
-                tasks = [get_model_requests_with_name(model_name) for model_name in model_names]
+                df = await self._get_enriched_requests_dataframe(start_time, end_time)
 
-                # 并发执行所有任务
-                results = await asyncio.gather(*tasks, return_exceptions=True)
-
-                # 合并结果
-                all_requests_with_model = []
-                for result in results:
-                    if isinstance(result, Exception):
-                        logger.error(f"[API_SERVER] 模型请求数据获取任务异常: {result}")
-                        continue
-                    all_requests_with_model.extend(result)
-
-                if not all_requests_with_model:
-                    return {"success": True, "data": {"model_token_distribution": {}}}
+                if df.empty:
+                    time_points = [{"timestamp": start_time + (i + 1) * interval, "data": point_template} for i in range(n_samples)]
+                    mode_breakdown = {mode: list(time_points) for mode in tracked_modes}
+                    return {"success": True, "data": {"time_points": time_points, "mode_breakdown": mode_breakdown}}
                 
-                # 2. 转换为 DataFrame
-                df = pd.DataFrame(all_requests_with_model)
-                
-                # 3. 计算 total_tokens 列
                 df['total_tokens'] = df['input_tokens'] + df['output_tokens']
+                df['bin_index'] = np.clip(np.floor((df['timestamp'] - start_time) / interval), 0, n_samples - 1).astype(int)
                 
-                # 4. 按模型名称分组并求和
-                model_token_distribution = df.groupby('model_name')['total_tokens'].sum()
+                overall_agg = df.groupby('bin_index')['total_tokens'].sum()
+                mode_agg = df.groupby(['bin_index', 'model_mode'])['total_tokens'].sum()
                 
-                # 5. 转换为字典格式输出
-                # to_dict() 会将 Series 转换为 {model_name: total_tokens, ...}
-                return {"success": True, "data": {"model_token_distribution": model_token_distribution.to_dict()}}
+                time_points = []
+                mode_breakdown = {mode: [] for mode in tracked_modes}
+
+                for i in range(n_samples):
+                    ts = start_time + (i + 1) * interval
+                    total = int(overall_agg.get(i, 0))
+                    time_points.append({"timestamp": ts, "data": {"total_tokens": total}})
+                    
+                    for mode in tracked_modes:
+                        mode_total = int(mode_agg.get((i, mode), 0))
+                        mode_breakdown[mode].append({"timestamp": ts, "data": {"total_tokens": mode_total}})
+                
+                return {"success": True, "data": {"time_points": time_points, "mode_breakdown": mode_breakdown}}
             except Exception as e:
-                logger.error(f"[API_SERVER] 获取Token分布失败: {e}")
+                logger.error(f"[API_SERVER] 获取Token分布趋势失败: {e}", exc_info=True)
                 return {"success": False, "error": str(e)}
 
         @self.app.get("/api/analytics/token-trends/{start_time}/{end_time}/{n_samples}")
         async def get_token_trends(start_time: float, end_time: float, n_samples: int):
-            """【向量化重构-已修正Numpy类型】获取指定时间范围内的Token消耗趋势"""
+            """【全新升级】获取Token消耗趋势，并按模型模式分解"""
             try:
                 if start_time >= end_time or n_samples <= 0:
                     return JSONResponse(status_code=400, content={"success": False, "error": "无效的时间范围或采样点数"})
 
-                # 1. 并发获取所有模型数据
-                async def get_model_requests_async(model_name: str):
-                    """并发获取单个模型的请求数据"""
-                    try:
-                        requests = await asyncio.wait_for(
-                            asyncio.to_thread(self.monitor.get_model_requests, model_name, start_time, end_time),
-                            timeout=15.0
-                        )
-                        return [req.__dict__ for req in requests]
-                    except asyncio.TimeoutError:
-                        logger.warning(f"[API_SERVER] 获取模型 {model_name} token趋势数据超时")
-                        return []
-                    except Exception as e:
-                        logger.error(f"[API_SERVER] 获取模型 {model_name} token趋势数据失败: {e}")
-                        return []
-
-                # 创建并发任务
-                model_names = self.config_manager.get_model_names()
-                tasks = [get_model_requests_async(model_name) for model_name in model_names]
-
-                # 并发执行所有任务
-                results = await asyncio.gather(*tasks, return_exceptions=True)
-
-                # 合并结果
-                all_requests_as_dicts = []
-                for result in results:
-                    if isinstance(result, Exception):
-                        logger.error(f"[API_SERVER] 模型token趋势数据获取任务异常: {result}")
-                        continue
-                    all_requests_as_dicts.extend(result)
-
                 interval = (end_time - start_time) / n_samples
-                
-                if not all_requests_as_dicts:
-                    # 如果没有数据，返回 n_samples 个空数据点
-                    point_template = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "cache_hit_tokens": 0, "cache_miss_tokens": 0}
+                tracked_modes = self.config_manager.get_token_tracker_modes()
+                point_template = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "cache_hit_tokens": 0, "cache_miss_tokens": 0}
+
+                df = await self._get_enriched_requests_dataframe(start_time, end_time)
+
+                if df.empty:
                     time_points = [{"timestamp": start_time + (i + 1) * interval, "data": point_template} for i in range(n_samples)]
-                    return {"success": True, "data": {"time_points": time_points}}
+                    mode_breakdown = {mode: list(time_points) for mode in tracked_modes}
+                    return {"success": True, "data": {"time_points": time_points, "mode_breakdown": mode_breakdown}}
                 
-                # 2. 转换为 DataFrame
-                df = pd.DataFrame(all_requests_as_dicts)
+                df['bin_index'] = np.clip(np.floor((df['timestamp'] - start_time) / interval), 0, n_samples - 1).astype(int)
+                agg_cols = {"input_tokens": "sum", "output_tokens": "sum", "cache_n": "sum", "prompt_n": "sum"}
                 
-                # 3. 向量化分桶
-                bin_indices = np.floor((df['timestamp'] - start_time) / interval)
-                df['bin_index'] = np.clip(bin_indices, 0, n_samples - 1).astype(int)
-                
-                # 4. 高效聚合
-                agg_cols = {
-                    "input_tokens": "sum", "output_tokens": "sum",
-                    "cache_n": "sum", "prompt_n": "sum"
-                }
-                agg_df = df.groupby('bin_index')[list(agg_cols.keys())].agg(agg_cols)
-                agg_df['total_tokens'] = agg_df['input_tokens'] + agg_df['output_tokens']
-                
-                # 5. 补全空桶并格式化输出
-                all_bins_df = pd.DataFrame(index=pd.RangeIndex(start=0, stop=n_samples, name='bin_index'))
-                final_agg_df = agg_df.reindex(all_bins_df.index, fill_value=0)
+                overall_agg = df.groupby('bin_index')[list(agg_cols.keys())].agg(agg_cols)
+                mode_agg = df.groupby(['bin_index', 'model_mode'])[list(agg_cols.keys())].agg(agg_cols)
                 
                 time_points = []
-                for bin_index, row in final_agg_df.iterrows():
-                    time_points.append({
-                        "timestamp": start_time + (bin_index + 1) * interval,
-                        "data": {
-                            # --- 核心修复：将 numpy 类型转换为 python 原生 int ---
+                mode_breakdown = {mode: [] for mode in tracked_modes}
+
+                for i in range(n_samples):
+                    ts = start_time + (i + 1) * interval
+                    
+                    if i in overall_agg.index:
+                        row = overall_agg.loc[i]
+                        time_points.append({"timestamp": ts, "data": {
                             "input_tokens": int(row["input_tokens"]),
                             "output_tokens": int(row["output_tokens"]),
-                            "total_tokens": int(row["total_tokens"]),
+                            "total_tokens": int(row["input_tokens"] + row["output_tokens"]),
                             "cache_hit_tokens": int(row["cache_n"]),
                             "cache_miss_tokens": int(row["prompt_n"])
-                        }
-                    })
+                        }})
+                    else:
+                        time_points.append({"timestamp": ts, "data": point_template})
+                    
+                    for mode in tracked_modes:
+                        if (i, mode) in mode_agg.index:
+                            row = mode_agg.loc[(i, mode)]
+                            mode_breakdown[mode].append({"timestamp": ts, "data": {
+                                "input_tokens": int(row["input_tokens"]),
+                                "output_tokens": int(row["output_tokens"]),
+                                "total_tokens": int(row["input_tokens"] + row["output_tokens"]),
+                                "cache_hit_tokens": int(row["cache_n"]),
+                                "cache_miss_tokens": int(row["prompt_n"])
+                            }})
+                        else:
+                             mode_breakdown[mode].append({"timestamp": ts, "data": point_template})
 
-                return {"success": True, "data": {"time_points": time_points}}
+                return {"success": True, "data": {"time_points": time_points, "mode_breakdown": mode_breakdown}}
             except Exception as e:
-                logger.error(f"[API_SERVER] 获取Token趋势失败: {e}")
-                # 打印详细的 traceback 以便调试
-                import traceback
-                logger.error(traceback.format_exc())
+                logger.error(f"[API_SERVER] 获取Token趋势失败: {e}", exc_info=True)
                 return {"success": False, "error": str(e)}
 
         @self.app.get("/api/analytics/cost-trends/{start_time}/{end_time}/{n_samples}")
         async def get_cost_trends(start_time: float, end_time: float, n_samples: int):
-            """【向量化重构-微调版】获取指定时间范围内的成本趋势数据"""
+            """【全新升级】获取成本趋势，并按模型模式分解"""
             try:
                 if start_time >= end_time or n_samples <= 0:
                     return JSONResponse(status_code=400, content={"success": False, "error": "无效的时间范围或采样点数"})
 
-                total_duration = end_time - start_time
-                interval = total_duration / n_samples
+                interval = (end_time - start_time) / n_samples
+                tracked_modes = self.config_manager.get_token_tracker_modes()
+                point_template = {"cost": 0.0}
 
-                # 并发获取所有模型数据
-                async def get_model_data_async(model_name: str):
-                    """并发获取单个模型的请求数据和计费信息"""
-                    try:
-                        billing = await asyncio.wait_for(
-                            asyncio.to_thread(self.monitor.get_model_billing, model_name),
-                            timeout=15.0
-                        )
-
-                        requests = await asyncio.wait_for(
-                            asyncio.to_thread(self.monitor.get_model_requests, model_name, start_time, end_time),
-                            timeout=15.0
-                        )
-
-                        requests_with_model = [(req.__dict__ | {'model_name': model_name}) for req in requests]
-                        return model_name, billing, requests_with_model
-                    except asyncio.TimeoutError:
-                        logger.warning(f"[API_SERVER] 获取模型 {model_name} 成本数据超时")
-                        return model_name, None, []
-                    except Exception as e:
-                        logger.error(f"[API_SERVER] 获取模型 {model_name} 成本数据失败: {e}")
-                        return model_name, None, []
-
-                # 创建并发任务
-                model_names = self.config_manager.get_model_names()
-                tasks = [get_model_data_async(name) for name in model_names]
-
-                # 并发执行所有任务
-                results = await asyncio.gather(*tasks, return_exceptions=True)
-
-                # 处理结果
-                all_requests_with_model = []
-                model_billings = {}
-                for result in results:
-                    if isinstance(result, Exception):
-                        logger.error(f"[API_SERVER] 模型成本数据获取任务异常: {result}")
-                        continue
-
-                    model_name, billing, requests = result
-                    if billing is not None:
-                        model_billings[model_name] = billing
-                    all_requests_with_model.extend(requests)
-
-                if not all_requests_with_model:
-                    time_points = [{"timestamp": start_time + (i + 1) * interval, "cost": 0.0} for i in range(n_samples)]
-                    return {"success": True, "data": {"time_points": time_points}}
+                # 1. 获取 enriched DataFrame
+                df = await self._get_enriched_requests_dataframe(start_time, end_time)
                 
-                df = pd.DataFrame(all_requests_with_model)
-                
+                if df.empty:
+                    time_points = [{"timestamp": start_time + (i + 1) * interval, "data": point_template} for i in range(n_samples)]
+                    mode_breakdown = {mode: list(time_points) for mode in tracked_modes}
+                    return {"success": True, "data": {"time_points": time_points, "mode_breakdown": mode_breakdown}}
+
+                # 2. 并发获取所有计费信息
+                model_names = df['model_name'].unique()
+                billing_tasks = [asyncio.to_thread(self.monitor.get_model_billing, name) for name in model_names]
+                billing_results = await asyncio.gather(*billing_tasks)
+                model_billings = {name: billing for name, billing in zip(model_names, billing_results)}
+
+                # 3. 计算每行成本
                 def calculate_cost_for_row(row):
-                    temp_req = SimpleNamespace(**row.to_dict()) # 使用 SimpleNamespace 更简洁
+                    temp_req = SimpleNamespace(**row.to_dict())
                     billing = model_billings.get(row['model_name'])
                     return self._calculate_request_cost(temp_req, billing)
-
                 df['cost'] = df.apply(calculate_cost_for_row, axis=1)
 
-                bin_indices = np.floor((df['timestamp'] - start_time) / interval)
-                df['bin_index'] = np.clip(bin_indices, 0, n_samples - 1).astype(int)
+                # 4. 聚合
+                df['bin_index'] = np.clip(np.floor((df['timestamp'] - start_time) / interval), 0, n_samples - 1).astype(int)
+                overall_agg = df.groupby('bin_index')['cost'].sum()
+                mode_agg = df.groupby(['bin_index', 'model_mode'])['cost'].sum()
 
-                cost_by_bin = df.groupby('bin_index')['cost'].sum()
-
+                # 5. 格式化输出
                 time_points = []
-                for i in range(n_samples):
-                    cost = cost_by_bin.get(i, 0.0)
-                    time_points.append({
-                        "timestamp": start_time + (i + 1) * interval,
-                        "cost": round(cost, 6)
-                    })
+                mode_breakdown = {mode: [] for mode in tracked_modes}
 
-                return {"success": True, "data": {"time_points": time_points}}
+                for i in range(n_samples):
+                    ts = start_time + (i + 1) * interval
+                    cost = round(overall_agg.get(i, 0.0), 6)
+                    time_points.append({"timestamp": ts, "data": {"cost": cost}})
+                    
+                    for mode in tracked_modes:
+                        mode_cost = round(mode_agg.get((i, mode), 0.0), 6)
+                        mode_breakdown[mode].append({"timestamp": ts, "data": {"cost": mode_cost}})
+
+                return {"success": True, "data": {"time_points": time_points, "mode_breakdown": mode_breakdown}}
             except Exception as e:
-                logger.error(f"[API_SERVER] 获取成本趋势失败: {e}")
+                logger.error(f"[API_SERVER] 获取成本趋势失败: {e}", exc_info=True)
                 return {"success": False, "error": str(e)}
 
         @self.app.get("/api/analytics/model-stats/{model_name_alias}/{start_time}/{end_time}/{n_samples}")

@@ -399,23 +399,21 @@ curl http://localhost:8080/api/logs/stats
 
 ### 12. 清理模型日志
 
-**接口地址**: `POST /api/logs/{model_alias}/clear`
+**接口地址**: `POST /api/logs/{model_alias}/clear/{keep_minutes}`
 
 **功能**: 清理模型控制台日志，支持选择性保留
 
 **路径参数**:
 - `model_alias`: 模型别名
-
-**查询参数**:
-- `keep_minutes` (可选，默认0): 保留最近多少分钟的日志，0表示清空所有
+- `keep_minutes`: (可选, 默认0) 保留最近多少分钟的日志，0表示清空所有
 
 **请求示例**:
 ```bash
 # 清空所有日志
-curl -X POST http://localhost:8080/api/logs/Qwen3-8B-AWQ/clear
+curl -X POST http://localhost:8080/api/logs/Qwen3-8B-AWQ/clear/0
 
 # 保留最近10分钟的日志
-curl -X POST "http://localhost:8080/api/logs/Qwen3-8B-AWQ/clear?keep_minutes=10"
+curl -X POST http://localhost:8080/api/logs/Qwen3-8B-AWQ/clear/10
 ```
 
 **返回结构**:
@@ -436,7 +434,7 @@ curl -X POST "http://localhost:8080/api/logs/Qwen3-8B-AWQ/clear?keep_minutes=10"
 
 **接口地址**: `GET /api/metrics/throughput/{start_time}/{end_time}/{n_samples}`
 
-**功能**: 获取指定时间段内，所有模型合并计算的吞吐量趋势数据。
+**功能**: 获取指定时间段内，所有模型合并计算的吞吐量趋势数据，并按模型模式细分。
 
 **路径参数**:
 - `start_time`: 开始时间戳 (Unix Timestamp, float)
@@ -462,17 +460,46 @@ curl http://localhost:8080/api/metrics/throughput/1758820000/1758822000/10
           "output_tokens_per_sec": 45.2,
           "total_tokens_per_sec": 195.7,
           "cache_hit_tokens_per_sec": 80.3,
-          "cache_miss_tokens_per_sec": 70.2 
+          "cache_miss_tokens_per_sec": 70.2
         }
       }
-      // ... more data points
-    ]
+      // ... more data points (总共n_samples个)
+    ],
+    "mode_breakdown": {
+      "Chat": [
+        {
+          "timestamp": 1758820200.0,
+          "data": {
+            "input_tokens_per_sec": 120.0,
+            "output_tokens_per_sec": 40.0,
+            "total_tokens_per_sec": 160.0,
+            "cache_hit_tokens_per_sec": 70.0,
+            "cache_miss_tokens_per_sec": 50.0
+          }
+        }
+        // ... Chat模式的n_samples个数据点
+      ],
+      "Embedding": [
+        {
+          "timestamp": 1758820200.0,
+          "data": {
+            "input_tokens_per_sec": 30.5,
+            "output_tokens_per_sec": 5.2,
+            "total_tokens_per_sec": 35.7,
+            "cache_hit_tokens_per_sec": 10.3,
+            "cache_miss_tokens_per_sec": 20.2
+          }
+        }
+        // ... Embedding模式的n_samples个数据点
+      ]
+      // ... 其他模式如 Base, Reranker 的数据
+    }
   }
 }
 ```
 
 **返回字段说明**:
-- `time_points`: 时间点数据数组，长度等于 `n_samples`
+- `time_points`: **总体**时间点数据数组，长度等于 `n_samples`
   - `timestamp`: 每个采样区间的**结束时间戳**
   - `data`: 该时间区间的吞吐量统计
     - `input_tokens_per_sec`: 输入token每秒处理量
@@ -480,6 +507,7 @@ curl http://localhost:8080/api/metrics/throughput/1758820000/1758822000/10
     - `total_tokens_per_sec`: 总token每秒处理量
     - `cache_hit_tokens_per_sec`: 缓存命中token每秒处理量
     - `cache_miss_tokens_per_sec`: 缓存未命中token每秒处理量
+- `mode_breakdown`: 一个字典，键为模型模式 (e.g., "Chat", "Embedding")，值为该模式下的时间点数据数组，结构与 `time_points` 相同。
 
 ---
 
@@ -487,7 +515,7 @@ curl http://localhost:8080/api/metrics/throughput/1758820000/1758822000/10
 
 **接口地址**: `GET /api/metrics/throughput/current-session`
 
-**功能**: 获取本次程序运行的总消耗统计 (此接口保持不变)。
+**功能**: 获取本次程序运行的总消耗统计。
 
 **请求示例**:
 ```bash
@@ -521,19 +549,20 @@ curl http://localhost:8080/api/metrics/throughput/current-session
 
 ---
 
-### 16. Token分布
+### 16. Token分布趋势
 
-**接口地址**: `GET /api/analytics/token-distribution/{start_time}/{end_time}`
+**接口地址**: `GET /api/analytics/token-distribution/{start_time}/{end_time}/{n_samples}`
 
-**功能**: 获取在指定时间范围内，各个模型消耗的Token总量分布。
+**功能**: 获取在指定时间范围内，各个模型模式消耗的**总Token**趋势。
 
 **路径参数**:
 - `start_time`: 开始时间戳 (Unix Timestamp, float)
 - `end_time`: 结束时间戳 (Unix Timestamp, float)
+- `n_samples`: 采样点数量 (integer)
 
 **请求示例**:
 ```bash
-curl http://localhost:8080/api/analytics/token-distribution/1758820000/1758822000
+curl http://localhost:8080/api/analytics/token-distribution/1758820000/1758822000/10
 ```
 
 **返回结构**:
@@ -541,16 +570,45 @@ curl http://localhost:8080/api/analytics/token-distribution/1758820000/175882200
 {
   "success": true,
   "data": {
-    "model_token_distribution": {
-      "Qwen3-8B-AWQ": 15000,
-      "Qwen3-14B-AWQ": 8000
+    "time_points": [
+      {
+        "timestamp": 1758820200.0,
+        "data": {
+          "total_tokens": 23000
+        }
+      }
+      // ... more total data points
+    ],
+    "mode_breakdown": {
+      "Chat": [
+        {
+          "timestamp": 1758820200.0,
+          "data": {
+            "total_tokens": 15000
+          }
+        }
+        // ... Chat mode data points
+      ],
+      "Embedding": [
+        {
+          "timestamp": 1758820200.0,
+          "data": {
+            "total_tokens": 8000
+          }
+        }
+        // ... Embedding mode data points
+      ]
     }
   }
 }
 ```
 
 **返回字段说明**:
-- `model_token_distribution`: 一个字典，键为模型名称，值为该模型在指定时间范围内的总Token消耗（输入+输出）。
+- `time_points`: **总体**时间点数据数组，长度等于 `n_samples`
+  - `timestamp`: 每个采样区间的**结束时间戳**
+  - `data`: 该时间区间的总Token消耗
+    - `total_tokens`: 总token数 (输入+输出)
+- `mode_breakdown`: 一个字典，键为模型模式，值为该模式下的时间点数据数组，结构与 `time_points` 相同。
 
 ---
 
@@ -558,7 +616,7 @@ curl http://localhost:8080/api/analytics/token-distribution/1758820000/175882200
 
 **接口地址**: `GET /api/analytics/token-trends/{start_time}/{end_time}/{n_samples}`
 
-**功能**: 获取在指定时间范围内，所有模型合并计算的Token消耗总量趋势。
+**功能**: 获取在指定时间范围内，所有模型合并计算的Token消耗总量趋势，并按模型模式细分。
 
 **路径参数**:
 - `start_time`: 开始时间戳 (Unix Timestamp, float)
@@ -587,13 +645,41 @@ curl http://localhost:8080/api/analytics/token-trends/1758820000/1758822000/10
         }
       }
       // ... more data points
-    ]
+    ],
+    "mode_breakdown": {
+      "Chat": [
+        {
+          "timestamp": 1758820200.0,
+          "data": {
+            "input_tokens": 600,
+            "output_tokens": 300,
+            "total_tokens": 900,
+            "cache_hit_tokens": 250,
+            "cache_miss_tokens": 350
+          }
+        }
+        // ... Chat模式的n_samples个数据点
+      ],
+      "Embedding": [
+        {
+          "timestamp": 1758820200.0,
+          "data": {
+            "input_tokens": 200,
+            "output_tokens": 100,
+            "total_tokens": 300,
+            "cache_hit_tokens": 50,
+            "cache_miss_tokens": 150
+          }
+        }
+        // ... Embedding模式的n_samples个数据点
+      ]
+    }
   }
 }
 ```
 
 **返回字段说明**:
-- `time_points`: 时间点数据数组，长度等于 `n_samples`
+- `time_points`: **总体**时间点数据数组，长度等于 `n_samples`
   - `timestamp`: 每个采样区间的**结束时间戳**
   - `data`: 该时间区间的Token消耗总量
     - `input_tokens`: 输入token数
@@ -601,6 +687,7 @@ curl http://localhost:8080/api/analytics/token-trends/1758820000/1758822000/10
     - `total_tokens`: 总token数
     - `cache_hit_tokens`: 缓存命中token数
     - `cache_miss_tokens`: 缓存未命中token数
+- `mode_breakdown`: 一个字典，键为模型模式，值为该模式下的时间点数据数组，结构与 `time_points` 相同。
 
 ---
 
@@ -608,7 +695,7 @@ curl http://localhost:8080/api/analytics/token-trends/1758820000/1758822000/10
 
 **接口地址**: `GET /api/analytics/cost-trends/{start_time}/{end_time}/{n_samples}`
 
-**功能**: 获取在指定时间范围内，所有模型合并计算的成本趋势。
+**功能**: 获取在指定时间范围内，所有模型合并计算的成本趋势，并按模型模式细分。
 
 **路径参数**:
 - `start_time`: 开始时间戳 (Unix Timestamp, float)
@@ -628,18 +715,42 @@ curl http://localhost:8080/api/analytics/cost-trends/1758820000/1758822000/10
     "time_points": [
       {
         "timestamp": 1758820200.0,
-        "cost": 0.025
+        "data": {
+          "cost": 0.025
+        }
       }
       // ... more data points
-    ]
+    ],
+    "mode_breakdown": {
+      "Chat": [
+        {
+          "timestamp": 1758820200.0,
+          "data": {
+            "cost": 0.020
+          }
+        }
+        // ... Chat模式的n_samples个数据点
+      ],
+      "Embedding": [
+        {
+          "timestamp": 1758820200.0,
+          "data": {
+            "cost": 0.005
+          }
+        }
+        // ... Embedding模式的n_samples个数据点
+      ]
+    }
   }
 }
 ```
 
 **返回字段说明**:
-- `time_points`: 时间点数据数组，长度等于 `n_samples`
+- `time_points`: **总体**时间点数据数组，长度等于 `n_samples`
   - `timestamp`: 每个采样区间的**结束时间戳**
-  - `cost`: 该时间区间的总成本（元）
+  - `data`:
+    - `cost`: 该时间区间的总成本（元）
+- `mode_breakdown`: 一个字典，键为模型模式，值为该模式下的时间点数据数组，结构与 `time_points` 相同。
 
 ---
 
@@ -972,7 +1083,7 @@ curl http://localhost:8080/api/data/storage/stats
 - `/v1/embeddings` - 文本嵌入
 - `/v1/rerank` - 重排序
 
-#### 13.1 聊天对话
+#### 26.1 聊天对话
 
 **接口地址**: `POST /v1/chat/completions`
 
@@ -1023,7 +1134,7 @@ curl -X POST http://localhost:8080/v1/chat/completions \
 }
 ```
 
-#### 13.2 文本补全
+#### 26.2 文本补全
 
 **接口地址**: `POST /v1/completions`
 
@@ -1068,7 +1179,7 @@ curl -X POST http://localhost:8080/v1/completions \
 }
 ```
 
-#### 13.3 文本嵌入
+#### 26.3 文本嵌入
 
 **接口地址**: `POST /v1/embeddings`
 
@@ -1109,7 +1220,7 @@ curl -X POST http://localhost:8080/v1/embeddings \
 }
 ```
 
-#### 13.4 重排序
+#### 26.4 重排序
 
 **接口地址**: `POST /v1/rerank`
 
