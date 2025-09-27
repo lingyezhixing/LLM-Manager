@@ -1,5 +1,5 @@
 import axios from 'axios'
-import { HealthResponse, ApiInfoResponse, ThroughputResponse, SessionConsumptionResponse } from '../types/api'
+import { HealthResponse, ApiInfoResponse, DevicesResponse, ThroughputResponse, SessionConsumptionResponse } from '../types/api'
 
 const API_BASE_URL = '/api'
 

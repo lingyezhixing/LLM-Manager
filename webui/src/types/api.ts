@@ -64,3 +64,22 @@ export interface SessionConsumptionResponse {
     session_total: SessionConsumption
   }
 }
+
+export interface ThroughputDataPoint {
+  timestamp: number
+  data: {
+    input_tokens_per_sec: number
+    output_tokens_per_sec: number
+    total_tokens_per_sec: number
+    cache_hit_tokens_per_sec: number
+    cache_miss_tokens_per_sec: number
+  }
+}
+
+export interface ThroughputResponse {
+  success: boolean
+  data: {
+    time_points: ThroughputDataPoint[]
+    mode_breakdown: Record<string, ThroughputDataPoint[]>
+  }
+}

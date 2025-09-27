@@ -208,6 +208,7 @@ body {
   width: 100%;
 }
 
+
 .section-title {
   font-size: 1.25rem;
   font-weight: 600;
@@ -378,10 +379,11 @@ body {
 
 .indicator-details {
   display: flex;
-  justify-content: space-between;
+  justify-content: flex-end;
   align-items: center;
   font-size: 0.7rem;
   color: #6b7280;
+  gap: 0.25rem;
 }
 
 .memory-used {
