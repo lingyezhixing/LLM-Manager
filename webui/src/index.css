@@ -213,7 +213,7 @@ body {
   font-size: 1.25rem;
   font-weight: 600;
   color: #1f2937;
-  margin-bottom: 1.5rem;
+  margin-bottom: 0.75rem;
 }
 
 .device-cards-container {
@@ -438,6 +438,251 @@ body {
   font-size: 0.875rem;
   color: #991b1b;
   margin-top: 0.5rem;
+}
+
+/* Session Consumption Card Styles */
+.session-consumption-card {
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 1rem;
+  height: 100%;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  display: flex;
+  flex-direction: column;
+}
+
+.session-consumption-card.loading,
+.session-consumption-card.error {
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+  color: #6b7280;
+  gap: 1rem;
+  min-height: 200px;
+}
+
+.session-consumption-card.error {
+  color: #dc2626;
+  background: #fee2e2;
+  border-color: #fecaca;
+}
+
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid #f3f4f6;
+}
+
+.card-title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #1f2937;
+  margin: 0;
+}
+
+.session-duration {
+  font-size: 0.75rem;
+  color: #6b7280;
+  font-weight: 500;
+}
+
+.consumption-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.875rem;
+}
+
+.consumption-row.main-cost {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.625rem;
+  background: #f8fafc;
+  border-radius: 6px;
+  border: 1px solid #e2e8f0;
+}
+
+.cost-label {
+  font-size: 0.825rem;
+  color: #374151;
+  font-weight: 500;
+}
+
+.cost-value {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: #059669;
+}
+
+.consumption-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.625rem;
+}
+
+.consumption-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1875rem;
+  padding: 0.4375rem;
+  background: #f9fafb;
+  border-radius: 4px;
+  border: 1px solid #f3f4f6;
+}
+
+.item-label {
+  font-size: 0.725rem;
+  color: #6b7280;
+  font-weight: 500;
+}
+
+.item-value {
+  font-size: 0.825rem;
+  font-weight: 600;
+  color: #1f2937;
+}
+
+.cache-hit-rate {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.625rem;
+  background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%);
+  border-radius: 6px;
+  border: 1px solid #93c5fd;
+}
+
+.rate-label {
+  font-size: 0.825rem;
+  color: #1e40af;
+  font-weight: 500;
+}
+
+.rate-value {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: #1d4ed8;
+}
+
+.no-data {
+  text-align: center;
+  color: #6b7280;
+  padding: 2rem;
+}
+
+/* Throughput Chart Styles */
+.throughput-chart {
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 1rem;
+  height: 100%;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  display: flex;
+  flex-direction: column;
+}
+
+.throughput-chart.loading,
+.throughput-chart.error {
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+  color: #6b7280;
+  gap: 1rem;
+  min-height: 300px;
+}
+
+.throughput-chart.error {
+  color: #dc2626;
+  background: #fee2e2;
+  border-color: #fecaca;
+}
+
+.chart-header {
+  margin-bottom: 1rem;
+}
+
+.chart-title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #1f2937;
+  margin: 0;
+}
+
+.chart-container {
+  flex: 1;
+  position: relative;
+  min-height: 250px;
+}
+
+/* Mode Throughput Chart Styles */
+.mode-throughput-chart {
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 1rem;
+  height: 100%;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  display: flex;
+  flex-direction: column;
+}
+
+.mode-throughput-chart.loading,
+.mode-throughput-chart.error {
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+  color: #6b7280;
+  gap: 1rem;
+  min-height: 250px;
+}
+
+.mode-throughput-chart.error {
+  color: #dc2626;
+  background: #fee2e2;
+  border-color: #fecaca;
+}
+
+/* Program Status Monitor Styles */
+.program-status-monitor {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+}
+
+.first-row {
+  display: flex;
+  gap: 1rem;
+  height: 350px;
+}
+
+.total-throughput-container {
+  flex: 5;
+  min-width: 0;
+}
+
+.consumption-card-container {
+  flex: 1;
+  min-width: 0;
+}
+
+.mode-charts-section {
+  margin-top: 1.5rem;
+}
+
+.mode-charts-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 1rem;
+}
+
+.mode-chart-item {
+  min-height: 300px;
 }
 
 
