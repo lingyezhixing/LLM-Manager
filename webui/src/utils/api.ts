@@ -1,5 +1,5 @@
 import axios from 'axios'
-import { HealthResponse, ApiInfoResponse } from '../types/api'
+import { HealthResponse, ApiInfoResponse, ThroughputResponse, SessionConsumptionResponse } from '../types/api'
 
 const API_BASE_URL = '/api'
 
@@ -38,6 +38,26 @@ export const apiService = {
       return response.data
     } catch (error) {
       console.error('Devices info failed:', error)
+      throw error
+    }
+  },
+
+  async getThroughput(startTime: number, endTime: number, nSamples: number): Promise<ThroughputResponse> {
+    try {
+      const response = await api.get(`/api/metrics/throughput/${startTime}/${endTime}/${nSamples}`)
+      return response.data
+    } catch (error) {
+      console.error('Throughput data failed:', error)
+      throw error
+    }
+  },
+
+  async getSessionConsumption(): Promise<SessionConsumptionResponse> {
+    try {
+      const response = await api.get('/api/metrics/throughput/current-session')
+      return response.data
+    } catch (error) {
+      console.error('Session consumption failed:', error)
       throw error
     }
   }

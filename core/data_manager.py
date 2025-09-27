@@ -26,9 +26,10 @@ class ModelRunTime:
 
 @dataclass
 class ModelRequest:
-    """模型请求记录"""
+    """模型请求记录 - 【已修改】"""
     id: int
-    timestamp: float
+    start_time: float  # 新增：请求开始时间
+    end_time: float    # 修改：原 timestamp 重命名为 end_time
     input_tokens: int
     output_tokens: int
     cache_n: int
@@ -55,7 +56,7 @@ class ModelBilling:
 class DatabaseConnectionPool:
     """线程安全的数据库连接池"""
 
-    def __init__(self, db_path: str, max_connections: int = 10):
+    def __init__(self, db_path: str, max_connections: int = 100):
         self.db_path = db_path
         self.max_connections = max_connections
         self.connections: List[sqlite3.Connection] = []
@@ -190,17 +191,38 @@ class Monitor:
                     )
                 ''')
 
-                # 创建模型请求记录表
+                # 【已修改】创建模型请求记录表，使用 start_time 和 end_time
                 cursor.execute(f'''
                     CREATE TABLE IF NOT EXISTS {safe_name}_requests (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        timestamp REAL NOT NULL,
+                        start_time REAL NOT NULL,
+                        end_time REAL NOT NULL,
                         input_tokens INTEGER NOT NULL,
                         output_tokens INTEGER NOT NULL,
                         cache_n INTEGER NOT NULL,
                         prompt_n INTEGER NOT NULL
                     )
                 ''')
+                
+                '''
+                # 【新增】数据库迁移逻辑，用于兼容旧版本
+                cursor.execute(f"PRAGMA table_info({safe_name}_requests)")
+                columns_info = cursor.fetchall()
+                columns = {col['name'] for col in columns_info}
+
+                if 'timestamp' in columns and 'end_time' not in columns:
+                    logger.info(f"正在迁移表 {safe_name}_requests: 重命名 timestamp -> end_time")
+                    cursor.execute(f"ALTER TABLE {safe_name}_requests RENAME COLUMN timestamp TO end_time")
+                    columns.remove('timestamp')
+                    columns.add('end_time')
+
+                if 'start_time' not in columns:
+                    logger.info(f"正在迁移表 {safe_name}_requests: 添加 start_time 列")
+                    cursor.execute(f"ALTER TABLE {safe_name}_requests ADD COLUMN start_time REAL NOT NULL DEFAULT 0")
+                    # 对于旧数据，用 end_time 填充 start_time
+                    cursor.execute(f"UPDATE {safe_name}_requests SET start_time = end_time WHERE start_time = 0")
+                    columns.add('start_time')
+                '''
 
                 # 创建模型按量分阶计费表
                 cursor.execute(f'''
@@ -340,28 +362,28 @@ class Monitor:
             ''', (end_time,))
             conn.commit()
 
-    def add_model_request(self, model_name: str, request_data: List[Union[float, int, int, int, int]]):
+    def add_model_request(self, model_name: str, request_data: List[Union[float, float, int, int, int, int]]):
         """
-        添加模型请求记录
+        【已修改】添加模型请求记录
 
         Args:
             model_name: 模型名称
-            request_data: [时间戳, 输入token数, 输出token数, cache_n, prompt_n]
+            request_data: [start_time, end_time, input_tokens, output_tokens, cache_n, prompt_n]
         """
-        if len(request_data) != 5:
-            raise ValueError("请求数据格式错误，应为 [时间戳, 输入token数, 输出token数, cache_n, prompt_n]")
+        if len(request_data) != 6:
+            raise ValueError("请求数据格式错误，应为 [start_time, end_time, input_tokens, output_tokens, cache_n, prompt_n]")
 
         safe_name = self.get_model_safe_name(model_name)
         if not safe_name:
             raise ValueError(f"模型 '{model_name}' 不存在")
 
-        timestamp, input_tokens, output_tokens, cache_n, prompt_n = request_data
+        start_time, end_time, input_tokens, output_tokens, cache_n, prompt_n = request_data
         with get_db_connection(self.connection_pool) as conn:
             cursor = conn.cursor()
             cursor.execute(f'''
-                INSERT INTO {safe_name}_requests (timestamp, input_tokens, output_tokens, cache_n, prompt_n)
-                VALUES (?, ?, ?, ?, ?)
-            ''', (timestamp, input_tokens, output_tokens, cache_n, prompt_n))
+                INSERT INTO {safe_name}_requests (start_time, end_time, input_tokens, output_tokens, cache_n, prompt_n)
+                VALUES (?, ?, ?, ?, ?, ?)
+            ''', (start_time, end_time, input_tokens, output_tokens, cache_n, prompt_n))
             conn.commit()
 
     def add_tier_pricing(self, model_name: str, tier_data: List[Union[int, int, int, float, float, bool, float]]):
@@ -527,7 +549,7 @@ class Monitor:
                     ORDER BY id DESC
                 ''')
 
-            return [ModelRunTime(row[0], row[1], row[2]) for row in cursor.fetchall()]
+            return [ModelRunTime(row['id'], row['start_time'], row['end_time']) for row in cursor.fetchall()]
 
     def get_model_runtime(self, model_name: str, limit: int = 0) -> List[ModelRunTime]:
         """
@@ -557,7 +579,7 @@ class Monitor:
                     ORDER BY id DESC
                 ''')
 
-            return [ModelRunTime(row[0], row[1], row[2]) for row in cursor.fetchall()]
+            return [ModelRunTime(row['id'], row['start_time'], row['end_time']) for row in cursor.fetchall()]
 
     def get_model_requests(self, model_name: str, start_time: float = 0, end_time: float = 0, buffer_count: int = 20) -> List[ModelRequest]:
         """
@@ -584,11 +606,11 @@ class Monitor:
 
         with get_db_connection(self.connection_pool) as conn:
             cursor = conn.cursor()
-            # 从最新的记录开始反向查询
+            # 【已修改】从最新的记录开始反向查询，基于 end_time
             cursor.execute(f'''
-                SELECT id, timestamp, input_tokens, output_tokens, cache_n, prompt_n
+                SELECT id, start_time, end_time, input_tokens, output_tokens, cache_n, prompt_n
                 FROM {safe_name}_requests
-                WHERE timestamp < ?
+                WHERE end_time <= ?
                 ORDER BY id DESC
             ''', (end_time,))
 
@@ -600,12 +622,21 @@ class Monitor:
                 row = cursor.fetchone()
                 if not row:
                     break
-
-                req = ModelRequest(row[0], row[1], row[2], row[3], row[4], row[5])
+                
+                # 【已修改】使用新的 ModelRequest 结构
+                req = ModelRequest(
+                    id=row['id'],
+                    start_time=row['start_time'],
+                    end_time=row['end_time'],
+                    input_tokens=row['input_tokens'],
+                    output_tokens=row['output_tokens'],
+                    cache_n=row['cache_n'],
+                    prompt_n=row['prompt_n']
+                )
                 candidate_requests.append(req)
 
                 # 检查是否触及左边界
-                if start_time > 0 and not boundary_found and req.timestamp < start_time:
+                if start_time > 0 and not boundary_found and req.end_time < start_time:
                     boundary_found = True
                 
                 # 如果触及边界，开始倒数 buffer 数量
@@ -614,14 +645,14 @@ class Monitor:
                     if buffer_countdown <= 0:
                         break
             
-            # 在内存中进行最终的精确过滤
+            # 【已修改】在内存中进行最终的精确过滤，基于 end_time
             final_requests = [
                 req for req in candidate_requests 
-                if req.timestamp >= start_time
+                if req.end_time >= start_time
             ]
             
-            # 返回前按时间正序排列
-            return sorted(final_requests, key=lambda r: r.timestamp)
+            # 【已修改】返回前按结束时间正序排列
+            return sorted(final_requests, key=lambda r: r.end_time)
 
     def get_model_billing(self, model_name: str) -> Optional[ModelBilling]:
         """
@@ -648,13 +679,13 @@ class Monitor:
             if not billing_result:
                 return None
 
-            use_tier_pricing = bool(billing_result[0])
+            use_tier_pricing = bool(billing_result['use_tier_pricing'])
 
             # 获取按时价格
             cursor.execute(f'''
                 SELECT hourly_price FROM {safe_name}_hourly_price WHERE id = 1
             ''')
-            hourly_price = cursor.fetchone()[0]
+            hourly_price = cursor.fetchone()['hourly_price']
 
             # 获取阶梯价格
             cursor.execute(f'''
@@ -666,7 +697,7 @@ class Monitor:
             ''')
 
             tier_pricing = [
-                TierPricing(row[0], row[1], row[2], row[3], row[4], bool(row[5]), row[6])
+                TierPricing(row['tier_index'], row['start_tokens'], row['end_tokens'], row['input_price_per_million'], row['output_price_per_million'], bool(row['support_cache']), row['cache_hit_price_per_million'])
                 for row in cursor.fetchall()
             ]
 

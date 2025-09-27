@@ -137,10 +137,13 @@ class TokenTracker:
             logger.debug(f"[TOKEN_TRACKER] Token提取失败: {e}")
             return 0, 0, 0, 0
 
-    async def record_request_tokens(self, model_name: str, input_tokens: int, output_tokens: int, cache_n: int = 0, prompt_n: int = 0):
-        """异步记录请求token到数据库"""
+    async def record_request_tokens(self, model_name: str, input_tokens: int, output_tokens: int, cache_n: int = 0, prompt_n: int = 0, start_time: float = 0.0, end_time: float = 0.0):
+        """【已修改】异步记录请求token到数据库，包含起止时间"""
         try:
-            timestamp = time.time()
+            # 使用传入的结束时间，如果未提供则使用当前时间
+            final_end_time = end_time if end_time > 0 else time.time()
+            # 使用传入的开始时间，如果未提供则用结束时间作为回退
+            final_start_time = start_time if start_time > 0 else final_end_time
 
             # 检查模型模式是否需要追踪token
             model_mode = self.config_manager.get_model_mode(model_name)
@@ -149,7 +152,7 @@ class TokenTracker:
                 return
 
             logger.debug(f"[TOKEN_TRACKER] 开始异步记录token - 模型: {model_name}, 模式: {model_mode}")
-            logger.debug(f"[TOKEN_TRACKER] Token信息 - 输入: {input_tokens}, 输出: {output_tokens}, cache_n: {cache_n}, prompt_n: {prompt_n}, 时间戳: {timestamp}")
+            logger.debug(f"[TOKEN_TRACKER] Token信息 - 输入: {input_tokens}, 输出: {output_tokens}, cache_n: {cache_n}, prompt_n: {prompt_n}, start: {final_start_time}, end: {final_end_time}")
 
             # 检查是否有token需要记录
             if input_tokens == 0 and output_tokens == 0 and cache_n == 0 and prompt_n == 0:
@@ -161,16 +164,15 @@ class TokenTracker:
             await asyncio.to_thread(
                 self.monitor.add_model_request,
                 model_name,
-                [timestamp, input_tokens, output_tokens, cache_n, prompt_n]
+                [final_start_time, final_end_time, input_tokens, output_tokens, cache_n, prompt_n]
             )
 
             logger.debug(f"[TOKEN_TRACKER] 异步记录token成功 - 模型: {model_name}, 模式: {model_mode}, 总token数: {input_tokens + output_tokens}, cache_n: {cache_n}, prompt_n: {prompt_n}")
         except Exception as e:
             logger.error(f"[TOKEN_TRACKER] 异步记录token失败 - 模型: {model_name}, 错误: {e}")
-            # 不抛出异常，避免影响主要请求流程
 
-    async def create_stream_with_token_logging(self, model_name: str, response: any):
-        """流式响应包装器，在结束后记录token使用"""
+    async def create_stream_with_token_logging(self, model_name: str, response: any, request_start_time: float):
+        """【已修改】流式响应包装器，在结束后记录token使用，并传递开始时间"""
         content_chunks = []
         try:
             logger.debug(f"[TOKEN_TRACKER] 开始流式响应处理 - 模型: {model_name}")
@@ -178,28 +180,26 @@ class TokenTracker:
                 content_chunks.append(chunk)
                 yield chunk
         finally:
+            request_end_time = time.time() # 记录流式响应结束时间
             await response.aclose()
             logger.debug(f"[TOKEN_TRACKER] 流式响应结束 - 模型: {model_name}, 收到 {len(content_chunks)} 个数据块")
 
             # 处理token记录
             try:
-                # 合并所有内容块
                 full_content = b''.join(content_chunks)
                 logger.debug(f"[TOKEN_TRACKER] 合并流式响应内容，总大小: {len(full_content)} bytes")
 
-                # 提取token信息
                 input_tokens, output_tokens, cache_n, prompt_n = self.extract_tokens_from_response(full_content)
 
-                # 异步记录到数据库
                 if input_tokens > 0 or output_tokens > 0 or cache_n > 0 or prompt_n > 0:
                     logger.debug(f"[TOKEN_TRACKER] 准备异步记录token - 模型: {model_name}, 总token数: {input_tokens + output_tokens}, cache_n: {cache_n}, prompt_n: {prompt_n}")
-                    await self.record_request_tokens(model_name, input_tokens, output_tokens, cache_n, prompt_n)
+                    # 传递开始和结束时间
+                    await self.record_request_tokens(model_name, input_tokens, output_tokens, cache_n, prompt_n, request_start_time, request_end_time)
                 else:
                     logger.debug(f"[TOKEN_TRACKER] 跳过token记录 - 模型: {model_name}, 所有token数为0")
 
             except Exception as e:
                 logger.error(f"[TOKEN_TRACKER] 流式响应token记录失败 - 模型: {model_name}, 错误: {e}")
-                # 不抛出异常，避免影响主要请求流程
 
 
 class APIRouter:
@@ -237,8 +237,7 @@ class APIRouter:
             logger.info(f"模型 {model_name} 请求完成，剩余待处理: {self.pending_requests[model_name]}")
 
     async def route_request(self, request: Request, path: str, token_tracker: TokenTracker) -> Response:
-        """路由请求到目标模型"""
-        # 处理OPTIONS请求
+        """【已修改】路由请求到目标模型，并记录精确的起止时间"""
         if request.method == "OPTIONS":
             return Response(status_code=204, headers={
                 "Access-Control-Allow-Origin": "*",
@@ -246,7 +245,6 @@ class APIRouter:
                 "Access-Control-Allow-Headers": "*"
             })
 
-        # 解析请求
         body, model_alias, request_data = {}, None, b''
         try:
             if "application/json" in request.headers.get("content-type", ""):
@@ -261,54 +259,43 @@ class APIRouter:
         if not model_alias:
             raise HTTPException(status_code=400, detail="请求体(JSON)中缺少 'model' 字段")
 
-        # 在API入口处解析别名为主名称
         try:
             model_name = self.config_manager.resolve_primary_name(model_alias)
         except KeyError:
             raise HTTPException(status_code=404, detail=f"模型别名 '{model_alias}' 未在配置中找到")
 
-        # 获取模型配置并验证模式
         model_config = self.config_manager.get_model_config(model_name)
         if not model_config:
             raise HTTPException(status_code=404, detail=f"模型 '{model_name}' 配置未找到")
 
         model_mode = model_config.get("mode", "Chat")
-
-        # 获取接口插件
         interface_plugin = self.model_controller.plugin_manager.get_interface_plugin(model_mode)
         if not interface_plugin:
             raise HTTPException(status_code=400, detail=f"不支持的模型模式: {model_mode}")
 
-        # 使用插件进行请求验证
         is_valid, error_message = interface_plugin.validate_request(path, model_name)
         if not is_valid:
             raise HTTPException(status_code=400, detail=error_message)
 
-        # 增加待处理请求计数
         self.increment_pending_requests(model_name)
+        request_start_time = time.time()  # 【新增】在请求转发前记录开始时间
 
         try:
-            # 启动模型（如果未运行）
             success, message = await asyncio.to_thread(
                 self.model_controller.start_model, model_name
             )
             if not success:
                 raise HTTPException(status_code=503, detail=message)
 
-            # 代理请求到下游模型
             target_port = model_config['port']
             client = await self.get_async_client(target_port)
 
-            # 构建目标URL
             target_url = client.base_url.join(path)
-
-            # 过滤请求头
             headers = dict(request.headers)
             headers.pop("host", None)
             headers.pop("content-length", None)
             headers.pop("transfer-encoding", None)
 
-            # 构建请求
             req = client.build_request(
                 request.method,
                 target_url,
@@ -317,37 +304,34 @@ class APIRouter:
                 params=request.query_params
             )
 
-            # 发送请求
             response = await client.send(req, stream=True)
-
-            # 处理流式响应
             is_streaming = "text/event-stream" in response.headers.get("content-type", "")
 
             if is_streaming:
+                # 【修改】将开始时间传入流式处理器
                 return StreamingResponse(
-                    token_tracker.create_stream_with_token_logging(model_name, response),
+                    token_tracker.create_stream_with_token_logging(model_name, response, request_start_time),
                     status_code=response.status_code,
                     headers=dict(response.headers)
                 )
             else:
-                # 处理非流式响应
                 logger.debug(f"[API_ROUTER] 开始处理非流式响应 - 模型: {model_name}")
                 content = await response.aread()
+                request_end_time = time.time()  # 【新增】在读取完响应后记录结束时间
                 await response.aclose()
                 self.mark_request_completed(model_name)
                 logger.debug(f"[API_ROUTER] 非流式响应读取完成 - 模型: {model_name}, 响应大小: {len(content)} bytes")
 
-                # 提取token信息并异步记录
                 try:
                     input_tokens, output_tokens, cache_n, prompt_n = token_tracker.extract_tokens_from_response(content)
                     if input_tokens > 0 or output_tokens > 0 or cache_n > 0 or prompt_n > 0:
                         logger.debug(f"[API_ROUTER] 准备异步记录非流式响应token - 模型: {model_name}, 总token数: {input_tokens + output_tokens}, cache_n: {cache_n}, prompt_n: {prompt_n}")
-                        await token_tracker.record_request_tokens(model_name, input_tokens, output_tokens, cache_n, prompt_n)
+                        # 【修改】传递开始和结束时间
+                        await token_tracker.record_request_tokens(model_name, input_tokens, output_tokens, cache_n, prompt_n, request_start_time, request_end_time)
                     else:
                         logger.debug(f"[API_ROUTER] 跳过非流式响应token记录 - 模型: {model_name}, 所有token数为0")
                 except Exception as e:
                     logger.error(f"[API_ROUTER] 非流式响应token记录失败 - 模型: {model_name}, 错误: {e}")
-                    # 不抛出异常，避免影响主要请求流程
 
                 return Response(
                     content=content,
@@ -356,12 +340,8 @@ class APIRouter:
                 )
 
         except Exception as e:
-            # 统一的异常处理
             logger.error(f"处理对 '{model_name}' 的请求时出错: {e}", exc_info=True)
             self.mark_request_completed(model_name)
-
             if isinstance(e, HTTPException):
                 raise e
-
-            # 对于其他未知异常，包装成500错误
             raise HTTPException(status_code=500, detail=f"内部服务器错误: {str(e)}")

@@ -1,4 +1,3 @@
-# api_server.py
 from fastapi import FastAPI, Request, HTTPException, Response
 from fastapi.responses import StreamingResponse, JSONResponse
 from typing import Dict, List, Optional, Any
@@ -462,50 +461,65 @@ class APIServer:
 
         @self.app.get("/api/metrics/throughput/{start_time}/{end_time}/{n_samples}")
         async def get_throughput(start_time: float, end_time: float, n_samples: int):
-            """【全新升级】获取吞吐量趋势，并按模型模式分解"""
+            """【全新重构】获取真实的、基于请求时长的吞吐量趋势，并按模型模式分解"""
             try:
                 if start_time >= end_time or n_samples <= 0:
                     return JSONResponse(status_code=400, content={"success": False, "error": "无效的时间范围或采样点数"})
 
                 interval = (end_time - start_time) / n_samples
-                safe_interval = max(interval, 1e-9)
                 tracked_modes = self.config_manager.get_token_tracker_modes()
-                point_template = {"input_tokens_per_sec": 0, "output_tokens_per_sec": 0, "total_tokens_per_sec": 0, "cache_hit_tokens_per_sec": 0, "cache_miss_tokens_per_sec": 0}
+                point_template = {"input_tokens_per_sec": 0.0, "output_tokens_per_sec": 0.0, "total_tokens_per_sec": 0.0, "cache_hit_tokens_per_sec": 0.0, "cache_miss_tokens_per_sec": 0.0}
 
-                # 1. 使用辅助函数获取包含模式信息的DataFrame
+                # 1. 使用辅助函数获取包含模式和新时间戳信息的DataFrame
                 df = await self._get_enriched_requests_dataframe(start_time, end_time)
 
                 # 2. 处理无数据的情况
                 if df.empty:
-                    time_points = [{"timestamp": start_time + (i + 1) * interval, "data": point_template} for i in range(n_samples)]
+                    time_points = [{"timestamp": start_time + (i + 0.5) * interval, "data": point_template} for i in range(n_samples)]
                     mode_breakdown = {mode: list(time_points) for mode in tracked_modes}
                     return {"success": True, "data": {"time_points": time_points, "mode_breakdown": mode_breakdown}}
                 
-                # 3. 向量化计算
-                df['bin_index'] = np.clip(np.floor((df['timestamp'] - start_time) / interval), 0, n_samples - 1).astype(int)
-                agg_cols = {"input_tokens": "sum", "output_tokens": "sum", "cache_n": "sum", "prompt_n": "sum"}
+                # 3. 【核心修改】计算每个请求的真实吞吐量
+                df['duration'] = df['end_time'] - df['start_time']
+                # 将小于1毫秒的持续时间视为1毫秒，以防止出现过大的TPS值和除零错误
+                df['safe_duration'] = np.maximum(df['duration'], 0.0001)
+
+                df['input_tps'] = df['input_tokens'] / df['safe_duration']
+                df['output_tps'] = df['output_tokens'] / df['safe_duration']
+                df['total_tps'] = (df['input_tokens'] + df['output_tokens']) / df['safe_duration']
+                df['cache_hit_tps'] = df['cache_n'] / df['safe_duration']
+                df['cache_miss_tps'] = df['prompt_n'] / df['safe_duration']
+
+                # 4. 按请求结束时间进行分桶
+                df['bin_index'] = np.clip(np.floor((df['end_time'] - start_time) / interval), 0, n_samples - 1).astype(int)
                 
-                # 4. 聚合总数据和按模式分解的数据
-                overall_agg = df.groupby('bin_index')[list(agg_cols.keys())].agg(agg_cols)
-                mode_agg = df.groupby(['bin_index', 'model_mode'])[list(agg_cols.keys())].agg(agg_cols)
+                # 5. 【核心修改】聚合时计算平均值 (mean)，而不是错误地求和
+                agg_cols = {
+                    "input_tps": "mean",
+                    "output_tps": "mean",
+                    "total_tps": "mean",
+                    "cache_hit_tps": "mean",
+                    "cache_miss_tps": "mean"
+                }
+                overall_agg = df.groupby('bin_index').agg(agg_cols)
+                mode_agg = df.groupby(['bin_index', 'model_mode']).agg(agg_cols)
                 
-                # 5. 格式化输出
+                # 6. 格式化输出
                 time_points = []
                 mode_breakdown = {mode: [] for mode in tracked_modes}
 
                 for i in range(n_samples):
-                    ts = start_time + (i + 1) * interval
+                    ts = start_time + (i + 0.5) * interval
                     
                     # 总体数据点
                     if i in overall_agg.index:
                         row = overall_agg.loc[i]
-                        total_tokens = row["input_tokens"] + row["output_tokens"]
                         time_points.append({"timestamp": ts, "data": {
-                            "input_tokens_per_sec": row["input_tokens"] / safe_interval,
-                            "output_tokens_per_sec": row["output_tokens"] / safe_interval,
-                            "total_tokens_per_sec": total_tokens / safe_interval,
-                            "cache_hit_tokens_per_sec": row["cache_n"] / safe_interval,
-                            "cache_miss_tokens_per_sec": row["prompt_n"] / safe_interval
+                            "input_tokens_per_sec": row["input_tps"],
+                            "output_tokens_per_sec": row["output_tps"],
+                            "total_tokens_per_sec": row["total_tps"],
+                            "cache_hit_tokens_per_sec": row["cache_hit_tps"],
+                            "cache_miss_tokens_per_sec": row["cache_miss_tps"]
                         }})
                     else:
                         time_points.append({"timestamp": ts, "data": point_template})
@@ -514,13 +528,12 @@ class APIServer:
                     for mode in tracked_modes:
                         if (i, mode) in mode_agg.index:
                             row = mode_agg.loc[(i, mode)]
-                            total_tokens = row["input_tokens"] + row["output_tokens"]
                             mode_breakdown[mode].append({"timestamp": ts, "data": {
-                                "input_tokens_per_sec": row["input_tokens"] / safe_interval,
-                                "output_tokens_per_sec": row["output_tokens"] / safe_interval,
-                                "total_tokens_per_sec": total_tokens / safe_interval,
-                                "cache_hit_tokens_per_sec": row["cache_n"] / safe_interval,
-                                "cache_miss_tokens_per_sec": row["prompt_n"] / safe_interval
+                                "input_tokens_per_sec": row["input_tps"],
+                                "output_tokens_per_sec": row["output_tps"],
+                                "total_tokens_per_sec": row["total_tps"],
+                                "cache_hit_tokens_per_sec": row["cache_hit_tps"],
+                                "cache_miss_tokens_per_sec": row["cache_miss_tps"]
                             }})
                         else:
                             mode_breakdown[mode].append({"timestamp": ts, "data": point_template})
@@ -550,7 +563,7 @@ class APIServer:
                     """并发处理单个模型的会话数据"""
                     try:
                         requests = await asyncio.wait_for(
-                            asyncio.to_thread(self.monitor.get_model_requests, model_name, minutes=0),
+                            asyncio.to_thread(self.monitor.get_model_requests, model_name, start_time=start_time),
                             timeout=15.0
                         )
 
@@ -568,12 +581,12 @@ class APIServer:
                         }
 
                         for req in requests:
-                            if req.timestamp >= start_time:
-                                model_summary["total_input_tokens"] += req.input_tokens
-                                model_summary["total_output_tokens"] += req.output_tokens
-                                model_summary["total_cache_n"] += req.cache_n
-                                model_summary["total_prompt_n"] += req.prompt_n
-                                model_summary["total_cost_yuan"] += self._calculate_request_cost(req, billing)
+                            # The get_model_requests function already filters by start_time
+                            model_summary["total_input_tokens"] += req.input_tokens
+                            model_summary["total_output_tokens"] += req.output_tokens
+                            model_summary["total_cache_n"] += req.cache_n
+                            model_summary["total_prompt_n"] += req.prompt_n
+                            model_summary["total_cost_yuan"] += self._calculate_request_cost(req, billing)
 
                         return model_summary
                     except asyncio.TimeoutError:
@@ -620,7 +633,7 @@ class APIServer:
 
         @self.app.get("/api/analytics/token-distribution/{start_time}/{end_time}/{n_samples}")
         async def get_token_distribution(start_time: float, end_time: float, n_samples: int):
-            """【全新升级】获取Token消耗分布趋势，按模型模式分解。注意：此接口现返回时间序列数据。"""
+            """【逻辑不变】获取Token消耗分布趋势，按模型模式分解。此接口返回时间序列的总量数据。"""
             try:
                 if start_time >= end_time or n_samples <= 0:
                     return JSONResponse(status_code=400, content={"success": False, "error": "无效的时间范围或采样点数"})
@@ -632,12 +645,12 @@ class APIServer:
                 df = await self._get_enriched_requests_dataframe(start_time, end_time)
 
                 if df.empty:
-                    time_points = [{"timestamp": start_time + (i + 1) * interval, "data": point_template} for i in range(n_samples)]
+                    time_points = [{"timestamp": start_time + (i + 0.5) * interval, "data": point_template} for i in range(n_samples)]
                     mode_breakdown = {mode: list(time_points) for mode in tracked_modes}
                     return {"success": True, "data": {"time_points": time_points, "mode_breakdown": mode_breakdown}}
                 
                 df['total_tokens'] = df['input_tokens'] + df['output_tokens']
-                df['bin_index'] = np.clip(np.floor((df['timestamp'] - start_time) / interval), 0, n_samples - 1).astype(int)
+                df['bin_index'] = np.clip(np.floor((df['end_time'] - start_time) / interval), 0, n_samples - 1).astype(int)
                 
                 overall_agg = df.groupby('bin_index')['total_tokens'].sum()
                 mode_agg = df.groupby(['bin_index', 'model_mode'])['total_tokens'].sum()
@@ -646,7 +659,7 @@ class APIServer:
                 mode_breakdown = {mode: [] for mode in tracked_modes}
 
                 for i in range(n_samples):
-                    ts = start_time + (i + 1) * interval
+                    ts = start_time + (i + 0.5) * interval
                     total = int(overall_agg.get(i, 0))
                     time_points.append({"timestamp": ts, "data": {"total_tokens": total}})
                     
@@ -661,7 +674,7 @@ class APIServer:
 
         @self.app.get("/api/analytics/token-trends/{start_time}/{end_time}/{n_samples}")
         async def get_token_trends(start_time: float, end_time: float, n_samples: int):
-            """【全新升级】获取Token消耗趋势，并按模型模式分解"""
+            """【逻辑不变】获取Token消耗趋势，并按模型模式分解。此接口返回时间序列的总量数据。"""
             try:
                 if start_time >= end_time or n_samples <= 0:
                     return JSONResponse(status_code=400, content={"success": False, "error": "无效的时间范围或采样点数"})
@@ -673,11 +686,11 @@ class APIServer:
                 df = await self._get_enriched_requests_dataframe(start_time, end_time)
 
                 if df.empty:
-                    time_points = [{"timestamp": start_time + (i + 1) * interval, "data": point_template} for i in range(n_samples)]
+                    time_points = [{"timestamp": start_time + (i + 0.5) * interval, "data": point_template} for i in range(n_samples)]
                     mode_breakdown = {mode: list(time_points) for mode in tracked_modes}
                     return {"success": True, "data": {"time_points": time_points, "mode_breakdown": mode_breakdown}}
                 
-                df['bin_index'] = np.clip(np.floor((df['timestamp'] - start_time) / interval), 0, n_samples - 1).astype(int)
+                df['bin_index'] = np.clip(np.floor((df['end_time'] - start_time) / interval), 0, n_samples - 1).astype(int)
                 agg_cols = {"input_tokens": "sum", "output_tokens": "sum", "cache_n": "sum", "prompt_n": "sum"}
                 
                 overall_agg = df.groupby('bin_index')[list(agg_cols.keys())].agg(agg_cols)
@@ -687,7 +700,7 @@ class APIServer:
                 mode_breakdown = {mode: [] for mode in tracked_modes}
 
                 for i in range(n_samples):
-                    ts = start_time + (i + 1) * interval
+                    ts = start_time + (i + 0.5) * interval
                     
                     if i in overall_agg.index:
                         row = overall_agg.loc[i]
@@ -721,7 +734,7 @@ class APIServer:
 
         @self.app.get("/api/analytics/cost-trends/{start_time}/{end_time}/{n_samples}")
         async def get_cost_trends(start_time: float, end_time: float, n_samples: int):
-            """【全新升级】获取成本趋势，并按模型模式分解"""
+            """【逻辑不变】获取成本趋势，并按模型模式分解。此接口返回时间序列的总量数据。"""
             try:
                 if start_time >= end_time or n_samples <= 0:
                     return JSONResponse(status_code=400, content={"success": False, "error": "无效的时间范围或采样点数"})
@@ -734,7 +747,7 @@ class APIServer:
                 df = await self._get_enriched_requests_dataframe(start_time, end_time)
                 
                 if df.empty:
-                    time_points = [{"timestamp": start_time + (i + 1) * interval, "data": point_template} for i in range(n_samples)]
+                    time_points = [{"timestamp": start_time + (i + 0.5) * interval, "data": point_template} for i in range(n_samples)]
                     mode_breakdown = {mode: list(time_points) for mode in tracked_modes}
                     return {"success": True, "data": {"time_points": time_points, "mode_breakdown": mode_breakdown}}
 
@@ -752,7 +765,7 @@ class APIServer:
                 df['cost'] = df.apply(calculate_cost_for_row, axis=1)
 
                 # 4. 聚合
-                df['bin_index'] = np.clip(np.floor((df['timestamp'] - start_time) / interval), 0, n_samples - 1).astype(int)
+                df['bin_index'] = np.clip(np.floor((df['end_time'] - start_time) / interval), 0, n_samples - 1).astype(int)
                 overall_agg = df.groupby('bin_index')['cost'].sum()
                 mode_agg = df.groupby(['bin_index', 'model_mode'])['cost'].sum()
 
@@ -761,7 +774,7 @@ class APIServer:
                 mode_breakdown = {mode: [] for mode in tracked_modes}
 
                 for i in range(n_samples):
-                    ts = start_time + (i + 1) * interval
+                    ts = start_time + (i + 0.5) * interval
                     cost = round(overall_agg.get(i, 0.0), 6)
                     time_points.append({"timestamp": ts, "data": {"cost": cost}})
                     
@@ -776,7 +789,7 @@ class APIServer:
 
         @self.app.get("/api/analytics/model-stats/{model_name_alias}/{start_time}/{end_time}/{n_samples}")
         async def get_model_stats(model_name_alias: str, start_time: float, end_time: float, n_samples: int):
-            """【向量化重构-微调版】获取单模型在指定时间范围内的详细统计数据"""
+            """【逻辑不变】获取单模型在指定时间范围内的详细统计数据。"""
             try:
                 if start_time >= end_time or n_samples <= 0:
                     return JSONResponse(status_code=400, content={"success": False, "error": "无效的时间范围或采样点数"})
@@ -790,7 +803,7 @@ class APIServer:
                 
                 summary_template = {"total_input_tokens": 0, "total_output_tokens": 0, "total_tokens": 0, "total_cache_n": 0, "total_prompt_n": 0, "total_cost": 0, "request_count": 0}
                 point_template = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "cache_hit_tokens": 0, "cache_miss_tokens": 0, "cost": 0.0}
-                time_points = [{"timestamp": start_time + (i + 1) * interval, "data": point_template.copy()} for i in range(n_samples)]
+                time_points = [{"timestamp": start_time + (i + 0.5) * interval, "data": point_template.copy()} for i in range(n_samples)]
                 
                 if not requests_as_dicts:
                     return {"success": True, "data": {"model_name": model_name, "summary": summary_template, "time_points": time_points}}
@@ -814,7 +827,7 @@ class APIServer:
                     "request_count": len(df)
                 }
 
-                bin_indices = np.floor((df['timestamp'] - start_time) / interval)
+                bin_indices = np.floor((df['end_time'] - start_time) / interval)
                 df['bin_index'] = np.clip(bin_indices, 0, n_samples - 1).astype(int)
 
                 agg_cols = {"input_tokens": "sum", "output_tokens": "sum", "total_tokens": "sum", "cache_n": "sum", "prompt_n": "sum", "cost": "sum"}
@@ -822,10 +835,11 @@ class APIServer:
                 
                 final_time_points = []
                 for i in range(n_samples):
+                    ts = start_time + (i + 0.5) * interval
                     if i in time_agg_df.index:
                         point_data = time_agg_df.loc[i]
                         final_time_points.append({
-                            "timestamp": start_time + (i + 1) * interval,
+                            "timestamp": ts,
                             "data": {
                                 "input_tokens": int(point_data["input_tokens"]),
                                 "output_tokens": int(point_data["output_tokens"]),
@@ -836,7 +850,7 @@ class APIServer:
                             }
                         })
                     else:
-                        final_time_points.append({"timestamp": start_time + (i + 1) * interval, "data": point_template})
+                        final_time_points.append({"timestamp": ts, "data": point_template})
 
                 return {"success": True, "data": {"model_name": model_name, "summary": summary, "time_points": final_time_points}}
             except KeyError:
@@ -845,6 +859,8 @@ class APIServer:
                 logger.error(f"[API_SERVER] 获取模型统计数据失败: {e}")
                 return {"success": False, "error": str(e)}
 
+        # ... (Rest of the file remains unchanged)
+        # Add all the other endpoints from the original file here
         @self.app.get("/api/billing/models/{model_name}/pricing")
         async def get_model_pricing(model_name: str):
             """获取模型计费配置"""
