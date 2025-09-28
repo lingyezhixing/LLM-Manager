@@ -1,9 +1,6 @@
 import openai
 import time
-from typing import Dict, Any, Tuple, Optional, Set
-from fastapi import FastAPI, Request, HTTPException
-from fastapi.responses import StreamingResponse, JSONResponse
-import httpx
+from typing import Tuple, Set
 import logging
 from plugins.interfaces.base import InterfacePlugin
 
