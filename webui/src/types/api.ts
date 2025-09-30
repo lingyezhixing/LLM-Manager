@@ -64,3 +64,60 @@ export interface SessionConsumptionResponse {
     session_total: SessionConsumption
   }
 }
+
+// Model Management Types
+export interface OpenAIModel {
+  id: string
+  object: 'model'
+  created: number
+  owned_by: string
+  aliases: string[]
+  mode: 'Chat' | 'Base' | 'Embedding' | 'Reranker'
+}
+
+export interface OpenAIModelsResponse {
+  object: 'list'
+  data: OpenAIModel[]
+}
+
+export interface ModelInfo {
+  model_name: string
+  aliases: string[]
+  status: 'stopped' | 'starting' | 'routing' | 'failed'
+  pid: number | null
+  idle_time_sec: string
+  mode: 'Chat' | 'Base' | 'Embedding' | 'Reranker'
+  is_available: boolean
+  current_bat_path: string
+  config_source: string
+  failure_reason: string | null
+  pending_requests: number
+}
+
+export interface ModelsResponse {
+  success: boolean
+  models: Record<string, ModelInfo>
+  total_models: number
+  running_models: number
+  total_pending_requests: number
+}
+
+export interface ModelActionResponse {
+  success: boolean
+  message: string
+}
+
+export interface LogStreamData {
+  type: 'historical' | 'historical_complete' | 'realtime' | 'stream_end' | 'error'
+  log?: {
+    timestamp: number
+    message: string
+  } | string
+  message?: string
+}
+
+export interface LogStreamOptions {
+  onMessage: (data: LogStreamData) => void
+  onError?: (error: Event) => void
+  onClose?: () => void
+}

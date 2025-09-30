@@ -1,11 +1,22 @@
 import axios from 'axios'
-import { HealthResponse, ApiInfoResponse, DevicesResponse, ThroughputResponse, SessionConsumptionResponse } from '../types/api'
+import {
+  HealthResponse,
+  ApiInfoResponse,
+  DevicesResponse,
+  ThroughputResponse,
+  SessionConsumptionResponse,
+  OpenAIModelsResponse,
+  ModelsResponse,
+  ModelActionResponse,
+  LogStreamData,
+  LogStreamOptions
+} from '../types/api'
 
-const API_BASE_URL = '/api'
+const API_BASE_URL = ''
 
 const api = axios.create({
   baseURL: API_BASE_URL,
-  timeout: 5000,
+  timeout: 15000, // Increased to 15 seconds for model info endpoints
   headers: {
     'Content-Type': 'application/json'
   }
@@ -24,8 +35,13 @@ export const apiService = {
 
   async getApiInfo(): Promise<ApiInfoResponse> {
     try {
-      const response = await api.get('/')
-      return response.data
+      // 暂时禁用API信息获取，避免影响其他功能
+      console.log('API info temporarily disabled to avoid proxy conflicts')
+      return {
+        message: "LLM-Manager API Server",
+        version: "1.0.0",
+        models_url: "/v1/models"
+      }
     } catch (error) {
       console.error('API info failed:', error)
       throw error
@@ -59,6 +75,119 @@ export const apiService = {
     } catch (error) {
       console.error('Session consumption failed:', error)
       throw error
+    }
+  },
+
+  // Model Management APIs
+  async getModels(): Promise<OpenAIModelsResponse> {
+    try {
+      const response = await api.get('/v1/models')
+      return response.data
+    } catch (error) {
+      console.error('Get models failed:', error)
+      throw error
+    }
+  },
+
+  async getModelsInfo(): Promise<ModelsResponse> {
+    try {
+      const response = await api.get('/api/models/all-models/info')
+      return response.data
+    } catch (error) {
+      console.error('Get models info failed:', error)
+      throw error
+    }
+  },
+
+  async startModel(modelAlias: string): Promise<ModelActionResponse> {
+    try {
+      const response = await api.post(`/api/models/${modelAlias}/start`)
+      return response.data
+    } catch (error) {
+      console.error('Start model failed:', error)
+      throw error
+    }
+  },
+
+  async stopModel(modelAlias: string): Promise<ModelActionResponse> {
+    try {
+      const response = await api.post(`/api/models/${modelAlias}/stop`)
+      return response.data
+    } catch (error) {
+      console.error('Stop model failed:', error)
+      throw error
+    }
+  },
+
+  createLogStream(modelAlias: string, options: LogStreamOptions): () => void {
+    // EventSource不支持代理，使用fetch + stream替代
+    const controller = new AbortController()
+    const signal = controller.signal
+
+    const connectStream = async () => {
+      try {
+        const response = await fetch('/api/models/' + modelAlias + '/logs/stream', {
+          headers: {
+            'Accept': 'text/event-stream',
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive',
+          },
+          signal
+        })
+
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`)
+        }
+
+        const reader = response.body?.getReader()
+        const decoder = new TextDecoder()
+
+        if (!reader) {
+          throw new Error('Failed to get stream reader')
+        }
+
+        let buffer = ''
+
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+
+          buffer += decoder.decode(value, { stream: true })
+          const lines = buffer.split('\n')
+          buffer = lines.pop() || '' // 保留最后一行（可能不完整）
+
+          for (const line of lines) {
+            if (line.trim() === '') continue
+
+            // 处理SSE格式
+            if (line.startsWith('data: ')) {
+              const jsonStr = line.substring(6)
+              try {
+                const data: LogStreamData = JSON.parse(jsonStr)
+                options.onMessage(data)
+              } catch (error) {
+                console.error('Failed to parse log stream data:', error, 'Raw data:', jsonStr)
+              }
+            }
+          }
+        }
+      } catch (error) {
+        if (error.name === 'AbortError') {
+          console.log('Stream aborted')
+        } else {
+          console.error('Log stream error:', error)
+          if (options.onError) {
+            options.onError(error as any)
+          }
+        }
+      }
+    }
+
+    connectStream()
+
+    // Return cleanup function
+    return () => {
+      controller.abort()
     }
   }
 }
