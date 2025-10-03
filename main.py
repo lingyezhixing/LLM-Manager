@@ -156,82 +156,43 @@ class Application:
         try:
             self.logger.info("正在启动WebUI服务器...")
 
-            # 获取进程管理器
-            process_manager = get_process_manager()
+            # 获取配置
+            webui_config = self.config_manager.get_webui_config()
+            webui_host = webui_config.get('host', '127.0.0.1')
+            webui_port = webui_config.get('port', 10000)
 
-            # 定义输出回调函数，将WebUI输出转发到日志
-            def webui_output_callback(stream_type: str, message: str):
-                """WebUI进程输出回调函数"""
-                # 过滤和替换特殊Unicode字符，避免乱码
-                try:
-                    # 替换常见的装饰性Unicode字符为ASCII兼容字符
-                    clean_message = message.replace('➜', '->')
-                    clean_message = clean_message.replace('✔', '[OK]')
-                    clean_message = clean_message.replace('✖', '[X]')
-                    clean_message = clean_message.replace('⚡', '[FAST]')
-                    clean_message = clean_message.replace('🚀', '[LAUNCH]')
-                    clean_message = clean_message.replace('✨', '[SPARKLE]')
-                    clean_message = clean_message.replace('📦', '[PACKAGE]')
-                    clean_message = clean_message.replace('🔥', '[HOT]')
+            # 如果WebUI host配置为0.0.0.0，改为127.0.0.1
+            if webui_host == '0.0.0.0':
+                webui_host = '127.0.0.1'
+                self.logger.info("WebUI host从0.0.0.0改为127.0.0.1（开发环境建议使用localhost）")
 
-                    # 过滤掉其他可能的控制字符和装饰性字符
-                    import re
-                    # 保留ASCII字符、中文、数字、基本标点，移除其他特殊符号
-                    clean_message = re.sub(r'[^\x20-\x7E\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]', '', clean_message)
+            # 获取API服务器配置用于前端代理
+            api_config = self.config_manager.get_openai_config()
+            api_host = api_config.get('host', '0.0.0.0')
+            api_port = api_config.get('port', 8080)
 
-                except Exception:
-                    # 如果字符过滤失败，使用原始消息但进行安全编码
-                    clean_message = message.encode('ascii', 'ignore').decode('ascii')
-
-                if stream_type == "stderr" and "error" in clean_message.lower():
-                    self.logger.warning(f"WebUI {stream_type}: {clean_message}")
-                else:
-                    self.logger.info(f"WebUI {stream_type}: {clean_message}")
-
-            # 使用进程管理器启动WebUI进程
+            
+            # 设置WebUI路径并验证
             project_root = os.path.dirname(os.path.abspath(self.config_path))
             webui_path = os.path.join(project_root, "webui")
-
-            # 优化环境变量，设置更好的编码处理
-            env = os.environ.copy()
-            env.update({
-                'PYTHONIOENCODING': 'utf-8',
-                'FORCE_COLOR': '0',  # 禁用彩色输出，避免ANSI转义序列
-                'NO_COLOR': '1'
-            })
-
-            # 确保webui目录存在
             if not os.path.exists(webui_path):
                 self.logger.error(f"WebUI目录不存在: {webui_path}")
                 return
 
-            # 检查npm是否可用
-            try:
-                # 使用where命令在Windows上查找npm
-                result = subprocess.run(['where', 'npm'], capture_output=True, text=True, timeout=5)
-                if result.returncode != 0:
-                    self.logger.warning("未在PATH中找到npm命令，尝试直接启动...")
-                else:
-                    self.logger.debug(f"找到npm: {result.stdout.strip()}")
-            except FileNotFoundError:
-                # where命令不可用，跳过检查
-                self.logger.debug("where命令不可用，跳过npm检查")
-            except Exception as e:
-                self.logger.debug(f"检查npm命令时出错: {e}，跳过检查")
-
+            # 使用进程管理器启动WebUI
+            process_manager = get_process_manager()
             success, message, pid = process_manager.start_process(
                 name="webui_server",
-                command="npm run dev",
+                command=f"npm run dev -- --host {webui_host} --port {webui_port}",
                 cwd=webui_path,
                 description="WebUI开发服务器",
                 shell=True,
-                capture_output=True,
-                output_callback=webui_output_callback
+                capture_output=False  # 不捕获输出，直接显示在控制台
             )
 
             if success:
                 self.logger.info(f"WebUI服务器启动成功 (PID: {pid})")
-                self.logger.info("WebUI开发服务器将在 http://localhost:10000 上运行")
+                self.logger.info(f"WebUI开发服务器将在 http://{webui_host}:{webui_port} 上运行")
             else:
                 self.logger.error(f"WebUI服务器启动失败: {message}")
 
