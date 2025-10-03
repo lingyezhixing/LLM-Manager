@@ -1,0 +1,91 @@
+/* Model Monitoring Page Specific Styles - Override default styles */
+
+/* Time Range Selector Horizontal Layout */
+.model-monitoring-page .time-range-container {
+  display: flex;
+  flex-direction: column;
+}
+
+.model-monitoring-page .time-range-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 2rem;
+}
+
+.model-monitoring-page .time-range-label {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #1f2937;
+  white-space: nowrap;
+}
+
+.model-monitoring-page .time-inputs-group {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.model-monitoring-page .time-inputs {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.model-monitoring-page .time-range-separator {
+  font-size: 0.875rem;
+  color: #6b7280;
+  font-weight: 500;
+  padding: 0 0.5rem;
+}
+
+/* Content Info Styles */
+.model-monitoring-page .content-info {
+  text-align: left;
+  width: 100%;
+}
+
+.model-monitoring-page .content-info h3 {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: #1f2937;
+  margin-bottom: 1.5rem;
+  text-align: center;
+}
+
+.model-monitoring-page .info-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1rem;
+  max-width: 600px;
+  margin: 0 auto;
+}
+
+.model-monitoring-page .info-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem 1rem;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  transition: all 0.2s ease;
+}
+
+.model-monitoring-page .info-item:hover {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+}
+
+.model-monitoring-page .info-label {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #374151;
+}
+
+.model-monitoring-page .info-value {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #1f2937;
+  font-family: 'Courier New', monospace;
+}
