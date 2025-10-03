@@ -16,7 +16,9 @@ const LogConsole: React.FC<LogConsoleProps> = ({
   const [autoScroll, setAutoScroll] = useState(true)
   const [clearLogs, setClearLogs] = useState(false)
   const logsEndRef = useRef<HTMLDivElement>(null)
+  const logContentRef = useRef<HTMLDivElement>(null)
   const cleanupRef = useRef<(() => void) | null>(null)
+  const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
   // 清理日志
   useEffect(() => {
@@ -28,10 +30,29 @@ const LogConsole: React.FC<LogConsoleProps> = ({
 
   // 自动滚动到底部
   useEffect(() => {
-    if (autoScroll && logsEndRef.current) {
-      logsEndRef.current.scrollIntoView({ behavior: 'smooth' })
+    if (autoScroll && logContentRef.current) {
+      // 清除之前的滚动定时器
+      if (scrollTimeoutRef.current) {
+        clearTimeout(scrollTimeoutRef.current)
+      }
+
+      // 使用立即滚动而不是smooth滚动，确保快速跟上日志
+      scrollTimeoutRef.current = setTimeout(() => {
+        if (logContentRef.current) {
+          logContentRef.current.scrollTop = logContentRef.current.scrollHeight
+        }
+      }, 10)
     }
   }, [logs, autoScroll])
+
+  // 清理定时器
+  useEffect(() => {
+    return () => {
+      if (scrollTimeoutRef.current) {
+        clearTimeout(scrollTimeoutRef.current)
+      }
+    }
+  }, [])
 
   // 处理日志流连接
   useEffect(() => {
@@ -132,7 +153,8 @@ const LogConsole: React.FC<LogConsoleProps> = ({
 
   const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
     const element = e.currentTarget
-    const isAtBottom = element.scrollHeight - element.scrollTop <= element.clientHeight + 10
+    const threshold = 50 // 增加阈值，更准确地检测用户是否在底部
+    const isAtBottom = element.scrollHeight - element.scrollTop <= element.clientHeight + threshold
     setAutoScroll(isAtBottom)
   }
 
@@ -187,6 +209,7 @@ const LogConsole: React.FC<LogConsoleProps> = ({
       </div>
       <div
         className="log-content"
+        ref={logContentRef}
         onScroll={handleScroll}
       >
         {logs.length === 0 && !isConnected && (

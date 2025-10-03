@@ -101,7 +101,9 @@ export const apiService = {
 
   async startModel(modelAlias: string): Promise<ModelActionResponse> {
     try {
-      const response = await api.post(`/api/models/${modelAlias}/start`)
+      const response = await api.post(`/api/models/${modelAlias}/start`, {}, {
+        timeout: 0 // 无超时限制，等待模型启动完成
+      })
       return response.data
     } catch (error) {
       console.error('Start model failed:', error)
@@ -111,7 +113,9 @@ export const apiService = {
 
   async stopModel(modelAlias: string): Promise<ModelActionResponse> {
     try {
-      const response = await api.post(`/api/models/${modelAlias}/stop`)
+      const response = await api.post(`/api/models/${modelAlias}/stop`, {}, {
+        timeout: 0 // 无超时限制，等待模型停止完成
+      })
       return response.data
     } catch (error) {
       console.error('Stop model failed:', error)

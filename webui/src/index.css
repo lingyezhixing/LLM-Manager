@@ -192,7 +192,7 @@ body {
 
 .main-content {
   flex: 1;
-  padding: 2rem;
+  padding: 2rem 2rem 0 2rem; /* 移除底部padding避免额外滚动空间 */
   background-color: #f9fafb;
   min-height: calc(100vh - 64px);
 }
@@ -207,6 +207,7 @@ body {
 /* Add spacing for ModelManager in overview page */
 .overview-page .model-manager {
   margin-top: 1rem;
+  margin-bottom: 1.5rem; /* 添加底部空白 */
 }
 
 .device-monitor {
@@ -891,7 +892,7 @@ body {
   display: flex;
   flex-direction: column;
   width: 100%;
-  height: 500px;
+  height: 750px;
   background: white;
   border: 1px solid #e5e7eb;
   border-radius: 8px;
