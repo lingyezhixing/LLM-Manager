@@ -1,5 +1,10 @@
 /* Model Monitoring Page Specific Styles - Override default styles */
 
+/* Reduce page padding */
+.model-monitoring-page {
+  padding: 0.75rem 1.5rem 1.5rem 1.5rem !important;
+}
+
 /* Time Range Selector Horizontal Layout */
 .model-monitoring-page .time-range-container {
   display: flex;
