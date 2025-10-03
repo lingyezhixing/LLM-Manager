@@ -7,7 +7,7 @@ LLM-Manager 主程序入口
 
 import threading
 import time
-import logging
+import subprocess
 import sys
 import os
 import concurrent.futures
@@ -151,6 +151,93 @@ class Application:
         self.threads.append(api_thread)
         self.logger.info("API服务器启动完成")
 
+    def start_webui_server(self) -> None:
+        """启动WebUI服务器"""
+        try:
+            self.logger.info("正在启动WebUI服务器...")
+
+            # 获取进程管理器
+            process_manager = get_process_manager()
+
+            # 定义输出回调函数，将WebUI输出转发到日志
+            def webui_output_callback(stream_type: str, message: str):
+                """WebUI进程输出回调函数"""
+                # 过滤和替换特殊Unicode字符，避免乱码
+                try:
+                    # 替换常见的装饰性Unicode字符为ASCII兼容字符
+                    clean_message = message.replace('➜', '->')
+                    clean_message = clean_message.replace('✔', '[OK]')
+                    clean_message = clean_message.replace('✖', '[X]')
+                    clean_message = clean_message.replace('⚡', '[FAST]')
+                    clean_message = clean_message.replace('🚀', '[LAUNCH]')
+                    clean_message = clean_message.replace('✨', '[SPARKLE]')
+                    clean_message = clean_message.replace('📦', '[PACKAGE]')
+                    clean_message = clean_message.replace('🔥', '[HOT]')
+
+                    # 过滤掉其他可能的控制字符和装饰性字符
+                    import re
+                    # 保留ASCII字符、中文、数字、基本标点，移除其他特殊符号
+                    clean_message = re.sub(r'[^\x20-\x7E\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]', '', clean_message)
+
+                except Exception:
+                    # 如果字符过滤失败，使用原始消息但进行安全编码
+                    clean_message = message.encode('ascii', 'ignore').decode('ascii')
+
+                if stream_type == "stderr" and "error" in clean_message.lower():
+                    self.logger.warning(f"WebUI {stream_type}: {clean_message}")
+                else:
+                    self.logger.info(f"WebUI {stream_type}: {clean_message}")
+
+            # 使用进程管理器启动WebUI进程
+            project_root = os.path.dirname(os.path.abspath(self.config_path))
+            webui_path = os.path.join(project_root, "webui")
+
+            # 优化环境变量，设置更好的编码处理
+            env = os.environ.copy()
+            env.update({
+                'PYTHONIOENCODING': 'utf-8',
+                'FORCE_COLOR': '0',  # 禁用彩色输出，避免ANSI转义序列
+                'NO_COLOR': '1'
+            })
+
+            # 确保webui目录存在
+            if not os.path.exists(webui_path):
+                self.logger.error(f"WebUI目录不存在: {webui_path}")
+                return
+
+            # 检查npm是否可用
+            try:
+                # 使用where命令在Windows上查找npm
+                result = subprocess.run(['where', 'npm'], capture_output=True, text=True, timeout=5)
+                if result.returncode != 0:
+                    self.logger.warning("未在PATH中找到npm命令，尝试直接启动...")
+                else:
+                    self.logger.debug(f"找到npm: {result.stdout.strip()}")
+            except FileNotFoundError:
+                # where命令不可用，跳过检查
+                self.logger.debug("where命令不可用，跳过npm检查")
+            except Exception as e:
+                self.logger.debug(f"检查npm命令时出错: {e}，跳过检查")
+
+            success, message, pid = process_manager.start_process(
+                name="webui_server",
+                command="npm run dev",
+                cwd=webui_path,
+                description="WebUI开发服务器",
+                shell=True,
+                capture_output=True,
+                output_callback=webui_output_callback
+            )
+
+            if success:
+                self.logger.info(f"WebUI服务器启动成功 (PID: {pid})")
+                self.logger.info("WebUI开发服务器将在 http://localhost:10000 上运行")
+            else:
+                self.logger.error(f"WebUI服务器启动失败: {message}")
+
+        except Exception as e:
+            self.logger.error(f"启动WebUI服务器失败: {e}")
+
     def start_tray_service(self) -> None:
         """启动系统托盘服务"""
         try:
@@ -246,6 +333,8 @@ class Application:
             def start_services():
                 # 启动API服务器
                 self.start_api_server()
+                # 启动WebUI服务器
+                self.start_webui_server()
                 # 启动系统托盘服务
                 self.start_tray_service()
                 return "services"
@@ -291,6 +380,25 @@ class Application:
         finally:
             self.shutdown()
 
+    def stop_webui_server(self) -> None:
+        """停止WebUI服务器"""
+        try:
+            self.logger.info("正在停止WebUI服务器...")
+
+            # 获取进程管理器
+            process_manager = get_process_manager()
+
+            # 停止WebUI进程
+            success, message = process_manager.stop_process("webui_server", force=True, timeout=5)
+
+            if success:
+                self.logger.info("WebUI服务器已停止")
+            else:
+                self.logger.warning(f"WebUI服务器停止警告: {message}")
+
+        except Exception as e:
+            self.logger.error(f"停止WebUI服务器失败: {e}")
+
     def shutdown(self) -> None:
         """优化的关闭应用程序 - 快速并行关闭"""
         if not self.running:
@@ -322,6 +430,14 @@ class Application:
                         return "monitor_failed"
                 return "monitor_none"
 
+            def stop_webui():
+                try:
+                    self.stop_webui_server()
+                    return "webui_server"
+                except Exception as e:
+                    self.logger.error(f"停止WebUI服务器失败: {e}")
+                    return "webui_server_failed"
+
             def cleanup_processes():
                 try:
                     cleanup_process_manager()
@@ -344,6 +460,7 @@ class Application:
             shutdown_tasks = [
                 self.executor.submit(stop_monitor_thread),
                 self.executor.submit(close_monitor),
+                self.executor.submit(stop_webui),
                 self.executor.submit(cleanup_processes),
                 self.executor.submit(shutdown_model_controller)
             ]
