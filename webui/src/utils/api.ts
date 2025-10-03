@@ -28,7 +28,7 @@ export const apiService = {
       const response = await api.get('/health')
       return response.data
     } catch (error) {
-      console.error('Health check failed:', error)
+      console.error('Health check failed:', error instanceof Error ? error.message : String(error))
       throw error
     }
   },
@@ -43,7 +43,7 @@ export const apiService = {
         models_url: "/v1/models"
       }
     } catch (error) {
-      console.error('API info failed:', error)
+      console.error('API info failed:', error instanceof Error ? error.message : String(error))
       throw error
     }
   },
@@ -53,7 +53,7 @@ export const apiService = {
       const response = await api.get('/api/devices/info')
       return response.data
     } catch (error) {
-      console.error('Devices info failed:', error)
+      console.error('Devices info failed:', error instanceof Error ? error.message : String(error))
       throw error
     }
   },
@@ -63,7 +63,7 @@ export const apiService = {
       const response = await api.get(`/api/metrics/throughput/${startTime}/${endTime}/${nSamples}`)
       return response.data
     } catch (error) {
-      console.error('Throughput data failed:', error)
+      console.error('Throughput data failed:', error instanceof Error ? error.message : String(error))
       throw error
     }
   },
@@ -73,7 +73,7 @@ export const apiService = {
       const response = await api.get('/api/metrics/throughput/current-session')
       return response.data
     } catch (error) {
-      console.error('Session consumption failed:', error)
+      console.error('Session consumption failed:', error instanceof Error ? error.message : String(error))
       throw error
     }
   },
@@ -84,7 +84,7 @@ export const apiService = {
       const response = await api.get('/v1/models')
       return response.data
     } catch (error) {
-      console.error('Get models failed:', error)
+      console.error('Get models failed:', error instanceof Error ? error.message : String(error))
       throw error
     }
   },
@@ -94,7 +94,7 @@ export const apiService = {
       const response = await api.get('/api/models/all-models/info')
       return response.data
     } catch (error) {
-      console.error('Get models info failed:', error)
+      console.error('Get models info failed:', error instanceof Error ? error.message : String(error))
       throw error
     }
   },
@@ -106,7 +106,7 @@ export const apiService = {
       })
       return response.data
     } catch (error) {
-      console.error('Start model failed:', error)
+      console.error('Start model failed:', error instanceof Error ? error.message : String(error))
       throw error
     }
   },
@@ -118,7 +118,7 @@ export const apiService = {
       })
       return response.data
     } catch (error) {
-      console.error('Stop model failed:', error)
+      console.error('Stop model failed:', error instanceof Error ? error.message : String(error))
       throw error
     }
   },
@@ -170,16 +170,16 @@ export const apiService = {
                 const data: LogStreamData = JSON.parse(jsonStr)
                 options.onMessage(data)
               } catch (error) {
-                console.error('Failed to parse log stream data:', error, 'Raw data:', jsonStr)
+                console.error('Failed to parse log stream data:', error instanceof Error ? error.message : String(error), 'Raw data:', jsonStr)
               }
             }
           }
         }
       } catch (error) {
-        if (error.name === 'AbortError') {
+        if (error instanceof Error && error.name === 'AbortError') {
           console.log('Stream aborted')
         } else {
-          console.error('Log stream error:', error)
+          console.error('Log stream error:', error instanceof Error ? error.message : String(error))
           if (options.onError) {
             options.onError(error as any)
           }
