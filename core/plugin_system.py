@@ -269,7 +269,7 @@ class PluginManager:
                 name: {
                     "online": plugin.is_online() if hasattr(plugin, 'is_online') else False,
                     "type": type(plugin).__name__,
-                    "memory_info": plugin.get_memory_info() if hasattr(plugin, 'get_memory_info') else None
+                    "device_info": plugin.get_devices_info() if hasattr(plugin, 'get_devices_info') else None
                 }
                 for name, plugin in self.device_plugins.items()
             },
