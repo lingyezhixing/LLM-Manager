@@ -1,247 +1,1189 @@
 from fastapi import FastAPI, Request, HTTPException, Response
 from fastapi.responses import StreamingResponse, JSONResponse
-from typing import Dict, List, Optional
-import logging
+from typing import Dict, List, Optional, Any
+from types import SimpleNamespace
 import json
+import time
 import asyncio
+import queue
+import pandas as pd
+import numpy as np
 from utils.logger import get_logger
+from core.config_manager import ConfigManager
 from core.model_controller import ModelController
+from core.data_manager import Monitor, ModelRequest, ModelBilling, TierPricing
+from core.api_router import APIRouter, TokenTracker
 
 logger = get_logger(__name__)
 
-class APIServer:
-    """API服务器 - 提供统一的OpenAI API接口"""
 
-    def __init__(self, model_controller: ModelController):
-        self.model_controller = model_controller
+class APIServer:
+    """API服务器 - 负责FastAPI应用管理和路由配置"""
+
+    def __init__(self, config_manager: ConfigManager):
+        self.config_manager = config_manager
+        self.model_controller = ModelController(self.config_manager)
+        self.monitor = Monitor()
+        self.token_tracker = TokenTracker(self.monitor, self.config_manager)
+        self.api_router = APIRouter(self.config_manager, self.model_controller)
         self.app = FastAPI(title="LLM-Manager API", version="1.0.0")
-        self.async_clients: Dict[int, any] = {}
         self._setup_routes()
+        self.model_controller.start_auto_start_models()
+        logger.info("API服务器初始化完成")
+        logger.debug("[API_SERVER] token跟踪功能已激活")
+
+    def _calculate_tiered_cost_for_tokens(self, tokens_to_price: int, tiers: List[TierPricing], price_key: str) -> float:
+        """
+        【保留并优化】辅助函数：为单一类型的token流（如纯输出token）计算阶梯费用。
+        现在它也依赖于token总量来决定阶梯，而不是自身数量。
+        注意：此函数现在主要用于计算独立的 output_tokens。
+        """
+        cost = 0.0
+        remaining_tokens_to_price = tokens_to_price
+        processed_tokens_cursor = 0
+
+        for tier in tiers:
+            if remaining_tokens_to_price <= 0:
+                break
+
+            tier_start = tier.start_tokens
+            # 对于最后一个阶梯，结束设为无限大
+            tier_end = tier.end_tokens if tier.end_tokens > 0 else float('inf')
+            
+            # 计算当前阶梯与已处理token的重叠部分
+            overlap_start = max(tier_start, processed_tokens_cursor)
+            overlap_end = min(tier_end, processed_tokens_cursor + remaining_tokens_to_price)
+            
+            tokens_in_this_tier = max(0, overlap_end - overlap_start)
+            
+            if tokens_in_this_tier > 0:
+                price_per_million = getattr(tier, price_key, 0.0)
+                cost += (tokens_in_this_tier * price_per_million) / 1_000_000
+                
+            processed_tokens_cursor += tokens_in_this_tier
+        
+        return cost
+
+    def _calculate_request_cost(self, req: ModelRequest, billing: Optional[ModelBilling]) -> float:
+        """
+        【全新重写】计算单个请求的成本，精确处理分阶缓存和总输入依赖。
+        """
+        if not billing or not billing.use_tier_pricing or not billing.tier_pricing:
+            return 0.0
+
+        total_cost = 0.0
+        # 从数据库获取时已按 tier_index 排序，无需再次排序
+        tiers = billing.tier_pricing
+        
+        # =====================================================================
+        # 1. 统一计算输入成本 (Input Cost) - 这是最核心的修改
+        # =====================================================================
+        total_input_tokens = req.input_tokens
+        remaining_cache_hits = req.cache_n
+        
+        # 使用一个“光标”来跟踪我们处理到了总输入的哪个位置
+        processed_input_tokens = 0
+
+        for tier in tiers:
+            if processed_input_tokens >= total_input_tokens:
+                break
+
+            tier_start = tier.start_tokens
+            tier_end = tier.end_tokens if tier.end_tokens > 0 else float('inf')
+
+            # 计算总输入token落入当前阶梯的部分
+            # 例如 tier 是 1000-2000，总输入是 1500，已处理 800，则此阶梯处理 1000-1500
+            tokens_in_this_tier = max(0, min(total_input_tokens, tier_end) - max(processed_input_tokens, tier_start))
+            
+            if tokens_in_this_tier <= 0:
+                continue
+
+            # 在这个阶梯内，优先分配缓存命中部分
+            cache_hits_in_this_tier = 0
+            if tier.support_cache and remaining_cache_hits > 0:
+                cache_hits_in_this_tier = min(tokens_in_this_tier, remaining_cache_hits)
+                
+                # 累加缓存成本
+                cost_for_cache = (cache_hits_in_this_tier * tier.cache_hit_price_per_million) / 1_000_000
+                total_cost += cost_for_cache
+                
+                remaining_cache_hits -= cache_hits_in_this_tier
+
+            # 剩余部分为非缓存输入
+            non_cached_in_this_tier = tokens_in_this_tier - cache_hits_in_this_tier
+            if non_cached_in_this_tier > 0:
+                cost_for_non_cached = (non_cached_in_this_tier * tier.input_price_per_million) / 1_000_000
+                total_cost += cost_for_non_cached
+            
+            # 移动光标
+            processed_input_tokens += tokens_in_this_tier
+
+        # =====================================================================
+        # 2. 独立计算输出成本 (Output Cost)
+        # 输出的计费阶梯依赖于输出token自身的数量，与输入无关
+        # =====================================================================
+        if req.output_tokens > 0:
+            # 我们可以复用旧的辅助函数来计算这个独立的token流
+            total_cost += self._calculate_tiered_cost_for_tokens(
+                req.output_tokens, tiers, 'output_price_per_million'
+            )
+        
+        return total_cost
+
+    async def _get_enriched_requests_dataframe(self, start_time: float, end_time: float) -> pd.DataFrame:
+        """
+        【新增辅助函数】并发获取所有模型的请求数据，并用模型模式(mode)丰富数据，返回一个统一的DataFrame。
+        """
+        async def get_model_requests_with_mode(model_name: str):
+            """并发获取单个模型的请求数据并添加模式信息"""
+            try:
+                # 获取模型模式
+                mode = self.config_manager.get_model_mode(model_name)
+                # 检查此模式是否需要追踪
+                if not self.config_manager.should_track_tokens_for_mode(mode):
+                    return []
+                
+                requests = await asyncio.wait_for(
+                    asyncio.to_thread(self.monitor.get_model_requests, model_name, start_time, end_time),
+                    timeout=15.0
+                )
+                # 为每条记录添加 model_name 和 model_mode
+                return [(req.__dict__ | {'model_name': model_name, 'model_mode': mode}) for req in requests]
+            except asyncio.TimeoutError:
+                logger.warning(f"[API_SERVER] 获取模型 {model_name} 请求数据超时")
+                return []
+            except Exception as e:
+                logger.error(f"[API_SERVER] 获取模型 {model_name} 请求数据失败: {e}")
+                return []
+
+        # 创建并发任务
+        model_names = self.config_manager.get_model_names()
+        tasks = [get_model_requests_with_mode(model_name) for model_name in model_names]
+
+        # 并发执行所有任务
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # 合并结果
+        all_requests = []
+        for result in results:
+            if isinstance(result, Exception):
+                logger.error(f"[API_SERVER] 模型请求数据获取任务异常: {result}")
+                continue
+            all_requests.extend(result)
+
+        if not all_requests:
+            return pd.DataFrame()
+        
+        return pd.DataFrame(all_requests)
 
     def _setup_routes(self):
         """设置基础路由"""
 
         @self.app.get("/v1/models", response_class=JSONResponse)
         async def list_models():
-            """获取模型列表接口"""
             return self.model_controller.get_model_list()
 
         @self.app.get("/")
         async def root():
-            """根路径"""
-            return {
-                "message": "LLM-Manager API Server",
-                "version": "1.0.0",
-                "models_url": "/v1/models"
-            }
+            return {"message": "LLM-Manager API Server", "version": "1.0.0", "models_url": "/v1/models"}
 
         @self.app.get("/health")
         async def health_check():
-            """健康检查接口"""
-            return {
-                "status": "healthy",
-                "models_count": len(self.model_controller.models_state),
-                "running_models": len([
-                    s for s in self.model_controller.models_state.values()
-                    if s['status'] == 'routing'
-                ])
-            }
+            return {"status": "healthy", "models_count": len(self.model_controller.models_state), "running_models": len([s for s in self.model_controller.models_state.values() if s['status'] == 'routing'])}
 
         @self.app.post("/api/models/{model_alias}/start")
         async def start_model_api(model_alias: str):
-            """启动模型API"""
             try:
-                success, message = await asyncio.to_thread(
-                    self.model_controller.start_model, model_alias
-                )
+                model_name = self.config_manager.resolve_primary_name(model_alias)
+                success, message = await asyncio.to_thread(self.model_controller.start_model, model_name)
                 return {"success": success, "message": message}
+            except KeyError:
+                return {"success": False, "message": f"模型别名 '{model_alias}' 未找到"}
             except Exception as e:
                 return {"success": False, "message": str(e)}
 
         @self.app.post("/api/models/{model_alias}/stop")
         async def stop_model_api(model_alias: str):
-            """停止模型API"""
             try:
-                success, message = await asyncio.to_thread(
-                    self.model_controller.stop_model, model_alias
-                )
+                model_name = self.config_manager.resolve_primary_name(model_alias)
+                success, message = await asyncio.to_thread(self.model_controller.stop_model, model_name)
                 return {"success": success, "message": message}
+            except KeyError:
+                return {"success": False, "message": f"模型别名 '{model_alias}' 未找到"}
             except Exception as e:
                 return {"success": False, "message": str(e)}
 
-        @self.app.get("/api/models/{model_alias}/logs")
-        async def get_model_logs(model_alias: str):
-            """获取模型日志API"""
+        @self.app.get("/api/models/{model_alias}/logs/stream")
+        async def stream_model_logs(model_alias: str):
             try:
-                logs = self.model_controller.get_model_logs(model_alias)
-                return logs
+                model_name = self.config_manager.resolve_primary_name(model_alias)
+                if model_name not in self.model_controller.models_state:
+                    return JSONResponse(status_code=404, content={"error": f"模型 '{model_alias}' 不存在"})
+                model_status = self.model_controller.models_state[model_name].get('status')
+                if model_status not in ['routing', 'starting', 'init_script', 'health_check']:
+                    return JSONResponse(status_code=400, content={"error": f"模型 '{model_alias}' 未启动或已停止 (当前状态: {model_status})"})
+                historical_logs = self.model_controller.get_model_logs(model_name)
+
+                async def log_stream_generator():
+                    for log_entry in historical_logs:
+                        yield f"data: {json.dumps({'type': 'historical', 'log': log_entry}, ensure_ascii=False)}\n\n"
+                        await asyncio.sleep(0.01)
+                    yield f"data: {json.dumps({'type': 'historical_complete'}, ensure_ascii=False)}\n\n"
+                    subscriber_queue = self.model_controller.subscribe_to_model_logs(model_name)
+                    try:
+                        while True:
+                            try:
+                                log_entry = await asyncio.to_thread(subscriber_queue.get, timeout=1.0)
+                                if log_entry is None:
+                                    yield f"data: {json.dumps({'type': 'stream_end'}, ensure_ascii=False)}\n\n"
+                                    break
+                                yield f"data: {json.dumps({'type': 'realtime', 'log': log_entry}, ensure_ascii=False)}\n\n"
+                            except queue.Empty:
+                                continue
+                            except Exception as e:
+                                logger.error(f"流式日志推送错误: {e}")
+                                yield f"data: {json.dumps({'type': 'error', 'message': str(e)}, ensure_ascii=False)}\n\n"
+                                break
+                    finally:
+                        self.model_controller.unsubscribe_from_model_logs(model_name, subscriber_queue)
+                return StreamingResponse(log_stream_generator(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "*"})
+            except KeyError:
+                return JSONResponse(status_code=404, content={"error": f"模型别名 '{model_alias}' 未找到"})
             except Exception as e:
-                return []
+                logger.error(f"流式日志接口错误: {e}")
+                return JSONResponse(status_code=500, content={"error": f"服务器内部错误: {str(e)}"})
+
+        @self.app.post("/api/models/restart-autostart")
+        async def restart_autostart_models():
+            try:
+                logger.info("[API_SERVER] 通过API重启所有autostart模型...")
+                await asyncio.to_thread(self.model_controller.unload_all_models)
+                await asyncio.sleep(2)
+
+                # 并发启动所有autostart模型
+                async def start_autostart_model_async(model_name: str):
+                    """并发启动单个autostart模型"""
+                    if not self.config_manager.is_auto_start(model_name):
+                        return model_name, False, "模型未配置为自动启动"
+
+                    try:
+                        success, message = await asyncio.wait_for(
+                            asyncio.to_thread(self.model_controller.start_model, model_name),
+                            timeout=30.0  # 模型启动可能需要较长时间
+                        )
+                        return model_name, success, message
+                    except asyncio.TimeoutError:
+                        logger.warning(f"[API_SERVER] 启动模型 {model_name} 超时")
+                        return model_name, False, "启动模型超时"
+                    except Exception as e:
+                        logger.error(f"[API_SERVER] 启动模型 {model_name} 失败: {e}")
+                        return model_name, False, str(e)
+
+                # 获取需要启动的模型
+                autostart_models = [
+                    model_name for model_name in self.config_manager.get_model_names()
+                    if self.config_manager.is_auto_start(model_name)
+                ]
+
+                if not autostart_models:
+                    return {"success": True, "message": "没有配置autostart模型", "started_models": []}
+
+                # 创建并发任务
+                tasks = [start_autostart_model_async(model_name) for model_name in autostart_models]
+
+                # 并发执行所有任务
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+
+                # 处理结果
+                started_models = []
+                for result in results:
+                    if isinstance(result, Exception):
+                        logger.error(f"[API_SERVER] 模型启动任务异常: {result}")
+                        continue
+
+                    model_name, success, message = result
+                    if success:
+                        started_models.append(model_name)
+                    else:
+                        logger.warning(f"[API_SERVER] 自动启动模型 {model_name} 失败: {message}")
+
+                return {"success": True, "message": f"已重启 {len(started_models)} 个autostart模型", "started_models": started_models}
+            except Exception as e:
+                logger.error(f"[API_SERVER] 重启autostart模型失败: {e}")
+                return {"success": False, "message": str(e)}
+
+        @self.app.post("/api/models/stop-all")
+        async def stop_all_models():
+            try:
+                logger.info("[API_SERVER] 通过API关闭所有模型...")
+                await asyncio.to_thread(self.model_controller.unload_all_models)
+                return {"success": True, "message": "所有模型已关闭"}
+            except Exception as e:
+                logger.error(f"[API_SERVER] 关闭所有模型失败: {e}")
+                return {"success": False, "message": str(e)}
+
+        @self.app.get("/api/devices/info")
+        async def get_device_info():
+            try:
+                device_plugins = self.model_controller.plugin_manager.get_all_device_plugins()
+
+                async def get_single_device_info(device_name: str, device_plugin):
+                    """异步获取单个设备信息，带超时和错误处理"""
+                    try:
+                        # 使用 asyncio.wait_for 设置超时，并在线程池中执行IO操作
+                        is_online = await asyncio.wait_for(
+                            asyncio.to_thread(device_plugin.is_online),
+                            timeout=15.0
+                        )
+
+                        device_info = await asyncio.wait_for(
+                            asyncio.to_thread(device_plugin.get_devices_info),
+                            timeout=15.0
+                        )
+
+                        return device_name, {"online": is_online, "info": device_info}
+                    except asyncio.TimeoutError:
+                        logger.warning(f"[API_SERVER] 获取设备 {device_name} 信息超时")
+                        return device_name, {"online": False, "error": "获取设备信息超时"}
+                    except Exception as e:
+                        logger.error(f"[API_SERVER] 获取设备 {device_name} 信息失败: {e}")
+                        return device_name, {"online": False, "error": str(e)}
+
+                # 创建所有设备的异步任务
+                tasks = [
+                    get_single_device_info(device_name, device_plugin)
+                    for device_name, device_plugin in device_plugins.items()
+                ]
+
+                # 并发执行所有任务
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+
+                # 处理结果
+                devices_info = {}
+                for result in results:
+                    if isinstance(result, Exception):
+                        logger.error(f"[API_SERVER] 设备信息获取任务异常: {result}")
+                        continue
+
+                    device_name, device_data = result
+                    devices_info[device_name] = device_data
+
+                return {"success": True, "devices": devices_info}
+            except Exception as e:
+                logger.error(f"[API_SERVER] 获取设备信息失败: {e}")
+                return {"success": False, "message": str(e)}
+
+        @self.app.get("/api/logs/stats")
+        async def get_log_stats():
+            try:
+                return {"success": True, "stats": self.model_controller.get_log_stats()}
+            except Exception as e:
+                logger.error(f"[API_SERVER] 获取日志统计失败: {e}")
+                return {"success": False, "message": str(e)}
+
+        @self.app.post("/api/logs/{model_alias}/clear/{keep_minutes}")
+        async def clear_model_logs(model_alias: str, keep_minutes: int = 0):
+            try:
+                model_name = self.config_manager.resolve_primary_name(model_alias)
+                if keep_minutes == 0:
+                    self.model_controller.log_manager.clear_logs(model_name)
+                    message = f"模型 '{model_alias}' 所有日志已清空"
+                else:
+                    removed_count = self.model_controller.log_manager.cleanup_old_logs(model_name, keep_minutes)
+                    message = f"模型 '{model_alias}' 已清理 {keep_minutes} 分钟前的日志，删除 {removed_count} 条"
+                return {"success": True, "message": message}
+            except KeyError:
+                return {"success": False, "message": f"模型别名 '{model_alias}' 未找到"}
+            except Exception as e:
+                logger.error(f"[API_SERVER] 清理日志失败: {e}")
+                return {"success": False, "message": str(e)}
+
+        @self.app.get("/api/models/{model_alias}/info")
+        async def get_model_info(model_alias: str):
+            try:
+                if model_alias == "all-models":
+                    # 并发获取所有模型状态和待处理请求数
+                    async def get_model_info_async(model_name: str, model_status: dict):
+                        """并发获取单个模型的完整信息"""
+                        try:
+                            pending_requests = self.api_router.pending_requests.get(model_name, 0)
+                            return model_name, {**model_status, "pending_requests": pending_requests}
+                        except Exception as e:
+                            logger.error(f"[API_SERVER] 获取模型 {model_name} 信息失败: {e}")
+                            return model_name, {**model_status, "pending_requests": 0, "error": str(e)}
+
+                    # 获取所有模型状态
+                    all_models_status = await asyncio.wait_for(
+                        asyncio.to_thread(self.model_controller.get_all_models_status),
+                        timeout=15.0
+                    )
+
+                    # 创建并发任务
+                    tasks = [
+                        get_model_info_async(model_name, model_status)
+                        for model_name, model_status in all_models_status.items()
+                    ]
+
+                    # 并发执行所有任务
+                    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+                    # 处理结果
+                    all_models_info = {}
+                    for result in results:
+                        if isinstance(result, Exception):
+                            logger.error(f"[API_SERVER] 模型信息获取任务异常: {result}")
+                            continue
+
+                        model_name, model_info = result
+                        all_models_info[model_name] = model_info
+
+                    return {
+                        "success": True,
+                        "models": all_models_info,
+                        "total_models": len(all_models_info),
+                        "running_models": len([m for m in all_models_info.values() if m["status"] == "routing"]),
+                        "total_pending_requests": sum(m["pending_requests"] for m in all_models_info.values())
+                    }
+                else:
+                    model_name = self.config_manager.resolve_primary_name(model_alias)
+                    if model_name not in self.model_controller.models_state:
+                        return JSONResponse(status_code=404, content={"success": False, "error": f"模型 '{model_alias}' 不存在"})
+                    all_models_status = self.model_controller.get_all_models_status()
+                    model_status = all_models_status.get(model_name)
+                    if not model_status:
+                        return JSONResponse(status_code=404, content={"success": False, "error": f"模型 '{model_alias}' 状态信息未找到"})
+                    return {"success": True, "model": {**model_status, "pending_requests": self.api_router.pending_requests.get(model_name, 0)}}
+            except KeyError:
+                return JSONResponse(status_code=404, content={"success": False, "error": f"模型别名 '{model_alias}' 未找到"})
+            except Exception as e:
+                logger.error(f"[API_SERVER] 获取模型信息失败: {e}")
+                return JSONResponse(status_code=500, content={"success": False, "error": f"服务器内部错误: {str(e)}"})
+
+        @self.app.get("/api/metrics/throughput/{start_time}/{end_time}/{n_samples}")
+        async def get_throughput(start_time: float, end_time: float, n_samples: int):
+            """【全新重构】获取真实的、基于请求时长的吞吐量趋势，并按模型模式分解"""
+            try:
+                if start_time >= end_time or n_samples <= 0:
+                    return JSONResponse(status_code=400, content={"success": False, "error": "无效的时间范围或采样点数"})
+
+                interval = (end_time - start_time) / n_samples
+                tracked_modes = self.config_manager.get_token_tracker_modes()
+                point_template = {"input_tokens_per_sec": 0.0, "output_tokens_per_sec": 0.0, "total_tokens_per_sec": 0.0, "cache_hit_tokens_per_sec": 0.0, "cache_miss_tokens_per_sec": 0.0}
+
+                # 1. 使用辅助函数获取包含模式和新时间戳信息的DataFrame
+                df = await self._get_enriched_requests_dataframe(start_time, end_time)
+
+                # 2. 处理无数据的情况
+                if df.empty:
+                    time_points = [{"timestamp": start_time + (i + 0.5) * interval, "data": point_template} for i in range(n_samples)]
+                    mode_breakdown = {mode: list(time_points) for mode in tracked_modes}
+                    return {"success": True, "data": {"time_points": time_points, "mode_breakdown": mode_breakdown}}
+                
+                # 3. 【核心修改】计算每个请求的真实吞吐量
+                df['duration'] = df['end_time'] - df['start_time']
+                # 将小于1毫秒的持续时间视为1毫秒，以防止出现过大的TPS值和除零错误
+                df['safe_duration'] = np.maximum(df['duration'], 0.0001)
+
+                df['input_tps'] = df['input_tokens'] / df['safe_duration']
+                df['output_tps'] = df['output_tokens'] / df['safe_duration']
+                df['total_tps'] = (df['input_tokens'] + df['output_tokens']) / df['safe_duration']
+                df['cache_hit_tps'] = df['cache_n'] / df['safe_duration']
+                df['cache_miss_tps'] = df['prompt_n'] / df['safe_duration']
+
+                # 4. 按请求结束时间进行分桶
+                df['bin_index'] = np.clip(np.floor((df['end_time'] - start_time) / interval), 0, n_samples - 1).astype(int)
+                
+                # 5. 【核心修改】聚合时计算平均值 (mean)，而不是错误地求和
+                agg_cols = {
+                    "input_tps": "mean",
+                    "output_tps": "mean",
+                    "total_tps": "mean",
+                    "cache_hit_tps": "mean",
+                    "cache_miss_tps": "mean"
+                }
+                overall_agg = df.groupby('bin_index').agg(agg_cols)
+                mode_agg = df.groupby(['bin_index', 'model_mode']).agg(agg_cols)
+                
+                # 6. 格式化输出
+                time_points = []
+                mode_breakdown = {mode: [] for mode in tracked_modes}
+
+                for i in range(n_samples):
+                    ts = start_time + (i + 0.5) * interval
+                    
+                    # 总体数据点
+                    if i in overall_agg.index:
+                        row = overall_agg.loc[i]
+                        time_points.append({"timestamp": ts, "data": {
+                            "input_tokens_per_sec": row["input_tps"],
+                            "output_tokens_per_sec": row["output_tps"],
+                            "total_tokens_per_sec": row["total_tps"],
+                            "cache_hit_tokens_per_sec": row["cache_hit_tps"],
+                            "cache_miss_tokens_per_sec": row["cache_miss_tps"]
+                        }})
+                    else:
+                        time_points.append({"timestamp": ts, "data": point_template})
+                    
+                    # 按模式分解的数据点
+                    for mode in tracked_modes:
+                        if (i, mode) in mode_agg.index:
+                            row = mode_agg.loc[(i, mode)]
+                            mode_breakdown[mode].append({"timestamp": ts, "data": {
+                                "input_tokens_per_sec": row["input_tps"],
+                                "output_tokens_per_sec": row["output_tps"],
+                                "total_tokens_per_sec": row["total_tps"],
+                                "cache_hit_tokens_per_sec": row["cache_hit_tps"],
+                                "cache_miss_tokens_per_sec": row["cache_miss_tps"]
+                            }})
+                        else:
+                            mode_breakdown[mode].append({"timestamp": ts, "data": point_template})
+
+                return {"success": True, "data": {"time_points": time_points, "mode_breakdown": mode_breakdown}}
+            except Exception as e:
+                logger.error(f"[API_SERVER] 获取吞吐量趋势失败: {e}", exc_info=True)
+                return {"success": False, "error": str(e)}
+
+        @self.app.get("/api/metrics/throughput/current-session")
+        async def get_current_session_total():
+            """【已优化】获取本次运行总消耗"""
+            try:
+                program_runtime = await asyncio.wait_for(
+                    asyncio.to_thread(self.monitor.get_program_runtime, 1),
+                    timeout=15.0
+                )
+                default_data = {"total_cost_yuan": 0.0, "total_input_tokens": 0, "total_output_tokens": 0, "total_cache_n": 0, "total_prompt_n": 0, "session_start_time": None}
+                if not program_runtime:
+                    return {"success": True, "data": {"session_total": default_data}}
+
+                start_time = program_runtime[0].start_time
+                summary = {k: v for k, v in default_data.items() if k != "session_start_time"}
+
+                # 并发获取所有模型数据
+                async def process_model_session_async(model_name: str):
+                    """并发处理单个模型的会话数据"""
+                    try:
+                        requests = await asyncio.wait_for(
+                            asyncio.to_thread(self.monitor.get_model_requests, model_name, start_time=start_time),
+                            timeout=15.0
+                        )
+
+                        billing = await asyncio.wait_for(
+                            asyncio.to_thread(self.monitor.get_model_billing, model_name),
+                            timeout=15.0
+                        )
+
+                        model_summary = {
+                            "total_input_tokens": 0,
+                            "total_output_tokens": 0,
+                            "total_cache_n": 0,
+                            "total_prompt_n": 0,
+                            "total_cost_yuan": 0.0
+                        }
+
+                        for req in requests:
+                            # The get_model_requests function already filters by start_time
+                            model_summary["total_input_tokens"] += req.input_tokens
+                            model_summary["total_output_tokens"] += req.output_tokens
+                            model_summary["total_cache_n"] += req.cache_n
+                            model_summary["total_prompt_n"] += req.prompt_n
+                            model_summary["total_cost_yuan"] += self._calculate_request_cost(req, billing)
+
+                        return model_summary
+                    except asyncio.TimeoutError:
+                        logger.warning(f"[API_SERVER] 获取模型 {model_name} 会话数据超时")
+                        return {
+                            "total_input_tokens": 0,
+                            "total_output_tokens": 0,
+                            "total_cache_n": 0,
+                            "total_prompt_n": 0,
+                            "total_cost_yuan": 0.0
+                        }
+                    except Exception as e:
+                        logger.error(f"[API_SERVER] 获取模型 {model_name} 会话数据失败: {e}")
+                        return {
+                            "total_input_tokens": 0,
+                            "total_output_tokens": 0,
+                            "total_cache_n": 0,
+                            "total_prompt_n": 0,
+                            "total_cost_yuan": 0.0
+                        }
+
+                # 创建并发任务
+                model_names = self.config_manager.get_model_names()
+                tasks = [process_model_session_async(model_name) for model_name in model_names]
+
+                # 并发执行所有任务
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+
+                # 合并结果
+                for result in results:
+                    if isinstance(result, Exception):
+                        logger.error(f"[API_SERVER] 模型会话数据获取任务异常: {result}")
+                        continue
+
+                    for key in summary.keys():
+                        summary[key] += result[key]
+                
+                summary["total_cost_yuan"] = round(summary["total_cost_yuan"], 6)
+                summary["session_start_time"] = start_time
+                return {"success": True, "data": {"session_total": summary}}
+            except Exception as e:
+                logger.error(f"[API_SERVER] 获取本次运行总消耗失败: {e}")
+                return {"success": False, "error": str(e)}
+
+        @self.app.get("/api/analytics/token-distribution/{start_time}/{end_time}/{n_samples}")
+        async def get_token_distribution(start_time: float, end_time: float, n_samples: int):
+            """【逻辑不变】获取Token消耗分布趋势，按模型模式分解。此接口返回时间序列的总量数据。"""
+            try:
+                if start_time >= end_time or n_samples <= 0:
+                    return JSONResponse(status_code=400, content={"success": False, "error": "无效的时间范围或采样点数"})
+
+                interval = (end_time - start_time) / n_samples
+                tracked_modes = self.config_manager.get_token_tracker_modes()
+                point_template = {"total_tokens": 0}
+
+                df = await self._get_enriched_requests_dataframe(start_time, end_time)
+
+                if df.empty:
+                    time_points = [{"timestamp": start_time + (i + 0.5) * interval, "data": point_template} for i in range(n_samples)]
+                    mode_breakdown = {mode: list(time_points) for mode in tracked_modes}
+                    return {"success": True, "data": {"time_points": time_points, "mode_breakdown": mode_breakdown}}
+                
+                df['total_tokens'] = df['input_tokens'] + df['output_tokens']
+                df['bin_index'] = np.clip(np.floor((df['end_time'] - start_time) / interval), 0, n_samples - 1).astype(int)
+                
+                overall_agg = df.groupby('bin_index')['total_tokens'].sum()
+                mode_agg = df.groupby(['bin_index', 'model_mode'])['total_tokens'].sum()
+                
+                time_points = []
+                mode_breakdown = {mode: [] for mode in tracked_modes}
+
+                for i in range(n_samples):
+                    ts = start_time + (i + 0.5) * interval
+                    total = int(overall_agg.get(i, 0))
+                    time_points.append({"timestamp": ts, "data": {"total_tokens": total}})
+                    
+                    for mode in tracked_modes:
+                        mode_total = int(mode_agg.get((i, mode), 0))
+                        mode_breakdown[mode].append({"timestamp": ts, "data": {"total_tokens": mode_total}})
+                
+                return {"success": True, "data": {"time_points": time_points, "mode_breakdown": mode_breakdown}}
+            except Exception as e:
+                logger.error(f"[API_SERVER] 获取Token分布趋势失败: {e}", exc_info=True)
+                return {"success": False, "error": str(e)}
+
+        @self.app.get("/api/analytics/token-trends/{start_time}/{end_time}/{n_samples}")
+        async def get_token_trends(start_time: float, end_time: float, n_samples: int):
+            """【逻辑不变】获取Token消耗趋势，并按模型模式分解。此接口返回时间序列的总量数据。"""
+            try:
+                if start_time >= end_time or n_samples <= 0:
+                    return JSONResponse(status_code=400, content={"success": False, "error": "无效的时间范围或采样点数"})
+
+                interval = (end_time - start_time) / n_samples
+                tracked_modes = self.config_manager.get_token_tracker_modes()
+                point_template = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "cache_hit_tokens": 0, "cache_miss_tokens": 0}
+
+                df = await self._get_enriched_requests_dataframe(start_time, end_time)
+
+                if df.empty:
+                    time_points = [{"timestamp": start_time + (i + 0.5) * interval, "data": point_template} for i in range(n_samples)]
+                    mode_breakdown = {mode: list(time_points) for mode in tracked_modes}
+                    return {"success": True, "data": {"time_points": time_points, "mode_breakdown": mode_breakdown}}
+                
+                df['bin_index'] = np.clip(np.floor((df['end_time'] - start_time) / interval), 0, n_samples - 1).astype(int)
+                agg_cols = {"input_tokens": "sum", "output_tokens": "sum", "cache_n": "sum", "prompt_n": "sum"}
+                
+                overall_agg = df.groupby('bin_index')[list(agg_cols.keys())].agg(agg_cols)
+                mode_agg = df.groupby(['bin_index', 'model_mode'])[list(agg_cols.keys())].agg(agg_cols)
+                
+                time_points = []
+                mode_breakdown = {mode: [] for mode in tracked_modes}
+
+                for i in range(n_samples):
+                    ts = start_time + (i + 0.5) * interval
+                    
+                    if i in overall_agg.index:
+                        row = overall_agg.loc[i]
+                        time_points.append({"timestamp": ts, "data": {
+                            "input_tokens": int(row["input_tokens"]),
+                            "output_tokens": int(row["output_tokens"]),
+                            "total_tokens": int(row["input_tokens"] + row["output_tokens"]),
+                            "cache_hit_tokens": int(row["cache_n"]),
+                            "cache_miss_tokens": int(row["prompt_n"])
+                        }})
+                    else:
+                        time_points.append({"timestamp": ts, "data": point_template})
+                    
+                    for mode in tracked_modes:
+                        if (i, mode) in mode_agg.index:
+                            row = mode_agg.loc[(i, mode)]
+                            mode_breakdown[mode].append({"timestamp": ts, "data": {
+                                "input_tokens": int(row["input_tokens"]),
+                                "output_tokens": int(row["output_tokens"]),
+                                "total_tokens": int(row["input_tokens"] + row["output_tokens"]),
+                                "cache_hit_tokens": int(row["cache_n"]),
+                                "cache_miss_tokens": int(row["prompt_n"])
+                            }})
+                        else:
+                             mode_breakdown[mode].append({"timestamp": ts, "data": point_template})
+
+                return {"success": True, "data": {"time_points": time_points, "mode_breakdown": mode_breakdown}}
+            except Exception as e:
+                logger.error(f"[API_SERVER] 获取Token趋势失败: {e}", exc_info=True)
+                return {"success": False, "error": str(e)}
+
+        @self.app.get("/api/analytics/cost-trends/{start_time}/{end_time}/{n_samples}")
+        async def get_cost_trends(start_time: float, end_time: float, n_samples: int):
+            """【逻辑不变】获取成本趋势，并按模型模式分解。此接口返回时间序列的总量数据。"""
+            try:
+                if start_time >= end_time or n_samples <= 0:
+                    return JSONResponse(status_code=400, content={"success": False, "error": "无效的时间范围或采样点数"})
+
+                interval = (end_time - start_time) / n_samples
+                tracked_modes = self.config_manager.get_token_tracker_modes()
+                point_template = {"cost": 0.0}
+
+                # 1. 获取 enriched DataFrame
+                df = await self._get_enriched_requests_dataframe(start_time, end_time)
+                
+                if df.empty:
+                    time_points = [{"timestamp": start_time + (i + 0.5) * interval, "data": point_template} for i in range(n_samples)]
+                    mode_breakdown = {mode: list(time_points) for mode in tracked_modes}
+                    return {"success": True, "data": {"time_points": time_points, "mode_breakdown": mode_breakdown}}
+
+                # 2. 并发获取所有计费信息
+                model_names = df['model_name'].unique()
+                billing_tasks = [asyncio.to_thread(self.monitor.get_model_billing, name) for name in model_names]
+                billing_results = await asyncio.gather(*billing_tasks)
+                model_billings = {name: billing for name, billing in zip(model_names, billing_results)}
+
+                # 3. 计算每行成本
+                def calculate_cost_for_row(row):
+                    temp_req = SimpleNamespace(**row.to_dict())
+                    billing = model_billings.get(row['model_name'])
+                    return self._calculate_request_cost(temp_req, billing)
+                df['cost'] = df.apply(calculate_cost_for_row, axis=1)
+
+                # 4. 聚合
+                df['bin_index'] = np.clip(np.floor((df['end_time'] - start_time) / interval), 0, n_samples - 1).astype(int)
+                overall_agg = df.groupby('bin_index')['cost'].sum()
+                mode_agg = df.groupby(['bin_index', 'model_mode'])['cost'].sum()
+
+                # 5. 格式化输出
+                time_points = []
+                mode_breakdown = {mode: [] for mode in tracked_modes}
+
+                for i in range(n_samples):
+                    ts = start_time + (i + 0.5) * interval
+                    cost = round(overall_agg.get(i, 0.0), 6)
+                    time_points.append({"timestamp": ts, "data": {"cost": cost}})
+                    
+                    for mode in tracked_modes:
+                        mode_cost = round(mode_agg.get((i, mode), 0.0), 6)
+                        mode_breakdown[mode].append({"timestamp": ts, "data": {"cost": mode_cost}})
+
+                return {"success": True, "data": {"time_points": time_points, "mode_breakdown": mode_breakdown}}
+            except Exception as e:
+                logger.error(f"[API_SERVER] 获取成本趋势失败: {e}", exc_info=True)
+                return {"success": False, "error": str(e)}
+
+        @self.app.get("/api/analytics/model-stats/{model_name_alias}/{start_time}/{end_time}/{n_samples}")
+        async def get_model_stats(model_name_alias: str, start_time: float, end_time: float, n_samples: int):
+            """【逻辑不变】获取单模型在指定时间范围内的详细统计数据。"""
+            try:
+                if start_time >= end_time or n_samples <= 0:
+                    return JSONResponse(status_code=400, content={"success": False, "error": "无效的时间范围或采样点数"})
+
+                model_name = self.config_manager.resolve_primary_name(model_name_alias)
+                
+                requests_as_dicts = [req.__dict__ for req in self.monitor.get_model_requests(model_name, start_time, end_time)]
+                
+                total_duration = end_time - start_time
+                interval = total_duration / n_samples
+                
+                summary_template = {"total_input_tokens": 0, "total_output_tokens": 0, "total_tokens": 0, "total_cache_n": 0, "total_prompt_n": 0, "total_cost": 0, "request_count": 0}
+                point_template = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "cache_hit_tokens": 0, "cache_miss_tokens": 0, "cost": 0.0}
+                time_points = [{"timestamp": start_time + (i + 0.5) * interval, "data": point_template.copy()} for i in range(n_samples)]
+                
+                if not requests_as_dicts:
+                    return {"success": True, "data": {"model_name": model_name, "summary": summary_template, "time_points": time_points}}
+
+                df = pd.DataFrame(requests_as_dicts)
+                billing = self.monitor.get_model_billing(model_name)
+
+                def calculate_cost_for_row(row):
+                    temp_req = SimpleNamespace(**row.to_dict())
+                    return self._calculate_request_cost(temp_req, billing)
+                df['cost'] = df.apply(calculate_cost_for_row, axis=1)
+                df['total_tokens'] = df['input_tokens'] + df['output_tokens']
+
+                summary = {
+                    "total_input_tokens": int(df['input_tokens'].sum()),
+                    "total_output_tokens": int(df['output_tokens'].sum()),
+                    "total_tokens": int(df['total_tokens'].sum()),
+                    "total_cache_n": int(df['cache_n'].sum()),
+                    "total_prompt_n": int(df['prompt_n'].sum()),
+                    "total_cost": round(df['cost'].sum(), 6),
+                    "request_count": len(df)
+                }
+
+                bin_indices = np.floor((df['end_time'] - start_time) / interval)
+                df['bin_index'] = np.clip(bin_indices, 0, n_samples - 1).astype(int)
+
+                agg_cols = {"input_tokens": "sum", "output_tokens": "sum", "total_tokens": "sum", "cache_n": "sum", "prompt_n": "sum", "cost": "sum"}
+                time_agg_df = df.groupby('bin_index')[list(agg_cols.keys())].agg(agg_cols)
+                
+                final_time_points = []
+                for i in range(n_samples):
+                    ts = start_time + (i + 0.5) * interval
+                    if i in time_agg_df.index:
+                        point_data = time_agg_df.loc[i]
+                        final_time_points.append({
+                            "timestamp": ts,
+                            "data": {
+                                "input_tokens": int(point_data["input_tokens"]),
+                                "output_tokens": int(point_data["output_tokens"]),
+                                "total_tokens": int(point_data["total_tokens"]),
+                                "cache_hit_tokens": int(point_data["cache_n"]),
+                                "cache_miss_tokens": int(point_data["prompt_n"]),
+                                "cost": round(point_data["cost"], 6)
+                            }
+                        })
+                    else:
+                        final_time_points.append({"timestamp": ts, "data": point_template})
+
+                return {"success": True, "data": {"model_name": model_name, "summary": summary, "time_points": final_time_points}}
+            except KeyError:
+                return JSONResponse(status_code=404, content={"success": False, "error": f"模型别名 '{model_name_alias}' 未找到"})
+            except Exception as e:
+                logger.error(f"[API_SERVER] 获取模型统计数据失败: {e}")
+                return {"success": False, "error": str(e)}
+
+        # ... (Rest of the file remains unchanged)
+        # Add all the other endpoints from the original file here
+        @self.app.get("/api/billing/models/{model_name}/pricing")
+        async def get_model_pricing(model_name: str):
+            """获取模型计费配置"""
+            try:
+                # 解析模型名称
+                primary_name = self.config_manager.resolve_primary_name(model_name)
+
+                billing = self.monitor.get_model_billing(primary_name)
+                if not billing:
+                    return {"success": False, "error": f"模型 '{model_name}' 的计费配置不存在"}
+
+                return {
+                    "success": True,
+                    "data": {
+                        "model_name": primary_name,
+                        "pricing_type": "tier" if billing.use_tier_pricing else "hourly",
+                        "tier_pricing": [
+                            {
+                                "tier_index": tier.tier_index,
+                                "start_tokens": tier.start_tokens,
+                                "end_tokens": tier.end_tokens,
+                                "input_price_per_million": tier.input_price_per_million,
+                                "output_price_per_million": tier.output_price_per_million,
+                                "support_cache": tier.support_cache,
+                                "cache_hit_price_per_million": tier.cache_hit_price_per_million
+                            }
+                            for tier in billing.tier_pricing
+                        ],
+                        "hourly_price": billing.hourly_price
+                    }
+                }
+
+            except KeyError:
+                return {"success": False, "error": f"模型 '{model_name}' 不存在"}
+            except Exception as e:
+                logger.error(f"[API_SERVER] 获取模型计费配置失败: {e}")
+                return {"success": False, "error": str(e)}
+
+        @self.app.post("/api/billing/models/{model_name}/pricing/tier")
+        async def set_tier_pricing(model_name: str, pricing_data: dict):
+            """设置模型阶梯计费"""
+            try:
+                # 解析模型名称
+                primary_name = self.config_manager.resolve_primary_name(model_name)
+
+                # 验证数据
+                required_fields = ["tier_index", "start_tokens", "end_tokens",
+                                 "input_price_per_million", "output_price_per_million",
+                                 "support_cache", "cache_hit_price_per_million"]
+
+                for field in required_fields:
+                    if field not in pricing_data:
+                        return {"success": False, "error": f"缺少必要字段: {field}"}
+
+                # 设置阶梯计费
+                tier_data = [
+                    pricing_data["tier_index"],
+                    pricing_data["start_tokens"],
+                    pricing_data["end_tokens"],
+                    pricing_data["input_price_per_million"],
+                    pricing_data["output_price_per_million"],
+                    pricing_data["support_cache"],
+                    pricing_data["cache_hit_price_per_million"]
+                ]
+
+                self.monitor.update_tier_pricing(primary_name, tier_data)
+                self.monitor.update_billing_method(primary_name, True)
+
+                return {
+                    "success": True,
+                    "message": f"模型 '{model_name}' 阶梯计费配置已更新"
+                }
+
+            except KeyError:
+                return {"success": False, "error": f"模型 '{model_name}' 不存在"}
+            except Exception as e:
+                logger.error(f"[API_SERVER] 设置阶梯计费失败: {e}")
+                return {"success": False, "error": str(e)}
+
+        @self.app.post("/api/billing/models/{model_name}/pricing/hourly")
+        async def set_hourly_pricing(model_name: str, pricing_data: dict):
+            """设置模型按时计费"""
+            try:
+                # 解析模型名称
+                primary_name = self.config_manager.resolve_primary_name(model_name)
+
+                # 验证数据
+                if "hourly_price" not in pricing_data:
+                    return {"success": False, "error": "缺少必要字段: hourly_price"}
+
+                # 设置按时计费
+                hourly_price = float(pricing_data["hourly_price"])
+                self.monitor.update_hourly_price(primary_name, hourly_price)
+                self.monitor.update_billing_method(primary_name, False)
+
+                return {
+                    "success": True,
+                    "message": f"模型 '{model_name}' 按时计费配置已更新"
+                }
+
+            except KeyError:
+                return {"success": False, "error": f"模型 '{model_name}' 不存在"}
+            except Exception as e:
+                logger.error(f"[API_SERVER] 设置按时计费失败: {e}")
+                return {"success": False, "error": str(e)}
+
+        @self.app.get("/api/data/models/orphaned")
+        async def get_orphaned_models():
+            """获取孤立模型数据（配置中不存在但数据库中有数据的模型）"""
+            try:
+                import os
+                import sqlite3
+
+                # 获取配置中的模型名称
+                configured_models = set(self.config_manager.get_model_names())
+
+                # 获取数据库中的所有模型表
+                orphaned_models = []
+
+                if os.path.exists(self.monitor.db_path):
+                    conn = sqlite3.connect(self.monitor.db_path)
+                    cursor = conn.cursor()
+
+                    # 获取所有表名
+                    cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+                    tables = cursor.fetchall()
+
+                    for table in tables:
+                        table_name = table[0]
+                        if table_name.endswith('_requests'):
+                            # 从表名提取模型名称
+                            model_name = table_name[:-9]  # 移除 '_requests' 后缀
+
+                            # 检查是否在映射表中
+                            cursor.execute('''
+                                SELECT original_name FROM model_name_mapping
+                                WHERE safe_name = ?
+                            ''', (model_name,))
+                            result = cursor.fetchone()
+
+                            if result:
+                                original_name = result[0]
+                                if original_name not in configured_models:
+                                    orphaned_models.append(original_name)
+
+                    conn.close()
+
+                return {
+                    "success": True,
+                    "data": {
+                        "orphaned_models": orphaned_models,
+                        "count": len(orphaned_models)
+                    }
+                }
+
+            except Exception as e:
+                logger.error(f"[API_SERVER] 获取孤立模型数据失败: {e}")
+                return {"success": False, "error": str(e)}
+
+        @self.app.delete("/api/data/models/{model_name}")
+        async def delete_model_data(model_name: str):
+            """删除指定模型的数据"""
+            try:
+                # 检查模型是否在配置中
+                configured_models = self.config_manager.get_model_names()
+                if model_name in configured_models:
+                    return {"success": False, "error": f"模型 '{model_name}' 仍在配置中，无法删除"}
+
+                # 删除模型数据
+                self.monitor.delete_model_tables(model_name)
+
+                return {
+                    "success": True,
+                    "message": f"模型 '{model_name}' 的数据已删除"
+                }
+
+            except Exception as e:
+                logger.error(f"[API_SERVER] 删除模型数据失败: {e}")
+                return {"success": False, "error": str(e)}
+
+        @self.app.get("/api/data/storage/stats")
+        async def get_storage_stats():
+            """获取存储统计信息"""
+            try:
+                import os
+                import sqlite3
+
+                stats = {
+                    "database_exists": False,
+                    "database_size_mb": 0,
+                    "total_models_with_data": 0,
+                    "total_requests": 0,
+                    "models_data": {}
+                }
+
+                if os.path.exists(self.monitor.db_path):
+                    stats["database_exists"] = True
+                    stats["database_size_mb"] = round(os.path.getsize(self.monitor.db_path) / (1024 * 1024), 2)
+
+                    # 并发获取所有模型统计信息
+                    async def get_model_storage_stats_async(model_name: str):
+                        """并发获取单个模型的存储统计信息"""
+                        try:
+                            # 在线程池中执行数据库操作
+                            result = await asyncio.wait_for(
+                                asyncio.to_thread(self._get_single_model_storage_stats, model_name),
+                                timeout=15.0
+                            )
+                            return model_name, result
+                        except asyncio.TimeoutError:
+                            logger.warning(f"[API_SERVER] 获取模型 {model_name} 存储统计超时")
+                            return model_name, {
+                                "request_count": 0,
+                                "has_runtime_data": False,
+                                "has_billing_data": False
+                            }
+                        except Exception as e:
+                            logger.error(f"[API_SERVER] 获取模型 {model_name} 存储统计失败: {e}")
+                            return model_name, {
+                                "request_count": 0,
+                                "has_runtime_data": False,
+                                "has_billing_data": False
+                            }
+
+                    # 获取配置中的模型名称
+                    configured_models = self.config_manager.get_model_names()
+
+                    # 创建并发任务
+                    tasks = [get_model_storage_stats_async(model_name) for model_name in configured_models]
+
+                    # 并发执行所有任务
+                    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+                    # 处理结果
+                    total_requests = 0
+                    for result in results:
+                        if isinstance(result, Exception):
+                            logger.error(f"[API_SERVER] 模型存储统计任务异常: {result}")
+                            continue
+
+                        model_name, model_stats = result
+                        stats["models_data"][model_name] = model_stats
+                        total_requests += model_stats["request_count"]
+
+                    stats["total_models_with_data"] = len([m for m in stats["models_data"].values() if m["request_count"] > 0])
+                    stats["total_requests"] = total_requests
+
+                return {
+                    "success": True,
+                    "data": stats
+                }
+
+            except Exception as e:
+                logger.error(f"[API_SERVER] 获取存储统计失败: {e}")
+                return {"success": False, "error": str(e)}
+
+        def _get_single_model_storage_stats(self, model_name: str):
+            """同步获取单个模型的存储统计信息（在线程池中执行）"""
+            import sqlite3
+
+            safe_name = self.monitor.get_model_safe_name(model_name)
+            if not safe_name:
+                return {
+                    "request_count": 0,
+                    "has_runtime_data": False,
+                    "has_billing_data": False
+                }
+
+            try:
+                conn = sqlite3.connect(self.monitor.db_path)
+                cursor = conn.cursor()
+
+                # 获取请求数量
+                cursor.execute(f"SELECT COUNT(*) FROM {safe_name}_requests")
+                request_count = cursor.fetchone()[0]
+
+                # 检查是否有运行时间数据
+                cursor.execute(f"SELECT COUNT(*) FROM {safe_name}_runtime")
+                has_runtime_data = cursor.fetchone()[0] > 0
+
+                # 检查是否有计费数据
+                cursor.execute(f"SELECT COUNT(*) FROM {safe_name}_tier_pricing")
+                has_billing_data = cursor.fetchone()[0] > 0
+
+                conn.close()
+
+                return {
+                    "request_count": request_count,
+                    "has_runtime_data": has_runtime_data,
+                    "has_billing_data": has_billing_data
+                }
+
+            except Exception as e:
+                logger.error(f"[API_SERVER] 获取模型 {model_name} 存储统计详情失败: {e}")
+                return {
+                    "request_count": 0,
+                    "has_runtime_data": False,
+                    "has_billing_data": False
+                }
 
         @self.app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD"])
         async def handle_all_requests(request: Request, path: str):
             """统一请求处理器"""
-            return await self.handle_request(request, path)
+            return await self.api_router.route_request(request, path, self.token_tracker)
 
-    
-    async def get_async_client(self, port: int):
-        """获取异步HTTP客户端"""
-        if port not in self.async_clients:
-            import httpx
-            timeouts = httpx.Timeout(10.0, read=600.0)
-            self.async_clients[port] = httpx.AsyncClient(
-                base_url=f"http://127.0.0.1:{port}",
-                timeout=timeouts
-            )
-        return self.async_clients[port]
 
-    async def stream_proxy_wrapper(self, model_alias: str, response: any):
-        """包装流式响应，以在结束后更新请求计数器"""
-        try:
-            async for chunk in response.aiter_bytes():
-                yield chunk
-        finally:
-            await response.aclose()
-            self.model_controller.mark_request_completed(model_alias)
-
-    def create_error_response(self, detail: str, status_code: int = 500) -> JSONResponse:
-        """创建错误响应"""
-        return JSONResponse(
-            status_code=status_code,
-            content={"error": True, "message": detail}
-        )
-
-    async def handle_request(self, request: Request, path: str) -> Response:
-        """统一请求处理器"""
-        # 处理OPTIONS请求
-        if request.method == "OPTIONS":
-            return Response(status_code=204, headers={
-                "Access-Control-Allow-Origin": "*",
-                "Access-Control-Allow-Methods": "*",
-                "Access-Control-Allow-Headers": "*"
-            })
-
-        # 解析请求
-        body, model_alias, request_data = {}, None, b''
-        try:
-            if "application/json" in request.headers.get("content-type", ""):
-                body = await request.json()
-                model_alias = body.get("model")
-                request_data = json.dumps(body).encode('utf-8')
-            else:
-                request_data = await request.body()
-        except Exception:
-            request_data = await request.body()
-
-        if not model_alias:
-            raise HTTPException(status_code=400, detail="请求体(JSON)中缺少 'model' 字段")
-
-        if model_alias not in self.model_controller.alias_to_primary_name:
-            raise HTTPException(status_code=404, detail=f"模型别名 '{model_alias}' 未在配置中找到")
-
-        # 获取模型配置并验证模式
-        model_config = self.model_controller.get_model_config(model_alias)
-        if not model_config:
-            raise HTTPException(status_code=404, detail=f"模型 '{model_alias}' 配置未找到")
-
-        model_mode = model_config.get("mode", "Chat")
-
-        # 获取接口插件
-        interface_plugin = self.model_controller.interface_plugins.get(model_mode)
-        if not interface_plugin:
-            raise HTTPException(status_code=400, detail=f"不支持的模型模式: {model_mode}")
-
-        # 使用插件进行请求验证
-        is_valid, error_message = interface_plugin.validate_request(path, model_alias)
-        if not is_valid:
-            raise HTTPException(status_code=400, detail=error_message)
-
-        # 增加待处理请求计数
-        self.model_controller.increment_pending_requests(model_alias)
-
-        try:
-            # 启动模型（如果未运行）
-            success, message = await asyncio.to_thread(
-                self.model_controller.start_model, model_alias
-            )
-            if not success:
-                raise HTTPException(status_code=503, detail=message)
-
-            # 代理请求到下游模型
-            target_port = model_config['port']
-            client = await self.get_async_client(target_port)
-
-            # 构建目标URL
-            target_url = client.base_url.join(path)
-
-            # 过滤请求头
-            headers = dict(request.headers)
-            headers.pop("host", None)
-            headers.pop("content-length", None)
-            headers.pop("transfer-encoding", None)
-
-            # 构建请求
-            req = client.build_request(
-                request.method,
-                target_url,
-                headers=headers,
-                content=request_data,
-                params=request.query_params
-            )
-
-            # 发送请求
-            response = await client.send(req, stream=True)
-
-            # 处理流式响应
-            is_streaming = "text/event-stream" in response.headers.get("content-type", "")
-
-            if is_streaming:
-                return StreamingResponse(
-                    self.stream_proxy_wrapper(model_alias, response),
-                    status_code=response.status_code,
-                    headers=dict(response.headers)
-                )
-            else:
-                # 处理非流式响应
-                content = await response.aread()
-                await response.aclose()
-                self.model_controller.mark_request_completed(model_alias)
-
-                return Response(
-                    content=content,
-                    status_code=response.status_code,
-                    headers=dict(response.headers)
-                )
-
-        except Exception as e:
-            # 统一的异常处理
-            logger.error(f"处理对 '{model_alias}' 的请求时出错: {e}", exc_info=True)
-            self.model_controller.mark_request_completed(model_alias)
-
-            if isinstance(e, HTTPException):
-                raise e
-
-            # 对于其他未知异常，包装成500错误
-            raise HTTPException(status_code=500, detail=f"内部服务器错误: {str(e)}")
-
-    def run(self, host: str, port: int):
+    def run(self, host: Optional[str] = None, port: Optional[int] = None):
         """运行API服务器"""
         import uvicorn
-        logger.info(f"统一API接口将在 http://{host}:{port} 上启动")
+        if host is None or port is None:
+            api_cfg = self.config_manager.get_openai_config()
+            host = host or api_cfg['host']
+            port = port or api_cfg['port']
+        logger.info(f"[API_SERVER] 统一API接口将在 http://{host}:{port} 上启动")
         uvicorn.run(self.app, host=host, port=port, log_level="warning")
 
-# 全局变量
-app: Optional[FastAPI] = None
-api_server: Optional[APIServer] = None
 
-def initialize_api_server(model_controller: ModelController) -> APIServer:
-    """初始化API服务器"""
-    global app, api_server
-    api_server = APIServer(model_controller)
-    app = api_server.app
-    return api_server
+_app_instance: Optional[FastAPI] = None
+_server_instance: Optional[APIServer] = None
 
-def run_api_server(model_controller: ModelController, host: str, port: int):
-    """运行API服务器的便捷函数"""
-    server = initialize_api_server(model_controller)
-    server.run(host, port)
+def run_api_server(config_manager: ConfigManager, host: Optional[str] = None, port: Optional[int] = None):
+    """运行API服务器"""
+    global _app_instance, _server_instance
+    _server_instance = APIServer(config_manager)
+    _app_instance = _server_instance.app
+    _server_instance.run(host, port)

@@ -1,5 +1,5 @@
 import GPUtil
-from typing import Tuple
+from typing import Dict, Any
 from plugins.devices.Base_Class import DevicePlugin
 import logging
 
@@ -25,8 +25,8 @@ class V100Device(DevicePlugin):
             logger.error(f"检查V100在线状态失败: {e}")
             return False
 
-    def get_memory_info(self) -> Tuple[int, int, int]:
-        """获取V100显存信息"""
+    def get_devices_info(self) -> Dict[str, Any]:
+        """获取V100设备信息"""
         try:
             gpus = GPUtil.getGPUs()
             for gpu in gpus:
@@ -34,14 +34,42 @@ class V100Device(DevicePlugin):
                     total_mb = int(gpu.memoryTotal)
                     used_mb = int(gpu.memoryUsed)
                     available_mb = int(gpu.memoryFree)
+                    usage_percentage = gpu.load * 100
+                    temperature = gpu.temperature
 
-                    logger.debug(f"V100显存: 总={total_mb}MB, 可用={available_mb}MB, 已用={used_mb}MB")
-                    return total_mb, available_mb, used_mb
+                    device_info = {
+                        'device_type': 'GPU',
+                        'memory_type': 'VRAM',
+                        'total_memory_mb': total_mb,
+                        'available_memory_mb': available_mb,
+                        'used_memory_mb': used_mb,
+                        'usage_percentage': usage_percentage,
+                        'temperature_celsius': temperature
+                    }
+
+                    logger.debug(f"V100设备: {device_info}")
+                    return device_info
 
             logger.warning("未找到V100 GPU")
-            return 0, 0, 0
+            return {
+                'device_type': 'GPU',
+                'memory_type': 'VRAM',
+                'total_memory_mb': 0,
+                'available_memory_mb': 0,
+                'used_memory_mb': 0,
+                'usage_percentage': 0.0,
+                'temperature_celsius': None
+            }
 
         except Exception as e:
-            logger.error(f"获取V100显存信息失败: {e}")
-            return 0, 0, 0
+            logger.error(f"获取V100设备信息失败: {e}")
+            return {
+                'device_type': 'GPU',
+                'memory_type': 'VRAM',
+                'total_memory_mb': 0,
+                'available_memory_mb': 0,
+                'used_memory_mb': 0,
+                'usage_percentage': 0.0,
+                'temperature_celsius': None
+            }
 
