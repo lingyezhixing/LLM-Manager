@@ -507,7 +507,7 @@ class ModelController:
 
     def start_model(self, primary_name: str) -> Tuple[bool, str]:
         """
-        优化的启动模型 - 支持并行启动，接受主名称
+        优化的启动模型 - 支持并发启动和统一等待机制，接受主名称
 
         Args:
             primary_name: 模型主名称
@@ -523,13 +523,14 @@ class ModelController:
             if state['status'] == ModelStatus.ROUTING.value:
                 return True, f"模型 '{primary_name}' 已在运行"
             elif state['status'] == ModelStatus.STARTING.value:
-                # 模型正在启动，等待启动完成（最多等待30秒）
+                # 模型正在启动，所有请求统一等待启动完成
+                logger.info(f"模型 '{primary_name}' 正在启动中，等待完成...")
                 return self._wait_for_model_startup(primary_name, state)
 
-        # 使用模型专用锁而不是全局锁，允许并行启动
-        if not model_lock.acquire(blocking=False):
-            # 如果锁被占用，返回等待信息
-            return False, f"模型 '{primary_name}' 正在启动中，请稍后再试"
+        # 【修复】使用阻塞锁获取，确保所有请求都能等待而不是被拒绝
+        logger.info(f"等待启动模型 '{primary_name}' 的启动锁...")
+        model_lock.acquire(blocking=True)  # 改为阻塞获取，会一直等待直到获取到锁
+        logger.info(f"获取到模型 '{primary_name}' 的启动锁")
 
         try:
             logger.info(f"开始启动模型 '{primary_name}'")
@@ -563,7 +564,7 @@ class ModelController:
 
     def _wait_for_model_startup(self, primary_name: str, state: Dict[str, Any]) -> Tuple[bool, str]:
         """
-        等待模型启动完成
+        【增强】等待模型启动完成 - 支持更长的等待时间和更好的状态检查
 
         Args:
             primary_name: 模型名称
@@ -573,21 +574,53 @@ class ModelController:
             (成功状态, 消息)
         """
         wait_start = time.time()
-        max_wait_time = 30  # 减少等待时间到30秒
+        max_wait_time = 120  # 【增强】增加等待时间到120秒，适应大模型启动时间
+        check_interval = 0.5  # 检查间隔（秒）
+        last_log_time = wait_start
 
-        while state['status'] == ModelStatus.STARTING.value:
-            if time.time() - wait_start > max_wait_time:
-                logger.error(f"等待模型 '{primary_name}' 启动超时")
-                return False, f"等待模型 '{primary_name}' 启动超时"
-            time.sleep(0.5)
+        logger.info(f"开始等待模型 '{primary_name}' 启动完成，最大等待时间: {max_wait_time}秒")
 
-        # 重新检查状态
-        if state['status'] == ModelStatus.ROUTING.value:
-            logger.info(f"模型 '{primary_name}' 启动完成")
-            return True, f"模型 {primary_name} 已成功启动"
-        else:
-            logger.error(f"模型 '{primary_name}' 启动失败")
-            return False, f"模型 {primary_name} 启动失败"
+        while True:
+            current_time = time.time()
+            elapsed_time = current_time - wait_start
+
+            # 定期输出等待日志（每30秒一次）
+            if current_time - last_log_time >= 30:
+                logger.info(f"持续等待模型 '{primary_name}' 启动中... 已等待 {elapsed_time:.1f}秒")
+                last_log_time = current_time
+
+            # 【增强】安全的状态检查，使用锁避免竞态条件
+            with state['lock']:
+                current_status = state['status']
+                failure_reason = state.get('failure_reason')
+
+            # 检查是否超时
+            if elapsed_time > max_wait_time:
+                logger.error(f"等待模型 '{primary_name}' 启动超时，等待时间: {elapsed_time:.1f}秒")
+                return False, f"等待模型 '{primary_name}' 启动超时（超过{max_wait_time}秒）"
+
+            # 检查启动状态
+            if current_status == ModelStatus.ROUTING.value:
+                logger.info(f"模型 '{primary_name}' 启动完成，总等待时间: {elapsed_time:.1f}秒")
+                return True, f"模型 {primary_name} 已成功启动"
+            elif current_status == ModelStatus.FAILED.value:
+                error_msg = f"模型 '{primary_name}' 启动失败"
+                if failure_reason:
+                    error_msg += f": {failure_reason}"
+                logger.error(error_msg)
+                return False, error_msg
+            elif current_status == ModelStatus.STOPPED.value:
+                # 意外状态，可能被外部停止
+                logger.warning(f"模型 '{primary_name}' 状态变为已停止，等待中断")
+                return False, f"模型 '{primary_name}' 被意外停止"
+
+            # 如果还在启动中，继续等待
+            if current_status == ModelStatus.STARTING.value:
+                time.sleep(check_interval)
+            else:
+                # 未知状态，记录警告并继续等待
+                logger.warning(f"模型 '{primary_name}' 处于未知状态: {current_status}，继续等待...")
+                time.sleep(check_interval)
 
     def _start_model_intelligent(self, primary_name: str) -> Tuple[bool, str]:
         """

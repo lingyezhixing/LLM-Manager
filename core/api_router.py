@@ -216,7 +216,8 @@ class APIRouter:
         """获取异步HTTP客户端"""
         if port not in self.async_clients:
             import httpx
-            timeouts = httpx.Timeout(10.0, read=600.0)
+            # 【调整】增加连接超时时间，适应模型启动等待时间
+            timeouts = httpx.Timeout(30.0, read=600.0, connect=30.0, write=30.0)
             self.async_clients[port] = httpx.AsyncClient(
                 base_url=f"http://127.0.0.1:{port}",
                 timeout=timeouts
