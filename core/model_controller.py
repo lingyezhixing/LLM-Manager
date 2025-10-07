@@ -527,29 +527,55 @@ class ModelController:
                 logger.info(f"模型 '{primary_name}' 正在启动中，等待完成...")
                 return self._wait_for_model_startup(primary_name, state)
 
-        # 【修复】使用阻塞锁获取，确保所有请求都能等待而不是被拒绝
+        # 【修复】使用带超时的阻塞锁获取，避免死锁
         logger.info(f"等待启动模型 '{primary_name}' 的启动锁...")
-        model_lock.acquire(blocking=True)  # 改为阻塞获取，会一直等待直到获取到锁
-        logger.info(f"获取到模型 '{primary_name}' 的启动锁")
+        lock_acquired = False
+        try:
+            lock_acquired = model_lock.acquire(blocking=True, timeout=60)  # 60秒超时
+            if not lock_acquired:
+                logger.error(f"获取模型 '{primary_name}' 启动锁超时，可能存在死锁")
+                # 尝试强制获取锁作为最后手段
+                logger.warning(f"尝试强制获取模型 '{primary_name}' 的启动锁...")
+                lock_acquired = model_lock.acquire(blocking=False)
+                if not lock_acquired:
+                    return False, f"获取模型 '{primary_name}' 启动锁失败，请稍后重试"
+            logger.info(f"获取到模型 '{primary_name}' 的启动锁")
+        except Exception as e:
+            logger.error(f"获取模型 '{primary_name}' 启动锁时发生异常: {e}")
+            if lock_acquired:
+                model_lock.release()
+            return False, f"获取启动锁时发生异常: {e}"
 
         try:
             logger.info(f"开始启动模型 '{primary_name}'")
 
             # 双重检查：在获取锁后再次确认模型状态
             with state['lock']:
-                if state['status'] == ModelStatus.ROUTING.value:
+                current_status = state['status']
+
+                if current_status == ModelStatus.ROUTING.value:
                     logger.info(f"模型 '{primary_name}' 已被其他线程启动")
                     return True, f"模型 {primary_name} 已成功启动"
-                elif state['status'] == ModelStatus.STARTING.value:
-                    logger.info(f"模型 '{primary_name}' 正在启动中，等待完成...")
+                elif current_status == ModelStatus.STOPPED.value:
+                    # 检查是否被外部停止请求中断
+                    if state.get('failure_reason') == "被用户请求停止":
+                        logger.info(f"模型 '{primary_name}' 启动过程被用户请求中断")
+                        return False, f"模型 '{primary_name}' 启动被用户中断"
+                    logger.info(f"模型 '{primary_name}' 状态为已停止，继续启动流程")
+                elif current_status == ModelStatus.FAILED.value:
+                    logger.info(f"模型 '{primary_name}' 之前启动失败，重新尝试启动")
+                    # 清除失败原因
+                    state['failure_reason'] = None
+                elif current_status == ModelStatus.STARTING.value:
+                    logger.warning(f"模型 '{primary_name}' 仍处于启动状态，这可能表示存在状态不一致")
                     # 释放模型锁并等待
-                    model_lock.release()
                     return self._wait_for_model_startup(primary_name, state)
 
                 # 确认由当前线程执行加载
                 state['status'] = ModelStatus.STARTING.value
+                state['failure_reason'] = None  # 清除之前的失败原因
                 # 使用系统日志记录器记录启动操作
-                logger.info(f"启动模型 '{primary_name}'")
+                logger.info(f"开始启动模型 '{primary_name}' (之前状态: {current_status})")
 
             try:
                 return self._start_model_intelligent(primary_name)
@@ -560,7 +586,12 @@ class ModelController:
                 logger.error(f"启动模型 {primary_name} 失败: {e}", exc_info=True)
                 return False, f"启动模型 {primary_name} 失败: {e}"
         finally:
-            model_lock.release()
+            if lock_acquired:
+                try:
+                    model_lock.release()
+                    logger.info(f"已释放模型 '{primary_name}' 的启动锁")
+                except Exception as e:
+                    logger.error(f"释放模型 '{primary_name}' 启动锁时发生异常: {e}")
 
     def _wait_for_model_startup(self, primary_name: str, state: Dict[str, Any]) -> Tuple[bool, str]:
         """
@@ -610,9 +641,14 @@ class ModelController:
                 logger.error(error_msg)
                 return False, error_msg
             elif current_status == ModelStatus.STOPPED.value:
-                # 意外状态，可能被外部停止
-                logger.warning(f"模型 '{primary_name}' 状态变为已停止，等待中断")
-                return False, f"模型 '{primary_name}' 被意外停止"
+                # 检查是否被用户主动停止
+                if failure_reason and "被用户请求停止" in failure_reason:
+                    logger.info(f"模型 '{primary_name}' 启动过程被用户中断，等待时间: {elapsed_time:.1f}秒")
+                    return False, f"模型 '{primary_name}' 启动被用户中断"
+                else:
+                    # 意外状态，可能被外部停止
+                    logger.warning(f"模型 '{primary_name}' 状态意外变为已停止，等待中断，等待时间: {elapsed_time:.1f}秒")
+                    return False, f"模型 '{primary_name}' 启动过程被意外停止"
 
             # 如果还在启动中，继续等待
             if current_status == ModelStatus.STARTING.value:
@@ -876,7 +912,7 @@ class ModelController:
 
     def stop_model(self, primary_name: str) -> Tuple[bool, str]:
         """
-        停止模型 - 接受主名称
+        停止模型 - 接受主名称，增强支持中断正在启动的模型
 
         Args:
             primary_name: 模型主名称
@@ -885,30 +921,75 @@ class ModelController:
             (成功状态, 消息)
         """
         state = self.models_state[primary_name]
+        model_lock = self.startup_locks[primary_name]
 
-        with state['lock']:
-            if state['status'] in [ModelStatus.STOPPED.value, ModelStatus.FAILED.value]:
-                return True, f"模型 '{primary_name}' 已停止或失败"
-
-            pid = state.get('pid')
-            if pid:
-                logger.info(f"正在强制停止模型 {primary_name} (PID: {pid})")
-                # 使用进程管理器强制终止模型进程
-                process_name = f"model_{primary_name}"
-                success, message = self.process_manager.stop_process(process_name, force=True)
-
-                if success:
-                    logger.info(f"模型 {primary_name} (PID: {pid}) 已成功终止")
+        # 【新增】检查启动锁，处理正在启动的模型
+        startup_lock_released = False
+        try:
+            # 尝试获取启动锁，如果获取失败说明模型正在启动
+            startup_lock_released = model_lock.acquire(blocking=False)
+            if not startup_lock_released:
+                logger.info(f"模型 '{primary_name}' 正在启动中，尝试中断启动过程...")
+                # 模型正在启动，尝试获取锁来中断启动
+                # 等待最多10秒来获取启动锁
+                startup_lock_released = model_lock.acquire(blocking=True, timeout=10)
+                if not startup_lock_released:
+                    logger.warning(f"无法获取模型 '{primary_name}' 的启动锁，可能存在死锁")
+                    # 强制释放锁作为最后手段
+                    logger.warning(f"强制释放模型 '{primary_name}' 的启动锁...")
+                    # 这里我们不能直接强制释放锁，但可以标记状态为停止
+                    with state['lock']:
+                        state['status'] = ModelStatus.STOPPED.value
+                        state['failure_reason'] = "被外部请求中断"
+                    return False, f"无法中断模型 '{primary_name}' 的启动过程，请稍后重试"
                 else:
-                    logger.warning(f"终止模型 {primary_name} PID:{pid} 失败: {message}")
+                    logger.info(f"成功获取模型 '{primary_name}' 的启动锁，将中断启动过程")
+        except Exception as e:
+            logger.error(f"处理模型 '{primary_name}' 启动锁时发生异常: {e}")
 
-            self._mark_model_as_stopped(primary_name, acquire_lock=False)
+        try:
+            with state['lock']:
+                # 检查当前状态
+                if state['status'] in [ModelStatus.STOPPED.value, ModelStatus.FAILED.value]:
+                    logger.info(f"模型 '{primary_name}' 已停止或失败")
+                    return True, f"模型 '{primary_name}' 已停止或失败"
 
-        # 只有在模型被监控时才记录停止时间
-        if self.runtime_monitor.is_model_monitored(primary_name):
-            self.runtime_monitor.record_model_stop(primary_name)
+                # 标记为停止状态，阻止启动过程继续
+                original_status = state['status']
+                state['status'] = ModelStatus.STOPPED.value
+                state['failure_reason'] = "被用户请求停止"
 
-        return True, f"模型 {primary_name} 已停止"
+                logger.info(f"正在停止模型 '{primary_name}' (当前状态: {original_status})")
+
+                pid = state.get('pid')
+                if pid:
+                    logger.info(f"正在强制停止模型 {primary_name} (PID: {pid})")
+                    # 使用进程管理器强制终止模型进程
+                    process_name = f"model_{primary_name}"
+                    success, message = self.process_manager.stop_process(process_name, force=True)
+
+                    if success:
+                        logger.info(f"模型 {primary_name} (PID: {pid}) 已成功终止")
+                    else:
+                        logger.warning(f"终止模型 {primary_name} PID:{pid} 失败: {message}")
+                else:
+                    logger.info(f"模型 '{primary_name}' 没有关联的进程，直接标记为停止")
+
+                self._mark_model_as_stopped(primary_name, acquire_lock=False)
+
+            # 只有在模型被监控时才记录停止时间
+            if self.runtime_monitor.is_model_monitored(primary_name):
+                self.runtime_monitor.record_model_stop(primary_name)
+
+            return True, f"模型 {primary_name} 已停止"
+        finally:
+            # 【重要】释放启动锁
+            if startup_lock_released:
+                try:
+                    model_lock.release()
+                    logger.info(f"已释放模型 '{primary_name}' 的启动锁")
+                except Exception as e:
+                    logger.error(f"释放模型 '{primary_name}' 启动锁时发生异常: {e}")
 
     def _mark_model_as_stopped(self, primary_name: str, acquire_lock: bool = True):
         """
@@ -938,31 +1019,85 @@ class ModelController:
             update()
 
     def unload_all_models(self):
-        """卸载所有运行中的模型"""
+        """
+        卸载所有运行中的模型 - 增强版本支持处理正在启动的模型
+        """
         logger.info("正在卸载所有运行中的模型...")
         primary_names = list(self.models_state.keys())
 
-        # 使用进程管理器批量停止所有模型进程
-        terminated_models = []
+        # 【新增】首先处理所有启动锁，确保能够中断正在启动的模型
+        released_locks = []
         for name in primary_names:
-            state = self.models_state[name]
-            with state['lock']:
-                if state['status'] not in [ModelStatus.STOPPED.value, ModelStatus.FAILED.value]:
-                    process_name = f"model_{name}"
-                    success, message = self.process_manager.stop_process(process_name, force=True)
-                    if success:
-                        terminated_models.append(name)
+            model_lock = self.startup_locks[name]
+            try:
+                # 尝试非阻塞获取锁
+                if model_lock.acquire(blocking=False):
+                    released_locks.append(name)
+                    logger.debug(f"获取模型 '{name}' 的启动锁成功")
+                else:
+                    # 模型可能正在启动，尝试获取锁来中断
+                    logger.info(f"模型 '{name}' 可能正在启动，尝试中断...")
+                    if model_lock.acquire(blocking=True, timeout=5):
+                        released_locks.append(name)
+                        logger.info(f"成功获取模型 '{name}' 的启动锁，将中断启动")
+                    else:
+                        logger.warning(f"无法获取模型 '{name}' 的启动锁，跳过该模型")
+            except Exception as e:
+                logger.error(f"处理模型 '{name}' 启动锁时发生异常: {e}")
 
-                    # 更新状态
-                    state['status'] = ModelStatus.STOPPED.value
-                    state['pid'] = None
-                    state['process'] = None
+        try:
+            # 使用进程管理器批量停止所有模型进程
+            terminated_models = []
+            for name in primary_names:
+                state = self.models_state[name]
+                try:
+                    with state['lock']:
+                        if state['status'] not in [ModelStatus.STOPPED.value, ModelStatus.FAILED.value]:
+                            logger.info(f"正在停止模型 '{name}' (当前状态: {state['status']})")
 
-                    # 只有在模型被监控时才记录停止时间
-                    if self.runtime_monitor.is_model_monitored(name):
-                        self.runtime_monitor.record_model_stop(name)
+                            # 标记为停止状态
+                            original_status = state['status']
+                            state['status'] = ModelStatus.STOPPED.value
+                            state['failure_reason'] = "被批量卸载操作停止"
 
-        logger.info(f"所有模型均已卸载，共终止 {len(terminated_models)} 个模型进程")
+                            pid = state.get('pid')
+                            if pid:
+                                process_name = f"model_{name}"
+                                success, message = self.process_manager.stop_process(process_name, force=True)
+                                if success:
+                                    logger.info(f"模型 {name} (PID: {pid}) 已成功终止")
+                                    terminated_models.append(name)
+                                else:
+                                    logger.warning(f"终止模型 {name} PID:{pid} 失败: {message}")
+                            else:
+                                logger.info(f"模型 '{name}' 没有关联的进程，直接标记为停止")
+                                terminated_models.append(name)
+
+                            # 更新状态
+                            state['pid'] = None
+                            state['process'] = None
+
+                            # 只有在模型被监控时才记录停止时间
+                            if self.runtime_monitor.is_model_monitored(name):
+                                self.runtime_monitor.record_model_stop(name)
+                        else:
+                            logger.debug(f"模型 '{name}' 已经处于停止状态，跳过")
+
+                except Exception as e:
+                    logger.error(f"停止模型 '{name}' 时发生异常: {e}")
+
+            logger.info(f"所有模型均已卸载，共终止 {len(terminated_models)} 个模型进程")
+            return len(terminated_models)
+
+        finally:
+            # 【重要】释放所有获取到的启动锁
+            for name in released_locks:
+                try:
+                    model_lock = self.startup_locks[name]
+                    model_lock.release()
+                    logger.debug(f"已释放模型 '{name}' 的启动锁")
+                except Exception as e:
+                    logger.error(f"释放模型 '{name}' 启动锁时发生异常: {e}")
 
     def idle_check_loop(self):
         """空闲检查循环"""
