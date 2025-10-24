@@ -309,9 +309,22 @@ class APIRouter:
             is_streaming = "text/event-stream" in response.headers.get("content-type", "")
 
             if is_streaming:
-                # 【修改】将开始时间传入流式处理器
+                # 【修复】为流式响应创建一个包装生成器，以确保在流结束后减少请求计数
+                async def stream_wrapper():
+                    # TokenTracker的生成器负责Token记录
+                    token_logging_stream = token_tracker.create_stream_with_token_logging(
+                        model_name, response, request_start_time
+                    )
+                    try:
+                        async for chunk in token_logging_stream:
+                            yield chunk
+                    finally:
+                        # 此代码块在流完全消耗或关闭后执行
+                        self.mark_request_completed(model_name)
+                        logger.debug(f"模型 '{model_name}' 的流式响应已完成，请求计数已递减。")
+
                 return StreamingResponse(
-                    token_tracker.create_stream_with_token_logging(model_name, response, request_start_time),
+                    stream_wrapper(),
                     status_code=response.status_code,
                     headers=dict(response.headers)
                 )
