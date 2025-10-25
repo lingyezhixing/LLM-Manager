@@ -86,6 +86,9 @@ LLM-Manager.code-workspace
 # 忽略指定的markdown文档
 monitor_manual.md
 openai_api_manual.md
+data_manager（数据管理器）使用说明.md
+API接口文档.md
+API_DOCUMENTATION.md
 
 # 忽略所有数据库文件
 *.db
