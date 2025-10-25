@@ -30,21 +30,24 @@ class ModelRequest:
     id: int
     start_time: float  # 新增：请求开始时间
     end_time: float    # 修改：原 timestamp 重命名为 end_time
-    input_tokens: int
-    output_tokens: int
-    cache_n: int
-    prompt_n: int
+    input_tokens: int   # 总输入token数
+    output_tokens: int  # 输出token数
+    cache_n: int        # 缓存读取token数
+    prompt_n: int       # 提示token数（包含缓存写入token）
 
 @dataclass
 class TierPricing:
-    """阶梯计费配置"""
+    """阶梯计费配置 - 重新设计"""
     tier_index: int
-    start_tokens: int
-    end_tokens: int
-    input_price_per_million: float
-    output_price_per_million: float
-    support_cache: bool
-    cache_hit_price_per_million: float
+    min_input_tokens: int      # 最小输入token数（不含）
+    max_input_tokens: int      # 最大输入token数（包含，-1表示无上限）
+    min_output_tokens: int     # 最小输出token数（不含）
+    max_output_tokens: int     # 最大输出token数（包含，-1表示无上限）
+    input_price: float         # 输入价格/百万token
+    output_price: float        # 输出价格/百万token
+    support_cache: bool        # 是否支持缓存
+    cache_write_price: float   # 缓存写入价格/百万token
+    cache_read_price: float    # 缓存读取价格/百万token
 
 @dataclass
 class ModelBilling:
@@ -224,34 +227,21 @@ class Monitor:
                     columns.add('start_time')
                 '''
 
-                # 创建模型按量分阶计费表
+                # 创建模型按量分阶计费表 - 新结构
                 cursor.execute(f'''
                     CREATE TABLE IF NOT EXISTS {safe_name}_tier_pricing (
                         tier_index INTEGER PRIMARY KEY,
-                        start_tokens INTEGER NOT NULL,
-                        end_tokens INTEGER NOT NULL,
-                        input_price_per_million REAL NOT NULL,
-                        output_price_per_million REAL NOT NULL,
+                        min_input_tokens INTEGER NOT NULL,
+                        max_input_tokens INTEGER NOT NULL,
+                        min_output_tokens INTEGER NOT NULL,
+                        max_output_tokens INTEGER NOT NULL,
+                        input_price REAL NOT NULL,
+                        output_price REAL NOT NULL,
                         support_cache BOOLEAN NOT NULL DEFAULT 0,
-                        cache_hit_price_per_million REAL NOT NULL DEFAULT 0.0
+                        cache_write_price REAL NOT NULL DEFAULT 0.0,
+                        cache_read_price REAL NOT NULL DEFAULT 0.0
                     )
                 ''')
-
-                # 检查表是否有新字段，如果没有则添加
-                cursor.execute(f"PRAGMA table_info({safe_name}_tier_pricing)")
-                columns = [column[1] for column in cursor.fetchall()]
-
-                if 'support_cache' not in columns:
-                    cursor.execute(f'''
-                        ALTER TABLE {safe_name}_tier_pricing
-                        ADD COLUMN support_cache BOOLEAN NOT NULL DEFAULT 0
-                    ''')
-
-                if 'cache_hit_price_per_million' not in columns:
-                    cursor.execute(f'''
-                        ALTER TABLE {safe_name}_tier_pricing
-                        ADD COLUMN cache_hit_price_per_million REAL NOT NULL DEFAULT 0.0
-                    ''')
 
                 # 检查是否有默认数据，没有则插入
                 cursor.execute(f'''
@@ -260,8 +250,9 @@ class Monitor:
                 if cursor.fetchone()[0] == 0:
                     cursor.execute(f'''
                         INSERT INTO {safe_name}_tier_pricing
-                        (tier_index, start_tokens, end_tokens, input_price_per_million, output_price_per_million, support_cache, cache_hit_price_per_million)
-                        VALUES (1, 0, 32768, 0, 0, 0, 0.0)
+                        (tier_index, min_input_tokens, max_input_tokens, min_output_tokens, max_output_tokens,
+                         input_price, output_price, support_cache, cache_write_price, cache_read_price)
+                        VALUES (1, 0, 32768, 0, 32768, 0.0, 0.0, 0, 0.0, 0.0)
                     ''')
 
                 # 创建模型按时计费价格表
@@ -386,56 +377,60 @@ class Monitor:
             ''', (start_time, end_time, input_tokens, output_tokens, cache_n, prompt_n))
             conn.commit()
 
-    def add_tier_pricing(self, model_name: str, tier_data: List[Union[int, int, int, float, float, bool, float]]):
+    def add_tier_pricing(self, model_name: str, tier_data: List[Union[int, int, int, int, int, float, float, bool, float, float]]):
         """
         添加计费阶梯
 
         Args:
             model_name: 模型名称
-            tier_data: [阶梯索引, 起始token数, 结束token数, 输入价格/百万token, 输出价格/百万token, 是否支持缓存, 缓存命中价格/百万token]
+            tier_data: [阶梯索引, 最小输入, 最大输入, 最小输出, 最大输出, 输入价格, 输出价格, 是否支持缓存, 缓存写入价格, 缓存读取价格]
         """
-        if len(tier_data) != 7:
-            raise ValueError("阶梯数据格式错误，应为 [阶梯索引, 起始token数, 结束token数, 输入价格/百万token, 输出价格/百万token, 是否支持缓存, 缓存命中价格/百万token]")
+        if len(tier_data) != 10:
+            raise ValueError("阶梯数据格式错误，应为 [阶梯索引, 最小输入, 最大输入, 最小输出, 最大输出, 输入价格, 输出价格, 是否支持缓存, 缓存写入价格, 缓存读取价格]")
 
         safe_name = self.get_model_safe_name(model_name)
         if not safe_name:
             raise ValueError(f"模型 '{model_name}' 不存在")
 
-        tier_index, start_tokens, end_tokens, input_price, output_price, support_cache, cache_hit_price = tier_data
+        tier_index, min_input, max_input, min_output, max_output, input_price, output_price, support_cache, cache_write_price, cache_read_price = tier_data
         with get_db_connection(self.connection_pool) as conn:
             cursor = conn.cursor()
             cursor.execute(f'''
                 INSERT INTO {safe_name}_tier_pricing
-                (tier_index, start_tokens, end_tokens, input_price_per_million, output_price_per_million, support_cache, cache_hit_price_per_million)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            ''', (tier_index, start_tokens, end_tokens, input_price, output_price, 1 if support_cache else 0, cache_hit_price))
+                (tier_index, min_input_tokens, max_input_tokens, min_output_tokens, max_output_tokens,
+                 input_price, output_price, support_cache, cache_write_price, cache_read_price)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (tier_index, min_input, max_input, min_output, max_output, input_price, output_price,
+                  1 if support_cache else 0, cache_write_price, cache_read_price))
             conn.commit()
 
-    def update_tier_pricing(self, model_name: str, tier_data: List[Union[int, int, int, float, float, bool, float]]):
+    def update_tier_pricing(self, model_name: str, tier_data: List[Union[int, int, int, int, int, float, float, bool, float, float]]):
         """
         更新计费阶梯
 
         Args:
             model_name: 模型名称
-            tier_data: [阶梯索引, 起始token数, 结束token数, 输入价格/百万token, 输出价格/百万token, 是否支持缓存, 缓存命中价格/百万token]
+            tier_data: [阶梯索引, 最小输入, 最大输入, 最小输出, 最大输出, 输入价格, 输出价格, 是否支持缓存, 缓存写入价格, 缓存读取价格]
         """
-        if len(tier_data) != 7:
-            raise ValueError("阶梯数据格式错误，应为 [阶梯索引, 起始token数, 结束token数, 输入价格/百万token, 输出价格/百万token, 是否支持缓存, 缓存命中价格/百万token]")
+        if len(tier_data) != 10:
+            raise ValueError("阶梯数据格式错误，应为 [阶梯索引, 最小输入, 最大输入, 最小输出, 最大输出, 输入价格, 输出价格, 是否支持缓存, 缓存写入价格, 缓存读取价格]")
 
         safe_name = self.get_model_safe_name(model_name)
         if not safe_name:
             raise ValueError(f"模型 '{model_name}' 不存在")
 
-        tier_index, start_tokens, end_tokens, input_price, output_price, support_cache, cache_hit_price = tier_data
+        tier_index, min_input, max_input, min_output, max_output, input_price, output_price, support_cache, cache_write_price, cache_read_price = tier_data
         with get_db_connection(self.connection_pool) as conn:
             cursor = conn.cursor()
             cursor.execute(f'''
                 UPDATE {safe_name}_tier_pricing
-                SET start_tokens = ?, end_tokens = ?,
-                    input_price_per_million = ?, output_price_per_million = ?,
-                    support_cache = ?, cache_hit_price_per_million = ?
+                SET min_input_tokens = ?, max_input_tokens = ?,
+                    min_output_tokens = ?, max_output_tokens = ?,
+                    input_price = ?, output_price = ?,
+                    support_cache = ?, cache_write_price = ?, cache_read_price = ?
                 WHERE tier_index = ?
-            ''', (start_tokens, end_tokens, input_price, output_price, 1 if support_cache else 0, cache_hit_price, tier_index))
+            ''', (min_input, max_input, min_output, max_output, input_price, output_price,
+                  1 if support_cache else 0, cache_write_price, cache_read_price, tier_index))
             conn.commit()
 
     def delete_tier_pricing(self, model_name: str, tier_index: int):
@@ -581,78 +576,68 @@ class Monitor:
 
             return [ModelRunTime(row['id'], row['start_time'], row['end_time']) for row in cursor.fetchall()]
 
-    def get_model_requests(self, model_name: str, start_time: float = 0, end_time: float = 0, buffer_count: int = 20) -> List[ModelRequest]:
+    def get_model_requests(self, model_name: str, start_time: float = 0, end_time: float = 0, buffer_seconds: int = 60) -> List[ModelRequest]:
         """
-        【已升级】高效获取指定时间范围内的模型请求记录，处理时间戳乱序问题。
+        【高性能优化版】高效获取指定时间范围内的模型请求记录。
 
-        从数据库反向拉取数据，当找到第一个早于 start_time 的记录后，再多拉取 buffer_count 条记录
-        以确保捕获因异步写入导致时间戳乱序的数据。最终在内存中精确过滤。
+        优化原理:
+        1.  **单一高效查询**: 将所有过滤和排序工作都交给数据库，利用其索引和优化能力，避免在Python中处理海量数据。
+        2.  **时间缓冲**: 在查询时，将 `start_time` 向前推移 `buffer_seconds`，以捕获那些因异步写入而延迟记录的、时间戳在边界附近的数据。
+        3.  **批量获取**: 使用 `fetchall()` 一次性将数据库处理好的结果集加载到内存，避免了逐行拉取的巨大I/O开销。
+        4.  **数据库排序**: 直接在SQL中使用 `ORDER BY end_time ASC` 进行高效排序，这比在Python中用 `sorted()` 快得多。
 
         Args:
-            model_name: 模型名称
-            start_time: 开始时间戳。如果为 0，则从最早的记录开始。
-            end_time: 结束时间戳。如果为 0，则到最新的记录为止。
-            buffer_count: 边界缓冲数量，用于处理时间戳乱序。
+            model_name: 模型名称。
+            start_time: 开始时间戳。
+            end_time: 结束时间戳。
+            buffer_seconds: 边界缓冲区的秒数，用于处理时间戳乱序问题。
 
         Returns:
-            模型请求记录列表 (按时间戳升序)
+            模型请求记录列表 (已按结束时间升序排列)。
         """
         safe_name = self.get_model_safe_name(model_name)
         if not safe_name:
             return []
 
         if end_time == 0:
-            end_time = time.time() # 默认为当前时间
+            end_time = time.time()  # 默认为当前时间
+
+        # 在 start_time 上应用时间缓冲，以捕获边界附近的乱序数据
+        # 如果 start_time 为 0 (表示从头查询)，则无需缓冲
+        query_start_time = start_time - buffer_seconds if start_time > 0 else 0
 
         with get_db_connection(self.connection_pool) as conn:
             cursor = conn.cursor()
-            # 【已修改】从最新的记录开始反向查询，基于 end_time
+            
+            # 构建一个能够完成所有工作的SQL查询
+            # 1. WHERE 子句在数据库层面进行高效过滤
+            # 2. ORDER BY 子句在数据库层面进行高效排序
             cursor.execute(f'''
                 SELECT id, start_time, end_time, input_tokens, output_tokens, cache_n, prompt_n
                 FROM {safe_name}_requests
-                WHERE end_time <= ?
-                ORDER BY id DESC
-            ''', (end_time,))
+                WHERE end_time >= ? AND end_time <= ?
+                ORDER BY end_time ASC
+            ''', (query_start_time, end_time))
 
-            candidate_requests = []
-            buffer_countdown = buffer_count
-            boundary_found = False
-
-            while True:
-                row = cursor.fetchone()
-                if not row:
-                    break
-                
-                # 【已修改】使用新的 ModelRequest 结构
-                req = ModelRequest(
-                    id=row['id'],
-                    start_time=row['start_time'],
-                    end_time=row['end_time'],
-                    input_tokens=row['input_tokens'],
-                    output_tokens=row['output_tokens'],
-                    cache_n=row['cache_n'],
-                    prompt_n=row['prompt_n']
-                )
-                candidate_requests.append(req)
-
-                # 检查是否触及左边界
-                if start_time > 0 and not boundary_found and req.end_time < start_time:
-                    boundary_found = True
-                
-                # 如果触及边界，开始倒数 buffer 数量
-                if boundary_found:
-                    buffer_countdown -= 1
-                    if buffer_countdown <= 0:
-                        break
+            # 使用 fetchall() 一次性将优化后的结果集加载到内存
+            rows = cursor.fetchall()
             
-            # 【已修改】在内存中进行最终的精确过滤，基于 end_time
-            final_requests = [
-                req for req in candidate_requests 
-                if req.end_time >= start_time
-            ]
-            
-            # 【已修改】返回前按结束时间正序排列
-            return sorted(final_requests, key=lambda r: r.end_time)
+            # 如果没有使用时间缓冲 (start_time=0)，则查询结果就是最终结果。
+            # 否则，我们需要在内存中进行一次最终的精确过滤，去除缓冲区中多获取的数据。
+            # 这一步非常快，因为此时内存中的数据量已经很小并且是排好序的。
+            if start_time > 0:
+                # 使用列表推导式高效构建最终结果
+                return [
+                    ModelRequest(
+                        id=row['id'], start_time=row['start_time'], end_time=row['end_time'],
+                        input_tokens=row['input_tokens'], output_tokens=row['output_tokens'],
+                        cache_n=row['cache_n'], prompt_n=row['prompt_n']
+                    )
+                    for row in rows if row['end_time'] >= start_time
+                ]
+            else:
+                # 如果没有start_time，直接转换所有行
+                return [ModelRequest(**row) for row in rows]
 
     def get_model_billing(self, model_name: str) -> Optional[ModelBilling]:
         """
@@ -689,15 +674,16 @@ class Monitor:
 
             # 获取阶梯价格
             cursor.execute(f'''
-                SELECT tier_index, start_tokens, end_tokens,
-                       input_price_per_million, output_price_per_million,
-                       support_cache, cache_hit_price_per_million
+                SELECT tier_index, min_input_tokens, max_input_tokens, min_output_tokens, max_output_tokens,
+                       input_price, output_price, support_cache, cache_write_price, cache_read_price
                 FROM {safe_name}_tier_pricing
                 ORDER BY tier_index
             ''')
 
             tier_pricing = [
-                TierPricing(row['tier_index'], row['start_tokens'], row['end_tokens'], row['input_price_per_million'], row['output_price_per_million'], bool(row['support_cache']), row['cache_hit_price_per_million'])
+                TierPricing(row['tier_index'], row['min_input_tokens'], row['max_input_tokens'],
+                           row['min_output_tokens'], row['max_output_tokens'], row['input_price'],
+                           row['output_price'], bool(row['support_cache']), row['cache_write_price'], row['cache_read_price'])
                 for row in cursor.fetchall()
             ]
 

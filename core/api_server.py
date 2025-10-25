@@ -32,123 +32,192 @@ class APIServer:
         logger.info("API服务器初始化完成")
         logger.debug("[API_SERVER] token跟踪功能已激活")
 
-    def _calculate_tiered_cost_for_tokens(self, tokens_to_price: int, tiers: List[TierPricing], price_key: str) -> float:
+    def _find_matching_tier(self, input_tokens: int, output_tokens: int, tiers: List[TierPricing]) -> Optional[TierPricing]:
         """
-        【保留并优化】辅助函数：为单一类型的token流（如纯输出token）计算阶梯费用。
-        现在它也依赖于token总量来决定阶梯，而不是自身数量。
-        注意：此函数现在主要用于计算独立的 output_tokens。
-        """
-        cost = 0.0
-        remaining_tokens_to_price = tokens_to_price
-        processed_tokens_cursor = 0
+        根据输入和输出token数量匹配唯一的阶梯
 
+        Args:
+            input_tokens: 输入token数量
+            output_tokens: 输出token数量
+            tiers: 所有阶梯配置
+
+        Returns:
+            匹配的阶梯，如果没有匹配则返回None
+        """
         for tier in tiers:
-            if remaining_tokens_to_price <= 0:
-                break
+            # 检查输入token范围（注意：min是不包含，max是包含，-1表示无上限）
+            input_match = (input_tokens > tier.min_input_tokens and
+                          (tier.max_input_tokens == -1 or input_tokens <= tier.max_input_tokens))
 
-            tier_start = tier.start_tokens
-            # 对于最后一个阶梯，结束设为无限大
-            tier_end = tier.end_tokens if tier.end_tokens > 0 else float('inf')
-            
-            # 计算当前阶梯与已处理token的重叠部分
-            overlap_start = max(tier_start, processed_tokens_cursor)
-            overlap_end = min(tier_end, processed_tokens_cursor + remaining_tokens_to_price)
-            
-            tokens_in_this_tier = max(0, overlap_end - overlap_start)
-            
-            if tokens_in_this_tier > 0:
-                price_per_million = getattr(tier, price_key, 0.0)
-                cost += (tokens_in_this_tier * price_per_million) / 1_000_000
-                
-            processed_tokens_cursor += tokens_in_this_tier
-        
-        return cost
+            # 检查输出token范围（注意：min是不包含，max是包含，-1表示无上限）
+            output_match = (output_tokens > tier.min_output_tokens and
+                           (tier.max_output_tokens == -1 or output_tokens <= tier.max_output_tokens))
+
+            if input_match and output_match:
+                return tier
+
+        return None
 
     def _calculate_request_cost(self, req: ModelRequest, billing: Optional[ModelBilling]) -> float:
         """
-        【全新重写】计算单个请求的成本，精确处理分阶缓存和总输入依赖。
+        【修正版】计算单个请求的成本，确保与向量化版本逻辑完全一致
+
+        注意：此函数用于单次请求场景，批量计算请使用 _calculate_cost_vectorized
         """
         if not billing or not billing.use_tier_pricing or not billing.tier_pricing:
             return 0.0
 
+        # 1. 根据输入和输出token数量匹配唯一阶梯
+        matching_tier = self._find_matching_tier(req.input_tokens, req.output_tokens, billing.tier_pricing)
+
+        if not matching_tier:
+            logger.warning(f"未找到匹配的计费阶梯: input={req.input_tokens}, output={req.output_tokens} for model. 请求成本计为0。")
+            return 0.0
+
         total_cost = 0.0
-        # 从数据库获取时已按 tier_index 排序，无需再次排序
-        tiers = billing.tier_pricing
-        
-        # =====================================================================
-        # 1. 统一计算输入成本 (Input Cost) - 这是最核心的修改
-        # =====================================================================
-        total_input_tokens = req.input_tokens
-        remaining_cache_hits = req.cache_n
-        
-        # 使用一个“光标”来跟踪我们处理到了总输入的哪个位置
-        processed_input_tokens = 0
 
-        for tier in tiers:
-            if processed_input_tokens >= total_input_tokens:
-                break
+        # 2. 根据阶梯配置计算成本
+        if matching_tier.support_cache:
+            # **支持缓存的计费逻辑**
+            # 成本 = 缓存读取成本 + 缓外输入成本 + 输出内容成本 + 缓存写入成本
 
-            tier_start = tier.start_tokens
-            tier_end = tier.end_tokens if tier.end_tokens > 0 else float('inf')
-
-            # 计算总输入token落入当前阶梯的部分
-            # 例如 tier 是 1000-2000，总输入是 1500，已处理 800，则此阶梯处理 1000-1500
-            tokens_in_this_tier = max(0, min(total_input_tokens, tier_end) - max(processed_input_tokens, tier_start))
+            # 缓存读取成本 (基于 cache_n)
+            cost_cache_read = (req.cache_n * matching_tier.cache_read_price) / 1_000_000
             
-            if tokens_in_this_tier <= 0:
-                continue
-
-            # 在这个阶梯内，优先分配缓存命中部分
-            cache_hits_in_this_tier = 0
-            if tier.support_cache and remaining_cache_hits > 0:
-                cache_hits_in_this_tier = min(tokens_in_this_tier, remaining_cache_hits)
-                
-                # 累加缓存成本
-                cost_for_cache = (cache_hits_in_this_tier * tier.cache_hit_price_per_million) / 1_000_000
-                total_cost += cost_for_cache
-                
-                remaining_cache_hits -= cache_hits_in_this_tier
-
-            # 剩余部分为非缓存输入
-            non_cached_in_this_tier = tokens_in_this_tier - cache_hits_in_this_tier
-            if non_cached_in_this_tier > 0:
-                cost_for_non_cached = (non_cached_in_this_tier * tier.input_price_per_million) / 1_000_000
-                total_cost += cost_for_non_cached
+            # 缓外输入成本 (基于 prompt_n)
+            cost_prompt = (req.prompt_n * matching_tier.input_price) / 1_000_000
             
-            # 移动光标
-            processed_input_tokens += tokens_in_this_tier
+            # 输出内容成本 (基于 output_tokens)
+            cost_output = (req.output_tokens * matching_tier.output_price) / 1_000_000
+            
+            # 缓存写入成本 (基于 output_tokens，因为输出内容被写入缓存)
+            cost_cache_write = (req.output_tokens * matching_tier.cache_write_price) / 1_000_000
+            
+            total_cost = cost_cache_read + cost_prompt + cost_output + cost_cache_write
+            
+        else:
+            # **不支持缓存的计费逻辑**
+            # 成本 = 总输入成本 + 总输出成本
+            cost_input = (req.input_tokens * matching_tier.input_price) / 1_000_000
+            cost_output = (req.output_tokens * matching_tier.output_price) / 1_000_000
+            total_cost = cost_input + cost_output
 
-        # =====================================================================
-        # 2. 独立计算输出成本 (Output Cost)
-        # 输出的计费阶梯依赖于输出token自身的数量，与输入无关
-        # =====================================================================
-        if req.output_tokens > 0:
-            # 我们可以复用旧的辅助函数来计算这个独立的token流
-            total_cost += self._calculate_tiered_cost_for_tokens(
-                req.output_tokens, tiers, 'output_price_per_million'
-            )
-        
         return total_cost
 
+    async def _calculate_cost_vectorized(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        【高性能向量化版本】为DataFrame中的所有请求批量计算成本。
+        此函数取代了逐行 apply 的低效方法，是本次优化的核心。
+
+        Args:
+            df: 包含请求数据的DataFrame，必须有 'model_name' 列。
+
+        Returns:
+            带有 'cost' 列的原始DataFrame。
+        """
+        if df.empty:
+            df['cost'] = 0.0
+            return df
+
+        # 步骤 1: 一次性并发获取所有相关模型的计费配置，减少I/O次数
+        model_names = df['model_name'].unique()
+        billing_tasks = [asyncio.to_thread(self.monitor.get_model_billing, name) for name in model_names]
+        billing_results = await asyncio.gather(*billing_tasks)
+        model_billings = {name: billing for name, billing in zip(model_names, billing_results)}
+
+        all_costs = []
+        # 步骤 2: 按模型分组处理。因为不同模型的计费规则不同，所以这是一个天然的分组边界。
+        # 注意：我们是在遍历模型（数量少），而不是遍历行（数量巨大）。
+        for model_name, group_df in df.groupby('model_name'):
+            billing = model_billings.get(model_name)
+
+            # 如果模型没有计费配置，或不使用阶梯计费，则该组所有请求成本为0
+            if not billing or not billing.use_tier_pricing or not billing.tier_pricing:
+                costs = np.zeros(len(group_df))
+                all_costs.append(pd.Series(costs, index=group_df.index))
+                continue
+
+            # 步骤 3: 为当前模型的所有阶梯，构建向量化的"条件"和"选择"列表
+            # 这是 np.select 的核心思想：condlist[i] 为真时，取 choicelist[i] 的值
+            condlist = []
+            choice_input_price, choice_output_price = [], []
+            choice_cache_read_price, choice_cache_write_price = [], []
+            choice_support_cache = []
+
+            for tier in billing.tier_pricing:
+                # 定义上限，-1 代表无穷大
+                max_input = float('inf') if tier.max_input_tokens == -1 else tier.max_input_tokens
+                max_output = float('inf') if tier.max_output_tokens == -1 else tier.max_output_tokens
+
+                # 创建一个布尔 Series (True/False 数组)，代表 group_df 中哪些行匹配当前阶梯
+                condition = (
+                    (group_df['input_tokens'] > tier.min_input_tokens) &
+                    (group_df['input_tokens'] <= max_input) &
+                    (group_df['output_tokens'] > tier.min_output_tokens) &
+                    (group_df['output_tokens'] <= max_output)
+                )
+                condlist.append(condition)
+
+                # 将该阶梯对应的价格存入"选择"列表
+                choice_input_price.append(tier.input_price)
+                choice_output_price.append(tier.output_price)
+                choice_cache_read_price.append(tier.cache_read_price)
+                choice_cache_write_price.append(tier.cache_write_price)
+                choice_support_cache.append(1 if tier.support_cache else 0)
+
+            # 步骤 4: 使用 np.select，一次性为所有行匹配到正确的价格
+            # 它会根据 condlist 中的条件，从 choice 列表中为每一行选出对应的值
+            matched_input_price = np.select(condlist, choice_input_price, default=0)
+            matched_output_price = np.select(condlist, choice_output_price, default=0)
+            matched_cache_read_price = np.select(condlist, choice_cache_read_price, default=0)
+            matched_cache_write_price = np.select(condlist, choice_cache_write_price, default=0)
+            is_cache_supported = np.select(condlist, choice_support_cache, default=0)
+
+            # 步骤 5: 纯向量化计算成本，这里全是数组/列级别的数学运算，速度极快
+            # a) 不支持缓存的成本公式
+            cost_no_cache = (group_df['input_tokens'] * matched_input_price +
+                             group_df['output_tokens'] * matched_output_price) / 1_000_000
+
+            # b) 支持缓存的成本公式 (使用修正后的正确逻辑)
+            cost_with_cache = (group_df['cache_n'] * matched_cache_read_price +
+                               group_df['prompt_n'] * matched_input_price +
+                               group_df['output_tokens'] * matched_output_price +
+                               group_df['output_tokens'] * matched_cache_write_price) / 1_000_000
+
+            # 步骤 6: 使用 np.where 根据是否支持缓存，从两种计算结果中选择最终成本
+            final_costs = np.where(is_cache_supported == 1, cost_with_cache, cost_no_cache)
+
+            # 将计算结果（带索引）添加到列表中，以便最后合并
+            all_costs.append(pd.Series(final_costs, index=group_df.index))
+
+        # 步骤 7: 合并所有模型分组的成本计算结果，并赋值给 df['cost']
+        if all_costs:
+            df['cost'] = pd.concat(all_costs)
+        else:
+            df['cost'] = 0.0
+
+        return df
+
+    # 在 APIServer 类中，使用这个更简洁的版本
     async def _get_enriched_requests_dataframe(self, start_time: float, end_time: float) -> pd.DataFrame:
         """
-        【新增辅助函数】并发获取所有模型的请求数据，并用模型模式(mode)丰富数据，返回一个统一的DataFrame。
+        【最终简化版】并发获取所有需要追踪的模型的请求数据，并用模型模式(mode)丰富数据。
+        职责：只获取数据，不处理计费。
         """
         async def get_model_requests_with_mode(model_name: str):
             """并发获取单个模型的请求数据并添加模式信息"""
             try:
-                # 获取模型模式
                 mode = self.config_manager.get_model_mode(model_name)
-                # 检查此模式是否需要追踪
                 if not self.config_manager.should_track_tokens_for_mode(mode):
                     return []
                 
+                # 直接在线程中执行数据库查询
                 requests = await asyncio.wait_for(
                     asyncio.to_thread(self.monitor.get_model_requests, model_name, start_time, end_time),
                     timeout=15.0
                 )
-                # 为每条记录添加 model_name 和 model_mode
-                return [(req.__dict__ | {'model_name': model_name, 'model_mode': mode}) for req in requests]
+                # 使用列表推导式高效地为每条记录添加 model_name 和 model_mode
+                return [dict(req.__dict__, model_name=model_name, model_mode=mode) for req in requests]
             except asyncio.TimeoutError:
                 logger.warning(f"[API_SERVER] 获取模型 {model_name} 请求数据超时")
                 return []
@@ -156,24 +225,88 @@ class APIServer:
                 logger.error(f"[API_SERVER] 获取模型 {model_name} 请求数据失败: {e}")
                 return []
 
-        # 创建并发任务
-        model_names = self.config_manager.get_model_names()
-        tasks = [get_model_requests_with_mode(model_name) for model_name in model_names]
+        # 获取所有需要追踪的模型名称
+        model_names_to_track = [
+            name for name in self.config_manager.get_model_names()
+            if self.config_manager.should_track_tokens_for_mode(self.config_manager.get_model_mode(name))
+        ]
 
-        # 并发执行所有任务
+        if not model_names_to_track:
+            return pd.DataFrame()
+
+        # 创建并执行并发任务
+        tasks = [get_model_requests_with_mode(model_name) for model_name in model_names_to_track]
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
         # 合并结果
-        all_requests = []
+        all_requests_data = []
         for result in results:
             if isinstance(result, Exception):
-                logger.error(f"[API_SERVER] 模型请求数据获取任务异常: {result}")
+                # 错误已在子任务中记录，这里可以跳过
                 continue
-            all_requests.extend(result)
+            all_requests_data.extend(result)
+
+        if not all_requests_data:
+            return pd.DataFrame()
+        
+        return pd.DataFrame(all_requests_data)
+
+        # 获取模型列表并过滤掉不需要追踪的模型，减少并发任务数
+        all_model_names = self.config_manager.get_model_names()
+        tracked_models = []
+        for model_name in all_model_names:
+            try:
+                mode = self.config_manager.get_model_mode(model_name)
+                if self.config_manager.should_track_tokens_for_mode(mode):
+                    tracked_models.append(model_name)
+            except Exception as e:
+                logger.warning(f"[API_SERVER] 获取模型 {model_name} 模式失败，跳过: {e}")
+
+        if not tracked_models:
+            return pd.DataFrame()
+
+        # 使用信号量控制并发数量，避免过多并发请求
+        semaphore = asyncio.Semaphore(5)  # 最多5个并发请求
+
+        async def limited_get_model_data(model_name: str):
+            async with semaphore:
+                return await get_model_requests_with_mode_and_billing(model_name)
+
+        # 创建并发任务
+        tasks = [limited_get_model_data(model_name) for model_name in tracked_models]
+
+        # 并发执行所有任务，设置整体超时
+        try:
+            results = await asyncio.wait_for(
+                asyncio.gather(*tasks, return_exceptions=True),
+                timeout=30.0  # 整体超时30秒
+            )
+        except asyncio.TimeoutError:
+            logger.error("[API_SERVER] 获取所有模型数据整体超时")
+            return pd.DataFrame()
+
+        # 合并结果，进行更精细的错误处理
+        all_requests = []
+        success_count = 0
+        error_count = 0
+
+        for i, result in enumerate(results):
+            if isinstance(result, Exception):
+                error_count += 1
+                logger.error(f"[API_SERVER] 模型 {tracked_models[i]} 数据获取任务异常: {result}")
+                continue
+
+            if result:  # 如果有数据
+                success_count += 1
+                all_requests.extend(result)
+
+        logger.debug(f"[API_SERVER] 数据获取完成: 成功 {success_count}/{len(tracked_models)} 个模型, "
+                    f"失败 {error_count} 个, 总请求记录 {len(all_requests)} 条")
 
         if not all_requests:
             return pd.DataFrame()
-        
+
+        # 转换为DataFrame，使用更高效的方式
         return pd.DataFrame(all_requests)
 
     def _setup_routes(self):
@@ -545,90 +678,42 @@ class APIServer:
 
         @self.app.get("/api/metrics/throughput/current-session")
         async def get_current_session_total():
-            """【已优化】获取本次运行总消耗"""
+            """【性能优化版】获取本次运行总消耗"""
             try:
                 program_runtime = await asyncio.wait_for(
                     asyncio.to_thread(self.monitor.get_program_runtime, 1),
                     timeout=15.0
                 )
-                default_data = {"total_cost_yuan": 0.0, "total_input_tokens": 0, "total_output_tokens": 0, "total_cache_n": 0, "total_prompt_n": 0, "session_start_time": None}
+                default_data = {"total_cost_yuan": 0.0, "total_input_tokens": 0, "total_output_tokens": 0,
+                                "total_cache_n": 0, "total_prompt_n": 0, "session_start_time": None}
                 if not program_runtime:
                     return {"success": True, "data": {"session_total": default_data}}
 
                 start_time = program_runtime[0].start_time
-                summary = {k: v for k, v in default_data.items() if k != "session_start_time"}
 
-                # 并发获取所有模型数据
-                async def process_model_session_async(model_name: str):
-                    """并发处理单个模型的会话数据"""
-                    try:
-                        requests = await asyncio.wait_for(
-                            asyncio.to_thread(self.monitor.get_model_requests, model_name, start_time=start_time),
-                            timeout=15.0
-                        )
+                # 1. 【性能优化】使用我们的数据获取函数，一次性并发获取所有模型在会话期间的请求数据
+                df = await self._get_enriched_requests_dataframe(start_time, time.time())
 
-                        billing = await asyncio.wait_for(
-                            asyncio.to_thread(self.monitor.get_model_billing, model_name),
-                            timeout=15.0
-                        )
+                if df.empty:
+                    default_data["session_start_time"] = start_time
+                    return {"success": True, "data": {"session_total": default_data}}
 
-                        model_summary = {
-                            "total_input_tokens": 0,
-                            "total_output_tokens": 0,
-                            "total_cache_n": 0,
-                            "total_prompt_n": 0,
-                            "total_cost_yuan": 0.0
-                        }
+                # 2. 【核心优化】调用向量化函数，一次性计算所有成本
+                df = await self._calculate_cost_vectorized(df)
 
-                        for req in requests:
-                            # The get_model_requests function already filters by start_time
-                            model_summary["total_input_tokens"] += req.input_tokens
-                            model_summary["total_output_tokens"] += req.output_tokens
-                            model_summary["total_cache_n"] += req.cache_n
-                            model_summary["total_prompt_n"] += req.prompt_n
-                            model_summary["total_cost_yuan"] += self._calculate_request_cost(req, billing)
+                # 3. 【优化点】使用Pandas的内置聚合函数进行总计，速度极快
+                summary = {
+                    "total_input_tokens": int(df['input_tokens'].sum()),
+                    "total_output_tokens": int(df['output_tokens'].sum()),
+                    "total_cache_n": int(df['cache_n'].sum()),
+                    "total_prompt_n": int(df['prompt_n'].sum()),
+                    "total_cost_yuan": round(df['cost'].sum(), 6),
+                    "session_start_time": start_time
+                }
 
-                        return model_summary
-                    except asyncio.TimeoutError:
-                        logger.warning(f"[API_SERVER] 获取模型 {model_name} 会话数据超时")
-                        return {
-                            "total_input_tokens": 0,
-                            "total_output_tokens": 0,
-                            "total_cache_n": 0,
-                            "total_prompt_n": 0,
-                            "total_cost_yuan": 0.0
-                        }
-                    except Exception as e:
-                        logger.error(f"[API_SERVER] 获取模型 {model_name} 会话数据失败: {e}")
-                        return {
-                            "total_input_tokens": 0,
-                            "total_output_tokens": 0,
-                            "total_cache_n": 0,
-                            "total_prompt_n": 0,
-                            "total_cost_yuan": 0.0
-                        }
-
-                # 创建并发任务
-                model_names = self.config_manager.get_model_names()
-                tasks = [process_model_session_async(model_name) for model_name in model_names]
-
-                # 并发执行所有任务
-                results = await asyncio.gather(*tasks, return_exceptions=True)
-
-                # 合并结果
-                for result in results:
-                    if isinstance(result, Exception):
-                        logger.error(f"[API_SERVER] 模型会话数据获取任务异常: {result}")
-                        continue
-
-                    for key in summary.keys():
-                        summary[key] += result[key]
-                
-                summary["total_cost_yuan"] = round(summary["total_cost_yuan"], 6)
-                summary["session_start_time"] = start_time
                 return {"success": True, "data": {"session_total": summary}}
             except Exception as e:
-                logger.error(f"[API_SERVER] 获取本次运行总消耗失败: {e}")
+                logger.error(f"[API_SERVER] 获取本次运行总消耗失败: {e}", exc_info=True)
                 return {"success": False, "error": str(e)}
 
         @self.app.get("/api/analytics/usage-summary/{start_time}/{end_time}")
@@ -656,38 +741,25 @@ class APIServer:
                         }
                     }
 
-                # 4. 并发获取所有涉及模型的计费信息
-                model_names = df['model_name'].unique()
-                billing_tasks = [asyncio.to_thread(self.monitor.get_model_billing, name) for name in model_names]
-                billing_results = await asyncio.gather(*billing_tasks)
-                model_billings = {name: billing for name, billing in zip(model_names, billing_results)}
-
-                # 5. 定义一个辅助函数，用于在DataFrame的每一行上计算成本
-                def calculate_cost_for_row(row):
-                    # 将DataFrame行转换为一个简单的命名空间对象，以模拟ModelRequest
-                    temp_req = SimpleNamespace(**row.to_dict())
-                    billing = model_billings.get(row['model_name'])
-                    return self._calculate_request_cost(temp_req, billing)
-                
-                # 6. 计算每个请求的总Token和成本
+                # 4. 【性能优化】调用向量化函数，一次性计算所有成本
                 df['total_tokens'] = df['input_tokens'] + df['output_tokens']
-                df['cost'] = df.apply(calculate_cost_for_row, axis=1)
+                df = await self._calculate_cost_vectorized(df)
 
-                # 7. 按模型模式(model_mode)对总Token和成本进行分组求和
+                # 5. 按模型模式(model_mode)对总Token和成本进行分组求和
                 agg_cols = {"total_tokens": "sum", "cost": "sum"}
                 mode_agg = df.groupby('model_mode').agg(agg_cols)
 
-                # 8. 将计算出的结果填充到结果字典中
+                # 6. 将计算出的结果填充到结果字典中
                 for mode, row in mode_agg.iterrows():
                     if mode in mode_summary:
                         mode_summary[mode]['total_tokens'] = int(row['total_tokens'])
                         mode_summary[mode]['total_cost'] = round(row['cost'], 6)
 
-                # 9. 计算所有模式的Token和成本总和
+                # 7. 计算所有模式的Token和成本总和
                 overall_summary['total_tokens'] = int(mode_agg['total_tokens'].sum())
                 overall_summary['total_cost'] = round(mode_agg['cost'].sum(), 6)
 
-                # 10. 返回最终的汇总数据
+                # 8. 返回最终的汇总数据
                 return {
                     "success": True,
                     "data": {
@@ -778,25 +850,15 @@ class APIServer:
                     mode_breakdown = {mode: list(time_points) for mode in tracked_modes}
                     return {"success": True, "data": {"time_points": time_points, "mode_breakdown": mode_breakdown}}
 
-                # 2. 并发获取所有计费信息
-                model_names = df['model_name'].unique()
-                billing_tasks = [asyncio.to_thread(self.monitor.get_model_billing, name) for name in model_names]
-                billing_results = await asyncio.gather(*billing_tasks)
-                model_billings = {name: billing for name, billing in zip(model_names, billing_results)}
+                # 2. 【性能优化】调用向量化函数，一次性计算所有成本
+                df = await self._calculate_cost_vectorized(df)
 
-                # 3. 计算每行成本
-                def calculate_cost_for_row(row):
-                    temp_req = SimpleNamespace(**row.to_dict())
-                    billing = model_billings.get(row['model_name'])
-                    return self._calculate_request_cost(temp_req, billing)
-                df['cost'] = df.apply(calculate_cost_for_row, axis=1)
-
-                # 4. 聚合
+                # 3. 聚合
                 df['bin_index'] = np.clip(np.floor((df['end_time'] - start_time) / interval), 0, n_samples - 1).astype(int)
                 overall_agg = df.groupby('bin_index')['cost'].sum()
                 mode_agg = df.groupby(['bin_index', 'model_mode'])['cost'].sum()
 
-                # 5. 格式化输出
+                # 4. 格式化输出
                 time_points = []
                 mode_breakdown = {mode: [] for mode in tracked_modes}
 
@@ -823,26 +885,26 @@ class APIServer:
 
                 model_name = self.config_manager.resolve_primary_name(model_name_alias)
                 
-                requests_as_dicts = [req.__dict__ for req in self.monitor.get_model_requests(model_name, start_time, end_time)]
-                
+                # 获取模型请求数据并创建DataFrame
+                requests = self.monitor.get_model_requests(model_name, start_time, end_time)
+
                 total_duration = end_time - start_time
                 interval = total_duration / n_samples
-                
+
                 summary_template = {"total_input_tokens": 0, "total_output_tokens": 0, "total_tokens": 0, "total_cache_n": 0, "total_prompt_n": 0, "total_cost": 0, "request_count": 0}
                 point_template = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "cache_hit_tokens": 0, "cache_miss_tokens": 0, "cost": 0.0}
                 time_points = [{"timestamp": start_time + (i + 0.5) * interval, "data": point_template.copy()} for i in range(n_samples)]
-                
-                if not requests_as_dicts:
+
+                if not requests:
                     return {"success": True, "data": {"model_name": model_name, "summary": summary_template, "time_points": time_points}}
 
-                df = pd.DataFrame(requests_as_dicts)
-                billing = self.monitor.get_model_billing(model_name)
-
-                def calculate_cost_for_row(row):
-                    temp_req = SimpleNamespace(**row.to_dict())
-                    return self._calculate_request_cost(temp_req, billing)
-                df['cost'] = df.apply(calculate_cost_for_row, axis=1)
+                # 创建DataFrame并添加模型名称列（用于向量化计算）
+                df = pd.DataFrame([req.__dict__ for req in requests])
+                df['model_name'] = model_name
                 df['total_tokens'] = df['input_tokens'] + df['output_tokens']
+
+                # 【性能优化】调用向量化函数，一次性计算所有成本
+                df = await self._calculate_cost_vectorized(df)
 
                 summary = {
                     "total_input_tokens": int(df['input_tokens'].sum()),
@@ -886,8 +948,6 @@ class APIServer:
                 logger.error(f"[API_SERVER] 获取模型统计数据失败: {e}")
                 return {"success": False, "error": str(e)}
 
-        # ... (Rest of the file remains unchanged)
-        # Add all the other endpoints from the original file here
         @self.app.get("/api/billing/models/{model_name}/pricing")
         async def get_model_pricing(model_name: str):
             """获取模型计费配置"""
@@ -907,12 +967,15 @@ class APIServer:
                         "tier_pricing": [
                             {
                                 "tier_index": tier.tier_index,
-                                "start_tokens": tier.start_tokens,
-                                "end_tokens": tier.end_tokens,
-                                "input_price_per_million": tier.input_price_per_million,
-                                "output_price_per_million": tier.output_price_per_million,
+                                "min_input_tokens": tier.min_input_tokens,
+                                "max_input_tokens": tier.max_input_tokens,
+                                "min_output_tokens": tier.min_output_tokens,
+                                "max_output_tokens": tier.max_output_tokens,
+                                "input_price": tier.input_price,
+                                "output_price": tier.output_price,
                                 "support_cache": tier.support_cache,
-                                "cache_hit_price_per_million": tier.cache_hit_price_per_million
+                                "cache_write_price": tier.cache_write_price,
+                                "cache_read_price": tier.cache_read_price
                             }
                             for tier in billing.tier_pricing
                         ],
@@ -934,9 +997,9 @@ class APIServer:
                 primary_name = self.config_manager.resolve_primary_name(model_name)
 
                 # 验证数据
-                required_fields = ["tier_index", "start_tokens", "end_tokens",
-                                 "input_price_per_million", "output_price_per_million",
-                                 "support_cache", "cache_hit_price_per_million"]
+                required_fields = ["tier_index", "min_input_tokens", "max_input_tokens",
+                                 "min_output_tokens", "max_output_tokens", "input_price",
+                                 "output_price", "support_cache", "cache_write_price", "cache_read_price"]
 
                 for field in required_fields:
                     if field not in pricing_data:
@@ -945,12 +1008,15 @@ class APIServer:
                 # 设置阶梯计费
                 tier_data = [
                     pricing_data["tier_index"],
-                    pricing_data["start_tokens"],
-                    pricing_data["end_tokens"],
-                    pricing_data["input_price_per_million"],
-                    pricing_data["output_price_per_million"],
+                    pricing_data["min_input_tokens"],
+                    pricing_data["max_input_tokens"],
+                    pricing_data["min_output_tokens"],
+                    pricing_data["max_output_tokens"],
+                    pricing_data["input_price"],
+                    pricing_data["output_price"],
                     pricing_data["support_cache"],
-                    pricing_data["cache_hit_price_per_million"]
+                    pricing_data["cache_write_price"],
+                    pricing_data["cache_read_price"]
                 ]
 
                 self.monitor.update_tier_pricing(primary_name, tier_data)
