@@ -205,6 +205,76 @@ class APIServer:
         
         return pd.DataFrame(all_requests_data)
 
+    def _calculate_hourly_cost_trends(
+        self,
+        start_time: float,
+        end_time: float,
+        n_samples: int,
+        hourly_models: List[str]
+    ) -> tuple[np.ndarray, dict]:
+        """
+        【新增】为按时计费模型计算精准的时间序列成本
+
+        Args:
+            start_time: 开始时间戳
+            end_time: 结束时间戳
+            n_samples: 采样数量
+            hourly_models: 按时计费的模型列表
+
+        Returns:
+            - total_costs_per_bucket: 包含所有模型总成本的Numpy数组
+            - mode_costs_per_bucket: 按模型模式分解的成本字典
+        """
+        if n_samples <= 0 or not hourly_models:
+            return np.zeros(1), {}
+
+        interval = (end_time - start_time) / n_samples
+        total_costs_per_bucket = np.zeros(n_samples)
+
+        # 初始化按模式分解的结果
+        tracked_modes = self.config_manager.get_token_tracker_modes()
+        mode_costs_per_bucket = {mode: np.zeros(n_samples) for mode in tracked_modes}
+
+        def calculate_overlap_duration(start1: float, end1: float, start2: float, end2: float) -> float:
+            """计算两个时间区间的重叠时长（秒）"""
+            overlap_start = max(start1, start2)
+            overlap_end = min(end1, end2)
+            return max(0, overlap_end - overlap_start)
+
+        for model_name in hourly_models:
+            try:
+                billing_cfg = self.monitor.get_model_billing(model_name)
+                if not billing_cfg or billing_cfg.hourly_price <= 0:
+                    continue
+
+                hourly_rate_per_sec = billing_cfg.hourly_price / 3600.0
+                model_mode = self.config_manager.get_model_mode(model_name)
+
+                # 获取指定时间范围内的运行时段
+                runtime_sessions = self.monitor.get_model_runtime_in_range(model_name, start_time, end_time)
+
+                for session in runtime_sessions:
+                    session_start = session.start_time
+                    session_end = session.end_time if session.end_time is not None else time.time()
+
+                    # 遍历 n_samples 个时间桶，进行精准分配
+                    for i in range(n_samples):
+                        bucket_start = start_time + i * interval
+                        bucket_end = bucket_start + interval
+
+                        overlap_seconds = calculate_overlap_duration(session_start, session_end, bucket_start, bucket_end)
+
+                        if overlap_seconds > 0:
+                            cost_in_bucket = overlap_seconds * hourly_rate_per_sec
+                            total_costs_per_bucket[i] += cost_in_bucket
+                            if model_mode in mode_costs_per_bucket:
+                                mode_costs_per_bucket[model_mode][i] += cost_in_bucket
+            except Exception as e:
+                logger.warning(f"[API_SERVER] 计算按时计费模型 {model_name} 成本失败: {e}")
+                continue
+
+        return total_costs_per_bucket, mode_costs_per_bucket
+
     def _setup_routes(self):
         """设置基础路由"""
 
@@ -574,7 +644,7 @@ class APIServer:
 
         @self.app.get("/api/metrics/throughput/current-session")
         async def get_current_session_total():
-            """【性能优化版】获取本次运行总消耗"""
+            """【混合计费版】获取本次运行总消耗，支持按时计费和按量计费的混合计算"""
             try:
                 program_runtime = await asyncio.wait_for(
                     asyncio.to_thread(self.monitor.get_program_runtime, 1),
@@ -586,26 +656,53 @@ class APIServer:
                     return {"success": True, "data": {"session_total": default_data}}
 
                 start_time = program_runtime[0].start_time
+                end_time = time.time()
 
-                # 1. 【性能优化】使用我们的数据获取函数，一次性并发获取所有模型在会话期间的请求数据
-                df = await self._get_enriched_requests_dataframe(start_time, time.time())
+                # 1. 【前置判断】将模型按计费模式分组
+                all_model_names = self.config_manager.get_model_names()
+                billing_configs = {}
+                for name in all_model_names:
+                    try:
+                        billing_configs[name] = self.monitor.get_model_billing(name)
+                    except Exception:
+                        billing_configs[name] = None
 
-                if df.empty:
-                    default_data["session_start_time"] = start_time
-                    return {"success": True, "data": {"session_total": default_data}}
+                tiered_models = [name for name, cfg in billing_configs.items() if cfg and cfg.use_tier_pricing]
+                hourly_models = [name for name, cfg in billing_configs.items() if cfg and not cfg.use_tier_pricing]
 
-                # 2. 【核心优化】调用向量化函数，一次性计算所有成本
-                df = await self._calculate_cost_vectorized(df)
-
-                # 3. 【优化点】使用Pandas的内置聚合函数进行总计，速度极快
+                # 2. 初始化汇总数据
                 summary = {
-                    "total_input_tokens": int(df['input_tokens'].sum()),
-                    "total_output_tokens": int(df['output_tokens'].sum()),
-                    "total_cache_n": int(df['cache_n'].sum()),
-                    "total_prompt_n": int(df['prompt_n'].sum()),
-                    "total_cost_yuan": round(df['cost'].sum(), 6),
+                    "total_input_tokens": 0,
+                    "total_output_tokens": 0,
+                    "total_cache_n": 0,
+                    "total_prompt_n": 0,
+                    "total_cost_yuan": 0.0,
                     "session_start_time": start_time
                 }
+
+                # 3. 分别计算不同计费模式的成本
+                # A) 计算按量计费模型的成本
+                if tiered_models:
+                    df_tiered = await self._get_enriched_requests_dataframe(start_time, end_time)
+                    df_tiered = df_tiered[df_tiered['model_name'].isin(tiered_models)]
+                    if not df_tiered.empty:
+                        df_tiered = await self._calculate_cost_vectorized(df_tiered)
+                        summary["total_input_tokens"] += int(df_tiered['input_tokens'].sum())
+                        summary["total_output_tokens"] += int(df_tiered['output_tokens'].sum())
+                        summary["total_cache_n"] += int(df_tiered['cache_n'].sum())
+                        summary["total_prompt_n"] += int(df_tiered['prompt_n'].sum())
+                        summary["total_cost_yuan"] += round(df_tiered['cost'].sum(), 6)
+
+                # B) 计算按时计费模型的成本 (n_samples=1)
+                if hourly_models:
+                    hourly_total_costs, _ = await asyncio.to_thread(
+                        self._calculate_hourly_cost_trends,
+                        start_time, end_time, 1, hourly_models
+                    )
+                    summary["total_cost_yuan"] += round(float(hourly_total_costs[0]), 6)
+
+                # 对于按时计费的模型，token统计设为0（因为按时间计费）
+                # 这里保持现有的统计逻辑
 
                 return {"success": True, "data": {"session_total": summary}}
             except Exception as e:
@@ -614,48 +711,64 @@ class APIServer:
 
         @self.app.get("/api/analytics/usage-summary/{start_time}/{end_time}")
         async def get_usage_summary(start_time: float, end_time: float):
-            """【全新升级】获取在指定时间范围内，各个模型模式消耗的Token总和与资金成本总和。"""
+            """【混合计费版】获取在指定时间范围内，各个模型模式消耗的Token总和与资金成本总和。"""
             try:
                 if start_time >= end_time:
                     return JSONResponse(status_code=400, content={"success": False, "error": "无效的时间范围"})
 
-                # 1. 使用辅助函数并发获取所有相关请求数据
-                df = await self._get_enriched_requests_dataframe(start_time, end_time)
+                # 1. 【前置判断】将模型按计费模式分组
+                all_model_names = self.config_manager.get_model_names()
+                billing_configs = {}
+                for name in all_model_names:
+                    try:
+                        billing_configs[name] = self.monitor.get_model_billing(name)
+                    except Exception:
+                        billing_configs[name] = None
+
+                tiered_models = [name for name, cfg in billing_configs.items() if cfg and cfg.use_tier_pricing]
+                hourly_models = [name for name, cfg in billing_configs.items() if cfg and not cfg.use_tier_pricing]
 
                 # 2. 初始化结果结构
                 tracked_modes = self.config_manager.get_token_tracker_modes()
                 mode_summary = {mode: {"total_tokens": 0, "total_cost": 0.0} for mode in tracked_modes}
                 overall_summary = {"total_tokens": 0, "total_cost": 0.0}
 
-                # 3. 如果在指定时间范围内没有任何请求，直接返回初始化的零值结果
-                if df.empty:
-                    return {
-                        "success": True,
-                        "data": {
-                            "mode_summary": mode_summary,
-                            "overall_summary": overall_summary
-                        }
-                    }
+                # 3. 分别计算不同计费模式的成本
+                # A) 计算按量计费模型的成本和Token
+                if tiered_models:
+                    df_tiered = await self._get_enriched_requests_dataframe(start_time, end_time)
+                    df_tiered = df_tiered[df_tiered['model_name'].isin(tiered_models)]
+                    if not df_tiered.empty:
+                        df_tiered['total_tokens'] = df_tiered['input_tokens'] + df_tiered['output_tokens']
+                        df_tiered = await self._calculate_cost_vectorized(df_tiered)
 
-                # 4. 【性能优化】调用向量化函数，一次性计算所有成本
-                df['total_tokens'] = df['input_tokens'] + df['output_tokens']
-                df = await self._calculate_cost_vectorized(df)
+                        # 按模型模式聚合按量计费数据
+                        agg_cols = {"total_tokens": "sum", "cost": "sum"}
+                        tiered_mode_agg = df_tiered.groupby('model_mode').agg(agg_cols)
 
-                # 5. 按模型模式(model_mode)对总Token和成本进行分组求和
-                agg_cols = {"total_tokens": "sum", "cost": "sum"}
-                mode_agg = df.groupby('model_mode').agg(agg_cols)
+                        # 累加按量计费结果到汇总
+                        for mode, row in tiered_mode_agg.iterrows():
+                            if mode in mode_summary:
+                                mode_summary[mode]['total_tokens'] += int(row['total_tokens'])
+                                mode_summary[mode]['total_cost'] += round(row['cost'], 6)
 
-                # 6. 将计算出的结果填充到结果字典中
-                for mode, row in mode_agg.iterrows():
-                    if mode in mode_summary:
-                        mode_summary[mode]['total_tokens'] = int(row['total_tokens'])
-                        mode_summary[mode]['total_cost'] = round(row['cost'], 6)
+                        overall_summary['total_tokens'] += int(tiered_mode_agg['total_tokens'].sum())
+                        overall_summary['total_cost'] += round(tiered_mode_agg['cost'].sum(), 6)
 
-                # 7. 计算所有模式的Token和成本总和
-                overall_summary['total_tokens'] = int(mode_agg['total_tokens'].sum())
-                overall_summary['total_cost'] = round(mode_agg['cost'].sum(), 6)
+                # B) 计算按时计费模型的成本 (n_samples=1)
+                if hourly_models:
+                    hourly_total_costs, hourly_mode_costs = await asyncio.to_thread(
+                        self._calculate_hourly_cost_trends,
+                        start_time, end_time, 1, hourly_models
+                    )
 
-                # 8. 返回最终的汇总数据
+                    # 累加按时计费成本到汇总
+                    overall_summary['total_cost'] += round(float(hourly_total_costs[0]), 6)
+                    for mode in tracked_modes:
+                        if mode in hourly_mode_costs:
+                            mode_summary[mode]['total_cost'] += round(float(hourly_mode_costs[mode][0]), 6)
+
+                # 4. 返回最终的汇总数据
                 return {
                     "success": True,
                     "data": {
@@ -729,30 +842,60 @@ class APIServer:
 
         @self.app.get("/api/analytics/cost-trends/{start_time}/{end_time}/{n_samples}")
         async def get_cost_trends(start_time: float, end_time: float, n_samples: int):
-            """【逻辑不变】获取成本趋势，并按模型模式分解。此接口返回时间序列的总量数据。"""
+            """【混合计费版】获取成本趋势，并按模型模式分解。支持按时计费和按量计费的混合计算。"""
             try:
                 if start_time >= end_time or n_samples <= 0:
                     return JSONResponse(status_code=400, content={"success": False, "error": "无效的时间范围或采样点数"})
 
                 interval = (end_time - start_time) / n_samples
                 tracked_modes = self.config_manager.get_token_tracker_modes()
-                point_template = {"cost": 0.0}
 
-                # 1. 获取 enriched DataFrame
-                df = await self._get_enriched_requests_dataframe(start_time, end_time)
-                
-                if df.empty:
-                    time_points = [{"timestamp": start_time + (i + 0.5) * interval, "data": point_template} for i in range(n_samples)]
-                    mode_breakdown = {mode: list(time_points) for mode in tracked_modes}
-                    return {"success": True, "data": {"time_points": time_points, "mode_breakdown": mode_breakdown}}
+                # 1. 【前置判断】将模型按计费模式分组
+                all_model_names = self.config_manager.get_model_names()
+                billing_configs = {}
+                for name in all_model_names:
+                    try:
+                        billing_configs[name] = self.monitor.get_model_billing(name)
+                    except Exception:
+                        billing_configs[name] = None
 
-                # 2. 【性能优化】调用向量化函数，一次性计算所有成本
-                df = await self._calculate_cost_vectorized(df)
+                tiered_models = [name for name, cfg in billing_configs.items() if cfg and cfg.use_tier_pricing]
+                hourly_models = [name for name, cfg in billing_configs.items() if cfg and not cfg.use_tier_pricing]
 
-                # 3. 聚合
-                df['bin_index'] = np.clip(np.floor((df['end_time'] - start_time) / interval), 0, n_samples - 1).astype(int)
-                overall_agg = df.groupby('bin_index')['cost'].sum()
-                mode_agg = df.groupby(['bin_index', 'model_mode'])['cost'].sum()
+                # 2. 初始化成本数组
+                total_costs = np.zeros(n_samples)
+                mode_costs = {mode: np.zeros(n_samples) for mode in tracked_modes}
+
+                # 3. 分别计算成本
+                # A) 计算按量计费模型的成本 (现有逻辑)
+                if tiered_models:
+                    df_tiered = await self._get_enriched_requests_dataframe(start_time, end_time)
+                    df_tiered = df_tiered[df_tiered['model_name'].isin(tiered_models)]
+                    if not df_tiered.empty:
+                        df_tiered = await self._calculate_cost_vectorized(df_tiered)
+                        df_tiered['bin_index'] = np.clip(np.floor((df_tiered['end_time'] - start_time) / interval), 0, n_samples - 1).astype(int)
+
+                        # 聚合按量计费成本
+                        tiered_overall_agg = df_tiered.groupby('bin_index')['cost'].sum()
+                        tiered_mode_agg = df_tiered.groupby(['bin_index', 'model_mode'])['cost'].sum()
+
+                        # 累加到总成本
+                        for i in range(n_samples):
+                            total_costs[i] += tiered_overall_agg.get(i, 0.0)
+                            for mode in tracked_modes:
+                                mode_costs[mode][i] += tiered_mode_agg.get((i, mode), 0.0)
+
+                # B) 计算按时计费模型的成本 (调用新函数)
+                if hourly_models:
+                    hourly_total_costs, hourly_mode_costs = await asyncio.to_thread(
+                        self._calculate_hourly_cost_trends,
+                        start_time, end_time, n_samples, hourly_models
+                    )
+                    # 累加按时计费成本
+                    total_costs += hourly_total_costs
+                    for mode in tracked_modes:
+                        if mode in hourly_mode_costs:
+                            mode_costs[mode] += hourly_mode_costs[mode]
 
                 # 4. 格式化输出
                 time_points = []
@@ -760,11 +903,11 @@ class APIServer:
 
                 for i in range(n_samples):
                     ts = start_time + (i + 0.5) * interval
-                    cost = round(overall_agg.get(i, 0.0), 6)
+                    cost = round(float(total_costs[i]), 6)
                     time_points.append({"timestamp": ts, "data": {"cost": cost}})
-                    
+
                     for mode in tracked_modes:
-                        mode_cost = round(mode_agg.get((i, mode), 0.0), 6)
+                        mode_cost = round(float(mode_costs[mode][i]), 6)
                         mode_breakdown[mode].append({"timestamp": ts, "data": {"cost": mode_cost}})
 
                 return {"success": True, "data": {"time_points": time_points, "mode_breakdown": mode_breakdown}}
@@ -774,70 +917,121 @@ class APIServer:
 
         @self.app.get("/api/analytics/model-stats/{model_name_alias}/{start_time}/{end_time}/{n_samples}")
         async def get_model_stats(model_name_alias: str, start_time: float, end_time: float, n_samples: int):
-            """【逻辑不变】获取单模型在指定时间范围内的详细统计数据。"""
+            """【混合计费版】获取单模型在指定时间范围内的详细统计数据。支持按时计费和按量计费。"""
             try:
                 if start_time >= end_time or n_samples <= 0:
                     return JSONResponse(status_code=400, content={"success": False, "error": "无效的时间范围或采样点数"})
 
                 model_name = self.config_manager.resolve_primary_name(model_name_alias)
-                
-                # 获取模型请求数据并创建DataFrame
-                requests = self.monitor.get_model_requests(model_name, start_time, end_time)
+
+                # 获取模型的计费配置
+                try:
+                    billing_cfg = self.monitor.get_model_billing(model_name)
+                except Exception:
+                    billing_cfg = None
 
                 total_duration = end_time - start_time
                 interval = total_duration / n_samples
 
+                # 初始化模板
                 summary_template = {"total_input_tokens": 0, "total_output_tokens": 0, "total_tokens": 0, "total_cache_n": 0, "total_prompt_n": 0, "total_cost": 0, "request_count": 0}
                 point_template = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "cache_hit_tokens": 0, "cache_miss_tokens": 0, "cost": 0.0}
                 time_points = [{"timestamp": start_time + (i + 0.5) * interval, "data": point_template.copy()} for i in range(n_samples)]
 
-                if not requests:
+                if not billing_cfg:
                     return {"success": True, "data": {"model_name": model_name, "summary": summary_template, "time_points": time_points}}
 
-                # 创建DataFrame并添加模型名称列（用于向量化计算）
-                df = pd.DataFrame([req.__dict__ for req in requests])
-                df['model_name'] = model_name
-                df['total_tokens'] = df['input_tokens'] + df['output_tokens']
+                # 根据计费模式分别处理
+                if billing_cfg.use_tier_pricing:
+                    # 按量计费逻辑（原有逻辑）
+                    requests = self.monitor.get_model_requests(model_name, start_time, end_time)
+                    if not requests:
+                        return {"success": True, "data": {"model_name": model_name, "summary": summary_template, "time_points": time_points}}
 
-                # 【性能优化】调用向量化函数，一次性计算所有成本
-                df = await self._calculate_cost_vectorized(df)
+                    # 创建DataFrame并计算成本
+                    df = pd.DataFrame([req.__dict__ for req in requests])
+                    df['model_name'] = model_name
+                    df['total_tokens'] = df['input_tokens'] + df['output_tokens']
+                    df = await self._calculate_cost_vectorized(df)
 
-                summary = {
-                    "total_input_tokens": int(df['input_tokens'].sum()),
-                    "total_output_tokens": int(df['output_tokens'].sum()),
-                    "total_tokens": int(df['total_tokens'].sum()),
-                    "total_cache_n": int(df['cache_n'].sum()),
-                    "total_prompt_n": int(df['prompt_n'].sum()),
-                    "total_cost": round(df['cost'].sum(), 6),
-                    "request_count": len(df)
-                }
+                    # 计算汇总数据
+                    summary = {
+                        "total_input_tokens": int(df['input_tokens'].sum()),
+                        "total_output_tokens": int(df['output_tokens'].sum()),
+                        "total_tokens": int(df['total_tokens'].sum()),
+                        "total_cache_n": int(df['cache_n'].sum()),
+                        "total_prompt_n": int(df['prompt_n'].sum()),
+                        "total_cost": round(df['cost'].sum(), 6),
+                        "request_count": len(df)
+                    }
 
-                bin_indices = np.floor((df['end_time'] - start_time) / interval)
-                df['bin_index'] = np.clip(bin_indices, 0, n_samples - 1).astype(int)
+                    # 计算时间点数据
+                    df['bin_index'] = np.clip(np.floor((df['end_time'] - start_time) / interval), 0, n_samples - 1).astype(int)
+                    agg_cols = {"input_tokens": "sum", "output_tokens": "sum", "total_tokens": "sum",
+                               "cache_n": "sum", "prompt_n": "sum", "cost": "sum"}
+                    time_agg_df = df.groupby('bin_index')[list(agg_cols.keys())].agg(agg_cols)
 
-                agg_cols = {"input_tokens": "sum", "output_tokens": "sum", "total_tokens": "sum", "cache_n": "sum", "prompt_n": "sum", "cost": "sum"}
-                time_agg_df = df.groupby('bin_index')[list(agg_cols.keys())].agg(agg_cols)
-                
-                final_time_points = []
-                for i in range(n_samples):
-                    ts = start_time + (i + 0.5) * interval
-                    if i in time_agg_df.index:
-                        point_data = time_agg_df.loc[i]
+                    final_time_points = []
+                    for i in range(n_samples):
+                        ts = start_time + (i + 0.5) * interval
+                        if i in time_agg_df.index:
+                            point_data = time_agg_df.loc[i]
+                            final_time_points.append({
+                                "timestamp": ts,
+                                "data": {
+                                    "input_tokens": int(point_data["input_tokens"]),
+                                    "output_tokens": int(point_data["output_tokens"]),
+                                    "total_tokens": int(point_data["total_tokens"]),
+                                    "cache_hit_tokens": int(point_data["cache_n"]),
+                                    "cache_miss_tokens": int(point_data["prompt_n"] - point_data["cache_n"]),
+                                    "cost": round(float(point_data["cost"]), 6)
+                                }
+                            })
+                        else:
+                            final_time_points.append({"timestamp": ts, "data": point_template.copy()})
+
+                else:
+                    # 按时计费逻辑（新增）
+                    # 汇总数据：Token相关为0，只有成本
+                    hourly_total_costs, _ = await asyncio.to_thread(
+                        self._calculate_hourly_cost_trends,
+                        start_time, end_time, 1, [model_name]
+                    )
+
+                    summary = {
+                        "total_input_tokens": 0,
+                        "total_output_tokens": 0,
+                        "total_tokens": 0,
+                        "total_cache_n": 0,
+                        "total_prompt_n": 0,
+                        "total_cost": round(float(hourly_total_costs[0]), 6),
+                        "request_count": 0
+                    }
+
+                    # 时间点数据：计算每个时间段的成本
+                    hourly_costs_by_time, _ = await asyncio.to_thread(
+                        self._calculate_hourly_cost_trends,
+                        start_time, end_time, n_samples, [model_name]
+                    )
+
+                    final_time_points = []
+                    for i in range(n_samples):
+                        ts = start_time + (i + 0.5) * interval
+                        cost = round(float(hourly_costs_by_time[i]), 6)
                         final_time_points.append({
                             "timestamp": ts,
                             "data": {
-                                "input_tokens": int(point_data["input_tokens"]),
-                                "output_tokens": int(point_data["output_tokens"]),
-                                "total_tokens": int(point_data["total_tokens"]),
-                                "cache_hit_tokens": int(point_data["cache_n"]),
-                                "cache_miss_tokens": int(point_data["prompt_n"]),
-                                "cost": round(point_data["cost"], 6)
+                                "input_tokens": 0,
+                                "output_tokens": 0,
+                                "total_tokens": 0,
+                                "cache_hit_tokens": 0,
+                                "cache_miss_tokens": 0,
+                                "cost": cost
                             }
                         })
-                    else:
-                        final_time_points.append({"timestamp": ts, "data": point_template})
 
                 return {"success": True, "data": {"model_name": model_name, "summary": summary, "time_points": final_time_points}}
+            
             except KeyError:
                 return JSONResponse(status_code=404, content={"success": False, "error": f"模型别名 '{model_name_alias}' 未找到"})
             except Exception as e:

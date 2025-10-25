@@ -546,33 +546,30 @@ class Monitor:
 
             return [ModelRunTime(row['id'], row['start_time'], row['end_time']) for row in cursor.fetchall()]
 
-    def get_model_runtime(self, model_name: str, limit: int = 0) -> List[ModelRunTime]:
+    def get_model_runtime_in_range(self, model_name: str, start_time: float, end_time: float) -> List[ModelRunTime]:
         """
-        获取模型运行时间记录
+        获取指定时间范围内的模型运行时间记录
 
         Args:
             model_name: 模型名称
-            limit: 限制返回的记录数，0表示返回所有记录
+            start_time: 开始时间戳
+            end_time: 结束时间戳
 
         Returns:
-            模型运行时间记录列表
+            运行时间记录列表
         """
         safe_name = self.get_model_safe_name(model_name)
         if not safe_name:
-            raise ValueError(f"模型 '{model_name}' 不存在")
+            return []
 
         with get_db_connection(self.connection_pool) as conn:
             cursor = conn.cursor()
-            if limit > 0:
-                cursor.execute(f'''
-                    SELECT id, start_time, end_time FROM {safe_name}_runtime
-                    ORDER BY id DESC LIMIT ?
-                ''', (limit,))
-            else:
-                cursor.execute(f'''
-                    SELECT id, start_time, end_time FROM {safe_name}_runtime
-                    ORDER BY id DESC
-                ''')
+            cursor.execute(f'''
+                SELECT id, start_time, end_time
+                FROM {safe_name}_runtime
+                WHERE (start_time <= ? AND (end_time >= ? OR end_time IS NULL))
+                ORDER BY start_time ASC
+            ''', (end_time, start_time))
 
             return [ModelRunTime(row['id'], row['start_time'], row['end_time']) for row in cursor.fetchall()]
 
