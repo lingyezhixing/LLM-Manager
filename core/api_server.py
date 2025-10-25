@@ -683,15 +683,21 @@ class APIServer:
                 # 3. 分别计算不同计费模式的成本
                 # A) 计算按量计费模型的成本
                 if tiered_models:
-                    df_tiered = await self._get_enriched_requests_dataframe(start_time, end_time)
-                    df_tiered = df_tiered[df_tiered['model_name'].isin(tiered_models)]
-                    if not df_tiered.empty:
-                        df_tiered = await self._calculate_cost_vectorized(df_tiered)
-                        summary["total_input_tokens"] += int(df_tiered['input_tokens'].sum())
-                        summary["total_output_tokens"] += int(df_tiered['output_tokens'].sum())
-                        summary["total_cache_n"] += int(df_tiered['cache_n'].sum())
-                        summary["total_prompt_n"] += int(df_tiered['prompt_n'].sum())
-                        summary["total_cost_yuan"] += round(df_tiered['cost'].sum(), 6)
+                    df_all_requests = await self._get_enriched_requests_dataframe(start_time, end_time)
+
+                    # 【关键修改】在访问任何列之前，必须先检查DataFrame是否为空
+                    if not df_all_requests.empty:
+                        # 只有在不为空时，才进行过滤和后续处理
+                        df_tiered = df_all_requests[df_all_requests['model_name'].isin(tiered_models)]
+
+                        # 过滤后可能也变为空，所以再次检查
+                        if not df_tiered.empty:
+                            df_tiered = await self._calculate_cost_vectorized(df_tiered)
+                            summary["total_input_tokens"] += int(df_tiered['input_tokens'].sum())
+                            summary["total_output_tokens"] += int(df_tiered['output_tokens'].sum())
+                            summary["total_cache_n"] += int(df_tiered['cache_n'].sum())
+                            summary["total_prompt_n"] += int(df_tiered['prompt_n'].sum())
+                            summary["total_cost_yuan"] += round(df_tiered['cost'].sum(), 6)
 
                 # B) 计算按时计费模型的成本 (n_samples=1)
                 if hourly_models:
@@ -736,24 +742,30 @@ class APIServer:
                 # 3. 分别计算不同计费模式的成本
                 # A) 计算按量计费模型的成本和Token
                 if tiered_models:
-                    df_tiered = await self._get_enriched_requests_dataframe(start_time, end_time)
-                    df_tiered = df_tiered[df_tiered['model_name'].isin(tiered_models)]
-                    if not df_tiered.empty:
-                        df_tiered['total_tokens'] = df_tiered['input_tokens'] + df_tiered['output_tokens']
-                        df_tiered = await self._calculate_cost_vectorized(df_tiered)
+                    df_all_requests = await self._get_enriched_requests_dataframe(start_time, end_time)
 
-                        # 按模型模式聚合按量计费数据
-                        agg_cols = {"total_tokens": "sum", "cost": "sum"}
-                        tiered_mode_agg = df_tiered.groupby('model_mode').agg(agg_cols)
+                    # 【关键修改】在访问任何列之前，必须先检查DataFrame是否为空
+                    if not df_all_requests.empty:
+                        # 只有在不为空时，才进行过滤和后续处理
+                        df_tiered = df_all_requests[df_all_requests['model_name'].isin(tiered_models)]
 
-                        # 累加按量计费结果到汇总
-                        for mode, row in tiered_mode_agg.iterrows():
-                            if mode in mode_summary:
-                                mode_summary[mode]['total_tokens'] += int(row['total_tokens'])
-                                mode_summary[mode]['total_cost'] += round(row['cost'], 6)
+                        # 过滤后可能也变为空，所以再次检查
+                        if not df_tiered.empty:
+                            df_tiered['total_tokens'] = df_tiered['input_tokens'] + df_tiered['output_tokens']
+                            df_tiered = await self._calculate_cost_vectorized(df_tiered)
 
-                        overall_summary['total_tokens'] += int(tiered_mode_agg['total_tokens'].sum())
-                        overall_summary['total_cost'] += round(tiered_mode_agg['cost'].sum(), 6)
+                            # 按模型模式聚合按量计费数据
+                            agg_cols = {"total_tokens": "sum", "cost": "sum"}
+                            tiered_mode_agg = df_tiered.groupby('model_mode').agg(agg_cols)
+
+                            # 累加按量计费结果到汇总
+                            for mode, row in tiered_mode_agg.iterrows():
+                                if mode in mode_summary:
+                                    mode_summary[mode]['total_tokens'] += int(row['total_tokens'])
+                                    mode_summary[mode]['total_cost'] += round(row['cost'], 6)
+
+                            overall_summary['total_tokens'] += int(tiered_mode_agg['total_tokens'].sum())
+                            overall_summary['total_cost'] += round(tiered_mode_agg['cost'].sum(), 6)
 
                 # B) 计算按时计费模型的成本 (n_samples=1)
                 if hourly_models:
@@ -869,21 +881,27 @@ class APIServer:
                 # 3. 分别计算成本
                 # A) 计算按量计费模型的成本 (现有逻辑)
                 if tiered_models:
-                    df_tiered = await self._get_enriched_requests_dataframe(start_time, end_time)
-                    df_tiered = df_tiered[df_tiered['model_name'].isin(tiered_models)]
-                    if not df_tiered.empty:
-                        df_tiered = await self._calculate_cost_vectorized(df_tiered)
-                        df_tiered['bin_index'] = np.clip(np.floor((df_tiered['end_time'] - start_time) / interval), 0, n_samples - 1).astype(int)
+                    df_all_requests = await self._get_enriched_requests_dataframe(start_time, end_time)
 
-                        # 聚合按量计费成本
-                        tiered_overall_agg = df_tiered.groupby('bin_index')['cost'].sum()
-                        tiered_mode_agg = df_tiered.groupby(['bin_index', 'model_mode'])['cost'].sum()
+                    # 【关键修改】在访问任何列之前，必须先检查DataFrame是否为空
+                    if not df_all_requests.empty:
+                        # 只有在不为空时，才进行过滤和后续处理
+                        df_tiered = df_all_requests[df_all_requests['model_name'].isin(tiered_models)]
 
-                        # 累加到总成本
-                        for i in range(n_samples):
-                            total_costs[i] += tiered_overall_agg.get(i, 0.0)
-                            for mode in tracked_modes:
-                                mode_costs[mode][i] += tiered_mode_agg.get((i, mode), 0.0)
+                        # 过滤后可能也变为空，所以再次检查
+                        if not df_tiered.empty:
+                            df_tiered = await self._calculate_cost_vectorized(df_tiered)
+                            df_tiered['bin_index'] = np.clip(np.floor((df_tiered['end_time'] - start_time) / interval), 0, n_samples - 1).astype(int)
+
+                            # 聚合按量计费成本
+                            tiered_overall_agg = df_tiered.groupby('bin_index')['cost'].sum()
+                            tiered_mode_agg = df_tiered.groupby(['bin_index', 'model_mode'])['cost'].sum()
+
+                            # 累加到总成本
+                            for i in range(n_samples):
+                                total_costs[i] += tiered_overall_agg.get(i, 0.0)
+                                for mode in tracked_modes:
+                                    mode_costs[mode][i] += tiered_mode_agg.get((i, mode), 0.0)
 
                 # B) 计算按时计费模型的成本 (调用新函数)
                 if hourly_models:
