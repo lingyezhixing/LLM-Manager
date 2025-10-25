@@ -12,7 +12,8 @@ import {
   LogStreamOptions,
   UsageSummaryResponse,
   TokenTrendsResponse,
-  CostTrendsResponse
+  CostTrendsResponse,
+  ModelStatsResponse
 } from '../types/api'
 
 const API_BASE_URL = ''
@@ -225,6 +226,17 @@ export const apiService = {
       return response.data
     } catch (error) {
       console.error('Cost trends failed:', error instanceof Error ? error.message : String(error))
+      throw error
+    }
+  },
+
+  // Single Model Stats API
+  async getModelStats(modelAlias: string, startTime: number, endTime: number, nSamples: number): Promise<ModelStatsResponse> {
+    try {
+      const response = await api.get(`/api/analytics/model-stats/${modelAlias}/${startTime}/${endTime}/${nSamples}`)
+      return response.data
+    } catch (error) {
+      console.error('Model stats failed:', error instanceof Error ? error.message : String(error))
       throw error
     }
   }

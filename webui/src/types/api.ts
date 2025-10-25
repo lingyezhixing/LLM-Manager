@@ -173,3 +173,32 @@ export interface CostTrendsResponse {
     mode_breakdown: Record<string, CostTrendDataPoint[]>
   }
 }
+
+// Single Model Stats API Types
+export interface ModelStatsSummary {
+  total_input_tokens: number
+  total_output_tokens: number
+  total_tokens: number
+  total_cache_n: number
+  total_prompt_n: number
+  total_cost: number
+  request_count: number
+}
+
+export interface ModelStatsDataPoint {
+  input_tokens: number
+  output_tokens: number
+  total_tokens: number
+  cache_hit_tokens: number
+  cache_miss_tokens: number
+  cost: number
+}
+
+export interface ModelStatsResponse {
+  success: boolean
+  data: {
+    model_name: string
+    summary: ModelStatsSummary
+    time_points: ModelStatsDataPoint[]
+  }
+}
