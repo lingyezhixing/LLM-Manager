@@ -817,92 +817,114 @@ curl http://localhost:8080/api/analytics/model-stats/Qwen3-8B-AWQ/1758820000/175
 
 ---
 
-### 20. 获取模型计费配置
+### **20. 获取模型计费配置**
 
 **接口地址**: `GET /api/billing/models/{model_name}/pricing`
 
-**功能**: 获取指定模型的计费配置
+**功能**: 获取指定模型的计费配置，包括按时计费和新的分阶按量计费档位。
 
 **路径参数**:
-- `model_name`: 模型名称
+*   `model_name`: 模型名称或别名。
 
 **请求示例**:
 ```bash
-curl http://localhost:8080/api/billing/models/Qwen3-8B-AWQ/pricing
+curl http://localhost:8080/api/billing/models/Qwen-VL-Chat/pricing
 ```
 
-**返回结构**:
-```json
+**返回结构**:```json
 {
   "success": true,
   "data": {
-    "model_name": "Qwen3-8B-AWQ",
+    "model_name": "Qwen-VL-Chat",
     "pricing_type": "tier",
     "tier_pricing": [
       {
         "tier_index": 1,
-        "start_tokens": 0,
-        "end_tokens": 32768,
-        "input_price_per_million": 2.5,
-        "output_price_per_million": 7.5,
+        "min_input_tokens": 0,
+        "max_input_tokens": 4096,
+        "min_output_tokens": 0,
+        "max_output_tokens": 4096,
+        "input_price": 5.0,
+        "output_price": 10.0,
         "support_cache": true,
-        "cache_hit_price_per_million": 1.0
+        "cache_write_price": 0.5,
+        "cache_read_price": 0.2
+      },
+      {
+        "tier_index": 2,
+        "min_input_tokens": 4096,
+        "max_input_tokens": -1,
+        "min_output_tokens": 0,
+        "max_output_tokens": -1,
+        "input_price": 8.0,
+        "output_price": 15.0,
+        "support_cache": false,
+        "cache_write_price": 0.0,
+        "cache_read_price": 0.0
       }
     ],
     "hourly_price": 0.0
   }
-}
-```
+}```
 
 **返回字段说明**:
-- `model_name`: 模型名称
-- `pricing_type`: 计费类型 (`tier`/`hourly`)
-- `tier_pricing`: 阶梯计费配置（当pricing_type为"tier"时）
-  - `tier_index`: 阶梯索引
-  - `start_tokens`: 起始token数
-  - `end_tokens`: 结束token数
-  - `input_price_per_million`: 输入token价格（元/百万token）
-  - `output_price_per_million`: 输出token价格（元/百万token）
-  - `support_cache`: 是否支持缓存
-  - `cache_hit_price_per_million`: 缓存命中价格（元/百万token）
-- `hourly_price`: 每小时价格（当pricing_type为"hourly"时）
+*   `model_name`: 模型的唯一主名称。
+*   `pricing_type`: 当前生效的计费类型 (`tier` - 按量 / `hourly` - 按时)。
+*   `tier_pricing`: 分阶按量计费的档位配置列表（当 `pricing_type` 为 "tier" 时）。
+    *   `tier_index`: 档位索引，唯一标识。
+    *   `min_input_tokens`: 匹配此档位的最小输入 Token 数（**不包含**此值，即 `> min`）。
+    *   `max_input_tokens`: 匹配此档位的最大输入 Token 数（**包含**此值，即 `<= max`）。`-1` 表示无上限。
+    *   `min_output_tokens`: 匹配此档位的最小输出 Token 数（**不包含**此值）。
+    *   `max_output_tokens`: 匹配此档位的最大输出 Token 数（**包含**此值）。`-1` 表示无上限。
+    *   `input_price`: 在此档位下，缓外输入 Token 的价格（元/百万 Token）。
+    *   `output_price`: 在此档位下，输出 Token 的价格（元/百万 Token）。
+    *   `support_cache`: 在此档位下是否启用缓存计费。
+    *   `cache_write_price`: 在此档位下，缓存写入的价格（元/百万 Token）。
+    *   `cache_read_price`: 在此档位下，缓存读取的价格（元/百万 Token）。
+*   `hourly_price`: 每小时的使用价格（元），仅在 `pricing_type` 为 "hourly" 时作为计费依据。
 
 ---
 
-### 21. 设置模型阶梯计费
+### **21. 设置模型分阶按量计费**
 
 **接口地址**: `POST /api/billing/models/{model_name}/pricing/tier`
 
-**功能**: 设置模型的阶梯计费配置
+**功能**: 新增或更新一个计费档位。调用此接口会自动将模型的计费方式切换为“按量计费”。
 
 **路径参数**:
-- `model_name`: 模型名称
+*   `model_name`: 模型名称或别名。
 
-**请求体**:
+**请求体 (JSON)**:
 ```json
 {
   "tier_index": 1,
-  "start_tokens": 0,
-  "end_tokens": 32768,
-  "input_price_per_million": 2.5,
-  "output_price_per_million": 7.5,
+  "min_input_tokens": 0,
+  "max_input_tokens": 4096,
+  "min_output_tokens": 0,
+  "max_output_tokens": 4096,
+  "input_price": 5.0,
+  "output_price": 10.0,
   "support_cache": true,
-  "cache_hit_price_per_million": 1.0
+  "cache_write_price": 0.5,
+  "cache_read_price": 0.2
 }
 ```
 
 **请求示例**:
 ```bash
-curl -X POST http://localhost:8080/api/billing/models/Qwen3-8B-AWQ/pricing/tier \
+curl -X POST http://localhost:8080/api/billing/models/Qwen-VL-Chat/pricing/tier \
   -H "Content-Type: application/json" \
   -d '{
     "tier_index": 1,
-    "start_tokens": 0,
-    "end_tokens": 32768,
-    "input_price_per_million": 2.5,
-    "output_price_per_million": 7.5,
+    "min_input_tokens": 0,
+    "max_input_tokens": 4096,
+    "min_output_tokens": 0,
+    "max_output_tokens": 4096,
+    "input_price": 5.0,
+    "output_price": 10.0,
     "support_cache": true,
-    "cache_hit_price_per_million": 1.0
+    "cache_write_price": 0.5,
+    "cache_read_price": 0.2
   }'
 ```
 
@@ -910,40 +932,42 @@ curl -X POST http://localhost:8080/api/billing/models/Qwen3-8B-AWQ/pricing/tier 
 ```json
 {
   "success": true,
-  "message": "模型 'Qwen3-8B-AWQ' 阶梯计费配置已更新"
+  "message": "模型 'Qwen-VL-Chat' 的按量计费档位配置已更新"
 }
 ```
 
-**请求字段说明**:
-- `tier_index`: 阶梯索引
-- `start_tokens`: 起始token数
-- `end_tokens`: 结束token数
-- `input_price_per_million`: 输入token价格（元/百万token）
-- `output_price_per_million`: 输出token价格（元/百万token）
-- `support_cache`: 是否支持缓存
-- `cache_hit_price_per_million`: 缓存命中价格（元/百万token）
+**请求字段说明 (全部必填)**:
+*   `tier_index`: **档位索引**。如果该索引已存在，则**更新**；如果不存在，则**新增**。
+*   `min_input_tokens`: 最小输入 Token 数（不含）。
+*   `max_input_tokens`: 最大输入 Token 数（包含）。使用 `-1` 表示无穷大。
+*   `min_output_tokens`: 最小输出 Token 数（不含）。
+*   `max_output_tokens`: 最大输出 Token 数（包含）。使用 `-1` 表示无穷大。
+*   `input_price`: 缓外输入价格（元/百万 Token）。
+*   `output_price`: 输出价格（元/百万 Token）。
+*   `support_cache`: `true` 或 `false`，决定此档位是否应用缓存计费规则。
+*   `cache_write_price`: 缓存写入价格（元/百万 Token）。如果 `support_cache` 为 `false`，此值虽必填但不会被使用。
+*   `cache_read_price`: 缓存读取价格（元/百万 Token）。如果 `support_cache` 为 `false`，此值虽必填但不会被使用。
 
 ---
 
-### 22. 设置模型按时计费
+### **22. 设置模型按时计费**
 
 **接口地址**: `POST /api/billing/models/{model_name}/pricing/hourly`
 
-**功能**: 设置模型的按时计费配置
+**功能**: 设置模型的按时计费价格。调用此接口会自动将模型的计费方式切换为“按时计费”。
 
 **路径参数**:
-- `model_name`: 模型名称
+*   `model_name`: 模型名称或别名。
 
-**请求体**:
+**请求体 (JSON)**:
 ```json
 {
   "hourly_price": 0.5
 }
 ```
 
-**请求示例**:
-```bash
-curl -X POST http://localhost:8080/api/billing/models/Qwen3-8B-AWQ/pricing/hourly \
+**请求示例**:```bash
+curl -X POST http://localhost:8080/api/billing/models/Qwen-VL-Chat/pricing/hourly \
   -H "Content-Type: application/json" \
   -d '{"hourly_price": 0.5}'
 ```
@@ -952,12 +976,12 @@ curl -X POST http://localhost:8080/api/billing/models/Qwen3-8B-AWQ/pricing/hourl
 ```json
 {
   "success": true,
-  "message": "模型 'Qwen3-8B-AWQ' 按时计费配置已更新"
+  "message": "模型 'Qwen-VL-Chat' 按时计费配置已更新"
 }
 ```
 
 **请求字段说明**:
-- `hourly_price`: 每小时价格（元）
+*   `hourly_price`: 每小时的价格（元）。
 
 ---
 
@@ -1059,276 +1083,3 @@ curl http://localhost:8080/api/data/storage/stats
   - `has_billing_data`: 是否有计费数据
 
 ---
-
-### 26. 统一API路由
-
-**接口地址**: `/{path:path}`
-
-**支持方法**: `GET`, `POST`, `PUT`, `DELETE`, `OPTIONS`, `HEAD`
-
-**功能**: 处理所有OpenAI兼容的API请求，自动路由到对应模型
-
-**支持的路径**:
-- `/v1/chat/completions` - 聊天对话
-- `/v1/completions` - 文本补全
-- `/v1/embeddings` - 文本嵌入
-- `/v1/rerank` - 重排序
-
-#### 26.1 聊天对话
-
-**接口地址**: `POST /v1/chat/completions`
-
-**功能**: 聊天对话接口 (Chat模式模型)
-
-**请求示例**:
-```bash
-curl -X POST http://localhost:8080/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "Qwen3-8B-AWQ",
-    "messages": [
-      {"role": "user", "content": "Hello, how are you?"}
-    ],
-    "max_tokens": 100,
-    "temperature": 0.7,
-    "stream": false
-  }'
-```
-
-**请求参数**:
-- `model`: 模型名称 (必需)
-- `messages`: 消息列表 (必需)
-- `max_tokens`: 最大生成长度 (可选)
-- `temperature`: 温度参数 (可选)
-- `stream`: 是否流式输出 (可选，默认false)
-
-**返回结构**:
-```json
-{
-  "id": "chatcmpl-123",
-  "object": "chat.completion",
-  "created": 1677652288,
-  "model": "Qwen3-8B-AWQ",
-  "choices": [{
-    "index": 0,
-    "message": {
-      "role": "assistant",
-      "content": "Hello! I'm doing well, thank you for asking. How can I help you today?"
-    },
-    "finish_reason": "stop"
-  }],
-  "usage": {
-    "prompt_tokens": 12,
-    "completion_tokens": 20,
-    "total_tokens": 32
-  }
-}
-```
-
-#### 26.2 文本补全
-
-**接口地址**: `POST /v1/completions`
-
-**功能**: 文本补全接口 (Base模式模型)
-
-**请求示例**:
-```bash
-curl -X POST http://localhost:8080/v1/completions \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "base-model-name",
-    "prompt": "Hello,",
-    "max_tokens": 50,
-    "temperature": 0.7
-  }'
-```
-
-**请求参数**:
-- `model`: 模型名称 (必需)
-- `prompt`: 输入文本 (必需)
-- `max_tokens`: 最大生成长度 (可选)
-- `temperature`: 温度参数 (可选)
-
-**返回结构**:
-```json
-{
-  "id": "cmpl-123",
-  "object": "text_completion",
-  "created": 1677652288,
-  "model": "base-model-name",
-  "choices": [{
-    "text": " world! How are you today?",
-    "index": 0,
-    "logprobs": null,
-    "finish_reason": "length"
-  }],
-  "usage": {
-    "prompt_tokens": 6,
-    "completion_tokens": 44,
-    "total_tokens": 50
-  }
-}
-```
-
-#### 26.3 文本嵌入
-
-**接口地址**: `POST /v1/embeddings`
-
-**功能**: 文本嵌入接口 (Embedding模式模型)
-
-**请求示例**:
-```bash
-curl -X POST http://localhost:8080/v1/embeddings \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "Qwen3-Embedding-8B",
-    "input": "Hello, world!",
-    "encoding_format": "float"
-  }'
-```
-
-**请求参数**:
-- `model`: 模型名称 (必需)
-- `input`: 输入文本 (必需)
-- `encoding_format`: 编码格式 (可选，默认float)
-
-**返回结构**:
-```json
-{
-  "object": "list",
-  "data": [
-    {
-      "object": "embedding",
-      "embedding": [0.1, 0.2, 0.3, ...],
-      "index": 0
-    }
-  ],
-  "model": "Qwen3-Embedding-8B",
-  "usage": {
-    "prompt_tokens": 4,
-    "total_tokens": 4
-  }
-}
-```
-
-#### 26.4 重排序
-
-**接口地址**: `POST /v1/rerank`
-
-**功能**: 重排序接口 (Reranker模式模型)
-
-**请求示例**:
-```bash
-curl -X POST http://localhost:8080/v1/rerank \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "bge-reranker-v2-m3",
-    "query": "What is artificial intelligence?",
-    "documents": [
-      "Artificial intelligence is a branch of computer science.",
-      "Machine learning is a subset of AI.",
-      "Deep learning uses neural networks."
-    ],
-    "top_n": 2
-  }'
-```
-
-**请求参数**:
-- `model`: 模型名称 (必需)
-- `query`: 查询文本 (必需)
-- `documents`: 文档列表 (必需)
-- `top_n`: 返回top N结果 (可选)
-
-**返回结构**:
-```json
-{
-  "results": [
-    {
-      "index": 0,
-      "document": "Artificial intelligence is a branch of computer science.",
-      "relevance_score": 0.95
-    },
-    {
-      "index": 1,
-      "document": "Machine learning is a subset of AI.",
-      "relevance_score": 0.87
-    }
-  ]
-}
-```
-
----
-
-## 🚨 错误处理
-
-### 错误响应格式
-
-所有API接口在遇到错误时返回统一格式的错误响应：
-
-```json
-{
-  "success": false,
-  "error": "错误信息",
-  "message": "详细错误描述"
-}
-```
-
-### 常见错误码
-
-- `400 Bad Request`: 请求参数错误
-- `404 Not Found`: 资源不存在
-- `500 Internal Server Error`: 服务器内部错误
-
-### 错误类型
-
-1. **模型未找到**: 模型别名不存在
-2. **模型未启动**: 模型处于停止状态
-3. **设备不可用**: 所需设备离线
-4. **端口占用**: 端口被其他程序占用
-5. **启动失败**: 模型启动过程出错
-
----
-
-## 🔒 认证与授权
-
-当前版本所有API接口无需认证，直接访问即可。
-
----
-
-## 📊 性能说明
-
-### 请求限制
-
-- 并发请求数: 无硬性限制，受系统资源约束
-- 请求超时: 默认300秒
-- 响应大小: 无限制，受模型配置影响
-
-### 资源管理
-
-- **自动加载**: 请求时自动启动对应模型
-- **智能卸载**: 空闲模型自动卸载释放资源
-- **并发控制**: 每个模型独立处理并发请求
-
----
-
-## 🔄 版本信息
-
-- **当前版本**: v1.0.0
-- **API兼容性**: 与OpenAI API完全兼容
-- **更新日期**: 2025-09-22
-
----
-
-## 📞 技术支持
-
-> **重要声明**: 本项目为个人开发项目，**不提供任何技术支持**。请根据项目文档自行调试和修改代码。
-
-如有问题，请：
-1. 仔细阅读本文档
-2. 检查配置文件和日志
-3. 参考项目README.md
-4. 自行调试解决
-
----
-
-*最后更新: 2025-09-25*
