@@ -631,45 +631,72 @@ class APIServer:
                 logger.error(f"[API_SERVER] 获取本次运行总消耗失败: {e}")
                 return {"success": False, "error": str(e)}
 
-        @self.app.get("/api/analytics/token-distribution/{start_time}/{end_time}/{n_samples}")
-        async def get_token_distribution(start_time: float, end_time: float, n_samples: int):
-            """【逻辑不变】获取Token消耗分布趋势，按模型模式分解。此接口返回时间序列的总量数据。"""
+        @self.app.get("/api/analytics/usage-summary/{start_time}/{end_time}")
+        async def get_usage_summary(start_time: float, end_time: float):
+            """【全新升级】获取在指定时间范围内，各个模型模式消耗的Token总和与资金成本总和。"""
             try:
-                if start_time >= end_time or n_samples <= 0:
-                    return JSONResponse(status_code=400, content={"success": False, "error": "无效的时间范围或采样点数"})
+                if start_time >= end_time:
+                    return JSONResponse(status_code=400, content={"success": False, "error": "无效的时间范围"})
 
-                interval = (end_time - start_time) / n_samples
-                tracked_modes = self.config_manager.get_token_tracker_modes()
-                point_template = {"total_tokens": 0}
-
+                # 1. 使用辅助函数并发获取所有相关请求数据
                 df = await self._get_enriched_requests_dataframe(start_time, end_time)
 
-                if df.empty:
-                    time_points = [{"timestamp": start_time + (i + 0.5) * interval, "data": point_template} for i in range(n_samples)]
-                    mode_breakdown = {mode: list(time_points) for mode in tracked_modes}
-                    return {"success": True, "data": {"time_points": time_points, "mode_breakdown": mode_breakdown}}
-                
-                df['total_tokens'] = df['input_tokens'] + df['output_tokens']
-                df['bin_index'] = np.clip(np.floor((df['end_time'] - start_time) / interval), 0, n_samples - 1).astype(int)
-                
-                overall_agg = df.groupby('bin_index')['total_tokens'].sum()
-                mode_agg = df.groupby(['bin_index', 'model_mode'])['total_tokens'].sum()
-                
-                time_points = []
-                mode_breakdown = {mode: [] for mode in tracked_modes}
+                # 2. 初始化结果结构
+                tracked_modes = self.config_manager.get_token_tracker_modes()
+                mode_summary = {mode: {"total_tokens": 0, "total_cost": 0.0} for mode in tracked_modes}
+                overall_summary = {"total_tokens": 0, "total_cost": 0.0}
 
-                for i in range(n_samples):
-                    ts = start_time + (i + 0.5) * interval
-                    total = int(overall_agg.get(i, 0))
-                    time_points.append({"timestamp": ts, "data": {"total_tokens": total}})
-                    
-                    for mode in tracked_modes:
-                        mode_total = int(mode_agg.get((i, mode), 0))
-                        mode_breakdown[mode].append({"timestamp": ts, "data": {"total_tokens": mode_total}})
+                # 3. 如果在指定时间范围内没有任何请求，直接返回初始化的零值结果
+                if df.empty:
+                    return {
+                        "success": True,
+                        "data": {
+                            "mode_summary": mode_summary,
+                            "overall_summary": overall_summary
+                        }
+                    }
+
+                # 4. 并发获取所有涉及模型的计费信息
+                model_names = df['model_name'].unique()
+                billing_tasks = [asyncio.to_thread(self.monitor.get_model_billing, name) for name in model_names]
+                billing_results = await asyncio.gather(*billing_tasks)
+                model_billings = {name: billing for name, billing in zip(model_names, billing_results)}
+
+                # 5. 定义一个辅助函数，用于在DataFrame的每一行上计算成本
+                def calculate_cost_for_row(row):
+                    # 将DataFrame行转换为一个简单的命名空间对象，以模拟ModelRequest
+                    temp_req = SimpleNamespace(**row.to_dict())
+                    billing = model_billings.get(row['model_name'])
+                    return self._calculate_request_cost(temp_req, billing)
                 
-                return {"success": True, "data": {"time_points": time_points, "mode_breakdown": mode_breakdown}}
+                # 6. 计算每个请求的总Token和成本
+                df['total_tokens'] = df['input_tokens'] + df['output_tokens']
+                df['cost'] = df.apply(calculate_cost_for_row, axis=1)
+
+                # 7. 按模型模式(model_mode)对总Token和成本进行分组求和
+                agg_cols = {"total_tokens": "sum", "cost": "sum"}
+                mode_agg = df.groupby('model_mode').agg(agg_cols)
+
+                # 8. 将计算出的结果填充到结果字典中
+                for mode, row in mode_agg.iterrows():
+                    if mode in mode_summary:
+                        mode_summary[mode]['total_tokens'] = int(row['total_tokens'])
+                        mode_summary[mode]['total_cost'] = round(row['cost'], 6)
+
+                # 9. 计算所有模式的Token和成本总和
+                overall_summary['total_tokens'] = int(mode_agg['total_tokens'].sum())
+                overall_summary['total_cost'] = round(mode_agg['cost'].sum(), 6)
+
+                # 10. 返回最终的汇总数据
+                return {
+                    "success": True,
+                    "data": {
+                        "mode_summary": mode_summary,
+                        "overall_summary": overall_summary
+                    }
+                }
             except Exception as e:
-                logger.error(f"[API_SERVER] 获取Token分布趋势失败: {e}", exc_info=True)
+                logger.error(f"[API_SERVER] 获取使用量汇总失败: {e}", exc_info=True)
                 return {"success": False, "error": str(e)}
 
         @self.app.get("/api/analytics/token-trends/{start_time}/{end_time}/{n_samples}")

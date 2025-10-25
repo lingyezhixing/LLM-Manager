@@ -549,20 +549,19 @@ curl http://localhost:8080/api/metrics/throughput/current-session
 
 ---
 
-### 16. Token分布趋势
+### 16. 使用量汇总
 
-**接口地址**: `GET /api/analytics/token-distribution/{start_time}/{end_time}/{n_samples}`
+**接口地址**: `GET /api/analytics/usage-summary/{start_time}/{end_time}`
 
-**功能**: 获取在指定时间范围内，各个模型模式消耗的**总Token**趋势。
+**功能**: 获取在指定时间范围内，按模型模式分类的**Token总消耗**和**资金总成本**。
 
 **路径参数**:
-- `start_time`: 开始时间戳 (Unix Timestamp, float)
-- `end_time`: 结束时间戳 (Unix Timestamp, float)
-- `n_samples`: 采样点数量 (integer)
+-   `start_time`: 开始时间戳 (Unix Timestamp, float)
+-   `end_time`: 结束时间戳 (Unix Timestamp, float)
 
 **请求示例**:
 ```bash
-curl http://localhost:8080/api/analytics/token-distribution/1758820000/1758822000/10
+curl http://localhost:8080/api/analytics/usage-summary/1758820000/1758822000
 ```
 
 **返回结构**:
@@ -570,45 +569,37 @@ curl http://localhost:8080/api/analytics/token-distribution/1758820000/175882200
 {
   "success": true,
   "data": {
-    "time_points": [
-      {
-        "timestamp": 1758820200.0,
-        "data": {
-          "total_tokens": 23000
-        }
+    "mode_summary": {
+      "Chat": {
+        "total_tokens": 15000,
+        "total_cost": 0.025
+      },
+      "Embedding": {
+        "total_tokens": 8000,
+        "total_cost": 0.001
+      },
+      "Image": {
+        "total_tokens": 0,
+        "total_cost": 0.0
       }
-      // ... more total data points
-    ],
-    "mode_breakdown": {
-      "Chat": [
-        {
-          "timestamp": 1758820200.0,
-          "data": {
-            "total_tokens": 15000
-          }
-        }
-        // ... Chat mode data points
-      ],
-      "Embedding": [
-        {
-          "timestamp": 1758820200.0,
-          "data": {
-            "total_tokens": 8000
-          }
-        }
-        // ... Embedding mode data points
-      ]
+    },
+    "overall_summary": {
+      "total_tokens": 23000,
+      "total_cost": 0.026
     }
   }
 }
 ```
 
 **返回字段说明**:
-- `time_points`: **总体**时间点数据数组，长度等于 `n_samples`
-  - `timestamp`: 每个采样区间的**结束时间戳**
-  - `data`: 该时间区间的总Token消耗
-    - `total_tokens`: 总token数 (输入+输出)
-- `mode_breakdown`: 一个字典，键为模型模式，值为该模式下的时间点数据数组，结构与 `time_points` 相同。
+-   `mode_summary`: 一个字典，提供了按模型模式细分的消耗数据。
+    -   **键**: 模型模式名称 (例如 "Chat")。
+    -   **值**: 一个包含该模式总消耗的对象。
+        -   `total_tokens`: 该模式消耗的Token总数。
+        -   `total_cost`: 该模式产生的资金成本总额。
+-   `overall_summary`: 一个对象，提供了所有模式的总消耗数据。
+    -   `total_tokens`: 所有模式消耗的Token总数。
+    -   `total_cost`: 所有模式产生的资金成本总额。
 
 ---
 
