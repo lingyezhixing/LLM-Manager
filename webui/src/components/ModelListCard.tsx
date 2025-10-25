@@ -1,8 +1,8 @@
 import React from 'react'
-import { Model } from '../types/api'
+import { OpenAIModel } from '../types/api'
 
 interface ModelListCardProps {
-  models: Model[]
+  models: OpenAIModel[]
   selectedModel: string
   onModelSelect: (modelName: string) => void
   loading: boolean

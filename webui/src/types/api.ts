@@ -121,3 +121,55 @@ export interface LogStreamOptions {
   onError?: (error: Event) => void
   onClose?: () => void
 }
+
+// Analytics API Types
+export interface UsageSummaryData {
+  total_tokens: number
+  total_cost: number
+}
+
+export interface UsageSummaryResponse {
+  success: boolean
+  data: {
+    mode_summary: Record<string, UsageSummaryData>
+    overall_summary: UsageSummaryData
+  }
+}
+
+export interface TokenTrendData {
+  input_tokens: number
+  output_tokens: number
+  total_tokens: number
+  cache_hit_tokens: number
+  cache_miss_tokens: number
+}
+
+export interface TokenTrendDataPoint {
+  timestamp: number
+  data: TokenTrendData
+}
+
+export interface TokenTrendsResponse {
+  success: boolean
+  data: {
+    time_points: TokenTrendDataPoint[]
+    mode_breakdown: Record<string, TokenTrendDataPoint[]>
+  }
+}
+
+export interface CostTrendData {
+  cost: number
+}
+
+export interface CostTrendDataPoint {
+  timestamp: number
+  data: CostTrendData
+}
+
+export interface CostTrendsResponse {
+  success: boolean
+  data: {
+    time_points: CostTrendDataPoint[]
+    mode_breakdown: Record<string, CostTrendDataPoint[]>
+  }
+}

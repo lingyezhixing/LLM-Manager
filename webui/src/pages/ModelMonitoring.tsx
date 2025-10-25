@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react'
 import { apiService } from '../utils/api'
-import { Model, ModelInfo } from '../types/api'
+import { OpenAIModel, ModelInfo } from '../types/api'
 import ModelListCard from '../components/ModelListCard'
 import TimeRangeSelector from '../components/TimeRangeSelector'
+import OverviewContent from '../components/OverviewContent'
 import '../styles/ModelMonitoring.css'
 
 const ModelMonitoring: React.FC = () => {
-  const [models, setModels] = useState<Model[]>([])
+  const [models, setModels] = useState<OpenAIModel[]>([])
   const [selectedModel, setSelectedModel] = useState<string>('总览')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -61,44 +62,47 @@ const ModelMonitoring: React.FC = () => {
             <TimeRangeSelector onTimeRangeChange={handleTimeRangeChange} />
           </div>
 
-          {/* 主页面预留区域 */}
+          {/* 主页面内容区域 */}
           <div className="main-content-area">
-            {/* 这里后续实现主页面内容 */}
-            <div className="content-placeholder">
-              <div className="content-info">
-                <h3>数据监控页面</h3>
-                <div className="info-grid">
-                  <div className="info-item">
-                    <span className="info-label">当前选中模型:</span>
-                    <span className="info-value">{selectedModel}</span>
+            {selectedModel === '总览' ? (
+              <OverviewContent timeRange={currentTimeRange} />
+            ) : (
+              <div className="content-placeholder">
+                <div className="content-info">
+                  <h3>模型详情监控页面</h3>
+                  <div className="info-grid">
+                    <div className="info-item">
+                      <span className="info-label">当前选中模型:</span>
+                      <span className="info-value">{selectedModel}</span>
+                    </div>
+                    {currentTimeRange && (
+                      <>
+                        <div className="info-item">
+                          <span className="info-label">时间区间:</span>
+                          <span className="info-value">
+                            {currentTimeRange.start.toLocaleString('zh-CN')} 至 {currentTimeRange.end.toLocaleString('zh-CN')}
+                          </span>
+                        </div>
+                        <div className="info-item">
+                          <span className="info-label">开始时间戳:</span>
+                          <span className="info-value">{currentTimeRange.start.getTime() / 1000}</span>
+                        </div>
+                        <div className="info-item">
+                          <span className="info-label">结束时间戳:</span>
+                          <span className="info-value">{currentTimeRange.end.getTime() / 1000}</span>
+                        </div>
+                        <div className="info-item">
+                          <span className="info-label">时间跨度:</span>
+                          <span className="info-value">
+                            {Math.round((currentTimeRange.end.getTime() - currentTimeRange.start.getTime()) / (1000 * 60 * 60))} 小时
+                          </span>
+                        </div>
+                      </>
+                    )}
                   </div>
-                  {currentTimeRange && (
-                    <>
-                      <div className="info-item">
-                        <span className="info-label">时间区间:</span>
-                        <span className="info-value">
-                          {currentTimeRange.start.toLocaleString('zh-CN')} 至 {currentTimeRange.end.toLocaleString('zh-CN')}
-                        </span>
-                      </div>
-                      <div className="info-item">
-                        <span className="info-label">开始时间戳:</span>
-                        <span className="info-value">{currentTimeRange.start.getTime() / 1000}</span>
-                      </div>
-                      <div className="info-item">
-                        <span className="info-label">结束时间戳:</span>
-                        <span className="info-value">{currentTimeRange.end.getTime() / 1000}</span>
-                      </div>
-                      <div className="info-item">
-                        <span className="info-label">时间跨度:</span>
-                        <span className="info-value">
-                          {Math.round((currentTimeRange.end.getTime() - currentTimeRange.start.getTime()) / (1000 * 60 * 60))} 小时
-                        </span>
-                      </div>
-                    </>
-                  )}
                 </div>
               </div>
-            </div>
+            )}
           </div>
         </div>
       </div>

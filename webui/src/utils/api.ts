@@ -9,7 +9,10 @@ import {
   ModelsResponse,
   ModelActionResponse,
   LogStreamData,
-  LogStreamOptions
+  LogStreamOptions,
+  UsageSummaryResponse,
+  TokenTrendsResponse,
+  CostTrendsResponse
 } from '../types/api'
 
 const API_BASE_URL = ''
@@ -192,6 +195,37 @@ export const apiService = {
     // Return cleanup function
     return () => {
       controller.abort()
+    }
+  },
+
+  // Analytics APIs
+  async getUsageSummary(startTime: number, endTime: number): Promise<UsageSummaryResponse> {
+    try {
+      const response = await api.get(`/api/analytics/usage-summary/${startTime}/${endTime}`)
+      return response.data
+    } catch (error) {
+      console.error('Usage summary failed:', error instanceof Error ? error.message : String(error))
+      throw error
+    }
+  },
+
+  async getTokenTrends(startTime: number, endTime: number, nSamples: number): Promise<TokenTrendsResponse> {
+    try {
+      const response = await api.get(`/api/analytics/token-trends/${startTime}/${endTime}/${nSamples}`)
+      return response.data
+    } catch (error) {
+      console.error('Token trends failed:', error instanceof Error ? error.message : String(error))
+      throw error
+    }
+  },
+
+  async getCostTrends(startTime: number, endTime: number, nSamples: number): Promise<CostTrendsResponse> {
+    try {
+      const response = await api.get(`/api/analytics/cost-trends/${startTime}/${endTime}/${nSamples}`)
+      return response.data
+    } catch (error) {
+      console.error('Cost trends failed:', error instanceof Error ? error.message : String(error))
+      throw error
     }
   }
 }
