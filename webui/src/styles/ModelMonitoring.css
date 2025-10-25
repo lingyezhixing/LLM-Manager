@@ -290,3 +290,12 @@
   position: relative;
 }
 
+/* 添加底部空白以获得更好的视觉效果，与总览页面保持一致 */
+.model-detail-content .chart-section:last-child {
+  margin-bottom: 1.5rem;
+}
+
+.overview-content .model-detail-row:last-child {
+  margin-bottom: 1.5rem;
+}
+
