@@ -58,52 +58,6 @@ class APIServer:
 
         return None
 
-    def _calculate_request_cost(self, req: ModelRequest, billing: Optional[ModelBilling]) -> float:
-        """
-        【修正版】计算单个请求的成本，确保与向量化版本逻辑完全一致
-
-        注意：此函数用于单次请求场景，批量计算请使用 _calculate_cost_vectorized
-        """
-        if not billing or not billing.use_tier_pricing or not billing.tier_pricing:
-            return 0.0
-
-        # 1. 根据输入和输出token数量匹配唯一阶梯
-        matching_tier = self._find_matching_tier(req.input_tokens, req.output_tokens, billing.tier_pricing)
-
-        if not matching_tier:
-            logger.warning(f"未找到匹配的计费阶梯: input={req.input_tokens}, output={req.output_tokens} for model. 请求成本计为0。")
-            return 0.0
-
-        total_cost = 0.0
-
-        # 2. 根据阶梯配置计算成本
-        if matching_tier.support_cache:
-            # **支持缓存的计费逻辑**
-            # 成本 = 缓存读取成本 + 缓外输入成本 + 输出内容成本 + 缓存写入成本
-
-            # 缓存读取成本 (基于 cache_n)
-            cost_cache_read = (req.cache_n * matching_tier.cache_read_price) / 1_000_000
-            
-            # 缓外输入成本 (基于 prompt_n)
-            cost_prompt = (req.prompt_n * matching_tier.input_price) / 1_000_000
-            
-            # 输出内容成本 (基于 output_tokens)
-            cost_output = (req.output_tokens * matching_tier.output_price) / 1_000_000
-            
-            # 缓存写入成本 (基于 output_tokens，因为输出内容被写入缓存)
-            cost_cache_write = (req.output_tokens * matching_tier.cache_write_price) / 1_000_000
-            
-            total_cost = cost_cache_read + cost_prompt + cost_output + cost_cache_write
-            
-        else:
-            # **不支持缓存的计费逻辑**
-            # 成本 = 总输入成本 + 总输出成本
-            cost_input = (req.input_tokens * matching_tier.input_price) / 1_000_000
-            cost_output = (req.output_tokens * matching_tier.output_price) / 1_000_000
-            total_cost = cost_input + cost_output
-
-        return total_cost
-
     async def _calculate_cost_vectorized(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         【高性能向量化版本】为DataFrame中的所有请求批量计算成本。
@@ -250,64 +204,6 @@ class APIServer:
             return pd.DataFrame()
         
         return pd.DataFrame(all_requests_data)
-
-        # 获取模型列表并过滤掉不需要追踪的模型，减少并发任务数
-        all_model_names = self.config_manager.get_model_names()
-        tracked_models = []
-        for model_name in all_model_names:
-            try:
-                mode = self.config_manager.get_model_mode(model_name)
-                if self.config_manager.should_track_tokens_for_mode(mode):
-                    tracked_models.append(model_name)
-            except Exception as e:
-                logger.warning(f"[API_SERVER] 获取模型 {model_name} 模式失败，跳过: {e}")
-
-        if not tracked_models:
-            return pd.DataFrame()
-
-        # 使用信号量控制并发数量，避免过多并发请求
-        semaphore = asyncio.Semaphore(5)  # 最多5个并发请求
-
-        async def limited_get_model_data(model_name: str):
-            async with semaphore:
-                return await get_model_requests_with_mode_and_billing(model_name)
-
-        # 创建并发任务
-        tasks = [limited_get_model_data(model_name) for model_name in tracked_models]
-
-        # 并发执行所有任务，设置整体超时
-        try:
-            results = await asyncio.wait_for(
-                asyncio.gather(*tasks, return_exceptions=True),
-                timeout=30.0  # 整体超时30秒
-            )
-        except asyncio.TimeoutError:
-            logger.error("[API_SERVER] 获取所有模型数据整体超时")
-            return pd.DataFrame()
-
-        # 合并结果，进行更精细的错误处理
-        all_requests = []
-        success_count = 0
-        error_count = 0
-
-        for i, result in enumerate(results):
-            if isinstance(result, Exception):
-                error_count += 1
-                logger.error(f"[API_SERVER] 模型 {tracked_models[i]} 数据获取任务异常: {result}")
-                continue
-
-            if result:  # 如果有数据
-                success_count += 1
-                all_requests.extend(result)
-
-        logger.debug(f"[API_SERVER] 数据获取完成: 成功 {success_count}/{len(tracked_models)} 个模型, "
-                    f"失败 {error_count} 个, 总请求记录 {len(all_requests)} 条")
-
-        if not all_requests:
-            return pd.DataFrame()
-
-        # 转换为DataFrame，使用更高效的方式
-        return pd.DataFrame(all_requests)
 
     def _setup_routes(self):
         """设置基础路由"""
