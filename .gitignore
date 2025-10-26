@@ -97,3 +97,7 @@ API_DOCUMENTATION.md
 **/*.db
 **/*.sqlite
 **/*.sqlite3
+
+# 忽略代码统计工具
+quick_stats.py
+QUICK_STATS_README.md
