@@ -695,39 +695,106 @@ class Monitor:
 
             return ModelBilling(use_tier_pricing, hourly_price, tier_pricing)
 
+    def get_all_db_models(self) -> List[str]:
+        """【新增】获取数据库中存在的所有模型的原始名称。"""
+        with get_db_connection(self.connection_pool) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT original_name FROM model_name_mapping")
+            return [row['original_name'] for row in cursor.fetchall()]
+
+    def get_orphaned_models(self) -> List[str]:
+        """
+        【新增 & 优化】高效获取孤立模型列表。
+        孤立模型指的是：存在于数据库中，但不存在于当前配置文件中的模型。
+        """
+        # 1. 从数据库一次性获取所有模型的名称
+        db_models = set(self.get_all_db_models())
+
+        # 2. 从配置管理器获取所有当前配置的模型名称
+        configured_models = set(self.config_manager.get_model_names())
+
+        # 3. 使用集合运算高效地找出差集，并排序返回
+        orphaned = sorted(list(db_models - configured_models))
+        return orphaned
+
     def delete_model_tables(self, model_name: str):
         """
-        删除模型相关的所有表和记录
-
-        Args:
-            model_name: 模型名称
+        【事务安全】删除模型相关的所有表和记录。
+        整个操作在一个事务中完成，确保数据一致性。
         """
         safe_name = self.get_model_safe_name(model_name)
         if not safe_name:
-            raise ValueError(f"模型 '{model_name}' 不存在")
+            # 对于不存在的模型，静默处理或记录日志，而不是抛出异常
+            logger.warning(f"尝试删除不存在的模型 '{model_name}' 的数据，操作已跳过。")
+            return
 
         with get_db_connection(self.connection_pool) as conn:
             cursor = conn.cursor()
+            try:
+                # 删除各个表
+                tables_to_drop = [
+                    f"{safe_name}_runtime",
+                    f"{safe_name}_requests",
+                    f"{safe_name}_tier_pricing",
+                    f"{safe_name}_hourly_price",
+                    f"{safe_name}_billing_method"
+                ]
 
-            # 删除各个表
-            tables_to_drop = [
-                f"{safe_name}_runtime",
-                f"{safe_name}_requests",
-                f"{safe_name}_tier_pricing",
-                f"{safe_name}_hourly_price",
-                f"{safe_name}_billing_method"
-            ]
+                for table in tables_to_drop:
+                    cursor.execute(f"DROP TABLE IF EXISTS {table}")
 
-            for table in tables_to_drop:
-                cursor.execute(f"DROP TABLE IF EXISTS {table}")
+                # 删除映射记录
+                cursor.execute('''
+                    DELETE FROM model_name_mapping WHERE original_name = ?
+                ''', (model_name,))
 
-            # 删除映射记录
-            cursor.execute('''
-                DELETE FROM model_name_mapping WHERE original_name = ?
-            ''', (model_name,))
+                conn.commit()
+                logger.info(f"已删除模型 '{model_name}' 的所有监控数据")
+            except Exception as e:
+                conn.rollback()
+                logger.error(f"删除模型 '{model_name}' 数据时发生错误，事务已回滚: {e}")
+                raise  # 将异常向上抛出
 
-            conn.commit()
-            logger.info(f"已删除模型 '{model_name}' 的所有监控数据")
+    def get_single_model_storage_stats(self, model_name: str) -> Dict[str, Union[int, bool]]:
+        """
+        【新增 & 核心】获取单个模型的存储统计信息。
+        此方法是为API层提供数据支持的核心函数。
+        """
+        import sqlite3  # 保留局部导入以防万一，但最好放在文件顶部
+        
+        # 使用 self.get_model_safe_name 而不是 self.monitor.get_model_safe_name
+        safe_name = self.get_model_safe_name(model_name)
+        stats = {"request_count": 0, "has_runtime_data": False, "has_billing_data": False}
+        if not safe_name:
+            return stats
+
+        try:
+            # 使用 self.connection_pool 而不是 self.monitor.connection_pool
+            with get_db_connection(self.connection_pool) as conn:
+                cursor = conn.cursor()
+                
+                # 检查请求数量
+                cursor.execute(f"SELECT COUNT(*) FROM {safe_name}_requests")
+                stats["request_count"] = cursor.fetchone()[0]
+
+                # 检查是否有运行时间数据
+                cursor.execute(f"SELECT COUNT(*) FROM {safe_name}_runtime")
+                stats["has_runtime_data"] = cursor.fetchone()[0] > 0
+
+                # 检查是否有计费数据 (tier_pricing表作为代表)
+                cursor.execute(f"SELECT COUNT(*) FROM {safe_name}_tier_pricing")
+                stats["has_billing_data"] = cursor.fetchone()[0] > 0
+            
+            return stats
+
+        except sqlite3.OperationalError as oe:
+            if "no such table" in str(oe).lower():
+                logger.warning(f"[DATA_MANAGER] 模型 '{model_name}' 的部分统计表不存在，返回默认统计。错误: {oe}")
+                return stats
+            raise
+        except Exception as e:
+            logger.error(f"[DATA_MANAGER] 获取模型 '{model_name}' 存储统计详情时发生未知错误: {e}")
+            return stats
 
     def close(self):
         """关闭监控器，清理资源"""

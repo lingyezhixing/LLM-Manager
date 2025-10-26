@@ -1,7 +1,6 @@
-from fastapi import FastAPI, Request, HTTPException, Response
+from fastapi import FastAPI, Request
 from fastapi.responses import StreamingResponse, JSONResponse
-from typing import Dict, List, Optional, Any
-from types import SimpleNamespace
+from typing import List, Optional
 import json
 import time
 import asyncio
@@ -11,7 +10,7 @@ import numpy as np
 from utils.logger import get_logger
 from core.config_manager import ConfigManager
 from core.model_controller import ModelController
-from core.data_manager import Monitor, ModelRequest, ModelBilling, TierPricing
+from core.data_manager import Monitor, TierPricing
 from core.api_router import APIRouter, TokenTracker
 
 logger = get_logger(__name__)
@@ -1217,197 +1216,93 @@ class APIServer:
 
         @self.app.get("/api/data/models/orphaned")
         async def get_orphaned_models():
-            """获取孤立模型数据（配置中不存在但数据库中有数据的模型）"""
+            """【优化版】获取孤立模型数据（配置中不存在但数据库中有数据的模型）"""
             try:
-                import os
-                import sqlite3
-
-                # 获取配置中的模型名称
-                configured_models = set(self.config_manager.get_model_names())
-
-                # 获取数据库中的所有模型表
-                orphaned_models = []
-
-                if os.path.exists(self.monitor.db_path):
-                    conn = sqlite3.connect(self.monitor.db_path)
-                    cursor = conn.cursor()
-
-                    # 获取所有表名
-                    cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
-                    tables = cursor.fetchall()
-
-                    for table in tables:
-                        table_name = table[0]
-                        if table_name.endswith('_requests'):
-                            # 从表名提取模型名称
-                            model_name = table_name[:-9]  # 移除 '_requests' 后缀
-
-                            # 检查是否在映射表中
-                            cursor.execute('''
-                                SELECT original_name FROM model_name_mapping
-                                WHERE safe_name = ?
-                            ''', (model_name,))
-                            result = cursor.fetchone()
-
-                            if result:
-                                original_name = result[0]
-                                if original_name not in configured_models:
-                                    orphaned_models.append(original_name)
-
-                    conn.close()
+                # 直接调用优化后的Monitor方法，在线程池中执行
+                orphaned_models_list = await asyncio.to_thread(self.monitor.get_orphaned_models)
 
                 return {
                     "success": True,
                     "data": {
-                        "orphaned_models": orphaned_models,
-                        "count": len(orphaned_models)
+                        "orphaned_models": orphaned_models_list,
+                        "count": len(orphaned_models_list)
                     }
                 }
-
             except Exception as e:
-                logger.error(f"[API_SERVER] 获取孤立模型数据失败: {e}")
+                logger.error(f"[API_SERVER] 获取孤立模型数据失败: {e}", exc_info=True)
                 return {"success": False, "error": str(e)}
 
         @self.app.delete("/api/data/models/{model_name}")
         async def delete_model_data(model_name: str):
-            """删除指定模型的数据"""
+            """【优化版】删除指定模型的数据（仅限不在配置中的孤立模型）"""
             try:
-                # 检查模型是否在配置中
-                configured_models = self.config_manager.get_model_names()
-                if model_name in configured_models:
-                    return {"success": False, "error": f"模型 '{model_name}' 仍在配置中，无法删除"}
+                # 检查模型是否仍在当前配置中
+                if model_name in self.config_manager.get_model_names():
+                    return {"success": False, "error": f"模型 '{model_name}' 仍在配置中，无法删除。请先从配置中移除该模型。"}
 
-                # 删除模型数据
-                self.monitor.delete_model_tables(model_name)
+                # 在线程池中执行删除操作
+                await asyncio.to_thread(self.monitor.delete_model_tables, model_name)
 
                 return {
                     "success": True,
-                    "message": f"模型 '{model_name}' 的数据已删除"
+                    "message": f"模型 '{model_name}' 的数据已成功删除"
                 }
-
             except Exception as e:
-                logger.error(f"[API_SERVER] 删除模型数据失败: {e}")
+                logger.error(f"[API_SERVER] 删除模型数据失败: {e}", exc_info=True)
                 return {"success": False, "error": str(e)}
 
         @self.app.get("/api/data/storage/stats")
         async def get_storage_stats():
-            """获取存储统计信息"""
+            """【重构版】获取存储统计信息，逻辑移至 Monitor 类"""
             try:
                 import os
-                import sqlite3
+                stats = {"database_exists": False, "database_size_mb": 0, "total_models_with_data": 0, "total_requests": 0, "models_data": {}}
 
-                stats = {
-                    "database_exists": False,
-                    "database_size_mb": 0,
-                    "total_models_with_data": 0,
-                    "total_requests": 0,
-                    "models_data": {}
-                }
+                if not os.path.exists(self.monitor.db_path):
+                    return {"success": True, "data": stats}
 
-                if os.path.exists(self.monitor.db_path):
-                    stats["database_exists"] = True
-                    stats["database_size_mb"] = round(os.path.getsize(self.monitor.db_path) / (1024 * 1024), 2)
+                stats["database_exists"] = True
+                stats["database_size_mb"] = round(os.path.getsize(self.monitor.db_path) / (1024 * 1024), 2)
 
-                    # 并发获取所有模型统计信息
-                    async def get_model_storage_stats_async(model_name: str):
-                        """并发获取单个模型的存储统计信息"""
-                        try:
-                            # 在线程池中执行数据库操作
-                            result = await asyncio.wait_for(
-                                asyncio.to_thread(self._get_single_model_storage_stats, model_name),
-                                timeout=15.0
-                            )
-                            return model_name, result
-                        except asyncio.TimeoutError:
-                            logger.warning(f"[API_SERVER] 获取模型 {model_name} 存储统计超时")
-                            return model_name, {
-                                "request_count": 0,
-                                "has_runtime_data": False,
-                                "has_billing_data": False
-                            }
-                        except Exception as e:
-                            logger.error(f"[API_SERVER] 获取模型 {model_name} 存储统计失败: {e}")
-                            return model_name, {
-                                "request_count": 0,
-                                "has_runtime_data": False,
-                                "has_billing_data": False
-                            }
+                all_db_models = await asyncio.to_thread(self.monitor.get_all_db_models)
+                if not all_db_models:
+                    return {"success": True, "data": stats}
 
-                    # 获取配置中的模型名称
-                    configured_models = self.config_manager.get_model_names()
+                # 并发任务现在直接调用 self.monitor 的方法
+                async def get_model_storage_stats_async(model_name: str):
+                    try:
+                        # 核心修改：调用 monitor 实例上的新方法
+                        result = await asyncio.wait_for(
+                            asyncio.to_thread(self.monitor.get_single_model_storage_stats, model_name),
+                            timeout=15.0
+                        )
+                        return model_name, result
+                    except asyncio.TimeoutError:
+                        logger.warning(f"[API_SERVER] 获取模型 {model_name} 存储统计超时")
+                        return model_name, {"request_count": 0, "has_runtime_data": False, "has_billing_data": False, "error": "timeout"}
+                    except Exception as e:
+                        logger.error(f"[API_SERVER] 获取模型 {model_name} 存储统计失败: {e}")
+                        return model_name, {"request_count": 0, "has_runtime_data": False, "has_billing_data": False, "error": str(e)}
 
-                    # 创建并发任务
-                    tasks = [get_model_storage_stats_async(model_name) for model_name in configured_models]
+                tasks = [get_model_storage_stats_async(model_name) for model_name in all_db_models]
+                results = await asyncio.gather(*tasks)
 
-                    # 并发执行所有任务
-                    results = await asyncio.gather(*tasks, return_exceptions=True)
-
-                    # 处理结果
-                    total_requests = 0
-                    for result in results:
-                        if isinstance(result, Exception):
-                            logger.error(f"[API_SERVER] 模型存储统计任务异常: {result}")
-                            continue
-
-                        model_name, model_stats = result
-                        stats["models_data"][model_name] = model_stats
+                # ... 后续处理逻辑保持不变 ...
+                total_requests = 0
+                models_with_data_count = 0
+                for model_name, model_stats in results:
+                    stats["models_data"][model_name] = model_stats
+                    if model_stats.get("request_count", 0) > 0:
                         total_requests += model_stats["request_count"]
+                        models_with_data_count += 1
+                
+                stats["total_models_with_data"] = models_with_data_count
+                stats["total_requests"] = total_requests
 
-                    stats["total_models_with_data"] = len([m for m in stats["models_data"].values() if m["request_count"] > 0])
-                    stats["total_requests"] = total_requests
-
-                return {
-                    "success": True,
-                    "data": stats
-                }
-
+                return {"success": True, "data": stats}
             except Exception as e:
-                logger.error(f"[API_SERVER] 获取存储统计失败: {e}")
+                logger.error(f"[API_SERVER] 获取存储统计失败: {e}", exc_info=True)
                 return {"success": False, "error": str(e)}
-
-        def _get_single_model_storage_stats(self, model_name: str):
-            """同步获取单个模型的存储统计信息（在线程池中执行）"""
-            import sqlite3
-
-            safe_name = self.monitor.get_model_safe_name(model_name)
-            if not safe_name:
-                return {
-                    "request_count": 0,
-                    "has_runtime_data": False,
-                    "has_billing_data": False
-                }
-
-            try:
-                conn = sqlite3.connect(self.monitor.db_path)
-                cursor = conn.cursor()
-
-                # 获取请求数量
-                cursor.execute(f"SELECT COUNT(*) FROM {safe_name}_requests")
-                request_count = cursor.fetchone()[0]
-
-                # 检查是否有运行时间数据
-                cursor.execute(f"SELECT COUNT(*) FROM {safe_name}_runtime")
-                has_runtime_data = cursor.fetchone()[0] > 0
-
-                # 检查是否有计费数据
-                cursor.execute(f"SELECT COUNT(*) FROM {safe_name}_tier_pricing")
-                has_billing_data = cursor.fetchone()[0] > 0
-
-                conn.close()
-
-                return {
-                    "request_count": request_count,
-                    "has_runtime_data": has_runtime_data,
-                    "has_billing_data": has_billing_data
-                }
-
-            except Exception as e:
-                logger.error(f"[API_SERVER] 获取模型 {model_name} 存储统计详情失败: {e}")
-                return {
-                    "request_count": 0,
-                    "has_runtime_data": False,
-                    "has_billing_data": False
-                }
 
         @self.app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD"])
         async def handle_all_requests(request: Request, path: str):
