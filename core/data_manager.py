@@ -377,69 +377,53 @@ class Monitor:
             ''', (start_time, end_time, input_tokens, output_tokens, cache_n, prompt_n))
             conn.commit()
 
-    def add_tier_pricing(self, model_name: str, tier_data: List[Union[int, int, int, int, int, float, float, bool, float, float]]):
+    def upsert_tier_pricing(self, model_name: str, tier_data: List[Union[int, float, bool]]):
         """
-        添加计费阶梯
+        新增或更新一个计费阶梯 (Upsert)，使用 ON CONFLICT 子句。
 
         Args:
             model_name: 模型名称
             tier_data: [阶梯索引, 最小输入, 最大输入, 最小输出, 最大输出, 输入价格, 输出价格, 是否支持缓存, 缓存写入价格, 缓存读取价格]
         """
         if len(tier_data) != 10:
-            raise ValueError("阶梯数据格式错误，应为 [阶梯索引, 最小输入, 最大输入, 最小输出, 最大输出, 输入价格, 输出价格, 是否支持缓存, 缓存写入价格, 缓存读取价格]")
+            raise ValueError("阶梯数据格式错误，应为10个元素的列表")
 
         safe_name = self.get_model_safe_name(model_name)
         if not safe_name:
             raise ValueError(f"模型 '{model_name}' 不存在")
 
         tier_index, min_input, max_input, min_output, max_output, input_price, output_price, support_cache, cache_write_price, cache_read_price = tier_data
+        
         with get_db_connection(self.connection_pool) as conn:
             cursor = conn.cursor()
+            # 插入数据，如果 tier_index 冲突，则执行 UPDATE
             cursor.execute(f'''
                 INSERT INTO {safe_name}_tier_pricing
                 (tier_index, min_input_tokens, max_input_tokens, min_output_tokens, max_output_tokens,
-                 input_price, output_price, support_cache, cache_write_price, cache_read_price)
+                input_price, output_price, support_cache, cache_write_price, cache_read_price)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(tier_index) DO UPDATE SET
+                    min_input_tokens = excluded.min_input_tokens,
+                    max_input_tokens = excluded.max_input_tokens,
+                    min_output_tokens = excluded.min_output_tokens,
+                    max_output_tokens = excluded.max_output_tokens,
+                    input_price = excluded.input_price,
+                    output_price = excluded.output_price,
+                    support_cache = excluded.support_cache,
+                    cache_write_price = excluded.cache_write_price,
+                    cache_read_price = excluded.cache_read_price
             ''', (tier_index, min_input, max_input, min_output, max_output, input_price, output_price,
-                  1 if support_cache else 0, cache_write_price, cache_read_price))
+                1 if support_cache else 0, cache_write_price, cache_read_price))
             conn.commit()
 
-    def update_tier_pricing(self, model_name: str, tier_data: List[Union[int, int, int, int, int, float, float, bool, float, float]]):
+    def delete_and_reindex_tier(self, model_name: str, tier_index_to_delete: int):
         """
-        更新计费阶梯
+        删除一个计费阶梯，并重新为所有剩余的阶梯排序索引，使其保持连续。
+        整个操作在一个事务中执行。
 
         Args:
             model_name: 模型名称
-            tier_data: [阶梯索引, 最小输入, 最大输入, 最小输出, 最大输出, 输入价格, 输出价格, 是否支持缓存, 缓存写入价格, 缓存读取价格]
-        """
-        if len(tier_data) != 10:
-            raise ValueError("阶梯数据格式错误，应为 [阶梯索引, 最小输入, 最大输入, 最小输出, 最大输出, 输入价格, 输出价格, 是否支持缓存, 缓存写入价格, 缓存读取价格]")
-
-        safe_name = self.get_model_safe_name(model_name)
-        if not safe_name:
-            raise ValueError(f"模型 '{model_name}' 不存在")
-
-        tier_index, min_input, max_input, min_output, max_output, input_price, output_price, support_cache, cache_write_price, cache_read_price = tier_data
-        with get_db_connection(self.connection_pool) as conn:
-            cursor = conn.cursor()
-            cursor.execute(f'''
-                UPDATE {safe_name}_tier_pricing
-                SET min_input_tokens = ?, max_input_tokens = ?,
-                    min_output_tokens = ?, max_output_tokens = ?,
-                    input_price = ?, output_price = ?,
-                    support_cache = ?, cache_write_price = ?, cache_read_price = ?
-                WHERE tier_index = ?
-            ''', (min_input, max_input, min_output, max_output, input_price, output_price,
-                  1 if support_cache else 0, cache_write_price, cache_read_price, tier_index))
-            conn.commit()
-
-    def delete_tier_pricing(self, model_name: str, tier_index: int):
-        """
-        删除计费阶梯
-
-        Args:
-            model_name: 模型名称
-            tier_index: 阶梯索引
+            tier_index_to_delete: 要删除的阶梯索引
         """
         safe_name = self.get_model_safe_name(model_name)
         if not safe_name:
@@ -447,10 +431,35 @@ class Monitor:
 
         with get_db_connection(self.connection_pool) as conn:
             cursor = conn.cursor()
-            cursor.execute(f'''
-                DELETE FROM {safe_name}_tier_pricing WHERE tier_index = ?
-            ''', (tier_index,))
-            conn.commit()
+            try:
+                # 步骤 1: 删除指定的阶梯
+                cursor.execute(f'''
+                    DELETE FROM {safe_name}_tier_pricing WHERE tier_index = ?
+                ''', (tier_index_to_delete,))
+
+                # 步骤 2: 获取所有剩余的阶梯，按当前索引排序
+                cursor.execute(f'''
+                    SELECT tier_index FROM {safe_name}_tier_pricing ORDER BY tier_index ASC
+                ''')
+                # 使用 list() 来物化结果，因为我们马上要进行更新操作
+                remaining_tiers = list(cursor.fetchall())
+
+                # 步骤 3: 遍历并更新索引，使其从 1 开始连续
+                for new_index, (old_index,) in enumerate(remaining_tiers, start=1):
+                    # 如果旧索引和新索引不匹配，则需要更新
+                    if new_index != old_index:
+                        cursor.execute(f'''
+                            UPDATE {safe_name}_tier_pricing SET tier_index = ? WHERE tier_index = ?
+                        ''', (new_index, old_index))
+                
+                # 提交事务
+                conn.commit()
+
+            except Exception as e:
+                # 如果发生任何错误，回滚所有操作
+                conn.rollback()
+                # 将异常向上抛出，以便API层可以捕获它
+                raise e
 
     def update_hourly_price(self, model_name: str, hourly_price: float):
         """

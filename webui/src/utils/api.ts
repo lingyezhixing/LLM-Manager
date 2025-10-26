@@ -251,5 +251,47 @@ export const apiService = {
       console.error('Get model pricing failed:', error instanceof Error ? error.message : String(error))
       throw error
     }
+  },
+
+  async setModelPricingTier(modelName: string, tierData: any): Promise<any> {
+    try {
+      const response = await api.post(`/api/billing/models/${modelName}/pricing/tier`, tierData)
+      return response.data
+    } catch (error) {
+      console.error('Set model pricing tier failed:', error instanceof Error ? error.message : String(error))
+      throw error
+    }
+  },
+
+  async deleteModelPricingTier(modelName: string, tierIndex: number): Promise<any> {
+    try {
+      const response = await api.delete(`/api/billing/models/${modelName}/pricing/tier/${tierIndex}`)
+      return response.data
+    } catch (error) {
+      console.error('Delete model pricing tier failed:', error instanceof Error ? error.message : String(error))
+      throw error
+    }
+  },
+
+  async setModelPricingHourly(modelName: string, hourlyPrice: number): Promise<any> {
+    try {
+      const response = await api.post(`/api/billing/models/${modelName}/pricing/hourly`, {
+        hourly_price: hourlyPrice
+      })
+      return response.data
+    } catch (error) {
+      console.error('Set model pricing hourly failed:', error instanceof Error ? error.message : String(error))
+      throw error
+    }
+  },
+
+  async setModelPricingMethod(modelName: string, method: 'tier' | 'hourly'): Promise<any> {
+    try {
+      const response = await api.post(`/api/billing/models/${modelName}/pricing/set/${method}`)
+      return response.data
+    } catch (error) {
+      console.error('Set model pricing method failed:', error instanceof Error ? error.message : String(error))
+      throw error
+    }
   }
 }

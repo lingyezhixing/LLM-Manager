@@ -1096,6 +1096,32 @@ class APIServer:
             except Exception as e:
                 logger.error(f"[API_SERVER] 获取模型计费配置失败: {e}")
                 return {"success": False, "error": str(e)}
+        
+        @self.app.post("/api/billing/models/{model_name}/pricing/set/{method}")
+        async def set_billing_method(model_name: str, method: str):
+            """独立设置模型计费方式"""
+            try:
+                # 解析模型名称
+                primary_name = self.config_manager.resolve_primary_name(model_name)
+
+                # 验证路径参数
+                if method not in ["tier", "hourly"]:
+                    return {"success": False, "error": "无效的计费类型，请在URL中使用 'tier' 或 'hourly'"}
+
+                # 设置计费方式
+                use_tier_pricing = (method == "tier")
+                self.monitor.update_billing_method(primary_name, use_tier_pricing)
+
+                return {
+                    "success": True,
+                    "message": f"模型 '{model_name}' 的计费方式已更新为 '{method}'"
+                }
+
+            except KeyError:
+                return {"success": False, "error": f"模型 '{model_name}' 不存在"}
+            except Exception as e:
+                logger.error(f"[API_SERVER] 设置计费方式失败: {e}")
+                return {"success": False, "error": str(e)}
 
         @self.app.post("/api/billing/models/{model_name}/pricing/tier")
         async def set_tier_pricing(model_name: str, pricing_data: dict):
@@ -1106,8 +1132,8 @@ class APIServer:
 
                 # 验证数据
                 required_fields = ["tier_index", "min_input_tokens", "max_input_tokens",
-                                 "min_output_tokens", "max_output_tokens", "input_price",
-                                 "output_price", "support_cache", "cache_write_price", "cache_read_price"]
+                                "min_output_tokens", "max_output_tokens", "input_price",
+                                "output_price", "support_cache", "cache_write_price", "cache_read_price"]
 
                 for field in required_fields:
                     if field not in pricing_data:
@@ -1128,7 +1154,6 @@ class APIServer:
                 ]
 
                 self.monitor.update_tier_pricing(primary_name, tier_data)
-                self.monitor.update_billing_method(primary_name, True)
 
                 return {
                     "success": True,
@@ -1139,6 +1164,29 @@ class APIServer:
                 return {"success": False, "error": f"模型 '{model_name}' 不存在"}
             except Exception as e:
                 logger.error(f"[API_SERVER] 设置阶梯计费失败: {e}")
+                return {"success": False, "error": str(e)}
+
+        @self.app.delete("/api/billing/models/{model_name}/pricing/tier/{tier_index}")
+        async def delete_tier_pricing(model_name: str, tier_index: int):
+            """删除指定的计费档位，并自动重新排序其余档位的索引"""
+            try:
+                # 解析模型名称
+                primary_name = self.config_manager.resolve_primary_name(model_name)
+
+                # 调用新的数据库方法执行删除和重新索引
+                self.monitor.delete_and_reindex_tier(primary_name, tier_index)
+
+                return {
+                    "success": True,
+                    "message": f"模型 '{model_name}' 的计费档位 {tier_index} 已删除，其余档位已重新排序"
+                }
+
+            except KeyError:
+                return {"success": False, "error": f"模型 '{model_name}' 不存在"}
+            except ValueError as ve: # 捕获模型不存在的错误
+                return {"success": False, "error": str(ve)}
+            except Exception as e:
+                logger.error(f"[API_SERVER] 删除计费档位失败: {e}")
                 return {"success": False, "error": str(e)}
 
         @self.app.post("/api/billing/models/{model_name}/pricing/hourly")
@@ -1154,8 +1202,7 @@ class APIServer:
 
                 # 设置按时计费
                 hourly_price = float(pricing_data["hourly_price"])
-                self.monitor.update_hourly_price(primary_name, hourly_price)
-                self.monitor.update_billing_method(primary_name, False)
+                self.monitor.upsert_tier_pricing(primary_name, hourly_price)
 
                 return {
                     "success": True,
