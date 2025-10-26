@@ -1153,7 +1153,7 @@ class APIServer:
                     pricing_data["cache_read_price"]
                 ]
 
-                self.monitor.update_tier_pricing(primary_name, tier_data)
+                self.monitor.upsert_tier_pricing(primary_name, tier_data)
 
                 return {
                     "success": True,
@@ -1202,7 +1202,7 @@ class APIServer:
 
                 # 设置按时计费
                 hourly_price = float(pricing_data["hourly_price"])
-                self.monitor.upsert_tier_pricing(primary_name, hourly_price)
+                self.monitor.update_hourly_price(primary_name, hourly_price)
 
                 return {
                     "success": True,
