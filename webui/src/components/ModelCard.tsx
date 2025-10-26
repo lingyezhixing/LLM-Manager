@@ -99,7 +99,6 @@ const ModelCard: React.FC<ModelCardProps> = ({
       if (response.success) {
         // 停止命令发送成功，显示成功消息
         setSuccessMessage(response.message || '停止命令已发送')
-        console.log('停止命令已发送:', response.message)
         // 不设置错误，让3秒定时刷新来更新实际状态
       } else {
         // 停止命令发送失败，显示错误消息

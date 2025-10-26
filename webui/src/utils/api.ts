@@ -9,7 +9,6 @@ import {
   ModelsResponse,
   ModelActionResponse,
   LogStreamData,
-  LogStreamOptions,
   UsageSummaryResponse,
   TokenTrendsResponse,
   CostTrendsResponse,
@@ -43,13 +42,8 @@ export const apiService = {
 
   async getApiInfo(): Promise<ApiInfoResponse> {
     try {
-      // 暂时禁用API信息获取，避免影响其他功能
-      console.log('API info temporarily disabled to avoid proxy conflicts')
-      return {
-        message: "LLM-Manager API Server",
-        version: "1.0.0",
-        models_url: "/v1/models"
-      }
+      const response = await api.get('/')
+      return response.data
     } catch (error) {
       console.error('API info failed:', error instanceof Error ? error.message : String(error))
       throw error
@@ -131,7 +125,11 @@ export const apiService = {
     }
   },
 
-  createLogStream(modelAlias: string, options: LogStreamOptions): () => void {
+  createLogStream(modelAlias: string, options: {
+    onMessage: (data: LogStreamData) => void
+    onError?: (error: Event) => void
+    onClose?: () => void
+  }): () => void {
     // EventSource不支持代理，使用fetch + stream替代
     const controller = new AbortController()
     const signal = controller.signal

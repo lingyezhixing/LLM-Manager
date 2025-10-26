@@ -116,12 +116,6 @@ export interface LogStreamData {
   message?: string
 }
 
-export interface LogStreamOptions {
-  onMessage: (data: LogStreamData) => void
-  onError?: (error: Event) => void
-  onClose?: () => void
-}
-
 // Analytics API Types
 export interface UsageSummaryData {
   total_tokens: number
