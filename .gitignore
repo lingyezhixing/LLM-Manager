@@ -101,3 +101,7 @@ API_DOCUMENTATION.md
 # 忽略代码统计工具
 quick_stats.py
 QUICK_STATS_README.md
+
+# 忽略AI上下文生成器
+generate_ai_context.py
+ai_context.md
