@@ -14,7 +14,10 @@ import {
   TokenTrendsResponse,
   CostTrendsResponse,
   ModelStatsResponse,
-  ModelPricingResponse
+  ModelPricingResponse,
+  OrphanedModelsResponse,
+  StorageStatsResponse,
+  DeleteModelDataResponse
 } from '../types/api'
 
 const API_BASE_URL = ''
@@ -291,6 +294,37 @@ export const apiService = {
       return response.data
     } catch (error) {
       console.error('Set model pricing method failed:', error instanceof Error ? error.message : String(error))
+      throw error
+    }
+  },
+
+  // Data Management APIs
+  async getOrphanedModels(): Promise<OrphanedModelsResponse> {
+    try {
+      const response = await api.get('/api/data/models/orphaned')
+      return response.data
+    } catch (error) {
+      console.error('Get orphaned models failed:', error instanceof Error ? error.message : String(error))
+      throw error
+    }
+  },
+
+  async getStorageStats(): Promise<StorageStatsResponse> {
+    try {
+      const response = await api.get('/api/data/storage/stats')
+      return response.data
+    } catch (error) {
+      console.error('Get storage stats failed:', error instanceof Error ? error.message : String(error))
+      throw error
+    }
+  },
+
+  async deleteModelData(modelName: string): Promise<DeleteModelDataResponse> {
+    try {
+      const response = await api.delete(`/api/data/models/${modelName}`)
+      return response.data
+    } catch (error) {
+      console.error('Delete model data failed:', error instanceof Error ? error.message : String(error))
       throw error
     }
   }

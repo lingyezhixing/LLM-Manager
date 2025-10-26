@@ -226,3 +226,35 @@ export interface ModelPricingResponse {
     hourly_price?: number
   }
 }
+
+// Data Management API Types
+export interface OrphanedModelsResponse {
+  success: boolean
+  data: {
+    orphaned_models: string[]
+    count: number
+  }
+}
+
+export interface ModelDataStats {
+  request_count: number
+  has_runtime_data: boolean
+  has_billing_data: boolean
+  error?: string
+}
+
+export interface StorageStatsResponse {
+  success: boolean
+  data: {
+    database_exists: boolean
+    database_size_mb: number
+    total_models_with_data: number
+    total_requests: number
+    models_data: Record<string, ModelDataStats>
+  }
+}
+
+export interface DeleteModelDataResponse {
+  success: boolean
+  message: string
+}
