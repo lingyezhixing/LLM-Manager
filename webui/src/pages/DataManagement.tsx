@@ -82,10 +82,6 @@ const DataManagement: React.FC = () => {
 
   return (
     <div className="data-management-page">
-      <div className="page-header">
-        <h1 className="page-title">数据管理</h1>
-        <p className="page-description">管理数据库存储和孤立模型数据</p>
-      </div>
 
       {/* 存储统计信息 */}
       <div className="storage-stats-section">
