@@ -13,7 +13,8 @@ import {
   UsageSummaryResponse,
   TokenTrendsResponse,
   CostTrendsResponse,
-  ModelStatsResponse
+  ModelStatsResponse,
+  ModelPricingResponse
 } from '../types/api'
 
 const API_BASE_URL = ''
@@ -237,6 +238,17 @@ export const apiService = {
       return response.data
     } catch (error) {
       console.error('Model stats failed:', error instanceof Error ? error.message : String(error))
+      throw error
+    }
+  },
+
+  // Billing APIs
+  async getModelPricing(modelName: string): Promise<ModelPricingResponse> {
+    try {
+      const response = await api.get(`/api/billing/models/${modelName}/pricing`)
+      return response.data
+    } catch (error) {
+      console.error('Get model pricing failed:', error instanceof Error ? error.message : String(error))
       throw error
     }
   }

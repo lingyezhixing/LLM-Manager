@@ -202,3 +202,27 @@ export interface ModelStatsResponse {
     time_points: ModelStatsDataPoint[]
   }
 }
+
+// Billing API Types
+export interface TierPricing {
+  tier_index: number
+  min_input_tokens: number
+  max_input_tokens: number
+  min_output_tokens: number
+  max_output_tokens: number
+  input_price: number
+  output_price: number
+  support_cache: boolean
+  cache_write_price: number
+  cache_read_price: number
+}
+
+export interface ModelPricingResponse {
+  success: boolean
+  data: {
+    model_name: string
+    pricing_type: 'tier' | 'hourly'
+    tier_pricing?: TierPricing[]
+    hourly_price?: number
+  }
+}
