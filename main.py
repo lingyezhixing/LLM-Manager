@@ -1,183 +1,415 @@
 #!/usr/bin/env python3
 """
 LLM-Manager 主程序入口
-重构版本 - 采用插件化架构
+重构版本 - 使用Application类封装所有功能
+优化版本：支持并行初始化和快速关闭
 """
 
 import threading
 import time
-import logging
+import subprocess
 import sys
 import os
+import concurrent.futures
+from typing import Optional
 from utils.logger import setup_logging, get_logger
-from core.model_controller import ModelController
+from core.config_manager import ConfigManager
 from core.api_server import run_api_server
-from core.webui import run_web_ui
+from core.process_manager import get_process_manager, cleanup_process_manager
+from core.data_manager import Monitor
+from core.model_controller import ModelController
 
-# 全局变量
-model_controller: ModelController = None
-tray_service = None
-threads = []
+CONFIG_PATH = 'config.json'
 
-def setup_signal_handlers():
-    """设置信号处理器"""
-    try:
-        import signal
-        def signal_handler(signum, frame):
-            logger.info(f"接收到信号 {signum}，正在关闭应用...")
-            shutdown_application()
-            # 给一些时间让清理完成
-            time.sleep(1)
-            sys.exit(0)
 
-        signal.signal(signal.SIGINT, signal_handler)
-        signal.signal(signal.SIGTERM, signal_handler)
-    except ImportError:
-        # Windows系统可能不支持signal模块
-        pass
+class Application:
+    """优化的LLM-Manager应用程序主类"""
 
-def start_core_services():
-    """启动核心服务"""
-    global model_controller, tray_service
+    def __init__(self, config_path: str = CONFIG_PATH):
+        """
+        初始化应用程序
 
-    logger.info("正在启动核心服务...")
+        Args:
+            config_path: 配置文件路径
+        """
+        self.config_path = config_path
+        self.config_manager: Optional[ConfigManager] = None
+        self.tray_service = None
+        self.threads = []
+        self.logger = None
+        self.running = False
+        self.monitor: Optional[Monitor] = None
+        self.monitor_thread = None
+        self.stop_monitor = False
+        self.model_controller: Optional[ModelController] = None
+        self.startup_complete = threading.Event()
+        self.shutdown_event = threading.Event()
+        self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
 
-    try:
-        # 初始化模型控制器
-        config_path = 'config.json'
-        if not os.path.exists(config_path):
-            logger.error(f"配置文件不存在: {config_path}")
-            sys.exit(1)
+    def setup_logging(self) -> None:
+        """设置日志系统"""
+        if self.config_manager:
+            log_level = self.config_manager.get_log_level()
+        else:
+            log_level = os.environ.get('LOG_LEVEL', 'INFO')
+        setup_logging(log_level=log_level)
+        self.logger = get_logger(__name__)
 
-        model_controller = ModelController(config_path)
-        logger.info("模型控制器初始化完成")
+    def setup_signal_handlers(self) -> None:
+        """设置信号处理器"""
+        try:
+            import signal
 
-        # 启动API服务器
-        api_cfg = model_controller.config['program']
+            def signal_handler(signum, frame):
+                self.logger.info(f"接收到信号 {signum}，正在关闭应用...")
+                self.shutdown()
+
+            signal.signal(signal.SIGINT, signal_handler)
+            signal.signal(signal.SIGTERM, signal_handler)
+        except ImportError:
+            # Windows系统可能不支持signal模块
+            pass
+
+    def initialize_config_manager(self) -> None:
+        """优化的初始化配置管理器"""
+        if not os.path.exists(self.config_path):
+            self.logger.error(f"配置文件不存在: {self.config_path}")
+            raise FileNotFoundError(f"配置文件不存在: {self.config_path}")
+
+        self.config_manager = ConfigManager(self.config_path)
+
+        # 配置管理器初始化完成后，重新设置日志级别以应用配置文件中的设置
+        log_level = self.config_manager.get_log_level()
+        from utils.logger import _log_manager
+        if _log_manager:
+            _log_manager.set_level(log_level)
+
+        self.logger.info("配置管理器初始化完成")
+
+    def initialize_monitor(self) -> None:
+        """初始化监控器"""
+        try:
+            self.logger.info("正在初始化监控器...")
+
+            # 创建监控器实例
+            self.monitor = Monitor()
+
+            # 读取模型主别名列表
+            model_names = self.config_manager.get_model_names()
+            self.logger.info(f"读取到 {len(model_names)} 个模型别名: {', '.join(model_names)}")
+
+            # 数据库已在Monitor初始化时自动完成
+            self.logger.info("数据库初始化完成")
+
+            # 记录程序启动时间戳
+            start_time = time.time()
+            self.monitor.add_program_runtime_start(start_time)
+            self.logger.info(f"已记录程序启动时间戳: {start_time}")
+
+            # 启动监控线程
+            self.start_monitor_thread()
+
+        except Exception as e:
+            self.logger.error(f"初始化监控器失败: {e}")
+            raise
+
+    def start_monitor_thread(self) -> None:
+        """启动监控线程"""
+        if not self.monitor:
+            raise RuntimeError("监控器未初始化")
+
+        def monitor_loop():
+            self.logger.info("监控线程启动")
+            while not self.stop_monitor:
+                try:
+                    current_time = time.time()
+                    self.monitor.update_program_runtime_end(current_time)
+                    time.sleep(10)  # 每10秒更新一次
+                except Exception as e:
+                    self.logger.error(f"监控线程更新失败: {e}")
+                    time.sleep(10)
+            self.logger.info("监控线程停止")
+
+        self.monitor_thread = threading.Thread(target=monitor_loop, daemon=True)
+        self.monitor_thread.start()
+        self.threads.append(self.monitor_thread)
+        self.logger.info("监控线程已启动")
+
+    def start_api_server(self) -> None:
+        """启动API服务器"""
+        if not self.config_manager:
+            raise RuntimeError("配置管理器未初始化")
+
+        self.logger.info("正在启动API服务器...")
+
         api_thread = threading.Thread(
             target=run_api_server,
-            args=(model_controller, api_cfg['openai_host'], api_cfg['openai_port']),
-            daemon=True
+            args=(self.config_manager,),
+            daemon=False  # 不能设置为daemon，否则程序会立即退出
         )
         api_thread.start()
-        threads.append(api_thread)
-        logger.info(f"API服务器已启动: http://{api_cfg['openai_host']}:{api_cfg['openai_port']}")
+        self.threads.append(api_thread)
+        self.logger.info("API服务器启动完成")
 
-        # 启动现代化WebUI服务器
-        webui_cfg = model_controller.config['program']
-        webui_thread = threading.Thread(
-            target=run_web_ui,
-            args=(model_controller, webui_cfg['webui_host'], webui_cfg['webui_port']),
-            daemon=True
-        )
-        webui_thread.start()
-        threads.append(webui_thread)
-        logger.info(f"现代化WebUI服务器已启动: http://{webui_cfg['webui_host']}:{webui_cfg['webui_port']}")
-
-        # 等待服务启动
-        time.sleep(3)
-
-        # 启动自动启动的模型
-        logger.info("检查需要自动启动的模型...")
-        for primary_name in model_controller.models_state.keys():
-            config = model_controller.get_model_config(primary_name)
-            if config and config.get("auto_start", False):
-                logger.info(f"正在自动启动模型: {primary_name}")
-                threading.Thread(
-                    target=model_controller.start_model,
-                    args=(primary_name,),
-                    daemon=True
-                ).start()
-
-        # 更新托盘状态
-        if tray_service:
-            tray_service.set_services_started(True)
-
-        logger.info("核心服务启动完成")
-
-    except Exception as e:
-        logger.error(f"启动核心服务失败: {e}", exc_info=True)
-        shutdown_application()
-        sys.exit(1)
-
-def start_tray_service():
-    """启动系统托盘服务"""
-    global tray_service
-
-    try:
-        from core.tray import SystemTray
-
-        tray_service = SystemTray(model_controller)
-        tray_service.set_exit_callback(shutdown_application)
-
-        def tray_thread_func():
-            try:
-                tray_service.setup_tray_icon()
-            except Exception as e:
-                logger.error(f"托盘服务运行失败: {e}")
-                shutdown_application()
-
-        tray_thread = threading.Thread(target=tray_thread_func, daemon=False)
-        tray_thread.start()
-        threads.append(tray_thread)
-
-        logger.info("系统托盘服务已启动")
-
-    except Exception as e:
-        logger.error(f"启动托盘服务失败: {e}")
-
-def shutdown_application():
-    """快速关闭应用程序"""
-    logger.info("正在快速关闭应用程序...")
-
-    # 使用快速关闭方式强制停止所有模型
-    if model_controller:
+    def check_webui_build(self) -> None:
+        """检查WebUI构建文件是否存在"""
         try:
-            model_controller.shutdown()
+            project_root = os.path.dirname(os.path.abspath(self.config_path))
+            webui_dist_path = os.path.join(project_root, "webui", "dist")
+            index_path = os.path.join(webui_dist_path, "index.html")
+
+            if os.path.exists(index_path):
+                self.logger.info(f"WebUI构建文件已找到: {index_path}")
+            else:
+                self.logger.warning(f"WebUI构建文件未找到: {index_path}")
+                self.logger.info("请先构建WebUI: cd webui && npm run build")
+                self.logger.info("或者使用开发模式: npm run dev (需要同时运行API服务器)")
+
         except Exception as e:
-            logger.error(f"快速关闭模型控制器失败: {e}")
+            self.logger.error(f"检查WebUI构建文件失败: {e}")
 
-    # 不等待线程结束，直接退出
-    logger.info("应用程序已快速关闭")
+    def start_tray_service(self) -> None:
+        """启动系统托盘服务"""
+        try:
+            from core.tray import SystemTray
 
-def main():
-    """主函数"""
-    global logger
+            if not self.config_manager:
+                raise RuntimeError("配置管理器未初始化")
 
-    try:
-        # 设置日志
-        log_level = os.environ.get('LOG_LEVEL', 'INFO')
-        setup_logging(log_level=log_level)
-        logger = get_logger(__name__)
+            self.logger.info("正在启动系统托盘服务...")
+            self.tray_service = SystemTray(self.config_manager)
 
-        logger.info("LLM-Manager 启动中...")
-        logger.info(f"Python 版本: {sys.version}")
-        logger.info(f"工作目录: {os.getcwd()}")
+            # 设置退出回调
+            self.tray_service.set_exit_callback(self._on_tray_exit)
+
+            def tray_thread_func():
+                try:
+                    self.tray_service.start_tray()
+                except Exception as e:
+                    self.logger.error(f"托盘服务运行失败: {e}")
+                    self.logger.info("托盘服务失败，应用程序退出")
+                    self.shutdown()
+
+            # 托盘线程不能设置为daemon=True，否则程序会立即退出
+            tray_thread = threading.Thread(target=tray_thread_func, daemon=False)
+            tray_thread.start()
+            self.threads.append(tray_thread)
+            self.logger.info("系统托盘服务已启动")
+
+        except Exception as e:
+            self.logger.error(f"启动托盘服务失败: {e}")
+
+
+
+    def _on_tray_exit(self) -> None:
+        """托盘退出回调"""
+        self.logger.info("托盘服务请求退出")
+        self.shutdown()
+
+    def initialize(self) -> None:
+        """优化的初始化应用程序 - 并行初始化组件"""
+        self.setup_logging()
+
+        self.logger.info("LLM-Manager 启动中...")
+        self.logger.info(f"Python 版本: {sys.version}")
+        self.logger.info(f"工作目录: {os.getcwd()}")
 
         # 设置信号处理器
-        setup_signal_handlers()
+        self.setup_signal_handlers()
 
-        # 启动核心服务
-        start_core_services()
+        # 并行初始化核心组件
+        def init_config():
+            self.initialize_config_manager()
+            return "config_manager"
 
-        # 启动系统托盘服务
-        start_tray_service()
+        def init_process_manager():
+            process_manager = get_process_manager()
+            self.logger.info("进程管理器初始化完成")
+            return "process_manager"
 
-        # 主循环
-        logger.info("LLM-Manager 运行中，按 Ctrl+C 退出...")
+        def init_monitor():
+            self.initialize_monitor()
+            return "monitor"
+
+        # 提交初始化任务
+        futures = []
+        futures.append(self.executor.submit(init_config))
+        futures.append(self.executor.submit(init_process_manager))
+        futures.append(self.executor.submit(init_monitor))
+
+        # 等待所有初始化完成
+        for future in concurrent.futures.as_completed(futures, timeout=30):
+            try:
+                component = future.result()
+                self.logger.debug(f"组件 {component} 初始化完成")
+            except Exception as e:
+                self.logger.error(f"组件初始化失败: {e}")
+                raise
+
+        # 初始化模型控制器
+        self.model_controller = ModelController(self.config_manager)
+        self.logger.info("模型控制器初始化完成")
+
+    def start(self) -> None:
+        """优化的启动应用程序"""
         try:
-            while True:
+            # 并行初始化
+            self.initialize()
+
+            # 启动自动启动模型（在后台线程中）
+            auto_start_future = self.executor.submit(self._start_auto_start_models)
+
+            # 并行启动核心服务
+            def start_services():
+                # 启动API服务器
+                self.start_api_server()
+                # 检查WebUI构建文件
+                self.check_webui_build()
+                # 启动系统托盘服务
+                self.start_tray_service()
+                return "services"
+
+            services_future = self.executor.submit(start_services)
+
+            # 等待服务启动完成
+            try:
+                services_result = services_future.result(timeout=15)
+                self.logger.info(f"{services_result} 启动完成")
+            except concurrent.futures.TimeoutError:
+                self.logger.error("服务启动超时")
+                raise
+
+            # 等待自动启动模型完成（不阻塞主线程）
+            def check_auto_start():
+                try:
+                    auto_start_future.result(timeout=60)
+                    self.logger.info("自动启动模型完成")
+                except concurrent.futures.TimeoutError:
+                    self.logger.warning("自动启动模型超时")
+
+            check_thread = threading.Thread(target=check_auto_start, daemon=True)
+            check_thread.start()
+
+            self.running = True
+            self.startup_complete.set()
+            self.logger.info("LLM-Manager 运行中，按 Ctrl+C 退出...")
+
+            # 主循环
+            self.run_main_loop()
+
+        except Exception as e:
+            self.handle_startup_error(e)
+
+    def run_main_loop(self) -> None:
+        """运行主循环"""
+        try:
+            while self.running:
                 time.sleep(1)
         except KeyboardInterrupt:
-            logger.info("接收到键盘中断信号")
+            self.logger.info("接收到键盘中断信号")
         finally:
-            shutdown_application()
+            self.shutdown()
 
-    except Exception as e:
-        print(f"致命错误: {e}")
-        if 'logger' in locals():
-            logger.error(f"应用程序启动失败: {e}", exc_info=True)
+    def shutdown(self) -> None:
+        """优化的关闭应用程序 - 快速并行关闭"""
+        if not self.running:
+            return
+
+        self.logger.info("正在快速关闭应用程序...")
+        self.running = False
+        self.shutdown_event.set()
+
+        try:
+            # 并行关闭各个组件
+            def stop_monitor_thread():
+                if self.monitor_thread and self.monitor_thread.is_alive():
+                    self.stop_monitor = True
+                    self.monitor_thread.join(timeout=3)
+                    return "monitor_thread"
+                return "monitor_thread_stopped"
+
+            def close_monitor():
+                if self.monitor:
+                    try:
+                        end_time = time.time()
+                        self.monitor.update_program_runtime_end(end_time)
+                        self.logger.debug(f"已更新程序结束时间戳: {end_time}")
+                        self.monitor.close()
+                        return "monitor"
+                    except Exception as e:
+                        self.logger.error(f"关闭监控器失败: {e}")
+                        return "monitor_failed"
+                return "monitor_none"
+
+            def cleanup_processes():
+                try:
+                    cleanup_process_manager()
+                    return "process_manager"
+                except Exception as e:
+                    self.logger.error(f"清理进程管理器失败: {e}")
+                    return "process_manager_failed"
+
+            def shutdown_model_controller():
+                if self.model_controller:
+                    try:
+                        self.model_controller.shutdown()
+                        return "model_controller"
+                    except Exception as e:
+                        self.logger.error(f"关闭模型控制器失败: {e}")
+                        return "model_controller_failed"
+                return "model_controller_none"
+
+            # 提交关闭任务
+            shutdown_tasks = [
+                self.executor.submit(stop_monitor_thread),
+                self.executor.submit(close_monitor),
+                self.executor.submit(cleanup_processes),
+                self.executor.submit(shutdown_model_controller)
+            ]
+
+            # 等待关闭任务完成，设置总超时
+            timeout = 10  # 总超时10秒
+            completed = []
+            for future in concurrent.futures.as_completed(shutdown_tasks, timeout=timeout):
+                try:
+                    result = future.result()
+                    completed.append(result)
+                    self.logger.debug(f"{result} 关闭完成")
+                except Exception as e:
+                    self.logger.error(f"关闭任务失败: {e}")
+
+            self.logger.info(f"关闭完成: {completed}/{len(shutdown_tasks)}")
+
+            # 关闭线程池
+            self.executor.shutdown(wait=True)
+
+        except Exception as e:
+            self.logger.error(f"关闭应用程序时发生错误: {e}")
+        finally:
+            self.logger.info("应用程序已退出")
+
+    def _start_auto_start_models(self):
+        """启动自动启动模型"""
+        if self.model_controller:
+            try:
+                self.model_controller.start_auto_start_models()
+            except Exception as e:
+                self.logger.error(f"启动自动启动模型失败: {e}")
+
+    def handle_startup_error(self, error: Exception) -> None:
+        """处理启动错误"""
+        error_msg = f"致命错误: {error}"
+        print(error_msg)
+        if self.logger:
+            self.logger.error(f"应用程序启动失败: {error}", exc_info=True)
         sys.exit(1)
+
+
+def main():
+    """主函数入口"""
+    app = Application()
+    app.start()
+
 
 if __name__ == "__main__":
     main()

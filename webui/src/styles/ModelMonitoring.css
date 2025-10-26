@@ -1,0 +1,301 @@
+/* Model Monitoring Page Specific Styles - Override default styles */
+
+/* Adjust page padding and gap to match overview page */
+.model-monitoring-page {
+  padding: 0.75rem 1.5rem 1.5rem 1.5rem !important;
+  gap: 2rem !important;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+/* Time Range Selector Horizontal Layout */
+.model-monitoring-page .time-range-container {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+}
+
+/* Reduce gap between time selector and content */
+.model-monitoring-page .model-content-section {
+  gap: 0.5rem !important;
+}
+
+.model-monitoring-page .time-range-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 2rem;
+  width: 100%;
+}
+
+.model-monitoring-page .time-range-label {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #1f2937;
+  white-space: nowrap;
+}
+
+.model-monitoring-page .time-inputs-group {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap; /* 允许换行防止溢出 */
+  max-width: 100%;
+}
+
+.model-monitoring-page .time-inputs {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.model-monitoring-page .time-range-separator {
+  font-size: 0.875rem;
+  color: #6b7280;
+  font-weight: 500;
+  padding: 0 0.5rem;
+}
+
+/* Content Info Styles */
+.model-monitoring-page .content-info {
+  text-align: left;
+  width: 100%;
+}
+
+.model-monitoring-page .content-info h3 {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: #1f2937;
+  margin-bottom: 1.5rem;
+  text-align: center;
+}
+
+.model-monitoring-page .info-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1rem;
+  max-width: 600px;
+  margin: 0 auto;
+}
+
+.model-monitoring-page .info-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem 1rem;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  transition: all 0.2s ease;
+}
+
+.model-monitoring-page .info-item:hover {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+}
+
+.model-monitoring-page .info-label {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #374151;
+}
+
+.model-monitoring-page .info-value {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #1f2937;
+  font-family: 'Courier New', monospace;
+}
+
+/* Overview Content Styles */
+.overview-content {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  width: 100%;
+  flex: 1;
+}
+
+.overview-row {
+  display: flex;
+  gap: 1rem;
+  width: 100%;
+  height: 320px;
+}
+
+.chart-container-large {
+  flex: 4;
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.chart-container-small {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  max-width: 250px;
+  display: flex;
+  flex-direction: column;
+}
+
+.overview-content .throughput-chart {
+  flex: 1;
+  min-height: 250px;
+  display: flex;
+  flex-direction: column;
+}
+
+.overview-content .chart-container-large .throughput-chart {
+  min-height: 250px;
+}
+
+.overview-content .chart-container-small .throughput-chart {
+  min-height: 250px;
+}
+
+/* Model Detail Rows - 1:1 Layout */
+.model-detail-row {
+  display: flex;
+  gap: 1rem;
+  width: 100%;
+  height: 320px;
+}
+
+.model-detail-chart-container {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Pie Chart Legend Styles */
+.overview-content .chart-container-small {
+  position: relative;
+}
+
+.overview-content .chart-container-small .chartjs-legend {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  justify-content: center !important;
+  gap: 8px !important;
+  padding: 8px !important;
+  margin-top: auto !important;
+}
+
+.overview-content .chart-container-small .chartjs-legend li {
+  display: flex !important;
+  align-items: center !important;
+  margin: 0 !important;
+  padding: 4px 8px !important;
+  background: #f9fafb !important;
+  border: 1px solid #e5e7eb !important;
+  border-radius: 4px !important;
+  font-size: 11px !important;
+  min-width: calc(50% - 4px) !important;
+  box-sizing: border-box !important;
+}
+
+/* Model Detail Content Styles */
+.model-detail-content {
+  display: flex;
+  flex-direction: column;
+  gap: 1.2rem;
+  width: 100%;
+  flex: 1;
+}
+
+.model-summary-section {
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 1rem 1.25rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.summary-cards {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 0.8rem;
+  margin-top: 1rem;
+}
+
+.summary-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 0.8rem 0.5rem;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  transition: all 0.2s ease;
+}
+
+.summary-card:hover {
+  background: #f3f4f6;
+  border-color: #d1d5db;
+}
+
+.card-header {
+  margin-bottom: 0.4rem;
+}
+
+.card-label {
+  font-size: 0.75rem;
+  color: #6b7280;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.card-value {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #1f2937;
+  text-align: center;
+}
+
+.cache-rate-card .card-value {
+  font-size: 1rem;
+  font-weight: 700;
+  color: #059669;
+}
+
+.chart-section {
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 1rem 1.25rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  display: flex;
+  flex-direction: column;
+}
+
+.chart-section .section-title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #1f2937;
+  margin-bottom: 1rem;
+  margin-top: 0;
+}
+
+.model-detail-content .chart-container {
+  flex: 1;
+  min-height: 300px;
+  position: relative;
+}
+
+/* 添加底部空白以获得更好的视觉效果，与总览页面保持一致 */
+.model-detail-content .chart-section:last-child {
+  margin-bottom: 1.5rem;
+}
+
+.overview-content .model-detail-row:last-child {
+  margin-bottom: 1.5rem;
+}
+

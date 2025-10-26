@@ -1,0 +1,304 @@
+/* Billing Settings Page Styles */
+.billing-pricing-content {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  height: 100%;
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 1.5rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.pricing-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.pricing-title {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: #1f2937;
+  margin: 0;
+}
+
+.pricing-content {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.section-title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #1f2937;
+  margin-bottom: 1rem;
+}
+
+/* Pricing Method Selector */
+.pricing-method-selector {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.pricing-method-card {
+  flex: 1;
+  background: #f9fafb;
+  border: 2px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 1.5rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-align: center;
+}
+
+.pricing-method-card:hover {
+  border-color: #3b82f6;
+  background: #eff6ff;
+}
+
+.pricing-method-card.selected {
+  border-color: #3b82f6;
+  background: #eff6ff;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.1);
+}
+
+.method-title {
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: #1f2937;
+  margin: 0 0 0.5rem 0;
+}
+
+.method-description {
+  font-size: 0.875rem;
+  color: #6b7280;
+  margin: 0;
+}
+
+/* Section Header */
+.section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.add-tier-btn {
+  background: #3b82f6;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  padding: 0.5rem 1rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.add-tier-btn:hover {
+  background: #2563eb;
+}
+
+.no-tiers {
+  text-align: center;
+  color: #6b7280;
+  padding: 2rem;
+  background: #f9fafb;
+  border: 2px dashed #d1d5db;
+  border-radius: 8px;
+}
+
+/* Tier Table */
+.tier-table-container {
+  overflow-x: auto;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+}
+
+.tier-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: white;
+}
+
+.tier-table th,
+.tier-table td {
+  padding: 0.75rem;
+  text-align: left;
+  border-bottom: 1px solid #e5e7eb;
+  font-size: 0.875rem;
+}
+
+.tier-table th {
+  background: #f9fafb;
+  font-weight: 600;
+  color: #374151;
+  white-space: nowrap;
+}
+
+.tier-table td {
+  color: #1f2937;
+}
+
+.tier-row:hover {
+  background: #f9fafb;
+}
+
+.tier-input {
+  width: 100%;
+  padding: 0.375rem 0.5rem;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  font-size: 0.875rem;
+  background: white;
+}
+
+.tier-input:focus {
+  outline: none;
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.1);
+}
+
+.tier-checkbox {
+  width: 1rem;
+  height: 1rem;
+  cursor: pointer;
+}
+
+.tier-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.edit-btn,
+.save-btn,
+.delete-btn {
+  padding: 0.375rem 0.75rem;
+  border: 1px solid;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.edit-btn {
+  background: #3b82f6;
+  color: white;
+  border-color: #3b82f6;
+}
+
+.edit-btn:hover {
+  background: #2563eb;
+  border-color: #2563eb;
+}
+
+.save-btn {
+  background: #059669;
+  color: white;
+  border-color: #059669;
+}
+
+.save-btn:hover {
+  background: #047857;
+  border-color: #047857;
+}
+
+.delete-btn {
+  background: #ef4444;
+  color: white;
+  border-color: #ef4444;
+}
+
+.delete-btn:hover:not(:disabled) {
+  background: #dc2626;
+  border-color: #dc2626;
+}
+
+.delete-btn:disabled {
+  background: #9ca3af;
+  color: #e5e7eb;
+  border-color: #d1d5db;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+/* Hourly Pricing */
+.hourly-pricing-section {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.hourly-pricing-card {
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 1.5rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.hourly-price-setting {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 2rem;
+}
+
+.price-input-group {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex: 1;
+}
+
+.price-label {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #374151;
+  white-space: nowrap;
+}
+
+.hourly-price-input {
+  width: 150px;
+  padding: 0.5rem;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  font-size: 0.875rem;
+  background: white;
+}
+
+.hourly-price-input:focus {
+  outline: none;
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.1);
+}
+
+.hourly-price-input:disabled {
+  background: #f9fafb;
+  color: #6b7280;
+  cursor: not-allowed;
+}
+
+.price-unit {
+  font-size: 0.875rem;
+  color: #6b7280;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.hourly-actions {
+  flex-shrink: 0;
+}
+
+.tier-pricing-section {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
