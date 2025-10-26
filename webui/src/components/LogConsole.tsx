@@ -72,22 +72,24 @@ const LogConsole: React.FC<LogConsoleProps> = ({
     const handleLogMessage = (data: LogStreamData) => {
       switch (data.type) {
         case 'historical':
-          if (data.log && typeof data.log === 'object' && 'timestamp' in data.log) {
-            const timestamp = new Date(data.log.timestamp * 1000).toLocaleTimeString()
-            setLogs(prev => [...prev, `[${timestamp}] ${data.log.message}`])
-          } else if (typeof data.log === 'string') {
-            setLogs(prev => [...prev, data.log])
+          if (data.log && typeof data.log === 'object') {
+            const logEntry = data.log as { timestamp: number; message: string }
+            const timeStr = new Date(logEntry.timestamp * 1000).toLocaleTimeString()
+            setLogs(prev => [...prev, `[${timeStr}] ${logEntry.message}` as string])
+          } else if (typeof data.log === 'string' && data.log) {
+            setLogs(prev => [...prev, data.log as string])
           }
           break
         case 'historical_complete':
           setLogs(prev => [...prev, '[系统] 历史日志加载完成，开始实时监控...'])
           break
         case 'realtime':
-          if (data.log && typeof data.log === 'object' && 'timestamp' in data.log) {
-            const timestamp = new Date(data.log.timestamp * 1000).toLocaleTimeString()
-            setLogs(prev => [...prev, `[${timestamp}] ${data.log.message}`])
-          } else if (typeof data.log === 'string') {
-            setLogs(prev => [...prev, data.log])
+          if (data.log && typeof data.log === 'object') {
+            const logEntry = data.log as { timestamp: number; message: string }
+            const timeStr = new Date(logEntry.timestamp * 1000).toLocaleTimeString()
+            setLogs(prev => [...prev, `[${timeStr}] ${logEntry.message}` as string])
+          } else if (typeof data.log === 'string' && data.log) {
+            setLogs(prev => [...prev, data.log as string])
           }
           break
         case 'stream_end':

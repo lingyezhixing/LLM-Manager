@@ -18,38 +18,23 @@ class SystemTray:
         # 接收配置管理器实例
         self.config_manager = config_manager
 
-        # 从配置管理器获取API配置
-        api_cfg = self.config_manager.get_openai_config()
-        api_host = api_cfg['host']
-        api_port = api_cfg['port']
+        # 从配置管理器获取服务器配置
+        server_cfg = self.config_manager.get_openai_config()
+        self.server_host = server_cfg['host'] if server_cfg['host'] != '0.0.0.0' else 'localhost'
+        self.server_port = server_cfg['port']
 
-        # 如果配置为0.0.0.0，使用localhost进行本地访问
-        if api_host == '0.0.0.0':
-            api_host = 'localhost'
-
-        self.api_host = api_host
-        self.api_port = api_port
-        self.api_url = f"http://{api_host}:{api_port}"
+        self.server_url = f"http://{self.server_host}:{self.server_port}"
         self.tray_icon: Optional[TrayIcon] = None
         self.exit_callback = None
 
-        logger.info(f"托盘服务初始化完成，连接到API: {self.api_url}")
+        logger.info(f"托盘服务初始化完成，连接到API: {self.server_url}")
 
     def open_webui(self):
         """打开WebUI"""
         logger.info("正在打开WebUI...")
         try:
-            webui_config = self.config_manager.get_webui_config()
-            webui_host = webui_config['host']
-            webui_port = webui_config['port']
-
-            # 如果配置为0.0.0.0，使用localhost进行本地访问
-            if webui_host == '0.0.0.0':
-                webui_host = 'localhost'
-
-            webui_url = f"http://{webui_host}:{webui_port}"
-            webbrowser.open(webui_url)
-            logger.info(f"已在浏览器中打开WebUI: {webui_url}")
+            webbrowser.open(self.server_url)
+            logger.info(f"已在浏览器中打开WebUI: {self.server_url}")
         except Exception as e:
             logger.error(f"打开WebUI失败: {e}")
             logger.info("请手动访问WebUI地址")
@@ -58,7 +43,7 @@ class SystemTray:
         """重启所有auto_start模型"""
         logger.info("正在执行指令：重启所有 'auto_start' 模型...")
         try:
-            response = requests.post(f"{self.api_url}/api/models/restart-autostart", timeout=30)
+            response = requests.post(f"{self.server_url}/api/models/restart-autostart", timeout=30)
             result = response.json()
             if result.get("success"):
                 logger.info(f"成功重启autostart模型: {result.get('started_models', [])}")
@@ -71,7 +56,7 @@ class SystemTray:
         """卸载全部模型"""
         logger.info("正在执行指令：卸载全部模型...")
         try:
-            response = requests.post(f"{self.api_url}/api/models/stop-all", timeout=30)
+            response = requests.post(f"{self.server_url}/api/models/stop-all", timeout=30)
             result = response.json()
             if result.get("success"):
                 logger.info("全部模型卸载完毕。")
@@ -83,7 +68,7 @@ class SystemTray:
     def get_tray_title(self) -> str:
         """获取托盘标题"""
         try:
-            response = requests.get(f"{self.api_url}/api/devices/info", timeout=10)
+            response = requests.get(f"{self.server_url}/api/devices/info", timeout=10)
             if response.status_code == 200:
                 result = response.json()
                 if result.get("success"):
@@ -107,7 +92,7 @@ class SystemTray:
         # 通过API服务器关闭所有模型
         try:
             logger.info("正在通过API关闭所有模型...")
-            response = requests.post(f"{self.api_url}/api/models/stop-all", timeout=10)
+            response = requests.post(f"{self.server_url}/api/models/stop-all", timeout=10)
             if response.status_code == 200:
                 result = response.json()
                 if result.get("success"):

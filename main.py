@@ -151,53 +151,22 @@ class Application:
         self.threads.append(api_thread)
         self.logger.info("API服务器启动完成")
 
-    def start_webui_server(self) -> None:
-        """启动WebUI服务器"""
+    def check_webui_build(self) -> None:
+        """检查WebUI构建文件是否存在"""
         try:
-            self.logger.info("正在启动WebUI服务器...")
-
-            # 获取配置
-            webui_config = self.config_manager.get_webui_config()
-            webui_host = webui_config.get('host', '127.0.0.1')
-            webui_port = webui_config.get('port', 10000)
-
-            # 如果WebUI host配置为0.0.0.0，改为127.0.0.1
-            if webui_host == '0.0.0.0':
-                webui_host = '127.0.0.1'
-                self.logger.info("WebUI host从0.0.0.0改为127.0.0.1（开发环境建议使用localhost）")
-
-            # 获取API服务器配置用于前端代理
-            api_config = self.config_manager.get_openai_config()
-            api_host = api_config.get('host', '0.0.0.0')
-            api_port = api_config.get('port', 8080)
-
-            
-            # 设置WebUI路径并验证
             project_root = os.path.dirname(os.path.abspath(self.config_path))
-            webui_path = os.path.join(project_root, "webui")
-            if not os.path.exists(webui_path):
-                self.logger.error(f"WebUI目录不存在: {webui_path}")
-                return
+            webui_dist_path = os.path.join(project_root, "webui", "dist")
+            index_path = os.path.join(webui_dist_path, "index.html")
 
-            # 使用进程管理器启动WebUI
-            process_manager = get_process_manager()
-            success, message, pid = process_manager.start_process(
-                name="webui_server",
-                command=f"npm run dev -- --host {webui_host} --port {webui_port}",
-                cwd=webui_path,
-                description="WebUI开发服务器",
-                shell=True,
-                capture_output=False  # 不捕获输出，直接显示在控制台
-            )
-
-            if success:
-                self.logger.info(f"WebUI服务器启动成功 (PID: {pid})")
-                self.logger.info(f"WebUI开发服务器将在 http://{webui_host}:{webui_port} 上运行")
+            if os.path.exists(index_path):
+                self.logger.info(f"WebUI构建文件已找到: {index_path}")
             else:
-                self.logger.error(f"WebUI服务器启动失败: {message}")
+                self.logger.warning(f"WebUI构建文件未找到: {index_path}")
+                self.logger.info("请先构建WebUI: cd webui && npm run build")
+                self.logger.info("或者使用开发模式: npm run dev (需要同时运行API服务器)")
 
         except Exception as e:
-            self.logger.error(f"启动WebUI服务器失败: {e}")
+            self.logger.error(f"检查WebUI构建文件失败: {e}")
 
     def start_tray_service(self) -> None:
         """启动系统托盘服务"""
@@ -294,8 +263,8 @@ class Application:
             def start_services():
                 # 启动API服务器
                 self.start_api_server()
-                # 启动WebUI服务器
-                self.start_webui_server()
+                # 检查WebUI构建文件
+                self.check_webui_build()
                 # 启动系统托盘服务
                 self.start_tray_service()
                 return "services"
@@ -341,25 +310,6 @@ class Application:
         finally:
             self.shutdown()
 
-    def stop_webui_server(self) -> None:
-        """停止WebUI服务器"""
-        try:
-            self.logger.info("正在停止WebUI服务器...")
-
-            # 获取进程管理器
-            process_manager = get_process_manager()
-
-            # 停止WebUI进程
-            success, message = process_manager.stop_process("webui_server", force=True, timeout=5)
-
-            if success:
-                self.logger.info("WebUI服务器已停止")
-            else:
-                self.logger.warning(f"WebUI服务器停止警告: {message}")
-
-        except Exception as e:
-            self.logger.error(f"停止WebUI服务器失败: {e}")
-
     def shutdown(self) -> None:
         """优化的关闭应用程序 - 快速并行关闭"""
         if not self.running:
@@ -391,14 +341,6 @@ class Application:
                         return "monitor_failed"
                 return "monitor_none"
 
-            def stop_webui():
-                try:
-                    self.stop_webui_server()
-                    return "webui_server"
-                except Exception as e:
-                    self.logger.error(f"停止WebUI服务器失败: {e}")
-                    return "webui_server_failed"
-
             def cleanup_processes():
                 try:
                     cleanup_process_manager()
@@ -421,7 +363,6 @@ class Application:
             shutdown_tasks = [
                 self.executor.submit(stop_monitor_thread),
                 self.executor.submit(close_monitor),
-                self.executor.submit(stop_webui),
                 self.executor.submit(cleanup_processes),
                 self.executor.submit(shutdown_model_controller)
             ]

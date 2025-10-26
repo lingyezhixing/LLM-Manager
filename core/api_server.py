@@ -1,5 +1,8 @@
 from fastapi import FastAPI, Request
 from fastapi.responses import StreamingResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+import os
 from typing import List, Optional
 import json
 import time
@@ -281,11 +284,11 @@ class APIServer:
         async def list_models():
             return self.model_controller.get_model_list()
 
-        @self.app.get("/")
-        async def root():
+        @self.app.get("/api/info")
+        async def api_info():
             return {"message": "LLM-Manager API Server", "version": "1.0.0", "models_url": "/v1/models"}
 
-        @self.app.get("/health")
+        @self.app.get("/api/health")
         async def health_check():
             return {"status": "healthy", "models_count": len(self.model_controller.models_state), "running_models": len([s for s in self.model_controller.models_state.values() if s['status'] == 'routing'])}
 
@@ -1304,9 +1307,42 @@ class APIServer:
                 logger.error(f"[API_SERVER] 获取存储统计失败: {e}", exc_info=True)
                 return {"success": False, "error": str(e)}
 
-        @self.app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD"])
-        async def handle_all_requests(request: Request, path: str):
-            """统一请求处理器"""
+        # 静态文件服务配置
+        webui_dist_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'webui', 'dist')
+
+        # 调试信息
+        logger.debug(f"[API_SERVER] WebUI静态文件路径: {os.path.abspath(webui_dist_path)}")
+        logger.debug(f"[API_SERVER] Index文件路径: {os.path.join(webui_dist_path, 'index.html')}")
+        logger.debug(f"[API_SERVER] Index文件存在: {os.path.exists(os.path.join(webui_dist_path, 'index.html'))}")
+
+        # 前端静态文件路由
+        @self.app.get("/", response_class=FileResponse)
+        async def serve_frontend():
+            """提供前端首页"""
+            index_path = os.path.join(webui_dist_path, 'index.html')
+            if os.path.exists(index_path):
+                return FileResponse(index_path)
+            else:
+                logger.error(f"[API_SERVER] 前端文件未找到: {index_path}")
+                return JSONResponse(status_code=404, content={"error": "前端文件未找到，请先构建前端: cd webui && npm run build"})
+
+        @self.app.get("/{path:path}", response_class=FileResponse)
+        async def serve_static_files(path: str):
+            """提供前端静态文件"""
+            file_path = os.path.join(webui_dist_path, path)
+            if os.path.exists(file_path) and os.path.isfile(file_path):
+                return FileResponse(file_path)
+            else:
+                # 对于SPA应用，未找到的路由返回index.html
+                index_path = os.path.join(webui_dist_path, 'index.html')
+                if os.path.exists(index_path):
+                    return FileResponse(index_path)
+                else:
+                    return JSONResponse(status_code=404, content={"error": "前端文件未找到，请先构建前端: cd webui && npm run build"})
+
+        @self.app.api_route("/{path:path}", methods=["POST", "PUT", "DELETE", "OPTIONS", "HEAD"])
+        async def handle_api_requests(request: Request, path: str):
+            """API请求处理器"""
             return await self.api_router.route_request(request, path, self.token_tracker)
 
 
@@ -1314,9 +1350,9 @@ class APIServer:
         """运行API服务器"""
         import uvicorn
         if host is None or port is None:
-            api_cfg = self.config_manager.get_openai_config()
-            host = host or api_cfg['host']
-            port = port or api_cfg['port']
+            server_cfg = self.config_manager.get_openai_config()
+            host = host or server_cfg['host']
+            port = port or server_cfg['port']
         logger.info(f"[API_SERVER] 统一API接口将在 http://{host}:{port} 上启动")
         uvicorn.run(self.app, host=host, port=port, log_level="warning")
 

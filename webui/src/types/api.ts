@@ -180,12 +180,15 @@ export interface ModelStatsSummary {
 }
 
 export interface ModelStatsDataPoint {
-  input_tokens: number
-  output_tokens: number
-  total_tokens: number
-  cache_hit_tokens: number
-  cache_miss_tokens: number
-  cost: number
+  timestamp: number
+  data: {
+    input_tokens: number
+    output_tokens: number
+    total_tokens: number
+    cache_hit_tokens: number
+    cache_miss_tokens: number
+    cost: number
+  }
 }
 
 export interface ModelStatsResponse {

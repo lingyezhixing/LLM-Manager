@@ -160,10 +160,10 @@ class ConfigManager:
         return self.get_program_config().get('interface_plugin_dir', 'plugins/interfaces')
 
     def get_openai_config(self) -> Dict[str, Any]:
-        """获取OpenAI API配置"""
+        """获取API服务器配置"""
         return {
-            "host": self.get_program_config().get('openai_host', '0.0.0.0'),
-            "port": self.get_program_config().get('openai_port', 8080)
+            "host": self.get_program_config().get('host', '0.0.0.0'),
+            "port": self.get_program_config().get('port', 8080)
         }
 
     def get_token_tracker_modes(self) -> List[str]:
@@ -174,13 +174,6 @@ class ConfigManager:
         """检查指定模式的模型是否需要追踪token"""
         tracked_modes = self.get_token_tracker_modes()
         return mode in tracked_modes
-
-    def get_webui_config(self) -> Dict[str, Any]:
-        """获取WebUI前端配置"""
-        return {
-            "host": self.get_program_config().get('webui_host', '127.0.0.1'),
-            "port": self.get_program_config().get('webui_port', 10000)
-        }
 
     def get_alive_time(self) -> int:
         """获取模型存活时间（分钟）"""
@@ -216,7 +209,7 @@ class ConfigManager:
         try:
             # 检查必需的程序配置
             program_config = self.get_program_config()
-            required_program_keys = ['openai_host', 'openai_port']
+            required_program_keys = ['host', 'port']
             for key in required_program_keys:
                 if key not in program_config:
                     errors.append(f"缺少必需的程序配置项: {key}")

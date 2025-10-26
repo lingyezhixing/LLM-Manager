@@ -32,7 +32,7 @@ const api = axios.create({
 export const apiService = {
   async getHealth(): Promise<HealthResponse> {
     try {
-      const response = await api.get('/health')
+      const response = await api.get('/api/health')
       return response.data
     } catch (error) {
       console.error('Health check failed:', error instanceof Error ? error.message : String(error))
@@ -42,7 +42,7 @@ export const apiService = {
 
   async getApiInfo(): Promise<ApiInfoResponse> {
     try {
-      const response = await api.get('/')
+      const response = await api.get('/api/info')
       return response.data
     } catch (error) {
       console.error('API info failed:', error instanceof Error ? error.message : String(error))
