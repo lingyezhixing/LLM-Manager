@@ -34,39 +34,6 @@ class APIServer:
         logger.info("API服务器初始化完成")
         logger.debug("[API_SERVER] token跟踪功能已激活")
 
-    def _find_matching_tier(self, input_tokens: int, output_tokens: int, tiers: List[TierPricing]) -> Optional[TierPricing]:
-        """
-        根据输入和输出token数量匹配唯一的阶梯
-
-        Args:
-            input_tokens: 输入token数量
-            output_tokens: 输出token数量
-            tiers: 所有阶梯配置
-
-        Returns:
-            匹配的阶梯，如果没有匹配则返回None
-        """
-        for tier in tiers:
-            # 检查输入token范围（注意：min是不包含，max是包含，-1表示无上限）
-            input_match = (input_tokens > tier.min_input_tokens and
-                          (tier.max_input_tokens == -1 or input_tokens <= tier.max_input_tokens))
-
-            # 检查输出token范围（注意：min是不包含，max是包含，-1表示无上限）
-            # 根据要求，如果最小输出为0，则需要包含0
-            if tier.min_output_tokens == 0:
-                # 当最小输出为0时，使用 >= 来包含0
-                output_match = (output_tokens >= tier.min_output_tokens and
-                            (tier.max_output_tokens == -1 or output_tokens <= tier.max_output_tokens))
-            else:
-                # 否则，保持原来的逻辑（min是不包含）
-                output_match = (output_tokens > tier.min_output_tokens and
-                            (tier.max_output_tokens == -1 or output_tokens <= tier.max_output_tokens))
-
-            if input_match and output_match:
-                return tier
-
-        return None
-
     async def _calculate_cost_vectorized(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         【高性能向量化版本】为DataFrame中的所有请求批量计算成本。
@@ -90,7 +57,6 @@ class APIServer:
 
         all_costs = []
         # 步骤 2: 按模型分组处理。因为不同模型的计费规则不同，所以这是一个天然的分组边界。
-        # 注意：我们是在遍历模型（数量少），而不是遍历行（数量巨大）。
         for model_name, group_df in df.groupby('model_name'):
             billing = model_billings.get(model_name)
 
@@ -101,7 +67,6 @@ class APIServer:
                 continue
 
             # 步骤 3: 为当前模型的所有阶梯，构建向量化的"条件"和"选择"列表
-            # 这是 np.select 的核心思想：condlist[i] 为真时，取 choicelist[i] 的值
             condlist = []
             choice_input_price, choice_output_price = [], []
             choice_cache_read_price, choice_cache_write_price = [], []
@@ -112,11 +77,17 @@ class APIServer:
                 max_input = float('inf') if tier.max_input_tokens == -1 else tier.max_input_tokens
                 max_output = float('inf') if tier.max_output_tokens == -1 else tier.max_output_tokens
 
+                # 【核心修改】根据阶梯起始值动态决定区间的开闭
+                # 只有当最小值为0时，使用 >= (闭区间，包含0)
+                # 否则，使用 > (前开后闭区间)
+                input_condition = (group_df['input_tokens'] >= tier.min_input_tokens) if tier.min_input_tokens == 0 else (group_df['input_tokens'] > tier.min_input_tokens)
+                output_condition = (group_df['output_tokens'] >= tier.min_output_tokens) if tier.min_output_tokens == 0 else (group_df['output_tokens'] > tier.min_output_tokens)
+
                 # 创建一个布尔 Series (True/False 数组)，代表 group_df 中哪些行匹配当前阶梯
                 condition = (
-                    (group_df['input_tokens'] > tier.min_input_tokens) &
+                    input_condition &
                     (group_df['input_tokens'] <= max_input) &
-                    (group_df['output_tokens'] > tier.min_output_tokens) &
+                    output_condition &
                     (group_df['output_tokens'] <= max_output)
                 )
                 condlist.append(condition)
@@ -129,31 +100,29 @@ class APIServer:
                 choice_support_cache.append(1 if tier.support_cache else 0)
 
             # 步骤 4: 使用 np.select，一次性为所有行匹配到正确的价格
-            # 它会根据 condlist 中的条件，从 choice 列表中为每一行选出对应的值
             matched_input_price = np.select(condlist, choice_input_price, default=0)
             matched_output_price = np.select(condlist, choice_output_price, default=0)
             matched_cache_read_price = np.select(condlist, choice_cache_read_price, default=0)
             matched_cache_write_price = np.select(condlist, choice_cache_write_price, default=0)
             is_cache_supported = np.select(condlist, choice_support_cache, default=0)
 
-            # 步骤 5: 纯向量化计算成本，这里全是数组/列级别的数学运算，速度极快
+            # 步骤 5: 纯向量化计算成本
             # a) 不支持缓存的成本公式
             cost_no_cache = (group_df['input_tokens'] * matched_input_price +
-                             group_df['output_tokens'] * matched_output_price) / 1_000_000
+                            group_df['output_tokens'] * matched_output_price) / 1_000_000
 
-            # b) 支持缓存的成本公式 (使用修正后的正确逻辑)
+            # b) 支持缓存的成本公式
             cost_with_cache = (group_df['cache_n'] * matched_cache_read_price +
-                               group_df['prompt_n'] * matched_input_price +
-                               group_df['output_tokens'] * matched_output_price +
-                               group_df['output_tokens'] * matched_cache_write_price) / 1_000_000
+                            group_df['prompt_n'] * matched_input_price +
+                            group_df['output_tokens'] * matched_output_price +
+                            group_df['output_tokens'] * matched_cache_write_price) / 1_000_000
 
-            # 步骤 6: 使用 np.where 根据是否支持缓存，从两种计算结果中选择最终成本
+            # 步骤 6: 使用 np.where 根据是否支持缓存，选择最终成本
             final_costs = np.where(is_cache_supported == 1, cost_with_cache, cost_no_cache)
 
-            # 将计算结果（带索引）添加到列表中，以便最后合并
             all_costs.append(pd.Series(final_costs, index=group_df.index))
 
-        # 步骤 7: 合并所有模型分组的成本计算结果，并赋值给 df['cost']
+        # 步骤 7: 合并所有模型分组的成本计算结果
         if all_costs:
             df['cost'] = pd.concat(all_costs)
         else:
