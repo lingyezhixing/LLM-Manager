@@ -239,7 +239,7 @@
       ],
       "bat_path": "Model_startup_script\\Qwen3-Embedding-8B.bat",
       "memory_mb": {
-        "rtx 4060": 6500
+        "rtx 4060": 6144
       }
     }
   },

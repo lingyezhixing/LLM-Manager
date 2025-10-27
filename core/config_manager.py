@@ -143,6 +143,7 @@ class ConfigManager:
                 adaptive_config.update({
                     "bat_path": config_data["bat_path"],
                     "memory_mb": config_data["memory_mb"],
+                    "required_devices": list(required_devices),  # 保留required_devices信息
                     "config_source": config_name
                 })
 

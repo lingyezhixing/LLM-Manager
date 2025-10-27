@@ -737,6 +737,11 @@ class ModelLifecycleManager:
             return True
 
         required_memory = model_config.get("memory_mb", {})
+        if not required_memory:
+            logger.warning("模型配置中没有memory_mb信息，跳过资源检查")
+            return True
+
+        logger.debug(f"检查模型资源需求: {required_memory}")
 
         for attempt in range(3):  # 最多尝试3次
             resource_ok = True
@@ -756,11 +761,15 @@ class ModelLifecycleManager:
 
                 device_info = device_plugin.get_devices_info()
                 available_mb = device_info['available_memory_mb']
+                logger.debug(f"设备 '{device_name}': 可用 {available_mb}MB, 需要 {required_mb}MB")
+
                 if available_mb < required_mb:
                     deficit = required_mb - available_mb
                     deficit_devices[device_name] = deficit
                     resource_ok = False
+                    logger.debug(f"设备 '{device_name}' 资源不足，缺少 {deficit}MB")
 
+            # 只有当所有设备都满足要求时才返回True
             if resource_ok:
                 logger.info("设备资源检查通过")
                 return True
@@ -789,20 +798,45 @@ class ModelLifecycleManager:
             logger.info("GPU监控已禁用，不进行资源释放")
             return False
 
+        target_devices = set(deficit_devices.keys())
+        logger.debug(f"需要释放资源的设备: {target_devices}")
+
         idle_candidates = []
         all_states = self.state_manager.get_all_states()
 
         for name, state in all_states.items():
             if state.status == ModelStatus.ROUTING:
-                idle_candidates.append((name, state.last_access or 0))
+                # 检查模型是否在目标设备上运行
+                model_config = state.current_config
+                if not model_config:
+                    logger.debug(f"模型 {name} 没有当前配置信息，跳过")
+                    continue
 
-        # 按最后访问时间排序
+                # 优先使用required_devices信息
+                if "required_devices" in model_config:
+                    model_devices = set(model_config["required_devices"])
+                else:
+                    # 备选方案：从模型配置中推断设备信息
+                    model_devices = set()
+                    for config_key, config_data in model_config.items():
+                        if config_key not in ["bat_path", "memory_mb", "config_source", "required_devices"]:
+                            # 这个config_key就是设备配置名
+                            model_devices.add(config_key)
+
+                # 检查设备是否有交集
+                if model_devices.intersection(target_devices):
+                    logger.debug(f"模型 {name} 运行在设备 {model_devices} 上，与目标设备 {target_devices} 有交集")
+                    idle_candidates.append((name, state.last_access or 0, model_devices))
+                else:
+                    logger.debug(f"模型 {name} 运行在设备 {model_devices} 上，与目标设备 {target_devices} 无交集，跳过")
+
+        # 按最后访问时间排序（最久未访问的优先停止）
         sorted_idle_models = sorted(idle_candidates, key=lambda x: x[1])
 
-        logger.info(f"找到 {len(sorted_idle_models)} 个空闲模型可供停止")
+        logger.info(f"找到 {len(sorted_idle_models)} 个运行在目标设备上的空闲模型可供停止")
 
-        for model_name, _ in sorted_idle_models:
-            logger.info(f"为释放资源，正在停止空闲模型: {model_name}")
+        for model_name, _, model_devices in sorted_idle_models:
+            logger.info(f"为释放资源，正在停止空闲模型: {model_name} (运行设备: {model_devices})")
             success = self.stop_model(model_name)
 
             if success:
@@ -812,7 +846,7 @@ class ModelLifecycleManager:
             else:
                 logger.warning(f"停止模型 {model_name} 失败")
 
-        logger.warning("无法释放足够的资源")
+        logger.warning("无法释放足够的资源：没有可停止的相关空闲模型")
         return False
 
     def _start_model_process(self, model_name: str, model_config: Dict[str, Any]) -> Result:
