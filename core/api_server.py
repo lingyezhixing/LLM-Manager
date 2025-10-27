@@ -52,8 +52,15 @@ class APIServer:
                           (tier.max_input_tokens == -1 or input_tokens <= tier.max_input_tokens))
 
             # 检查输出token范围（注意：min是不包含，max是包含，-1表示无上限）
-            output_match = (output_tokens > tier.min_output_tokens and
-                           (tier.max_output_tokens == -1 or output_tokens <= tier.max_output_tokens))
+            # 根据要求，如果最小输出为0，则需要包含0
+            if tier.min_output_tokens == 0:
+                # 当最小输出为0时，使用 >= 来包含0
+                output_match = (output_tokens >= tier.min_output_tokens and
+                            (tier.max_output_tokens == -1 or output_tokens <= tier.max_output_tokens))
+            else:
+                # 否则，保持原来的逻辑（min是不包含）
+                output_match = (output_tokens > tier.min_output_tokens and
+                            (tier.max_output_tokens == -1 or output_tokens <= tier.max_output_tokens))
 
             if input_match and output_match:
                 return tier
