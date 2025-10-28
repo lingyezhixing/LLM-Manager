@@ -279,6 +279,8 @@ class APIRouter:
             raise HTTPException(status_code=400, detail=error_message)
 
         self.increment_pending_requests(model_name)
+        # 更新模型最后访问时间 - 请求开始时更新
+        self.model_controller.concurrency_controller.update_last_access(model_name)
         request_start_time = time.time()  # 【新增】在请求转发前记录开始时间
 
         try:
@@ -321,6 +323,8 @@ class APIRouter:
                     finally:
                         # 此代码块在流完全消耗或关闭后执行
                         self.mark_request_completed(model_name)
+                        # 更新模型最后访问时间 - 请求结束时更新
+                        self.model_controller.concurrency_controller.update_last_access(model_name)
                         logger.debug(f"模型 '{model_name}' 的流式响应已完成，请求计数已递减。")
 
                 return StreamingResponse(
@@ -334,6 +338,8 @@ class APIRouter:
                 request_end_time = time.time()  # 【新增】在读取完响应后记录结束时间
                 await response.aclose()
                 self.mark_request_completed(model_name)
+                # 更新模型最后访问时间 - 请求结束时更新
+                self.model_controller.concurrency_controller.update_last_access(model_name)
                 logger.debug(f"[API_ROUTER] 非流式响应读取完成 - 模型: {model_name}, 响应大小: {len(content)} bytes")
 
                 try:
@@ -356,6 +362,8 @@ class APIRouter:
         except Exception as e:
             logger.error(f"处理对 '{model_name}' 的请求时出错: {e}", exc_info=True)
             self.mark_request_completed(model_name)
+            # 更新模型最后访问时间 - 即使请求出错也更新访问时间
+            self.model_controller.concurrency_controller.update_last_access(model_name)
             if isinstance(e, HTTPException):
                 raise e
             raise HTTPException(status_code=500, detail=f"内部服务器错误: {str(e)}")
