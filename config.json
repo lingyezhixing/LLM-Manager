@@ -11,7 +11,6 @@
   },
     "Qwen3-Coder-30B-A3B-Instruct-UD-64K": {
     "aliases": [
-      "Qwen3-Coder-30B-A3B-Instruct-64K",
       "Qwen3-Coder-30B-A3B-Instruct"
     ],
     "mode": "Chat",
@@ -24,7 +23,7 @@
       ],
       "bat_path": "Model_startup_script\\Qwen3-Coder-30B-A3B-Instruct-UD-64K.bat",
       "memory_mb": {
-        "rtx 4060": 6144,
+        "rtx 4060": 5120,
         "v100": 16000
       }
     },
@@ -38,6 +37,48 @@
       }
     }
   },
+    "Qwen3-Coder-30B-A3B-Instruct-UD-128K": {
+    "aliases": [
+      "Qwen3-Coder-30B-A3B-Instruct-UD-128K"
+    ],
+    "mode": "Chat",
+    "port": 10002,
+    "auto_start": false,
+    "RTX4060-V100-CPU": {
+      "required_devices": [
+        "rtx 4060",
+        "v100",
+        "CPU"
+      ],
+      "bat_path": "Model_startup_script\\Qwen3-Coder-30B-A3B-Instruct-UD-128K.bat",
+      "memory_mb": {
+        "rtx 4060": 5120,
+        "v100": 16000,
+        "CPU": 10240
+      }
+    }
+  },
+  "Qwen3-Coder-30B-A3B-Instruct-UD-256K": {
+    "aliases": [
+      "Qwen3-Coder-30B-A3B-Instruct-UD-256K"
+    ],
+    "mode": "Chat",
+    "port": 10003,
+    "auto_start": false,
+    "RTX4060-V100-CPU": {
+      "required_devices": [
+        "rtx 4060",
+        "v100",
+        "CPU"
+      ],
+      "bat_path": "Model_startup_script\\Qwen3-Coder-30B-A3B-Instruct-UD-256K.bat",
+      "memory_mb": {
+        "rtx 4060": 5120,
+        "v100": 16000,
+        "CPU": 10240
+      }
+    }
+  },
   "Qwen3-30B-A3B-Instruct-2507-UD-64K": {
     "aliases": [
       "Qwen3-30B-A3B-Instruct-2507-64K",
@@ -45,7 +86,7 @@
       "Qwen3-30B-A3B-Instruct"
     ],
     "mode": "Chat",
-    "port": 10002,
+    "port": 10004,
     "auto_start": false,
     "RTX4060-V100": {
       "required_devices": [
@@ -75,7 +116,7 @@
       "Qwen3-30B-A3B-Thinking"
     ],
     "mode": "Chat",
-    "port": 10003,
+    "port": 10005,
     "auto_start": false,
     "RTX4060-V100": {
       "required_devices": [
@@ -103,7 +144,7 @@
       "Qwen3-14B-AWQ-32K"
     ],
     "mode": "Chat",
-    "port": 10004,
+    "port": 10006,
     "auto_start": false,
     "V100": {
       "required_devices": [
@@ -123,7 +164,7 @@
       "Tifa-Deepsex-unlimited"
     ],
     "mode": "Chat",
-    "port": 10005,
+    "port": 10007,
     "auto_start": false,
     "V100": {
       "required_devices": [
@@ -140,7 +181,7 @@
       "Tifa-DeepsexV3-80K"
     ],
     "mode": "Chat",
-    "port": 10006,
+    "port": 10008,
     "auto_start": false,
     "RTX4060-V100": {
       "required_devices": [
@@ -159,7 +200,7 @@
       "Qwen3-8B-AWQ"
     ],
     "mode": "Chat",
-    "port": 10007,
+    "port": 10009,
     "auto_start": false,
     "V100": {
       "required_devices": [
@@ -176,7 +217,7 @@
       "Qwen3-14B-AWQ"
     ],
     "mode": "Chat",
-    "port": 10008,
+    "port": 10010,
     "auto_start": false,
     "V100": {
       "required_devices": [
@@ -194,7 +235,7 @@
       "Sakura-14B-Qwen2.5-v1.0"
     ],
     "mode": "Chat",
-    "port": 10009,
+    "port": 10011,
     "auto_start": false,
     "V100": {
       "required_devices": [
@@ -212,7 +253,7 @@
       "Baichuan-M2-32B"
     ],
     "mode": "Chat",
-    "port": 10011,
+    "port": 10012,
     "auto_start": false,
     "RTX4060-V100": {
       "required_devices": [
@@ -231,15 +272,15 @@
       "Qwen3-Embedding-8B"
     ],
     "mode": "Embedding",
-    "port": 10012,
+    "port": 10013,
     "auto_start": false,
-    "RTX4060": {
+    "CPU": {
       "required_devices": [
-        "rtx 4060"
+        "CPU"
       ],
       "bat_path": "Model_startup_script\\Qwen3-Embedding-8B.bat",
       "memory_mb": {
-        "rtx 4060": 6144
+        "CPU": 6144
       }
     }
   },
@@ -248,7 +289,7 @@
       "Dmeta-embedding-zh-small"
     ],
     "mode": "Embedding",
-    "port": 10013,
+    "port": 10014,
     "auto_start": false,
     "RTX4060": {
       "required_devices": [
@@ -265,7 +306,7 @@
       "bge-reranker-v2-m3"
     ],
     "mode": "Reranker",
-    "port": 10014,
+    "port": 10015,
     "auto_start": false,
     "RTX4060": {
       "required_devices": [
