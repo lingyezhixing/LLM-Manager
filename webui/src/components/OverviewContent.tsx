@@ -78,19 +78,46 @@ const OverviewContent: React.FC<OverviewContentProps> = ({ timeRange }) => {
     }
   }
 
+  // 智能时间格式化函数
   const formatTime = (timestamp: number): string => {
-    return new Date(timestamp * 1000).toLocaleTimeString('zh-CN', {
-      hour: '2-digit',
-      minute: '2-digit'
-    })
+    // 如果没有时间范围，默认只显示时间
+    if (!timeRange) {
+      return new Date(timestamp * 1000).toLocaleTimeString('zh-CN', {
+        hour: '2-digit',
+        minute: '2-digit'
+      })
+    }
+
+    // 计算时间跨度（秒）
+    const durationSec = (timeRange.end.getTime() - timeRange.start.getTime()) / 1000
+    const date = new Date(timestamp * 1000)
+
+    // 场景 1: 跨度小于等于 24 小时 -> 显示 "HH:mm"
+    if (durationSec <= 86400) {
+      return date.toLocaleTimeString('zh-CN', {
+        hour: '2-digit',
+        minute: '2-digit'
+      })
+    }
+    // 场景 2: 跨度大于 24 小时 且 小于等于 7 天 -> 显示 "MM-DD HH:mm"
+    else if (durationSec <= 604800) {
+      const month = (date.getMonth() + 1).toString().padStart(2, '0')
+      const day = date.getDate().toString().padStart(2, '0')
+      const hour = date.getHours().toString().padStart(2, '0')
+      const minute = date.getMinutes().toString().padStart(2, '0')
+      return `${month}-${day} ${hour}:${minute}`
+    }
+    // 场景 3: 跨度大于 7 天 -> 显示 "YYYY-MM-DD"
+    else {
+      const year = date.getFullYear()
+      const month = (date.getMonth() + 1).toString().padStart(2, '0')
+      const day = date.getDate().toString().padStart(2, '0')
+      return `${year}-${month}-${day}`
+    }
   }
 
   const formatNumber = (value: number): string => {
     return value.toFixed(1)
-  }
-
-  const formatCost = (value: number): string => {
-    return `¥${value.toFixed(4)}`
   }
 
   // Token吞吐量图表数据
