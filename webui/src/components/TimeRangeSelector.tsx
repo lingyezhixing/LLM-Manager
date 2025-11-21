@@ -18,8 +18,13 @@ const TimeRangeSelector: React.FC<TimeRangeSelectorProps> = ({ onTimeRangeChange
     const tomorrow = new Date(today)
     tomorrow.setDate(today.getDate() + 1)
 
+    // 修复：使用本地时间而非 UTC 时间格式化
+    // 之前的 toISOString() 会导致在东八区凌晨 0-8 点时日期显示为前一天
     const formatDate = (date: Date) => {
-      return date.toISOString().split('T')[0] // YYYY-MM-DD
+      const year = date.getFullYear()
+      const month = String(date.getMonth() + 1).padStart(2, '0')
+      const day = String(date.getDate()).padStart(2, '0')
+      return `${year}-${month}-${day}`
     }
 
     setStartDate(formatDate(today))
@@ -48,6 +53,7 @@ const TimeRangeSelector: React.FC<TimeRangeSelectorProps> = ({ onTimeRangeChange
     }
   }
 
+  // 监听任何时间输入的变化
   useEffect(() => {
     handleTimeChange()
   }, [startDate, startHour, startMinute, endDate, endHour, endMinute])
