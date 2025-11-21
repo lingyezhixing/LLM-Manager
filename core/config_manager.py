@@ -140,9 +140,11 @@ class ConfigManager:
                         del adaptive_config[key]
 
                 # 添加新的配置值
+                # 【修复】明确包含 required_devices，确保后续资源释放逻辑能读取到占用设备
                 adaptive_config.update({
                     "bat_path": config_data["bat_path"],
                     "memory_mb": config_data["memory_mb"],
+                    "required_devices": config_data.get("required_devices", []),
                     "config_source": config_name
                 })
 

@@ -6,6 +6,7 @@
 import subprocess
 import time
 import threading
+import logging
 import os
 import concurrent.futures
 import queue
@@ -461,7 +462,9 @@ class ModelController:
 
         # 检查设备在线状态 (使用缓存)
         online_devices = self.plugin_manager.get_cached_online_devices()
-        if not online_devices:
+        
+        # 如果禁用了监控，我们跳过“无在线设备”的检查，允许尝试启动
+        if not online_devices and not self.config_manager.is_gpu_monitoring_disabled():
             logger.warning("没有在线设备，跳过自动启动模型")
             return
 
@@ -664,6 +667,7 @@ class ModelController:
         """
         智能启动模型 - 包含设备检查和资源管理
         【修复】使用缓存的设备状态，防止在高并发下阻塞
+        【修复】如果 Disable_GPU_monitoring 为 True，则强制启动，不依赖设备在线状态
 
         Args:
             primary_name: 模型主名称
@@ -676,8 +680,22 @@ class ModelController:
         # 使用 try-catch-finally 结构确保状态一致性
         try:
             # 获取自适应配置
-            # 【关键修改】获取当前在线的设备 (使用缓存，避免阻塞)
-            online_devices = self.plugin_manager.get_cached_online_devices()
+            if self.config_manager.is_gpu_monitoring_disabled():
+                # 【修复】如果禁用了GPU监控，强制假设所有所需设备在线
+                # 从模型基础配置中提取所有可能的 required_devices
+                logger.info("GPU监控已禁用，忽略设备在线状态，强制获取最佳配置...")
+                online_devices = set()
+                base_config = self.config_manager.get_model_config(primary_name)
+                if base_config:
+                    for key, val in base_config.items():
+                        if isinstance(val, dict) and "required_devices" in val:
+                            online_devices.update(val["required_devices"])
+                # 如果没有获取到设备（配置可能有误），尝试使用所有已知的插件名称作为 fallback
+                if not online_devices:
+                    online_devices = set(self.plugin_manager.get_all_device_plugins().keys())
+            else:
+                # 【关键修改】获取当前在线的设备 (使用缓存，避免阻塞)
+                online_devices = self.plugin_manager.get_cached_online_devices()
 
             model_config = self.config_manager.get_adaptive_model_config(primary_name, online_devices)
             if not model_config:
@@ -760,6 +778,7 @@ class ModelController:
         """
         检查并释放设备资源
         【修改】使用缓存的设备状态，避免阻塞
+        【修复】如果禁用监控，立即返回True，确保无条件启动
 
         Args:
             model_config: 模型配置
@@ -769,7 +788,7 @@ class ModelController:
         """
         # 如果禁用了GPU监控，跳过所有资源检查
         if self.config_manager.is_gpu_monitoring_disabled():
-            logger.info("GPU监控已禁用，跳过资源检查")
+            logger.info("GPU监控已禁用，跳过资源检查与释放")
             return True
 
         required_memory = model_config.get("memory_mb", {})
@@ -834,6 +853,8 @@ class ModelController:
     def _stop_idle_models_for_resources(self, deficit_devices: Dict[str, int], model_to_start: Dict[str, Any]) -> bool:
         """
         停止空闲模型以释放资源
+        【修复】只停止占用了 短缺设备 资源的空闲模型
+        【修复】增强了对 required_devices 的读取健壮性
 
         Args:
             deficit_devices: 缺乏资源的设备列表
@@ -852,6 +873,27 @@ class ModelController:
         for name, state in self.models_state.items():
             with state['lock']:
                 if state['status'] == ModelStatus.ROUTING.value:
+                    # 【修复逻辑】检查该模型是否使用了我们需要的设备
+                    current_config = state.get('current_config')
+                    if not current_config:
+                        continue
+                    
+                    # 获取模型占用的设备列表
+                    # 优先使用 required_devices (现在由 ConfigManager 填充)
+                    # 兜底使用 memory_mb 的 keys，防止数据结构异常导致 used_devices 为空
+                    used_devices = set(current_config.get('required_devices', []))
+                    if not used_devices:
+                        used_devices = set(current_config.get('memory_mb', {}).keys())
+                    
+                    needed_devices = set(deficit_devices.keys())
+                    
+                    logger.debug(f"资源释放检查 - 模型: {name}, 占用设备: {used_devices}, 短缺设备: {needed_devices}")
+
+                    # 如果没有交集，说明关闭该模型无法释放我们需要的设备资源
+                    if used_devices.isdisjoint(needed_devices):
+                        logger.debug(f"跳过空闲模型 {name}: 占用设备 {used_devices} 与需求设备 {needed_devices} 无交集")
+                        continue
+                        
                     idle_candidates.append(name)
 
         # 按最后访问时间排序
@@ -860,7 +902,11 @@ class ModelController:
             key=lambda m: self.models_state[m].get('last_access', 0) or 0
         )
 
-        logger.info(f"找到 {len(sorted_idle_models)} 个空闲模型可供停止: {sorted_idle_models}")
+        if not sorted_idle_models:
+            logger.info("没有找到占用相关设备的可停止空闲模型")
+            return False
+
+        logger.info(f"找到 {len(sorted_idle_models)} 个占用相关设备的空闲模型可供停止: {sorted_idle_models}")
 
         for model_name in sorted_idle_models:
             logger.info(f"为释放资源，正在停止空闲模型: {model_name}")
