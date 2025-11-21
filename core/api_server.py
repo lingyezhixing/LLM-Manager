@@ -12,7 +12,7 @@ import numpy as np
 from utils.logger import get_logger
 from core.config_manager import ConfigManager
 from core.model_controller import ModelController
-from core.data_manager import Monitor
+from core.data_manager import Monitor, TierPricing
 from core.api_router import APIRouter, TokenTracker
 
 logger = get_logger(__name__)
@@ -21,15 +21,20 @@ logger = get_logger(__name__)
 class APIServer:
     """API服务器 - 负责FastAPI应用管理和路由配置"""
 
-    def __init__(self, config_manager: ConfigManager):
+    def __init__(self, config_manager: ConfigManager, model_controller: ModelController):
         self.config_manager = config_manager
-        self.model_controller = ModelController(self.config_manager)
+        # 【核心修复】直接使用传入的控制器实例，不再创建新实例
+        self.model_controller = model_controller
         self.monitor = Monitor()
         self.token_tracker = TokenTracker(self.monitor, self.config_manager)
         self.api_router = APIRouter(self.config_manager, self.model_controller)
         self.app = FastAPI(title="LLM-Manager API", version="1.0.0")
         self._setup_routes()
-        self.model_controller.start_auto_start_models()
+        
+        # 【核心修复】移除此处的自动启动调用
+        # 自动启动逻辑统一由 main.py 中的 Application 类控制，避免双重启动和竞态条件
+        # self.model_controller.start_auto_start_models()
+        
         logger.info("API服务器初始化完成")
         logger.debug("[API_SERVER] token跟踪功能已激活")
 
@@ -1296,9 +1301,11 @@ class APIServer:
 _app_instance: Optional[FastAPI] = None
 _server_instance: Optional[APIServer] = None
 
-def run_api_server(config_manager: ConfigManager, host: Optional[str] = None, port: Optional[int] = None):
+# 【核心修改】函数签名增加 model_controller
+def run_api_server(config_manager: ConfigManager, model_controller: ModelController, host: Optional[str] = None, port: Optional[int] = None):
     """运行API服务器"""
     global _app_instance, _server_instance
-    _server_instance = APIServer(config_manager)
+    # 【核心修改】传递 model_controller 实例
+    _server_instance = APIServer(config_manager, model_controller)
     _app_instance = _server_instance.app
     _server_instance.run(host, port)

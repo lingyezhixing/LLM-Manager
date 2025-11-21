@@ -7,7 +7,6 @@ LLM-Manager 主程序入口
 
 import threading
 import time
-import subprocess
 import sys
 import os
 import concurrent.futures
@@ -142,9 +141,10 @@ class Application:
 
         self.logger.info("正在启动API服务器...")
 
+        # 【核心修复】将 self.model_controller 传递给 API Server，确保单例
         api_thread = threading.Thread(
             target=run_api_server,
-            args=(self.config_manager,),
+            args=(self.config_manager, self.model_controller),
             daemon=False  # 不能设置为daemon，否则程序会立即退出
         )
         api_thread.start()
@@ -257,6 +257,7 @@ class Application:
             self.initialize()
 
             # 启动自动启动模型（在后台线程中）
+            # 【注意】这里是唯一触发自动启动的地方
             auto_start_future = self.executor.submit(self._start_auto_start_models)
 
             # 并行启动核心服务

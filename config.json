@@ -43,7 +43,7 @@
     ],
     "mode": "Embedding",
     "port": 10002,
-    "auto_start": true,
+    "auto_start": false,
     "V100-CPU": {
       "required_devices": [
         "v100",
