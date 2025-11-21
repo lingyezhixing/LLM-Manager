@@ -1,6 +1,5 @@
 from fastapi import FastAPI, Request
 from fastapi.responses import StreamingResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 import os
 from typing import List, Optional
@@ -13,7 +12,7 @@ import numpy as np
 from utils.logger import get_logger
 from core.config_manager import ConfigManager
 from core.model_controller import ModelController
-from core.data_manager import Monitor, TierPricing
+from core.data_manager import Monitor
 from core.api_router import APIRouter, TokenTracker
 
 logger = get_logger(__name__)
@@ -402,49 +401,10 @@ class APIServer:
         @self.app.get("/api/devices/info")
         async def get_device_info():
             try:
-                device_plugins = self.model_controller.plugin_manager.get_all_device_plugins()
-
-                async def get_single_device_info(device_name: str, device_plugin):
-                    """异步获取单个设备信息，带超时和错误处理"""
-                    try:
-                        # 使用 asyncio.wait_for 设置超时，并在线程池中执行IO操作
-                        is_online = await asyncio.wait_for(
-                            asyncio.to_thread(device_plugin.is_online),
-                            timeout=15.0
-                        )
-
-                        device_info = await asyncio.wait_for(
-                            asyncio.to_thread(device_plugin.get_devices_info),
-                            timeout=15.0
-                        )
-
-                        return device_name, {"online": is_online, "info": device_info}
-                    except asyncio.TimeoutError:
-                        logger.warning(f"[API_SERVER] 获取设备 {device_name} 信息超时")
-                        return device_name, {"online": False, "error": "获取设备信息超时"}
-                    except Exception as e:
-                        logger.error(f"[API_SERVER] 获取设备 {device_name} 信息失败: {e}")
-                        return device_name, {"online": False, "error": str(e)}
-
-                # 创建所有设备的异步任务
-                tasks = [
-                    get_single_device_info(device_name, device_plugin)
-                    for device_name, device_plugin in device_plugins.items()
-                ]
-
-                # 并发执行所有任务
-                results = await asyncio.gather(*tasks, return_exceptions=True)
-
-                # 处理结果
-                devices_info = {}
-                for result in results:
-                    if isinstance(result, Exception):
-                        logger.error(f"[API_SERVER] 设备信息获取任务异常: {result}")
-                        continue
-
-                    device_name, device_data = result
-                    devices_info[device_name] = device_data
-
+                # 【核心修改】不再现场查询设备（会导致死锁），而是直接获取插件管理器中缓存的设备快照
+                # 这将是瞬间返回的，不会阻塞 API 线程，也不会抢占模型启动线程的 GPU 驱动锁
+                devices_info = self.model_controller.plugin_manager.get_device_status_snapshot()
+                
                 return {"success": True, "devices": devices_info}
             except Exception as e:
                 logger.error(f"[API_SERVER] 获取设备信息失败: {e}")

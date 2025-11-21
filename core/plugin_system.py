@@ -8,7 +8,8 @@ import importlib.util
 import inspect
 import logging
 import time
-from typing import Dict, List, Type, Any, Optional, Tuple
+import threading
+from typing import Dict, List, Type, Any, Optional
 from abc import ABC
 
 logger = logging.getLogger(__name__)
@@ -198,6 +199,86 @@ class PluginManager:
         self.device_plugins: Dict[str, Any] = {}
         self.interface_plugins: Dict[str, Any] = {}
         self.last_reload_time = 0
+        
+        # --- 设备状态缓存机制 (解决死锁的核心) ---
+        self.device_status_cache = {}
+        self.cache_lock = threading.RLock()
+        self.monitor_thread = None
+        self.is_monitoring = False
+
+    def start_monitor(self):
+        """启动设备状态后台监控线程"""
+        if self.is_monitoring:
+            return
+        
+        self.is_monitoring = True
+        # 先进行一次同步更新，确保启动时缓存有数据
+        self._update_device_status_once()
+        
+        self.monitor_thread = threading.Thread(target=self._monitor_devices_loop, daemon=True)
+        self.monitor_thread.start()
+        logger.info("设备状态监控线程已启动")
+
+    def stop_monitor(self):
+        """停止设备状态监控线程"""
+        self.is_monitoring = False
+        if self.monitor_thread and self.monitor_thread.is_alive():
+            self.monitor_thread.join(timeout=2)
+
+    def _monitor_devices_loop(self):
+        """后台循环更新设备状态"""
+        while self.is_monitoring:
+            try:
+                self._update_device_status_once()
+            except Exception as e:
+                logger.error(f"设备状态更新失败: {e}")
+            
+            # 休眠3秒，减少对底层驱动的压力
+            for _ in range(30):
+                if not self.is_monitoring:
+                    break
+                time.sleep(0.1)
+
+    def _update_device_status_once(self):
+        """执行一次设备状态更新"""
+        new_cache = {}
+        for name, plugin in self.device_plugins.items():
+            try:
+                # 注意：这些调用可能会阻塞，放在后台线程执行
+                is_online = plugin.is_online() if hasattr(plugin, 'is_online') else False
+                device_info = plugin.get_devices_info() if hasattr(plugin, 'get_devices_info') and is_online else None
+                
+                new_cache[name] = {
+                    "online": is_online,
+                    "info": device_info,
+                    "type": type(plugin).__name__
+                }
+            except Exception as e:
+                logger.warning(f"更新设备 {name} 状态时出错: {e}")
+                new_cache[name] = {
+                    "online": False, 
+                    "error": str(e),
+                    "type": type(plugin).__name__
+                }
+
+        with self.cache_lock:
+            self.device_status_cache = new_cache
+
+    def get_device_status_snapshot(self) -> Dict[str, Any]:
+        """
+        获取设备状态的快照（从缓存读取，非阻塞）
+        用于API快速响应和模型启动前的快速检查
+        """
+        with self.cache_lock:
+            # 返回深拷贝副本，防止外部修改
+            return {k: v.copy() for k, v in self.device_status_cache.items()}
+
+    def get_cached_online_devices(self) -> set:
+        """获取当前缓存中显示的在线设备集合"""
+        with self.cache_lock:
+            return {name for name, data in self.device_status_cache.items() if data.get("online", False)}
+
+    # ----------------------------------------
 
     def load_all_plugins(self, model_manager=None) -> Dict[str, Dict[str, Any]]:
         """加载所有插件"""
@@ -209,10 +290,20 @@ class PluginManager:
         # 加载设备插件
         try:
             self.device_plugins = self.device_loader.load_plugins()
+            
+            # 初始填充缓存（使用默认值，等待monitor线程更新真实值）
+            with self.cache_lock:
+                for name, plugin in self.device_plugins.items():
+                    if name not in self.device_status_cache:
+                        self.device_status_cache[name] = {
+                            "online": False,
+                            "info": None,
+                            "type": type(plugin).__name__
+                        }
+
             result["device_plugins"] = {
                 name: {
                     "status": "loaded",
-                    "online": plugin.is_online() if hasattr(plugin, 'is_online') else False,
                     "type": type(plugin).__name__
                 }
                 for name, plugin in self.device_plugins.items()
@@ -263,20 +354,25 @@ class PluginManager:
         return self.interface_plugins.copy()
 
     def get_plugin_status(self) -> Dict[str, Any]:
-        """获取所有插件状态"""
+        """
+        获取所有插件状态
+        【修改】现在使用缓存数据来报告设备状态，避免阻塞
+        """
+        device_status = self.get_device_status_snapshot()
+        
         return {
             "device_plugins": {
                 name: {
-                    "online": plugin.is_online() if hasattr(plugin, 'is_online') else False,
-                    "type": type(plugin).__name__,
-                    "device_info": plugin.get_devices_info() if hasattr(plugin, 'get_devices_info') else None
+                    "online": data.get("online", False),
+                    "type": data.get("type", "Unknown"),
+                    "device_info": data.get("info", None)
                 }
-                for name, plugin in self.device_plugins.items()
+                for name, data in device_status.items()
             },
             "interface_plugins": {
                 name: {
                     "type": type(plugin).__name__,
-                    "supported_modes": [name]  # 接口名称就是支持的模式
+                    "supported_modes": [name]
                 }
                 for name, plugin in self.interface_plugins.items()
             },
@@ -373,4 +469,3 @@ class PluginManager:
     def get_interface_loader(self) -> InterfacePluginLoader:
         """获取接口插件加载器"""
         return self.interface_loader
-

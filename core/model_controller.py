@@ -6,7 +6,6 @@
 import subprocess
 import time
 import threading
-import logging
 import os
 import concurrent.futures
 import queue
@@ -442,11 +441,14 @@ class ModelController:
             result = self.plugin_manager.load_all_plugins(model_manager=self)
             logger.info(f"设备插件自动加载完成: {list(self.plugin_manager.get_all_device_plugins().keys())}")
             logger.info(f"接口插件自动加载完成: {list(self.plugin_manager.get_all_interface_plugins().keys())}")
+            
+            # 启动设备状态监控线程，使用缓存机制避免死锁
+            self.plugin_manager.start_monitor()
 
-            # 检查是否有设备在线
-            online_devices = [name for name, plugin in self.plugin_manager.get_all_device_plugins().items() if plugin.is_online()]
+            # 检查是否有设备在线 (使用缓存读取)
+            online_devices = self.plugin_manager.get_cached_online_devices()
             if online_devices:
-                logger.info(f"在线设备: {online_devices}")
+                logger.info(f"在线设备: {list(online_devices)}")
             else:
                 logger.warning("未检测到在线设备")
 
@@ -457,8 +459,8 @@ class ModelController:
         """优化的启动所有标记为自动启动的模型 - 支持并行启动"""
         logger.info("检查需要自动启动的模型...")
 
-        # 检查设备在线状态
-        online_devices = [name for name, plugin in self.plugin_manager.get_all_device_plugins().items() if plugin.is_online()]
+        # 检查设备在线状态 (使用缓存)
+        online_devices = self.plugin_manager.get_cached_online_devices()
         if not online_devices:
             logger.warning("没有在线设备，跳过自动启动模型")
             return
@@ -661,6 +663,7 @@ class ModelController:
     def _start_model_intelligent(self, primary_name: str) -> Tuple[bool, str]:
         """
         智能启动模型 - 包含设备检查和资源管理
+        【修复】使用缓存的设备状态，防止在高并发下阻塞
 
         Args:
             primary_name: 模型主名称
@@ -669,43 +672,43 @@ class ModelController:
             (成功状态, 消息)
         """
         state = self.models_state[primary_name]
-
-        # 获取自适应配置
-        # 获取当前在线的设备
-        online_devices = set()
-        for device_name, device_plugin in self.plugin_manager.get_all_device_plugins().items():
-            if device_plugin.is_online():
-                online_devices.add(device_name)
-
-        model_config = self.config_manager.get_adaptive_model_config(primary_name, online_devices)
-        if not model_config:
-            current_devices = [name for name, plugin in self.plugin_manager.get_all_device_plugins().items() if plugin.is_online()]
-            error_msg = f"启动 '{primary_name}' 失败：没有适合当前设备状态 {current_devices} 的配置方案"
-            state['status'] = ModelStatus.FAILED.value
-            state['failure_reason'] = error_msg
-            logger.error(error_msg)
-            return False, error_msg
-
-        state['current_config'] = model_config
-
-        # 更新状态为启动脚本阶段
-        with state['lock']:
-            state['status'] = ModelStatus.INIT_SCRIPT.value
-
-        # 检查设备资源
-        if not self._check_and_free_resources(model_config):
-            error_msg = f"启动 '{primary_name}' 失败：设备资源不足"
-            state['status'] = ModelStatus.FAILED.value
-            state['failure_reason'] = error_msg
-            logger.error(error_msg)
-            return False, error_msg
-
-        # 启动模型
-        logger.info(f"正在启动模型: {primary_name} (配置方案: {model_config.get('config_source', '默认')})")
-        logger.info(f"使用配置方案: {model_config.get('config_source', '默认')}")
-        logger.info(f"启动脚本: {model_config['bat_path']}")
-
+        
+        # 使用 try-catch-finally 结构确保状态一致性
         try:
+            # 获取自适应配置
+            # 【关键修改】获取当前在线的设备 (使用缓存，避免阻塞)
+            online_devices = self.plugin_manager.get_cached_online_devices()
+
+            model_config = self.config_manager.get_adaptive_model_config(primary_name, online_devices)
+            if not model_config:
+                error_msg = f"启动 '{primary_name}' 失败：没有适合当前设备状态 {list(online_devices)} 的配置方案"
+                # 状态设置和错误返回在 except 或 finally 中处理，或直接在此处返回
+                with state['lock']:
+                    state['status'] = ModelStatus.FAILED.value
+                    state['failure_reason'] = error_msg
+                logger.error(error_msg)
+                return False, error_msg
+
+            state['current_config'] = model_config
+
+            # 更新状态为启动脚本阶段
+            with state['lock']:
+                state['status'] = ModelStatus.INIT_SCRIPT.value
+
+            # 检查设备资源
+            if not self._check_and_free_resources(model_config):
+                error_msg = f"启动 '{primary_name}' 失败：设备资源不足"
+                with state['lock']:
+                    state['status'] = ModelStatus.FAILED.value
+                    state['failure_reason'] = error_msg
+                logger.error(error_msg)
+                return False, error_msg
+
+            # 启动模型
+            logger.info(f"正在启动模型: {primary_name} (配置方案: {model_config.get('config_source', '默认')})")
+            logger.info(f"使用配置方案: {model_config.get('config_source', '默认')}")
+            logger.info(f"启动脚本: {model_config['bat_path']}")
+
             # 使用进程管理器启动模型进程
             project_root = os.path.dirname(os.path.abspath(self.config_manager.config_path))
             process_name = f"model_{primary_name}"
@@ -729,8 +732,9 @@ class ModelController:
 
             if not success:
                 error_msg = f"启动模型进程失败: {message}"
-                state['status'] = ModelStatus.FAILED.value
-                state['failure_reason'] = error_msg
+                with state['lock']:
+                    state['status'] = ModelStatus.FAILED.value
+                    state['failure_reason'] = error_msg
                 logger.error(error_msg)
                 return False, error_msg
 
@@ -746,14 +750,16 @@ class ModelController:
             return self._perform_health_checks(primary_name, model_config)
 
         except Exception as e:
-            logger.error(f"启动模型进程失败: {e}")
-            state['status'] = ModelStatus.FAILED.value
-            state['failure_reason'] = str(e)
-            return False, f"启动模型进程失败: {e}"
+            logger.error(f"智能启动过程发生异常: {e}")
+            with state['lock']:
+                state['status'] = ModelStatus.FAILED.value
+                state['failure_reason'] = str(e)
+            return False, f"启动过程异常: {e}"
 
     def _check_and_free_resources(self, model_config: Dict[str, Any]) -> bool:
         """
         检查并释放设备资源
+        【修改】使用缓存的设备状态，避免阻塞
 
         Args:
             model_config: 模型配置
@@ -772,23 +778,33 @@ class ModelController:
             resource_ok = True
             deficit_devices = {}
 
+            # 获取所有设备的状态快照 (缓存读取)
+            device_status_map = self.plugin_manager.get_device_status_snapshot()
+
             # 检查每个设备的内存
             for device_name, required_mb in required_memory.items():
-                device_plugin = self.plugin_manager.get_device_plugin(device_name)
-                if not device_plugin:
+                device_status = device_status_map.get(device_name)
+                
+                if not device_status:
                     logger.warning(f"配置中的设备 '{device_name}' 未找到插件，跳过")
                     continue
 
-                if not device_plugin.is_online():
+                if not device_status.get('online', False):
                     logger.warning(f"设备 '{device_name}' 不在线")
                     resource_ok = False
                     break
 
-                device_info = device_plugin.get_devices_info()
-                available_mb = device_info['available_memory_mb']
-                if available_mb < required_mb:
-                    deficit = required_mb - available_mb
-                    deficit_devices[device_name] = deficit
+                device_info = device_status.get('info')
+                if device_info:
+                    available_mb = device_info.get('available_memory_mb', 0)
+                    if available_mb < required_mb:
+                        deficit = required_mb - available_mb
+                        deficit_devices[device_name] = deficit
+                        resource_ok = False
+                else:
+                    # 在线但没有详细信息，保守起见认为不满足，或者跳过？
+                    # 这里假设没信息就是不满足
+                    logger.warning(f"无法获取设备 '{device_name}' 的内存信息")
                     resource_ok = False
 
             if resource_ok:
@@ -801,8 +817,10 @@ class ModelController:
                 # 尝试停止空闲模型释放资源
                 logger.info("尝试停止空闲模型以释放资源...")
                 if self._stop_idle_models_for_resources(deficit_devices, model_config):
-                    logger.info("资源释放完成，重新检查设备状态...")
+                    logger.info("资源释放完成，等待系统刷新...")
                     time.sleep(3)  # 给系统一些时间来释放资源
+                    # 这里需要等待Monitor线程更新缓存，或者强制Monitor更新一次？
+                    # 由于Monitor是独立的，等待3秒应该足够它更新一次缓存
                     # 继续下一次循环，重新检查实际可用资源
                 else:
                     logger.warning("无法释放足够的资源")
@@ -1137,15 +1155,14 @@ class ModelController:
         status_copy = {}
         now = time.time()
 
+        # 【关键修改】使用缓存的设备状态，避免阻塞
+        online_devices = self.plugin_manager.get_cached_online_devices()
+
         for primary_name, state in self.models_state.items():
             idle_seconds = (now - state['last_access']) if state.get('last_access') else -1
             config = self.config_manager.get_model_config(primary_name)
 
-            # 获取当前在线的设备
-            online_devices = set()
-            for device_name, device_plugin in self.plugin_manager.get_all_device_plugins().items():
-                if device_plugin.is_online():
-                    online_devices.add(device_name)
+            # 计算自适应配置
             adaptive_config = self.config_manager.get_adaptive_model_config(primary_name, online_devices)
 
             status_copy[primary_name] = {
@@ -1239,6 +1256,10 @@ class ModelController:
         logger.info("正在快速关闭模型控制器...")
         self.is_running = False
         self.shutdown_event.set()
+        
+        # 停止插件监控线程
+        if self.plugin_manager:
+            self.plugin_manager.stop_monitor()
 
         # 取消所有未完成的启动任务
         for model_name, future in self.startup_futures.items():
