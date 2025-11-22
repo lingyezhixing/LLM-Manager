@@ -1,6 +1,7 @@
 """
 统一的进程管理器
 提供简单但完整的进程管理功能，包括启动、追踪和关闭进程
+修复：解决进程列表为空时 cleanup 方法因未设置事件而死锁超时的问题
 """
 
 import subprocess
@@ -422,6 +423,8 @@ class ProcessManager:
             process_names = list(self.processes.keys())
 
         if not process_names:
+            # 【修复】如果没有进程需要停止，立即设置完成信号
+            self._process_cleanup_complete.set()
             return results
 
         logger.info(f"并行停止 {len(process_names)} 个进程...")
