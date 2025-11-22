@@ -5,7 +5,6 @@
 
 import json
 import threading
-import logging
 import os
 from typing import Dict, List, Optional, Any, Set
 from utils.logger import get_logger

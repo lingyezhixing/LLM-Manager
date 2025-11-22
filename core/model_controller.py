@@ -6,7 +6,6 @@
 import subprocess
 import time
 import threading
-import logging
 import os
 import concurrent.futures
 import queue
