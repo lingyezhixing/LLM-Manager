@@ -1,6 +1,7 @@
 """
 模型控制器 - 负责模型的启动、停止和资源管理
 优化版本：支持并行启动和智能资源管理
+修复：解决自动关闭时的死锁问题 (Lock -> RLock, 优化空闲检查逻辑)
 """
 
 import subprocess
@@ -414,7 +415,9 @@ class ModelController:
                     "status": ModelStatus.STOPPED.value,
                     "last_access": None,
                     "pid": None,
-                    "lock": threading.Lock(),
+                    # 【核心修复】使用 RLock 替代 Lock，允许同一线程（如 idle_check 调用 stop_model 时）重入锁
+                    # 这直接解决了自动关闭时的死锁问题
+                    "lock": threading.RLock(),
                     "log_thread": None,
                     "current_config": None,
                     "failure_reason": None
@@ -1163,7 +1166,10 @@ class ModelController:
                     logger.error(f"释放模型 '{name}' 启动锁时发生异常: {e}")
 
     def idle_check_loop(self):
-        """空闲检查循环"""
+        """
+        【已修复】空闲检查循环 - 解决死锁问题
+        逻辑优化：在锁内只进行检查和收集，在锁外执行停止操作
+        """
         while self.is_running:
             time.sleep(30)
             if not self.is_running:
@@ -1177,15 +1183,23 @@ class ModelController:
                 alive_time_sec = alive_time_min * 60
                 now = time.time()
 
+                # 收集需要停止的模型列表，避免在迭代过程中持有锁并进行复杂操作
+                models_to_stop = []
+
                 for name in list(self.models_state.keys()):
                     state = self.models_state[name]
+                    # 只在锁内读取状态
                     with state['lock']:
                         is_idle = (state['status'] == ModelStatus.ROUTING.value and
                                    state['last_access'])
 
                         if is_idle and (now - state['last_access']) > alive_time_sec:
-                            logger.info(f"模型 {name} 空闲超过 {alive_time_min} 分钟，正在自动关闭...")
-                            self.stop_model(name)
+                            models_to_stop.append(name)
+                
+                # 在锁外执行停止操作，避免死锁
+                for name in models_to_stop:
+                    logger.info(f"模型 {name} 空闲超过 {alive_time_min} 分钟，正在自动关闭...")
+                    self.stop_model(name)
 
             except Exception as e:
                 logger.error(f"空闲检查线程出错: {e}", exc_info=True)
