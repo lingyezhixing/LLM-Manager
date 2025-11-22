@@ -139,9 +139,9 @@ class ConfigManager:
                         del adaptive_config[key]
 
                 # 添加新的配置值
-                # 【修复】明确包含 required_devices，确保后续资源释放逻辑能读取到占用设备
+                # 【修改】使用 script_path
                 adaptive_config.update({
-                    "bat_path": config_data["bat_path"],
+                    "script_path": config_data["script_path"],
                     "memory_mb": config_data["memory_mb"],
                     "required_devices": config_data.get("required_devices", []),
                     "config_source": config_name
@@ -238,8 +238,8 @@ class ConfigManager:
                         device_config = model_cfg[cfg_key]
                         if isinstance(device_config, dict):
                             has_device_config = True
-                            # 检查必需的设备配置项
-                            required_device_keys = ['required_devices', 'bat_path', 'memory_mb']
+                            # 检查必需的设备配置项，已修改 bat_path 为 script_path
+                            required_device_keys = ['required_devices', 'script_path', 'memory_mb']
                             for req_key in required_device_keys:
                                 if req_key not in device_config:
                                     errors.append(f"模型 '{key}' 的设备配置 '{cfg_key}' 缺少必需项: {req_key}")

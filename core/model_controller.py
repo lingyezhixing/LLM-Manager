@@ -727,7 +727,8 @@ class ModelController:
             # 启动模型
             logger.info(f"正在启动模型: {primary_name} (配置方案: {model_config.get('config_source', '默认')})")
             logger.info(f"使用配置方案: {model_config.get('config_source', '默认')}")
-            logger.info(f"启动脚本: {model_config['bat_path']}")
+            # 【修改】使用 script_path
+            logger.info(f"启动脚本: {model_config['script_path']}")
 
             # 使用进程管理器启动模型进程
             project_root = os.path.dirname(os.path.abspath(self.config_manager.config_path))
@@ -741,7 +742,8 @@ class ModelController:
 
             success, message, pid = self.process_manager.start_process(
                 name=process_name,
-                command=model_config['bat_path'],
+                # 【修改】使用 script_path
+                command=model_config['script_path'],
                 cwd=project_root,
                 description=f"模型进程: {primary_name}",
                 shell=True,
@@ -1231,7 +1233,8 @@ class ModelController:
                 "idle_time_sec": f"{idle_seconds:.0f}" if idle_seconds != -1 else "N/A",
                 "mode": config.get("mode", "Chat") if config else "Chat",
                 "is_available": bool(adaptive_config),
-                "current_bat_path": adaptive_config.get("bat_path", "") if adaptive_config else "无可用配置",
+                # 【修改】current_bat_path -> current_script_path, 读取 script_path
+                "current_script_path": adaptive_config.get("script_path", "") if adaptive_config else "无可用配置",
                 "config_source": adaptive_config.get("config_source", "N/A") if adaptive_config else "N/A",
                 "failure_reason": state.get('failure_reason')
             }
