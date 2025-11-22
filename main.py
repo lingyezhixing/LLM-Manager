@@ -3,6 +3,7 @@
 LLM-Manager 主程序入口
 重构版本 - 使用Application类封装所有功能
 优化版本：支持并行初始化和快速关闭
+修复：适配新的日志系统，解决启动时的 ImportError
 """
 
 import threading
@@ -79,9 +80,10 @@ class Application:
 
         # 配置管理器初始化完成后，重新设置日志级别以应用配置文件中的设置
         log_level = self.config_manager.get_log_level()
-        from utils.logger import _log_manager
-        if _log_manager:
-            _log_manager.set_level(log_level)
+        
+        # 【修复】不再直接导入私有变量 _log_manager
+        # 直接调用 setup_logging，它会自动检测已初始化并只更新级别
+        setup_logging(log_level=log_level)
 
         self.logger.info("配置管理器初始化完成")
 
@@ -141,7 +143,7 @@ class Application:
 
         self.logger.info("正在启动API服务器...")
 
-        # 【核心修复】将 self.model_controller 传递给 API Server，确保单例
+        # 将 self.model_controller 传递给 API Server，确保单例
         api_thread = threading.Thread(
             target=run_api_server,
             args=(self.config_manager, self.model_controller),
@@ -198,8 +200,6 @@ class Application:
 
         except Exception as e:
             self.logger.error(f"启动托盘服务失败: {e}")
-
-
 
     def _on_tray_exit(self) -> None:
         """托盘退出回调"""
