@@ -5,6 +5,7 @@ LLM-Manager 主程序入口
 优化版本：支持并行初始化和快速关闭
 修复：适配新的日志系统，解决启动时的 ImportError
 适配：Linux 兼容性支持
+配置：已更新为 YAML 格式
 """
 
 import threading
@@ -20,7 +21,8 @@ from core.process_manager import get_process_manager, cleanup_process_manager
 from core.data_manager import Monitor
 from core.model_controller import ModelController
 
-CONFIG_PATH = 'config.json'
+# 修改为 .yaml
+CONFIG_PATH = 'config.yaml'
 
 
 class Application:
