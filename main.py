@@ -4,6 +4,7 @@ LLM-Manager 主程序入口
 重构版本 - 使用Application类封装所有功能
 优化版本：支持并行初始化和快速关闭
 修复：适配新的日志系统，解决启动时的 ImportError
+适配：Linux 兼容性支持
 """
 
 import threading
@@ -183,14 +184,19 @@ class Application:
 
             # 设置退出回调
             self.tray_service.set_exit_callback(self._on_tray_exit)
+            
+            # 检查是否无头模式，如果是，则不启动托盘线程，但服务对象保留用于API调用
+            if self.tray_service.is_headless:
+                self.logger.info("无头模式：跳过托盘界面启动。")
+                return
 
             def tray_thread_func():
                 try:
                     self.tray_service.start_tray()
                 except Exception as e:
                     self.logger.error(f"托盘服务运行失败: {e}")
-                    self.logger.info("托盘服务失败，应用程序退出")
-                    self.shutdown()
+                    # 不退出程序，只是没有托盘图标
+                    self.logger.info("托盘服务启动失败，程序继续在后台运行。")
 
             # 托盘线程不能设置为daemon=True，否则程序会立即退出
             tray_thread = threading.Thread(target=tray_thread_func, daemon=False)
@@ -213,6 +219,7 @@ class Application:
         self.logger.info("LLM-Manager 启动中...")
         self.logger.info(f"Python 版本: {sys.version}")
         self.logger.info(f"工作目录: {os.getcwd()}")
+        self.logger.info(f"操作系统: {os.name}")
 
         # 设置信号处理器
         self.setup_signal_handlers()

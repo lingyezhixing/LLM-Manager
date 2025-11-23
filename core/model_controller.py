@@ -2,6 +2,7 @@
 模型控制器 - 负责模型的启动、停止和资源管理
 优化版本：支持并行启动和智能资源管理
 修复：解决自动关闭时的死锁问题 (Lock -> RLock, 优化空闲检查逻辑)
+适配：Linux 路径与执行逻辑兼容
 """
 
 import subprocess
@@ -670,6 +671,7 @@ class ModelController:
         智能启动模型 - 包含设备检查和资源管理
         【修复】使用缓存的设备状态，防止在高并发下阻塞
         【修复】如果 Disable_GPU_monitoring 为 True，则强制启动，不依赖设备在线状态
+        【适配】Linux路径兼容性处理
 
         Args:
             primary_name: 模型主名称
@@ -684,7 +686,6 @@ class ModelController:
             # 获取自适应配置
             if self.config_manager.is_gpu_monitoring_disabled():
                 # 【修复】如果禁用了GPU监控，强制假设所有所需设备在线
-                # 从模型基础配置中提取所有可能的 required_devices
                 logger.info("GPU监控已禁用，忽略设备在线状态，强制获取最佳配置...")
                 online_devices = set()
                 base_config = self.config_manager.get_model_config(primary_name)
@@ -702,7 +703,6 @@ class ModelController:
             model_config = self.config_manager.get_adaptive_model_config(primary_name, online_devices)
             if not model_config:
                 error_msg = f"启动 '{primary_name}' 失败：没有适合当前设备状态 {list(online_devices)} 的配置方案"
-                # 状态设置和错误返回在 except 或 finally 中处理，或直接在此处返回
                 with state['lock']:
                     state['status'] = ModelStatus.FAILED.value
                     state['failure_reason'] = error_msg
@@ -726,11 +726,10 @@ class ModelController:
 
             # 启动模型
             logger.info(f"正在启动模型: {primary_name} (配置方案: {model_config.get('config_source', '默认')})")
-            logger.info(f"使用配置方案: {model_config.get('config_source', '默认')}")
-            # 【修改】使用 script_path
             logger.info(f"启动脚本: {model_config['script_path']}")
 
             # 使用进程管理器启动模型进程
+            # 跨平台路径处理：使用绝对路径作为 CWD
             project_root = os.path.dirname(os.path.abspath(self.config_manager.config_path))
             process_name = f"model_{primary_name}"
 
@@ -740,6 +739,11 @@ class ModelController:
                 # 记录模型控制台输出
                 self.log_manager.add_console_log(primary_name, message)
 
+            # 跨平台进程创建标志
+            creation_flags = None
+            if os.name == 'nt':
+                creation_flags = subprocess.CREATE_NEW_PROCESS_GROUP
+
             success, message, pid = self.process_manager.start_process(
                 name=process_name,
                 # 【修改】使用 script_path
@@ -747,7 +751,7 @@ class ModelController:
                 cwd=project_root,
                 description=f"模型进程: {primary_name}",
                 shell=True,
-                creation_flags=subprocess.CREATE_NEW_PROCESS_GROUP,
+                creation_flags=creation_flags,
                 capture_output=True,
                 output_callback=output_callback
             )

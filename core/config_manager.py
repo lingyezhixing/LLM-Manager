@@ -103,6 +103,14 @@ class ConfigManager:
     def get_all_aliases(self) -> Dict[str, str]:
         """获取所有别名映射"""
         return self.alias_to_primary_name.copy()
+    
+    def _normalize_path(self, path: str) -> str:
+        """
+        标准化路径，处理 Windows 反斜杠在 Linux 下的问题
+        """
+        if os.name == 'posix':
+            return path.replace('\\', '/')
+        return os.path.normpath(path)
 
     def get_adaptive_model_config(self, alias: str, online_devices: Set[str]) -> Optional[Dict[str, Any]]:
         """
@@ -139,9 +147,11 @@ class ConfigManager:
                         del adaptive_config[key]
 
                 # 添加新的配置值
-                # 【修改】使用 script_path
+                # 【修改】使用 script_path 并进行路径标准化
+                script_path = self._normalize_path(config_data["script_path"])
+                
                 adaptive_config.update({
-                    "script_path": config_data["script_path"],
+                    "script_path": script_path,
                     "memory_mb": config_data["memory_mb"],
                     "required_devices": config_data.get("required_devices", []),
                     "config_source": config_name

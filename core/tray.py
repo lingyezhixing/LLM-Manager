@@ -1,13 +1,17 @@
-import logging
 import webbrowser
 import os
-import time
 import requests
 from PIL import Image
-from pystray import Icon as TrayIcon, Menu as TrayMenu, MenuItem as TrayMenuItem
 from typing import Optional
 from utils.logger import get_logger
 from core.config_manager import ConfigManager
+
+# 尝试导入 pystray，如果失败（如无头Linux环境），则允许模块加载，但在运行时检查
+try:
+    from pystray import Icon as TrayIcon, Menu as TrayMenu, MenuItem as TrayMenuItem
+    PYSTRAY_AVAILABLE = True
+except ImportError:
+    PYSTRAY_AVAILABLE = False
 
 logger = get_logger(__name__)
 
@@ -26,8 +30,26 @@ class SystemTray:
         self.server_url = f"http://{self.server_host}:{self.server_port}"
         self.tray_icon: Optional[TrayIcon] = None
         self.exit_callback = None
+        
+        # 检测是否为无头模式
+        self.is_headless = self._check_headless()
+        if self.is_headless:
+            logger.info("检测到无头环境 (Headless)，托盘图标将不会显示。")
+        else:
+            logger.info(f"托盘服务初始化完成，连接到API: {self.server_url}")
 
-        logger.info(f"托盘服务初始化完成，连接到API: {self.server_url}")
+    def _check_headless(self) -> bool:
+        """检查是否为无头模式"""
+        # 如果 pystray 导入失败，强制无头
+        if not PYSTRAY_AVAILABLE:
+            return True
+            
+        # Linux 下检查 DISPLAY 环境变量
+        if os.name == 'posix':
+            if 'DISPLAY' not in os.environ:
+                return True
+        
+        return False
 
     def open_webui(self):
         """打开WebUI"""
@@ -117,6 +139,10 @@ class SystemTray:
 
     def start_tray(self):
         """创建并运行系统托盘图标"""
+        if self.is_headless:
+            logger.info("无头模式：跳过托盘图标创建，后台运行中...")
+            return
+
         try:
             icon_path = os.path.join(os.path.dirname(__file__), '..', 'icons', 'icon.ico')
             if not os.path.exists(icon_path):
@@ -146,7 +172,8 @@ class SystemTray:
 
         except Exception as e:
             logger.error(f"创建系统托盘图标失败: {e}")
-            self.exit_application()
+            # 注意：在无头或异常情况下不强制退出，仅禁用托盘
+            logger.warning("托盘启动失败，程序将继续运行，但无托盘控制。")
 
     def set_exit_callback(self, callback):
         """设置退出回调函数"""
