@@ -34,27 +34,6 @@ Local-Models:
       memory_mb:
         rtx 4060: 5120
 
-  bge-code-v1:
-    aliases:
-      - "bge-code-v1"
-    mode: "Embedding"
-    port: 10002
-    auto_start: false
-    V100-CPU:
-      required_devices:
-        - "v100"
-        - "CPU"
-      script_path: "Model_startup_script\\bge-code-v1.bat"
-      memory_mb:
-        v100: 0
-        CPU: 2048
-    CPU:
-      required_devices:
-        - "CPU"
-      script_path: "Model_startup_script\\RTX4060\\bge-code-v1.bat"
-      memory_mb:
-        CPU: 2048
-
   Qwen3-VL-30B-A3B-Instruct-UD-64K:
     aliases:
       - "Qwen3-VL-30B-A3B-Instruct"
