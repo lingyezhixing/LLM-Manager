@@ -1,6 +1,6 @@
 from fastapi import Request, HTTPException, Response
 from fastapi.responses import StreamingResponse
-from typing import Dict, Any
+from typing import Dict, Any, Set
 import json
 import time
 import asyncio
@@ -138,7 +138,7 @@ class TokenTracker:
             return 0, 0, 0, 0
 
     async def record_request_tokens(self, model_name: str, input_tokens: int, output_tokens: int, cache_n: int = 0, prompt_n: int = 0, start_time: float = 0.0, end_time: float = 0.0):
-        """【已修改】异步记录请求token到数据库，包含起止时间"""
+        """异步记录请求token到数据库，包含起止时间"""
         try:
             # 使用传入的结束时间，如果未提供则使用当前时间
             final_end_time = end_time if end_time > 0 else time.time()
@@ -172,7 +172,7 @@ class TokenTracker:
             logger.error(f"[TOKEN_TRACKER] 异步记录token失败 - 模型: {model_name}, 错误: {e}")
 
     async def create_stream_with_token_logging(self, model_name: str, response: any, request_start_time: float):
-        """【已修改】流式响应包装器，在结束后记录token使用，并传递开始时间"""
+        """流式响应包装器，在结束后记录token使用，并传递开始时间"""
         content_chunks = []
         try:
             logger.debug(f"[TOKEN_TRACKER] 开始流式响应处理 - 模型: {model_name}")
@@ -210,13 +210,17 @@ class APIRouter:
         self.model_controller = model_controller
         self.async_clients: Dict[int, any] = {}
         self.pending_requests: Dict[str, int] = {}
+        
+        # 【新增】本地启动任务标记，防止高并发请求耗尽线程池
+        self.starting_models: Set[str] = set()
+        
         logger.info("API路由器初始化完成")
 
     async def get_async_client(self, port: int):
         """获取异步HTTP客户端"""
         if port not in self.async_clients:
             import httpx
-            # 【调整】增加连接超时时间，适应模型启动等待时间
+            # 增加连接超时时间，适应模型启动等待时间
             timeouts = httpx.Timeout(30.0, read=600.0, connect=30.0, write=30.0)
             self.async_clients[port] = httpx.AsyncClient(
                 base_url=f"http://127.0.0.1:{port}",
@@ -238,7 +242,7 @@ class APIRouter:
             logger.info(f"模型 {model_name} 请求完成，剩余待处理: {self.pending_requests[model_name]}")
 
     async def route_request(self, request: Request, path: str, token_tracker: TokenTracker) -> Response:
-        """【已修改】路由请求到目标模型，并记录精确的起止时间"""
+        """路由请求到目标模型，并记录精确的起止时间"""
         if request.method == "OPTIONS":
             return Response(status_code=204, headers={
                 "Access-Control-Allow-Origin": "*",
@@ -279,44 +283,64 @@ class APIRouter:
             raise HTTPException(status_code=400, detail=error_message)
 
         self.increment_pending_requests(model_name)
-        request_start_time = time.time()  # 【新增】在请求转发前记录开始时间
+        request_start_time = time.time()  # 在请求转发前记录开始时间
 
         try:
-            # ==================== 修复开始 ====================
-            # 【核心修复】避免高并发启动请求耗尽线程池
-            # 在调用阻塞的 start_model 之前，先异步检查并等待模型状态
-            # 这样这30+个请求会挂起在 asyncio 循环中，而不是占用 30+ 个线程去 sleep
-            
-            # 定义启动过程中的过渡状态
-            STARTUP_STATES = ['starting', 'init_script', 'health_check']
+            # ==================== 智能启动控制逻辑 ====================
+            # 解决高并发导致线程池耗尽的问题：
+            # 1. 检查模型状态，如果正在启动（全局状态）或 本路由正在处理启动（本地状态），则异步等待。
+            # 2. 只有当状态为停止且本地没有启动任务时，才分配一个线程去执行启动。
             
             while True:
-                # 直接读取状态字典（字典读取是原子操作，相对安全，避免频繁调用的开销）
-                # 注意：这里假设 status 存储的是字符串值
+                # 1. 获取当前模型状态
                 model_state = self.model_controller.models_state.get(model_name, {})
                 current_status = model_state.get('status', 'stopped')
                 
+                # 2. 如果模型已就绪，直接跳出循环处理请求
                 if current_status == 'routing':
-                    # 模型已运行，可以直接处理
                     break
-                elif current_status in STARTUP_STATES:
-                    # 模型正在启动中，异步休眠等待，不占用线程池
-                    logger.debug(f"[API_ROUTER] 模型 {model_name} 正在启动中({current_status})，异步等待...")
+                
+                # 3. 检查是否有启动任务正在进行
+                # A: 控制器已经标记为启动中 (STARTING, INIT_SCRIPT, HEALTH_CHECK)
+                is_starting_global = current_status in ['starting', 'init_script', 'health_check']
+                # B: 路由器刚才已经派发了一个启动线程（闭合时间窗口的关键！）
+                is_starting_local = model_name in self.starting_models
+                
+                if is_starting_global or is_starting_local:
+                    # 发现正在启动，异步等待，绝对不占用线程池资源
+                    # 使用 asyncio.sleep 让出控制权
+                    logger.debug(f"[API_ROUTER] 模型 {model_name} 正在启动中 (Status: {current_status}), 异步等待...")
                     await asyncio.sleep(0.5)
                     continue
-                else:
-                    # 模型处于 stopped 或 failed 状态，尝试启动
-                    # 此时才真正占用一个线程去执行启动逻辑（包含加锁和健康检查）
-                    logger.info(f"[API_ROUTER] 模型 {model_name} 需要启动，分配线程...")
-                    success, message = await asyncio.to_thread(
-                        self.model_controller.start_model, model_name
-                    )
-                    if not success:
-                        raise HTTPException(status_code=503, detail=message)
-                    # 启动成功后（或原本就在运行），循环会再次检查状态并 break
-                    # 如果 start_model 返回 True，说明模型已经 ready，下一次循环 status 应为 routing
-                    break
-            # ==================== 修复结束 ====================
+                
+                # 4. 只有状态为停止/失败，且本地没有正在进行的启动任务时，才发起启动
+                if current_status in ['stopped', 'failed']:
+                    # 【关键】先在本地打标记，瞬间锁住后续并发请求进入此分支
+                    self.starting_models.add(model_name)
+                    try:
+                        logger.info(f"[API_ROUTER] 模型 {model_name} 需要启动，分配唯一启动线程...")
+                        # 这是一个耗时操作，占用 1 个线程
+                        success, message = await asyncio.to_thread(
+                            self.model_controller.start_model, model_name
+                        )
+                        if not success:
+                            raise HTTPException(status_code=503, detail=message)
+                        # 启动成功后，下一次循环会检测到 routing 状态并 break
+                    except Exception as e:
+                        logger.error(f"[API_ROUTER] 启动模型异常: {e}")
+                        # 如果是我们自己抛出的 HTTPException，直接重抛
+                        if isinstance(e, HTTPException):
+                            raise e
+                        raise HTTPException(status_code=503, detail=f"启动异常: {str(e)}")
+                    finally:
+                        # 无论成功失败，移除本地标记，允许后续逻辑处理或重试
+                        if model_name in self.starting_models:
+                            self.starting_models.remove(model_name)
+                    continue
+                
+                # 防止死循环的兜底等待
+                await asyncio.sleep(0.5)
+            # ==================== 启动控制结束 ====================
 
             target_port = model_config['port']
             client = await self.get_async_client(target_port)
@@ -339,7 +363,7 @@ class APIRouter:
             is_streaming = "text/event-stream" in response.headers.get("content-type", "")
 
             if is_streaming:
-                # 【修复】为流式响应创建一个包装生成器，以确保在流结束后减少请求计数
+                # 为流式响应创建一个包装生成器，以确保在流结束后减少请求计数
                 async def stream_wrapper():
                     # TokenTracker的生成器负责Token记录
                     token_logging_stream = token_tracker.create_stream_with_token_logging(
@@ -361,7 +385,7 @@ class APIRouter:
             else:
                 logger.debug(f"[API_ROUTER] 开始处理非流式响应 - 模型: {model_name}")
                 content = await response.aread()
-                request_end_time = time.time()  # 【新增】在读取完响应后记录结束时间
+                request_end_time = time.time()  # 在读取完响应后记录结束时间
                 await response.aclose()
                 self.mark_request_completed(model_name)
                 logger.debug(f"[API_ROUTER] 非流式响应读取完成 - 模型: {model_name}, 响应大小: {len(content)} bytes")
@@ -370,7 +394,7 @@ class APIRouter:
                     input_tokens, output_tokens, cache_n, prompt_n = token_tracker.extract_tokens_from_response(content)
                     if input_tokens > 0 or output_tokens > 0 or cache_n > 0 or prompt_n > 0:
                         logger.debug(f"[API_ROUTER] 准备异步记录非流式响应token - 模型: {model_name}, 总token数: {input_tokens + output_tokens}, cache_n: {cache_n}, prompt_n: {prompt_n}")
-                        # 【修改】传递开始和结束时间
+                        # 传递开始和结束时间
                         await token_tracker.record_request_tokens(model_name, input_tokens, output_tokens, cache_n, prompt_n, request_start_time, request_end_time)
                     else:
                         logger.debug(f"[API_ROUTER] 跳过非流式响应token记录 - 模型: {model_name}, 所有token数为0")
