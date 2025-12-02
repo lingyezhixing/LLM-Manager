@@ -75,10 +75,11 @@ Local-Models:
       script_path: "Model_startup_script\\RTX4060\\Qwen3-VL-30B-A3B-Thinking-UD-64K-RTX4060.bat"
       memory_mb:
         rtx 4060: 5120
-
-  Qwen3-Next-80B-A3B-Instruct-64K:
+  
+  Qwen3-Next-80B-A3B-Instruct:
     aliases:
       - "Qwen3-Next-80B-A3B-Instruct"
+      - "Qwen3-Next-80B-A3B-Instruct-128K"
     mode: "Chat"
     port: 10004
     auto_start: false
@@ -86,24 +87,9 @@ Local-Models:
       required_devices:
         - "rtx 4060"
         - "v100"
-      script_path: "Model_startup_script\\Qwen3-Next-80B-A3B-Instruct-64K.bat"
+      script_path: "Model_startup_script\\Qwen3-Next-80B-A3B-Instruct.bat"
       memory_mb:
         rtx 4060: 6144
-        v100: 16000
-  
-  Qwen3-Next-80B-A3B-Instruct-128K:
-    aliases:
-      - "Qwen3-Next-80B-A3B-Instruct-128K"
-    mode: "Chat"
-    port: 10005
-    auto_start: false
-    RTX4060-V100:
-      required_devices:
-        - "rtx 4060"
-        - "v100"
-      script_path: "Model_startup_script\\Qwen3-Next-80B-A3B-Instruct-128K.bat"
-      memory_mb:
-        rtx 4060: 5120
         v100: 16000
 
   Tifa-DeepsexV3-80K:
