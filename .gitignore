@@ -89,6 +89,7 @@ openai_api_manual.md
 data_manager（数据管理器）使用说明.md
 API接口文档.md
 API_DOCUMENTATION.md
+config.yaml
 
 # 忽略所有数据库文件
 *.db
