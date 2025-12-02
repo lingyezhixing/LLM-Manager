@@ -282,11 +282,41 @@ class APIRouter:
         request_start_time = time.time()  # 【新增】在请求转发前记录开始时间
 
         try:
-            success, message = await asyncio.to_thread(
-                self.model_controller.start_model, model_name
-            )
-            if not success:
-                raise HTTPException(status_code=503, detail=message)
+            # ==================== 修复开始 ====================
+            # 【核心修复】避免高并发启动请求耗尽线程池
+            # 在调用阻塞的 start_model 之前，先异步检查并等待模型状态
+            # 这样这30+个请求会挂起在 asyncio 循环中，而不是占用 30+ 个线程去 sleep
+            
+            # 定义启动过程中的过渡状态
+            STARTUP_STATES = ['starting', 'init_script', 'health_check']
+            
+            while True:
+                # 直接读取状态字典（字典读取是原子操作，相对安全，避免频繁调用的开销）
+                # 注意：这里假设 status 存储的是字符串值
+                model_state = self.model_controller.models_state.get(model_name, {})
+                current_status = model_state.get('status', 'stopped')
+                
+                if current_status == 'routing':
+                    # 模型已运行，可以直接处理
+                    break
+                elif current_status in STARTUP_STATES:
+                    # 模型正在启动中，异步休眠等待，不占用线程池
+                    logger.debug(f"[API_ROUTER] 模型 {model_name} 正在启动中({current_status})，异步等待...")
+                    await asyncio.sleep(0.5)
+                    continue
+                else:
+                    # 模型处于 stopped 或 failed 状态，尝试启动
+                    # 此时才真正占用一个线程去执行启动逻辑（包含加锁和健康检查）
+                    logger.info(f"[API_ROUTER] 模型 {model_name} 需要启动，分配线程...")
+                    success, message = await asyncio.to_thread(
+                        self.model_controller.start_model, model_name
+                    )
+                    if not success:
+                        raise HTTPException(status_code=503, detail=message)
+                    # 启动成功后（或原本就在运行），循环会再次检查状态并 break
+                    # 如果 start_model 返回 True，说明模型已经 ready，下一次循环 status 应为 routing
+                    break
+            # ==================== 修复结束 ====================
 
             target_port = model_config['port']
             client = await self.get_async_client(target_port)
