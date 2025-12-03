@@ -234,8 +234,14 @@ class ModelRuntimeMonitor:
         self.monitor = Monitor(db_path)
         self.active_models: Dict[str, threading.Timer] = {}
         self.lock = threading.Lock()
+        self.api_router: Optional[Any] = None # 类型设为 Any 避免循环导入
 
         logger.info("模型运行时间监控器初始化完成")
+    
+    def set_api_router(self, api_router: Any):
+        """设置API路由器实例，用于获取待处理请求数"""
+        self.api_router = api_router
+        logger.info("API Router 实例已成功注入到 Model Controller")
 
     def record_model_start(self, model_name: str) -> bool:
         """
@@ -784,151 +790,129 @@ class ModelController:
 
     def _check_and_free_resources(self, model_config: Dict[str, Any]) -> bool:
         """
-        检查并释放设备资源
-        【修改】使用缓存的设备状态，避免阻塞
-        【修复】如果禁用监控，立即返回True，确保无条件启动
-
-        Args:
-            model_config: 模型配置
-
-        Returns:
-            是否有足够资源
+        [优化版 - 问题三] 检查并循环释放设备资源，直到满足条件。
         """
         # 如果禁用了GPU监控，跳过所有资源检查
         if self.config_manager.is_gpu_monitoring_disabled():
             logger.info("GPU监控已禁用，跳过资源检查与释放")
             return True
 
-        required_memory = model_config.get("memory_mb", {})
-
-        for attempt in range(3):  # 增加到3次尝试
+        # 使用 while 循环持续尝试，直到资源足够或无法再释放
+        while True:
             resource_ok = True
             deficit_devices = {}
-
-            # 获取所有设备的状态快照 (缓存读取)
             device_status_map = self.plugin_manager.get_device_status_snapshot()
+            required_memory = model_config.get("memory_mb", {})
 
             # 检查每个设备的内存
             for device_name, required_mb in required_memory.items():
                 device_status = device_status_map.get(device_name)
-                
-                if not device_status:
-                    logger.warning(f"配置中的设备 '{device_name}' 未找到插件，跳过")
-                    continue
-
-                if not device_status.get('online', False):
-                    logger.warning(f"设备 '{device_name}' 不在线")
-                    resource_ok = False
-                    break
+                if not device_status or not device_status.get('online', False):
+                    logger.warning(f"所需设备 '{device_name}' 不在线或无信息")
+                    return False # 如果依赖的设备不在线，直接失败
 
                 device_info = device_status.get('info')
                 if device_info:
                     available_mb = device_info.get('available_memory_mb', 0)
                     if available_mb < required_mb:
-                        deficit = required_mb - available_mb
-                        deficit_devices[device_name] = deficit
+                        deficit_devices[device_name] = required_mb - available_mb
                         resource_ok = False
                 else:
-                    # 在线但没有详细信息，保守起见认为不满足，或者跳过？
-                    # 这里假设没信息就是不满足
                     logger.warning(f"无法获取设备 '{device_name}' 的内存信息")
                     resource_ok = False
 
+            # 如果资源检查通过，成功退出循环
             if resource_ok:
                 logger.info("设备资源检查通过")
                 return True
 
             logger.warning(f"设备资源不足，需要释放: {deficit_devices}")
 
-            if attempt < 2:  # 前两次尝试都进行资源释放
-                # 尝试停止空闲模型释放资源
-                logger.info("尝试停止空闲模型以释放资源...")
-                if self._stop_idle_models_for_resources(deficit_devices, model_config):
-                    logger.info("资源释放完成，等待系统刷新...")
-                    time.sleep(3)  # 给系统一些时间来释放资源
-                    # 这里需要等待Monitor线程更新缓存，或者强制Monitor更新一次？
-                    # 由于Monitor是独立的，等待3秒应该足够它更新一次缓存
-                    # 继续下一次循环，重新检查实际可用资源
-                else:
-                    logger.warning("无法释放足够的资源")
-                    break
+            # 尝试停止一个空闲模型来释放资源
+            freed_one_model = self._stop_idle_models_for_resources(deficit_devices)
+
+            if freed_one_model:
+                logger.info("已成功停止一个模型，等待3秒后重新检查资源...")
+                time.sleep(3)  # 给系统时间来更新资源状态
+                continue # 继续下一次 while 循环
             else:
-                logger.error("达到最大尝试次数，仍然资源不足")
-                break
+                # 如果无法再释放任何模型，但资源仍然不足，则最终失败
+                logger.error("已尝试关闭所有相关空闲模型，但资源仍然不足。")
+                break # 退出 while 循环
 
         return False
 
-    def _stop_idle_models_for_resources(self, deficit_devices: Dict[str, int], model_to_start: Dict[str, Any]) -> bool:
+    def _stop_idle_models_for_resources(self, deficit_devices: Dict[str, int]) -> bool:
         """
-        停止空闲模型以释放资源
-        【修复】只停止占用了 短缺设备 资源的空闲模型
-        【修复】增强了对 required_devices 的读取健壮性
-
-        Args:
-            deficit_devices: 缺乏资源的设备列表
-            model_to_start: 要启动的模型配置
-
-        Returns:
-            是否成功释放资源
+        [最终优化版] 停止一个空闲模型以释放资源。
+        综合了问题一、二的解决方案。
         """
-        # 如果禁用了GPU监控，不进行资源释放
-        if self.config_manager.is_gpu_monitoring_disabled():
-            logger.info("GPU监控已禁用，不进行资源释放")
-            return False
-
         idle_candidates = []
+        now = time.time()
 
         for name, state in self.models_state.items():
             with state['lock']:
-                if state['status'] == ModelStatus.ROUTING.value:
-                    # 【修复逻辑】检查该模型是否使用了我们需要的设备
-                    current_config = state.get('current_config')
-                    if not current_config:
-                        continue
-                    
-                    # 获取模型占用的设备列表
-                    # 优先使用 required_devices (现在由 ConfigManager 填充)
-                    # 兜底使用 memory_mb 的 keys，防止数据结构异常导致 used_devices 为空
-                    used_devices = set(current_config.get('required_devices', []))
-                    if not used_devices:
-                        used_devices = set(current_config.get('memory_mb', {}).keys())
-                    
-                    needed_devices = set(deficit_devices.keys())
-                    
-                    logger.debug(f"资源释放检查 - 模型: {name}, 占用设备: {used_devices}, 短缺设备: {needed_devices}")
+                if state['status'] != ModelStatus.ROUTING.value:
+                    continue
 
-                    # 如果没有交集，说明关闭该模型无法释放我们需要的设备资源
-                    if used_devices.isdisjoint(needed_devices):
-                        logger.debug(f"跳过空闲模型 {name}: 占用设备 {used_devices} 与需求设备 {needed_devices} 无交集")
-                        continue
-                        
-                    idle_candidates.append(name)
+                # [问题一] 检查是否有待处理请求
+                if self.api_router and self.api_router.pending_requests.get(name, 0) > 0:
+                    logger.debug(f"跳过模型 {name}: 有 {self.api_router.pending_requests.get(name, 0)} 个待处理请求")
+                    continue
+                
+                current_config = state.get('current_config')
+                if not current_config:
+                    continue
+                
+                used_devices = set(current_config.get('required_devices', []))
+                if not used_devices:
+                    used_devices = set(current_config.get('memory_mb', {}).keys())
+                
+                if used_devices.isdisjoint(set(deficit_devices.keys())):
+                    continue
+                
+                last_access = state.get('last_access') or 0
+                idle_seconds = max(0, now - last_access)
+                
+                total_memory_mb = sum(current_config.get('memory_mb', {}).values())
 
-        # 按最后访问时间排序
-        sorted_idle_models = sorted(
-            idle_candidates,
-            key=lambda m: self.models_state[m].get('last_access', 0) or 0
-        )
+                # [问题二] 显存单位转换为GB并设置下限
+                memory_gb = total_memory_mb / 1024.0
+                memory_gb_for_score = max(0.5, memory_gb)
 
-        if not sorted_idle_models:
+                # 计算淘汰评分
+                eviction_score = idle_seconds / memory_gb_for_score
+                
+                idle_candidates.append({
+                    "name": name,
+                    "score": eviction_score,
+                    "idle_seconds": idle_seconds,
+                    "memory_gb": memory_gb
+                })
+
+        if not idle_candidates:
             logger.info("没有找到占用相关设备的可停止空闲模型")
             return False
 
-        logger.info(f"找到 {len(sorted_idle_models)} 个占用相关设备的空闲模型可供停止: {sorted_idle_models}")
+        # 按分数从高到低排序
+        sorted_candidates = sorted(idle_candidates, key=lambda x: x['score'], reverse=True)
 
-        for model_name in sorted_idle_models:
-            logger.info(f"为释放资源，正在停止空闲模型: {model_name}")
-            success, message = self.stop_model(model_name)
+        logger.info(f"资源释放候选列表 (按优先级排序):")
+        for c in sorted_candidates:
+            logger.info(f"  - {c['name']}: 空闲 {c['idle_seconds']:.0f}s, 显存 {c['memory_gb']:.2f}GB -> 分数 {c['score']:.4f}")
 
-            if success:
-                logger.info(f"模型 {model_name} 已停止，等待系统释放资源...")
-                time.sleep(2)  # 给系统一些时间来释放资源
-                return True  # 返回True让主循环重新检查设备状态
-            else:
-                logger.warning(f"停止模型 {model_name} 失败: {message}")
+        # 只关闭分数最高的那个模型
+        candidate_to_stop = sorted_candidates[0]
+        model_name = candidate_to_stop['name']
+        logger.info(f"为释放资源，正在停止模型: {model_name} (当前评分最高)")
+        success, message = self.stop_model(model_name)
 
-        logger.warning("无法释放足够的资源")
-        return False
+        if success:
+            logger.info(f"模型 {model_name} 已成功停止")
+            return True # 返回True表示成功关闭了一个
+        else:
+            logger.warning(f"尝试停止模型 {model_name} 失败: {message}")
+            return False
 
     def _perform_health_checks(self, primary_name: str, model_config: Dict[str, Any]) -> Tuple[bool, str]:
         """

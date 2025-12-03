@@ -28,6 +28,7 @@ class APIServer:
         self.monitor = Monitor()
         self.token_tracker = TokenTracker(self.monitor, self.config_manager)
         self.api_router = APIRouter(self.config_manager, self.model_controller)
+        self.model_controller.set_api_router(self.api_router)
         self.app = FastAPI(title="LLM-Manager API", version="1.0.0")
         self._setup_routes()
         
