@@ -234,14 +234,8 @@ class ModelRuntimeMonitor:
         self.monitor = Monitor(db_path)
         self.active_models: Dict[str, threading.Timer] = {}
         self.lock = threading.Lock()
-        self.api_router: Optional[Any] = None # 类型设为 Any 避免循环导入
 
         logger.info("模型运行时间监控器初始化完成")
-    
-    def set_api_router(self, api_router: Any):
-        """设置API路由器实例，用于获取待处理请求数"""
-        self.api_router = api_router
-        logger.info("API Router 实例已成功注入到 Model Controller")
 
     def record_model_start(self, model_name: str) -> bool:
         """
@@ -404,6 +398,7 @@ class ModelController:
         self.startup_futures: Dict[str, concurrent.futures.Future] = {}
         self.startup_locks: Dict[str, threading.Lock] = {}  # 每个模型的专用锁
         self.shutdown_event = threading.Event()
+        self.api_router: Optional[Any] = None # 类型设为 Any 避免循环导入
 
         # 启动空闲检查线程
         self.idle_check_thread = threading.Thread(target=self.idle_check_loop, daemon=True)
@@ -436,6 +431,11 @@ class ModelController:
 
         self.models_state = new_states
         self.load_plugins()
+    
+    def set_api_router(self, api_router: Any):
+        """设置API路由器实例，用于获取待处理请求数"""
+        self.api_router = api_router
+        logger.info("API Router 实例已成功注入到 Model Controller")
 
     def load_plugins(self):
         """加载设备插件和接口插件"""
