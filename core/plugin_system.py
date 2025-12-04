@@ -264,6 +264,19 @@ class PluginManager:
         with self.cache_lock:
             self.device_status_cache = new_cache
 
+    def force_refresh_device_status(self):
+        """
+        [新增] 强制同步刷新设备状态
+        该方法会阻塞直到所有设备插件完成状态更新。
+        用于在资源释放后立即获取最新硬件状态，跳过后台轮询等待。
+        """
+        logger.info("[PLUGIN_SYSTEM] 收到强制刷新请求，正在更新硬件状态...")
+        try:
+            self._update_device_status_once()
+            logger.info("[PLUGIN_SYSTEM] 硬件状态强制刷新完成")
+        except Exception as e:
+            logger.error(f"[PLUGIN_SYSTEM] 强制刷新失败: {e}")
+
     def get_device_status_snapshot(self) -> Dict[str, Any]:
         """
         获取设备状态的快照（从缓存读取，非阻塞）
