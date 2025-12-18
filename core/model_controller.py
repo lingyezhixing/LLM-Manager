@@ -1189,7 +1189,7 @@ class ModelController:
                         if not last_access:
                             continue
 
-                        # 【修改点 3：获取待处理请求数】
+                        # 【初步检查】获取待处理请求数
                         pending_count = 0
                         if self.api_router:
                             pending_count = self.api_router.pending_requests.get(name, 0)
@@ -1197,21 +1197,25 @@ class ModelController:
                         # 计算空闲时间
                         idle_duration = now - last_access
 
-                        # 【修改点 4：核心判断逻辑】
-                        # 条件1: 没有任何正在处理的请求 (pending_count == 0)
-                        # 条件2: 空闲时间超过了设定阈值 (idle_duration > alive_time_sec)
+                        # 条件1: 没有任何正在处理的请求
+                        # 条件2: 空闲时间超过了设定阈值
                         if pending_count == 0 and idle_duration > alive_time_sec:
-                            logger.info(f"模型 {name} 判定为空闲: 无请求且已空闲 {idle_duration:.1f}秒 (阈值: {alive_time_sec}秒)")
+                            # logger.info(f"模型 {name} 判定为空闲: 无请求且已空闲 {idle_duration:.1f}秒")
                             models_to_stop.append(name)
-                        elif pending_count > 0 and idle_duration > alive_time_sec:
-                            # 调试日志：虽然时间超了，但因为有请求在跑，所以不杀
-                            # 正常情况下有了 修改点1/2，last_access会被刷新，这个分支很难走到，作为双重保险
-                            logger.debug(f"模型 {name} 运行时间较长但仍有 {pending_count} 个请求在处理，跳过关闭")
                 
                 # 在锁外执行停止操作，避免死锁
                 for name in models_to_stop:
-                    logger.info(f"执行自动关闭策略: 停止模型 {name}")
-                    self.stop_model(name)
+                    # 【双重检查】防止在“决定关闭”和“执行关闭”的微小时间窗内有新请求进入
+                    should_stop = True
+                    if self.api_router:
+                        current_pending = self.api_router.pending_requests.get(name, 0)
+                        if current_pending > 0:
+                            logger.info(f"模型 {name} 在关闭前一刻收到新请求，取消关闭")
+                            should_stop = False
+                    
+                    if should_stop:
+                        logger.info(f"执行自动关闭策略: 停止模型 {name}")
+                        self.stop_model(name)
 
             except Exception as e:
                 logger.error(f"空闲检查线程出错: {e}", exc_info=True)
