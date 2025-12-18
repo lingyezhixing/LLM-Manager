@@ -1157,8 +1157,8 @@ class ModelController:
 
     def idle_check_loop(self):
         """
-        【已修复】空闲检查循环 - 解决死锁问题
-        逻辑优化：在锁内只进行检查和收集，在锁外执行停止操作
+        【已修复】空闲检查循环 - 解决死锁问题并增加活跃请求检查
+        逻辑：只有当模型超时且当前没有正在处理的请求时，才执行关闭
         """
         while self.is_running:
             time.sleep(30)
@@ -1167,28 +1167,50 @@ class ModelController:
 
             try:
                 alive_time_min = self.config_manager.get_alive_time()
+                # 如果配置为 0 或负数，代表永不自动关闭
                 if alive_time_min <= 0:
                     continue
 
                 alive_time_sec = alive_time_min * 60
                 now = time.time()
 
-                # 收集需要停止的模型列表，避免在迭代过程中持有锁并进行复杂操作
+                # 收集需要停止的模型列表
                 models_to_stop = []
 
                 for name in list(self.models_state.keys()):
                     state = self.models_state[name]
                     # 只在锁内读取状态
                     with state['lock']:
-                        is_idle = (state['status'] == ModelStatus.ROUTING.value and
-                                   state['last_access'])
+                        # 只有处于 ROUTING 状态的模型才需要检查空闲
+                        if state['status'] != ModelStatus.ROUTING.value:
+                            continue
+                            
+                        last_access = state.get('last_access')
+                        if not last_access:
+                            continue
 
-                        if is_idle and (now - state['last_access']) > alive_time_sec:
+                        # 【修改点 3：获取待处理请求数】
+                        pending_count = 0
+                        if self.api_router:
+                            pending_count = self.api_router.pending_requests.get(name, 0)
+
+                        # 计算空闲时间
+                        idle_duration = now - last_access
+
+                        # 【修改点 4：核心判断逻辑】
+                        # 条件1: 没有任何正在处理的请求 (pending_count == 0)
+                        # 条件2: 空闲时间超过了设定阈值 (idle_duration > alive_time_sec)
+                        if pending_count == 0 and idle_duration > alive_time_sec:
+                            logger.info(f"模型 {name} 判定为空闲: 无请求且已空闲 {idle_duration:.1f}秒 (阈值: {alive_time_sec}秒)")
                             models_to_stop.append(name)
+                        elif pending_count > 0 and idle_duration > alive_time_sec:
+                            # 调试日志：虽然时间超了，但因为有请求在跑，所以不杀
+                            # 正常情况下有了 修改点1/2，last_access会被刷新，这个分支很难走到，作为双重保险
+                            logger.debug(f"模型 {name} 运行时间较长但仍有 {pending_count} 个请求在处理，跳过关闭")
                 
                 # 在锁外执行停止操作，避免死锁
                 for name in models_to_stop:
-                    logger.info(f"模型 {name} 空闲超过 {alive_time_min} 分钟，正在自动关闭...")
+                    logger.info(f"执行自动关闭策略: 停止模型 {name}")
                     self.stop_model(name)
 
             except Exception as e:

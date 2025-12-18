@@ -228,17 +228,36 @@ class APIRouter:
             )
         return self.async_clients[port]
 
+    # 【新增辅助方法】用于安全更新模型最后活动时间
+    def _touch_model_activity(self, model_name: str):
+        """更新模型的最后活动时间戳"""
+        if model_name in self.model_controller.models_state:
+            state = self.model_controller.models_state[model_name]
+            # 获取锁更新时间戳，确保线程安全
+            with state['lock']:
+                state['last_access'] = time.time()
+                # logger.debug(f"模型 {model_name} 活动时间已刷新")
+
     def increment_pending_requests(self, model_name: str):
         """增加待处理请求计数"""
         if model_name not in self.pending_requests:
             self.pending_requests[model_name] = 0
         self.pending_requests[model_name] += 1
+        
+        # 【修改点 1：请求到达时更新时间戳】
+        self._touch_model_activity(model_name)
+        
         logger.info(f"模型 {model_name} 新请求进入，当前待处理: {self.pending_requests[model_name]}")
 
     def mark_request_completed(self, model_name: str):
         """标记请求完成"""
         if model_name in self.pending_requests:
             self.pending_requests[model_name] = max(0, self.pending_requests[model_name] - 1)
+            
+            # 【修改点 2：请求结束时更新时间戳】
+            # 这样倒计时会从任务完成的那一刻开始计算，而不是任务开始时
+            self._touch_model_activity(model_name)
+            
             logger.info(f"模型 {model_name} 请求完成，剩余待处理: {self.pending_requests[model_name]}")
 
     async def route_request(self, request: Request, path: str, token_tracker: TokenTracker) -> Response:
