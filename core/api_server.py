@@ -267,11 +267,11 @@ class APIServer:
 
         @self.app.get("/api/info")
         async def api_info():
-            return {"message": "LLM-Manager API Server", "version": "1.0.0", "models_url": "/v1/models"}
+            return {"message": "LLM-Manager API Server", "version": "2.1.3", "models_url": "/v1/models"}
 
         @self.app.get("/api/health")
         async def health_check():
-            return {"status": "healthy", "models_count": len(self.model_controller.models_state), "running_models": len([s for s in self.model_controller.models_state.values() if s['status'] == 'routing'])}
+            return {"status": "healthy", "role": "Manager", "models_count": len(self.model_controller.models_state), "running_models": len([s for s in self.model_controller.models_state.values() if s['status'] == 'routing'])}
 
         @self.app.post("/api/models/{model_alias}/start")
         async def start_model_api(model_alias: str):
