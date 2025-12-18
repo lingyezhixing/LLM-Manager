@@ -832,8 +832,8 @@ class ModelController:
             freed_one_model = self._stop_idle_models_for_resources(deficit_devices)
 
             if freed_one_model:
-                logger.info("已成功停止一个模型，等待3秒后重新检查资源...")
-                time.sleep(3)  # 给系统时间来更新资源状态
+                logger.info("已成功停止一个模型，正在强制刷新设备资源缓存，以获取最新资源状态...")
+                self.plugin_manager.force_refresh_device_status()
                 continue # 继续下一次 while 循环
             else:
                 # 如果无法再释放任何模型，但资源仍然不足，则最终失败
