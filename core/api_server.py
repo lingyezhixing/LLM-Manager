@@ -29,7 +29,7 @@ class APIServer:
         self.token_tracker = TokenTracker(self.monitor, self.config_manager)
         self.api_router = APIRouter(self.config_manager, self.model_controller)
         self.model_controller.set_api_router(self.api_router)
-        self.app = FastAPI(title="LLM-Manager API", version="1.0.0")
+        self.app = FastAPI(title="LLM-Manager API", version="2.2.0")
         self._setup_routes()
         
         # 【核心修复】移除此处的自动启动调用
@@ -267,7 +267,7 @@ class APIServer:
 
         @self.app.get("/api/info")
         async def api_info():
-            return {"message": "LLM-Manager API Server", "version": "2.1.3", "models_url": "/v1/models"}
+            return {"message": "LLM-Manager API Server", "version": "2.2.0", "models_url": "/v1/models"}
 
         @self.app.get("/api/health")
         async def health_check():
