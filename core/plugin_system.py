@@ -213,7 +213,7 @@ class PluginManager:
         
         self.is_monitoring = True
         # 先进行一次同步更新，确保启动时缓存有数据
-        self._update_device_status_once()
+        self.update_device_status()
         
         self.monitor_thread = threading.Thread(target=self._monitor_devices_loop, daemon=True)
         self.monitor_thread.start()
@@ -229,7 +229,7 @@ class PluginManager:
         """后台循环更新设备状态"""
         while self.is_monitoring:
             try:
-                self._update_device_status_once()
+                self.update_device_status()
             except Exception as e:
                 logger.error(f"设备状态更新失败: {e}")
             
@@ -239,15 +239,19 @@ class PluginManager:
                     break
                 time.sleep(0.1)
 
-    def _update_device_status_once(self):
-        """执行一次设备状态更新"""
+    def update_device_status(self):
+        """
+        更新设备状态缓存（同步方法）
+        该方法会阻塞直到所有设备插件完成状态更新。
+        可以被后台监控线程调用，也可以在需要最新状态时主动调用。
+        """
         new_cache = {}
         for name, plugin in self.device_plugins.items():
             try:
                 # 注意：这些调用可能会阻塞，放在后台线程执行
                 is_online = plugin.is_online() if hasattr(plugin, 'is_online') else False
                 device_info = plugin.get_devices_info() if hasattr(plugin, 'get_devices_info') and is_online else None
-                
+
                 new_cache[name] = {
                     "online": is_online,
                     "info": device_info,
@@ -256,26 +260,13 @@ class PluginManager:
             except Exception as e:
                 logger.warning(f"更新设备 {name} 状态时出错: {e}")
                 new_cache[name] = {
-                    "online": False, 
+                    "online": False,
                     "error": str(e),
                     "type": type(plugin).__name__
                 }
 
         with self.cache_lock:
             self.device_status_cache = new_cache
-
-    def force_refresh_device_status(self):
-        """
-        [新增] 强制同步刷新设备状态
-        该方法会阻塞直到所有设备插件完成状态更新。
-        用于在资源释放后立即获取最新硬件状态，跳过后台轮询等待。
-        """
-        logger.info("[PLUGIN_SYSTEM] 收到强制刷新请求，正在更新硬件状态...")
-        try:
-            self._update_device_status_once()
-            logger.info("[PLUGIN_SYSTEM] 硬件状态强制刷新完成")
-        except Exception as e:
-            logger.error(f"[PLUGIN_SYSTEM] 强制刷新失败: {e}")
 
     def get_device_status_snapshot(self) -> Dict[str, Any]:
         """
