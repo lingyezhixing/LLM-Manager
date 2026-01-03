@@ -87,6 +87,35 @@ class SystemTray:
         except Exception as e:
             logger.error(f"通过API卸载全部模型失败: {e}")
 
+    def refresh_device_status(self):
+        """刷新设备状态"""
+        logger.info("正在刷新设备状态...")
+        try:
+            response = requests.get(f"{self.server_url}/api/devices/info", timeout=10)
+            if response.status_code == 200:
+                result = response.json()
+                if result.get("success"):
+                    devices = result.get("devices", {})
+                    online_devices = [
+                        name for name, info in devices.items()
+                        if info.get("online", False)
+                    ]
+
+                    if online_devices:
+                        logger.info(f"设备状态刷新成功：在线设备 {', '.join(online_devices)}")
+                    else:
+                        logger.warning("设备状态刷新成功，但未检测到在线设备")
+
+                    # 更新托盘标题
+                    if self.tray_icon:
+                        self.tray_icon.title = self.get_tray_title()
+                else:
+                    logger.error(f"刷新设备状态失败: {result.get('message', '未知错误')}")
+            else:
+                logger.error(f"刷新设备状态失败: HTTP {response.status_code}")
+        except Exception as e:
+            logger.error(f"刷新设备状态失败: {e}")
+
     def get_tray_title(self) -> str:
         """获取托盘标题"""
         try:
@@ -154,6 +183,7 @@ class SystemTray:
             menu = TrayMenu(
                 TrayMenuItem('打开 WebUI', self.open_webui, default=True),
                 TrayMenu.SEPARATOR,
+                TrayMenuItem('刷新设备状态', self.refresh_device_status),
                 TrayMenuItem('重启 Auto-Start 模型', self.restart_auto_start_models),
                 TrayMenuItem('卸载全部模型', self.unload_all_models),
                 TrayMenu.SEPARATOR,
