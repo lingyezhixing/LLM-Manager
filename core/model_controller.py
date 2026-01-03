@@ -452,9 +452,9 @@ class ModelController:
             logger.info(f"设备插件自动加载完成: {list(self.plugin_manager.get_all_device_plugins().keys())}")
             logger.info(f"接口插件自动加载完成: {list(self.plugin_manager.get_all_interface_plugins().keys())}")
             
-            # [按需监控] 不在启动时自动开启监控，等待首次API请求时再启动
+            # 按需监控：不在启动时自动开启监控，等待首次API请求时再启动
             logger.info("设备监控设置为按需模式，将在首次请求时启动")
-            # self.plugin_manager.start_monitor()  # 注释掉自动启动
+            # self.plugin_manager.start_monitor()  # 已禁用自动启动
 
             # 检查是否有设备在线 (使用缓存读取)
             online_devices = self.plugin_manager.get_cached_online_devices()
@@ -595,7 +595,7 @@ class ModelController:
             try:
                 success, message = self._start_model_intelligent(primary_name)
 
-                # [新增] 启动成功后刷新设备状态缓存，获取最新硬件状态
+                # 启动成功后刷新设备状态缓存
                 if success:
                     logger.info(f"模型 '{primary_name}' 启动成功，正在刷新设备状态缓存...")
                     self.plugin_manager.update_device_status()
@@ -1044,7 +1044,7 @@ class ModelController:
             if self.runtime_monitor.is_model_monitored(primary_name):
                 self.runtime_monitor.record_model_stop(primary_name)
 
-            # [新增] 刷新设备状态缓存，获取模型停止后的最新硬件状态
+            # 停止后刷新设备状态缓存
             logger.info(f"模型 '{primary_name}' 已停止，正在刷新设备状态缓存...")
             self.plugin_manager.update_device_status()
 

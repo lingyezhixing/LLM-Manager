@@ -200,15 +200,15 @@ class PluginManager:
         self.interface_plugins: Dict[str, Any] = {}
         self.last_reload_time = 0
         
-        # --- 设备状态缓存机制 (解决死锁的核心) ---
+        # --- 设备状态缓存机制 ---
         self.device_status_cache = {}
         self.cache_lock = threading.RLock()
         self.monitor_thread = None
         self.is_monitoring = False
 
-        # [按需监控] API请求活跃追踪
-        self.last_api_request_time = 0  # 最后API请求时间
-        self.api_request_lock = threading.Lock()  # 保护时间戳
+        # --- 按需监控：API请求活跃追踪 ---
+        self.last_api_request_time = 0  # 最后API请求时间戳
+        self.api_request_lock = threading.Lock()  # 保护时间戳的锁
 
     def start_monitor(self):
         """启动设备状态后台监控线程"""
@@ -230,12 +230,12 @@ class PluginManager:
             self.monitor_thread.join(timeout=2)
 
     def _monitor_devices_loop(self):
-        """后台循环更新设备状态（支持按需停止 - 10秒无请求则停止）"""
+        """后台循环更新设备状态（按需监控：10秒无请求则自动停止）"""
         while self.is_monitoring:
             try:
                 self.update_device_status()
 
-                # [按需监控] 检查是否超时（10秒无请求）
+                # 检查是否超时
                 if self.check_monitor_timeout():
                     logger.info("[按需监控] 10秒无请求，停止监控线程")
                     break
@@ -255,27 +255,30 @@ class PluginManager:
 
     def on_api_request(self):
         """
-        [按需监控] 记录API请求，启动监控（如果未运行）
-        当有API请求时调用此方法，触发按需监控
+        记录API请求并启动监控（按需触发）
+
+        当API收到设备信息请求时调用此方法：
+        - 更新最后请求时间戳
+        - 如果监控未运行，则启动监控线程
         """
         with self.api_request_lock:
             self.last_api_request_time = time.time()
 
-        # 如果监控未运行，启动它
         if not self.is_monitoring:
             logger.info("[按需监控] 检测到设备信息请求，启动监控线程")
             self.start_monitor()
 
     def check_monitor_timeout(self) -> bool:
         """
-        [按需监控] 检查是否应该停止监控（10秒超时）
+        检查是否应该停止监控（10秒超时）
 
         Returns:
-            True if should stop monitoring (no requests for 10 seconds)
+            True: 距离上次请求超过10秒，应该停止监控
+            False: 仍有活跃请求，继续监控
         """
         with self.api_request_lock:
             idle_time = time.time() - self.last_api_request_time
-            return idle_time > 10  # 固定10秒超时
+            return idle_time > 10
 
     def update_device_status(self):
         """

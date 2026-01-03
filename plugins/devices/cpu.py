@@ -22,8 +22,7 @@ class CPUDevice(DevicePlugin):
             total_mb = memory.total // (1024 * 1024)
             available_mb = memory.available // (1024 * 1024)
             used_mb = memory.used // (1024 * 1024)
-            # [性能优化] 使用 interval=None 替代 interval=1，避免阻塞1秒
-            # interval=None 会返回自上次调用以来的CPU使用率（非阻塞）
+            # 性能优化：使用 interval=None 避免阻塞（非阻塞模式）
             usage_percentage = psutil.cpu_percent(interval=None)
 
             temperature = None

@@ -407,11 +407,10 @@ class APIServer:
         @self.app.get("/api/devices/info")
         async def get_device_info():
             try:
-                # [按需监控] 记录API请求，触发监控启动（如果未运行）
+                # 按需监控：记录API请求，触发监控启动
                 self.model_controller.plugin_manager.on_api_request()
 
-                # 【核心修改】不再现场查询设备（会导致死锁），而是直接获取插件管理器中缓存的设备快照
-                # 这将是瞬间返回的，不会阻塞 API 线程，也不会抢占模型启动线程的 GPU 驱动锁
+                # 获取缓存的设备状态快照（非阻塞，避免死锁）
                 devices_info = self.model_controller.plugin_manager.get_device_status_snapshot()
 
                 return {"success": True, "devices": devices_info}

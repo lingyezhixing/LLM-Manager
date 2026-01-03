@@ -28,7 +28,7 @@ const DeviceMonitor: React.FC = () => {
         fetchDevices().finally(() => {
           startNextRequest()
         })
-      }, 500) // [按需监控优化] 前端0.5秒轮询，后端1秒更新，2倍频率保证不漏信息
+      }, 500) // 前端0.5秒轮询，后端1秒更新，2倍频率保证不漏信息
     }
 
     // 首次请求
