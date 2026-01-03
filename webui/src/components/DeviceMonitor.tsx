@@ -28,7 +28,7 @@ const DeviceMonitor: React.FC = () => {
         fetchDevices().finally(() => {
           startNextRequest()
         })
-      }, 500) // 请求结束后间隔0.5秒进行下一次
+      }, 1000) // [优化] 改为1秒，与后端刷新频率匹配
     }
 
     // 首次请求

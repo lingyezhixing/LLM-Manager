@@ -232,9 +232,9 @@ class PluginManager:
                 self.update_device_status()
             except Exception as e:
                 logger.error(f"设备状态更新失败: {e}")
-            
-            # 休眠3秒，减少对底层驱动的压力
-            for _ in range(30):
+
+            # [优化] 改为1秒刷新间隔，与前端轮询频率匹配
+            for _ in range(10):
                 if not self.is_monitoring:
                     break
                 time.sleep(0.1)
