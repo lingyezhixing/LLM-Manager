@@ -972,12 +972,13 @@ class ModelController:
             self.stop_model(primary_name)
             return False, msg
 
-    def stop_model(self, primary_name: str) -> Tuple[bool, str]:
+    def stop_model(self, primary_name: str, refresh_cache: bool = True) -> Tuple[bool, str]:
         """
         停止模型 - 接受主名称，增强支持中断正在启动的模型
 
         Args:
             primary_name: 模型主名称
+            refresh_cache: 是否在停止后刷新设备状态缓存，默认为 True
 
         Returns:
             (成功状态, 消息)
@@ -1043,9 +1044,10 @@ class ModelController:
             if self.runtime_monitor.is_model_monitored(primary_name):
                 self.runtime_monitor.record_model_stop(primary_name)
 
-            # 停止后刷新设备状态缓存
-            logger.info(f"模型 '{primary_name}' 已停止，正在刷新设备状态缓存...")
-            self.plugin_manager.update_device_status()
+            # 停止后刷新设备状态缓存（可选）
+            if refresh_cache:
+                logger.info(f"模型 '{primary_name}' 已停止，正在刷新设备状态缓存...")
+                self.plugin_manager.update_device_status()
 
             return True, f"模型 {primary_name} 已停止"
         finally:
@@ -1086,35 +1088,62 @@ class ModelController:
 
     def unload_all_models(self):
         """
-        [并行优化版] 卸载所有运行中的模型
-        使用线程池并行停止模型，大幅提升关闭速度
-        """
-        logger.info("正在并行卸载所有运行中的模型...")
-        primary_names = list(self.models_state.keys())
+        [防死锁优化版] 卸载所有运行中的模型
 
-        if not primary_names:
-            logger.info("没有需要卸载的模型")
+        优化策略：
+        1. 筛选出需要停止的模型（非 STOPPED/FAILED 状态）
+        2. 并行调用 stop_model(name, refresh_cache=False)，避免重复刷新缓存
+        3. 最后统一刷新一次设备状态缓存
+
+        Returns:
+            成功停止的模型数量
+        """
+        logger.info("正在卸载所有运行中的模型...")
+
+        # 第一阶段：筛选需要停止的模型
+        models_to_stop = []
+        already_stopped = []
+
+        for name, state in self.models_state.items():
+            # 快速检查状态（只需要读锁）
+            with state['lock']:
+                status = state['status']
+                if status in [ModelStatus.STOPPED.value, ModelStatus.FAILED.value]:
+                    already_stopped.append(name)
+                else:
+                    models_to_stop.append((name, status))
+
+        if models_to_stop:
+            logger.info(f"发现 {len(models_to_stop)} 个需要停止的模型：")
+            for name, status in models_to_stop:
+                logger.info(f"  - {name}: {status}")
+
+        if not models_to_stop:
+            logger.info(f"没有需要卸载的模型（{len(already_stopped)} 个模型已停止）")
             return 0
 
-        def stop_single_model(name):
-            """停止单个模型的包装函数"""
+        # 第二阶段：并行停止模型（refresh_cache=False 避免重复刷新）
+        def stop_single_model(name_status):
+            """停止单个模型，不刷新缓存"""
+            name, _ = name_status
             try:
-                success, message = self.stop_model(name)
+                success, message = self.stop_model(name, refresh_cache=False)
                 return name, success, message
             except Exception as e:
                 logger.error(f"卸载模型 '{name}' 时发生异常: {e}")
                 return name, False, str(e)
 
-        # 并行提交所有停止任务
+        # 并行提交停止任务
         futures = []
-        for name in primary_names:
-            future = self.executor.submit(stop_single_model, name)
+        for name_status in models_to_stop:
+            future = self.executor.submit(stop_single_model, name_status)
             futures.append(future)
 
-        # 收集结果，设置合理超时（每个模型最多5秒）
+        # 收集结果
         terminated_count = 0
         failed_models = []
-        timeout = len(primary_names) * 5 + 10  # 总超时时间
+        # 超时计算：每个模型最多 5 秒，加上缓冲时间
+        timeout = len(models_to_stop) * 5 + 10
 
         try:
             for future in concurrent.futures.as_completed(futures, timeout=timeout):
@@ -1131,7 +1160,15 @@ class ModelController:
         except concurrent.futures.TimeoutError:
             logger.error("并行卸载模型超时")
 
-        logger.info(f"所有模型卸载完成，成功: {terminated_count}/{len(primary_names)}")
+        # 第三阶段：统一刷新设备状态缓存（只刷新一次）
+        if terminated_count > 0:
+            logger.info("所有模型已停止，正在刷新设备状态缓存...")
+            try:
+                self.plugin_manager.update_device_status()
+            except Exception as e:
+                logger.error(f"刷新设备状态缓存失败: {e}")
+
+        logger.info(f"所有模型卸载完成，成功: {terminated_count}/{len(models_to_stop)}")
         if failed_models:
             logger.warning(f"以下模型卸载失败: {failed_models}")
 
