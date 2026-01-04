@@ -1063,41 +1063,8 @@ class ModelController:
             if not future.done():
                 future.cancel()
 
-        # 收集待终止进程
-        stop_tasks = []
-        for name, state in self.models_state.items():
-            with state['lock']:
-                if state.get('pid'):
-                    stop_tasks.append((name, f"model_{name}"))
-
-        # 执行终止
-        def kill_task(name, proc_name):
-            try:
-                ok, msg = self.process_manager.stop_process(proc_name, force=True, timeout=3)
-                return name, ok, msg
-            except Exception as e:
-                return name, False, str(e)
-
-        futures = [self.executor.submit(kill_task, n, p) for n, p in stop_tasks]
-        terminated_count = 0
-        
-        timeout = len(stop_tasks) * 2 + 5
-        try:
-            for f in concurrent.futures.as_completed(futures, timeout=timeout):
-                name, ok, msg = f.result()
-                if ok:
-                    terminated_count += 1
-                    with self.models_state[name]['lock']:
-                        self._reset_model_state(self.models_state[name])
-                else:
-                    logger.warning(f"进程终止失败 [{name}]: {msg}")
-        except concurrent.futures.TimeoutError:
-            logger.error("关闭过程超时")
-
-        # 记录统计
-        for name in self.models_state:
-            if self.runtime_monitor.is_model_monitored(name):
-                self.runtime_monitor.record_model_stop(name)
+        # 并行停止所有模型
+        terminated_count = self.unload_all_models()
 
         # 释放资源
         self.runtime_monitor.shutdown()
