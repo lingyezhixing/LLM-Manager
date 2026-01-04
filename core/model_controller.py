@@ -2,17 +2,16 @@
 模型控制器 (Model Controller)
 ===========================
 
-负责模型的生命周期管理，包括：
-1. 启动、停止模型进程
-2. 资源智能管理（自动释放空闲模型以腾出显存）
-3. 并行启动与死锁防护
-4. 跨平台路径适配与日志流管理
+负责模型的全生命周期管理，核心功能包括：
+1. 模型进程的启动与停止（支持并行启动）。
+2. 显存资源的智能管理（自动计算资源需求，循环释放空闲模型）。
+3. 进程守护与僵尸进程清理。
+4. 日志流的实时捕获与分发。
+5. 跨平台兼容性处理（Windows/Linux）。
 
-优化点：
-- 支持并行启动模型
-- 智能资源管理与循环释放策略
-- 修复自动关闭时的死锁问题 (使用 RLock)
-- Linux/Windows 路径与执行逻辑兼容
+关键特性：
+- 使用 RLock 解决自动关闭时的死锁问题。
+- 引入 Checkpoint 机制，支持启动过程中的立即中断。
 """
 
 import os
@@ -35,19 +34,19 @@ logger = get_logger(__name__)
 
 class ModelStatus(Enum):
     """模型状态枚举"""
-    STOPPED = "stopped"
-    STARTING = "starting"
-    INIT_SCRIPT = "init_script"
-    HEALTH_CHECK = "health_check"
-    ROUTING = "routing"
-    FAILED = "failed"
+    STOPPED = "stopped"          # 已停止
+    STARTING = "starting"        # 正在获取锁或准备启动
+    INIT_SCRIPT = "init_script"  # 正在执行启动脚本
+    HEALTH_CHECK = "health_check"# 正在进行健康检查
+    ROUTING = "routing"          # 运行中且可路由
+    FAILED = "failed"            # 启动失败或运行异常
 
 
 class LogManager:
     """
     日志管理器
     
-    负责模型控制台日志的收集、存储、流式推送以及定期清理。
+    负责模型控制台输出的收集、存储、实时流推送以及定期清理。
     """
 
     def __init__(self):
@@ -59,19 +58,19 @@ class LogManager:
         logger.info("日志管理器初始化完成")
 
     def register_model(self, model_name: str):
-        """注册模型的日志存储空间"""
+        """为新模型初始化日志存储结构"""
         with self.global_lock:
             if model_name not in self.model_logs:
                 self.model_logs[model_name] = []
                 self.log_subscribers[model_name] = []
                 self.log_locks[model_name] = threading.Lock()
-                logger.debug(f"已注册模型日志管理: {model_name}")
+                logger.debug(f"已注册模型日志空间: {model_name}")
 
     def unregister_model(self, model_name: str):
-        """注销模型的日志管理并通知订阅者"""
+        """注销模型并清理相关订阅资源"""
         with self.global_lock:
             if model_name in self.model_logs:
-                # 发送结束信号给所有订阅者
+                # 向所有订阅者发送结束信号
                 for subscriber_queue in self.log_subscribers[model_name]:
                     try:
                         subscriber_queue.put(None)
@@ -81,10 +80,10 @@ class LogManager:
                 del self.model_logs[model_name]
                 del self.log_subscribers[model_name]
                 del self.log_locks[model_name]
-                logger.debug(f"已注销模型日志管理: {model_name}")
+                logger.debug(f"已注销模型日志空间: {model_name}")
 
     def add_console_log(self, model_name: str, message: str):
-        """添加一条模型控制台日志并推送到订阅流"""
+        """添加一条控制台日志并广播给订阅者"""
         if model_name not in self.model_logs:
             self.register_model(model_name)
 
@@ -93,9 +92,11 @@ class LogManager:
             "message": message
         }
 
+        # 写入存储
         with self.log_locks[model_name]:
             self.model_logs[model_name].append(log_entry)
 
+        # 广播推送
         self._notify_subscribers(model_name, log_entry)
 
     def get_logs(self, model_name: str, limit: Optional[int] = None) -> List[Dict[str, Any]]:
@@ -111,7 +112,7 @@ class LogManager:
         return logs
 
     def get_all_logs(self) -> Dict[str, List[Dict[str, Any]]]:
-        """获取所有模型的日志"""
+        """获取所有模型的日志快照"""
         with self.global_lock:
             result = {}
             for model_name in self.model_logs:
@@ -119,28 +120,25 @@ class LogManager:
             return result
 
     def clear_logs(self, model_name: str):
-        """清空指定模型的日志"""
+        """手动清空指定模型的日志"""
         if model_name in self.model_logs:
             with self.log_locks[model_name]:
                 self.model_logs[model_name].clear()
-            logger.debug(f"已清空模型日志: {model_name}")
+            logger.debug(f"已手动清空模型日志: {model_name}")
 
     def cleanup_old_logs(self, model_name: str, keep_minutes: int) -> int:
         """
-        清理过期的日志
+        清理过期日志
         
         Args:
-            model_name: 模型名称
-            keep_minutes: 保留最近多少分钟的日志
-            
+            keep_minutes: 保留最近 N 分钟的日志
         Returns:
-            删除的条目数量
+            删除的条目数
         """
         if model_name not in self.model_logs:
             return 0
 
-        current_time = time.time()
-        cutoff_time = current_time - (keep_minutes * 60)
+        cutoff_time = time.time() - (keep_minutes * 60)
 
         with self.log_locks[model_name]:
             original_count = len(self.model_logs[model_name])
@@ -151,11 +149,11 @@ class LogManager:
             removed_count = original_count - len(self.model_logs[model_name])
 
         if removed_count > 0:
-            logger.debug(f"模型 '{model_name}' 日志清理: 删除 {keep_minutes} 分钟前的日志 {removed_count} 条")
+            logger.debug(f"日志自动清理 [{model_name}]: 移除了 {removed_count} 条过期日志 (保留最近 {keep_minutes} 分钟)")
         return removed_count
 
     def subscribe_to_logs(self, model_name: str) -> queue.Queue:
-        """订阅模型日志流"""
+        """订阅实时日志流"""
         if model_name not in self.model_logs:
             self.register_model(model_name)
 
@@ -163,7 +161,7 @@ class LogManager:
         with self.global_lock:
             self.log_subscribers[model_name].append(subscriber_queue)
 
-        logger.debug(f"新订阅者加入模型日志流: {model_name}")
+        logger.debug(f"新增日志订阅者: {model_name}")
         return subscriber_queue
 
     def unsubscribe_from_logs(self, model_name: str, subscriber_queue: queue.Queue):
@@ -172,13 +170,14 @@ class LogManager:
             with self.global_lock:
                 if subscriber_queue in self.log_subscribers[model_name]:
                     self.log_subscribers[model_name].remove(subscriber_queue)
-                    logger.debug(f"订阅者离开模型日志流: {model_name}")
+                    logger.debug(f"移除日志订阅者: {model_name}")
 
     def _notify_subscribers(self, model_name: str, log_entry: Dict[str, Any]):
-        """内部方法：向所有订阅者广播新日志"""
+        """内部方法：向所有活跃订阅者广播日志"""
         if model_name not in self.log_subscribers:
             return
 
+        # 复制列表以避免迭代时修改
         subscribers_copy = self.log_subscribers[model_name].copy()
         for subscriber_queue in subscribers_copy:
             try:
@@ -186,33 +185,33 @@ class LogManager:
             except queue.Full:
                 self._remove_subscriber(model_name, subscriber_queue, reason="队列已满")
             except Exception:
-                self._remove_subscriber(model_name, subscriber_queue, reason="发生异常")
+                self._remove_subscriber(model_name, subscriber_queue, reason="连接异常")
 
     def _remove_subscriber(self, model_name: str, subscriber_queue: queue.Queue, reason: str):
-        """内部方法：移除无效订阅者"""
+        """内部方法：清理无效订阅者"""
         with self.global_lock:
             if subscriber_queue in self.log_subscribers.get(model_name, []):
                 self.log_subscribers[model_name].remove(subscriber_queue)
-                logger.debug(f"移除订阅者 ({reason}): {model_name}")
+                logger.debug(f"强制移除订阅者 ({reason}): {model_name}")
 
     def get_log_stats(self) -> Dict[str, Any]:
-        """获取日志系统的统计信息"""
+        """获取日志系统统计信息"""
         with self.global_lock:
             stats = {
                 "total_models": len(self.model_logs),
-                "total_log_entries": sum(len(logs) for logs in self.model_logs.values()),
+                "total_entries": sum(len(logs) for logs in self.model_logs.values()),
                 "total_subscribers": sum(len(subs) for subs in self.log_subscribers.values()),
-                "model_stats": {}
+                "details": {}
             }
             for model_name, logs in self.model_logs.items():
-                stats["model_stats"][model_name] = {
-                    "log_count": len(logs),
-                    "subscriber_count": len(self.log_subscribers[model_name])
+                stats["details"][model_name] = {
+                    "count": len(logs),
+                    "subscribers": len(self.log_subscribers[model_name])
                 }
             return stats
 
     def shutdown(self):
-        """关闭日志管理器"""
+        """关闭日志管理器并断开所有连接"""
         self._running = False
         with self.global_lock:
             for _, subscribers in self.log_subscribers.items():
@@ -228,57 +227,55 @@ class ModelRuntimeMonitor:
     """
     模型运行时间监控器
     
-    负责记录模型的启动时间、运行时长，并定期写入数据库。
+    负责记录模型的启动/停止时间，并定期同步到数据库。
     """
 
     def __init__(self, db_path: Optional[str] = None):
         self.monitor = Monitor(db_path)
         self.active_models: Dict[str, threading.Timer] = {}
         self.lock = threading.Lock()
-        logger.info("模型运行时间监控器初始化完成")
+        logger.info("模型运行监控器初始化完成")
 
     def record_model_start(self, model_name: str) -> bool:
-        """记录模型启动时间并开启定时更新任务"""
+        """记录启动时间并开启心跳更新"""
         start_time = time.time()
         try:
             self.monitor.add_model_runtime_start(model_name, start_time)
-            logger.info(f"已记录模型 '{model_name}' 启动时间: {start_time}")
+            logger.info(f"已记录启动时间: {model_name}")
         except Exception as e:
-            logger.error(f"记录模型 '{model_name}' 启动时间失败: {e}")
+            logger.error(f"记录启动时间失败 [{model_name}]: {e}")
             return False
 
         with self.lock:
             if model_name in self.active_models:
                 self.active_models[model_name].cancel()
 
-            # 每10秒更新一次运行时长
+            # 启动心跳定时器（每10秒更新一次结束时间）
             timer = threading.Timer(10.0, self._update_runtime_periodically, args=[model_name])
             timer.daemon = True
             timer.start()
             self.active_models[model_name] = timer
 
-        logger.info(f"已启动模型 '{model_name}' 的运行时间定时更新器")
         return True
 
     def _update_runtime_periodically(self, model_name: str):
-        """定期更新数据库中的结束时间"""
+        """周期性更新数据库中的结束时间（心跳机制）"""
         with self.lock:
             if model_name in self.active_models:
                 end_time = time.time()
                 try:
                     self.monitor.update_model_runtime_end(model_name, end_time)
-                    logger.debug(f"已更新模型 '{model_name}' 运行时间: {end_time}")
                 except Exception as e:
-                    logger.error(f"更新模型 '{model_name}' 运行时间失败: {e}")
+                    logger.error(f"更新运行时间失败 [{model_name}]: {e}")
 
-                # 重新设置定时器
+                # 续约定时器
                 timer = threading.Timer(10.0, self._update_runtime_periodically, args=[model_name])
                 timer.daemon = True
                 timer.start()
                 self.active_models[model_name] = timer
 
     def record_model_stop(self, model_name: str) -> bool:
-        """记录模型停止时间并关闭定时器"""
+        """记录停止时间并终止心跳"""
         end_time = time.time()
         with self.lock:
             if model_name in self.active_models:
@@ -287,32 +284,28 @@ class ModelRuntimeMonitor:
 
         try:
             self.monitor.update_model_runtime_end(model_name, end_time)
-            logger.info(f"已记录模型 '{model_name}' 停止时间: {end_time}")
+            logger.info(f"已记录停止时间: {model_name}")
             return True
         except Exception as e:
-            logger.error(f"记录模型 '{model_name}' 停止时间失败: {e}")
+            logger.error(f"记录停止时间失败 [{model_name}]: {e}")
             return False
 
     def is_model_monitored(self, model_name: str) -> bool:
         with self.lock:
             return model_name in self.active_models
 
-    def get_active_models(self) -> List[str]:
-        with self.lock:
-            return list(self.active_models.keys())
-
     def shutdown(self):
+        """停止所有监控任务"""
         with self.lock:
             for name, timer in self.active_models.items():
                 timer.cancel()
-                logger.info(f"已停止模型 '{name}' 的运行时间监控")
             self.active_models.clear()
 
         try:
             self.monitor.close()
-            logger.info("模型运行时间监控器已关闭")
+            logger.info("模型运行监控器已关闭")
         except Exception as e:
-            logger.error(f"关闭模型运行时间监控器失败: {e}")
+            logger.error(f"关闭监控器异常: {e}")
 
     def __del__(self):
         try:
@@ -323,41 +316,43 @@ class ModelRuntimeMonitor:
 
 class ModelController:
     """
-    优化的模型控制器
+    模型控制器核心类
     
-    核心功能：
-    - 管理模型生命周期（启动/停止/状态查询）
-    - 并行启动支持
-    - 智能资源管理与释放
-    - 死锁修复与 Linux 适配
+    协调 ConfigManager, PluginManager, ProcessManager 实现模型的智能调度。
     """
 
     def __init__(self, config_manager: ConfigManager):
         self.config_manager = config_manager
         self.models_state: Dict[str, Dict[str, Any]] = {}
         self.is_running = True
+        
+        # 核心组件初始化
         self.plugin_manager: Optional[PluginManager] = None
         self.process_manager = get_process_manager()
         self.runtime_monitor = ModelRuntimeMonitor()
         self.log_manager = LogManager()
+        
+        # 线程池与并发控制
         self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=5)
         self.startup_futures: Dict[str, concurrent.futures.Future] = {}
         self.startup_locks: Dict[str, threading.Lock] = {}
         self.shutdown_event = threading.Event()
+        
+        # 外部依赖
         self.api_router: Optional[Any] = None
 
-        # 启动空闲检查线程
+        # 启动空闲资源检查守护线程
         self.idle_check_thread = threading.Thread(target=self.idle_check_loop, daemon=True)
         self.idle_check_thread.start()
 
-        # 初始化模型状态结构
+        # 初始化状态字典
         self._init_models_state()
         
-        # 加载插件
+        # 加载硬件与接口插件
         self.load_plugins()
 
     def _init_models_state(self):
-        """初始化内部模型状态字典"""
+        """初始化模型状态表"""
         new_states = {}
         model_names = self.config_manager.get_model_names()
 
@@ -370,77 +365,65 @@ class ModelController:
                     "status": ModelStatus.STOPPED.value,
                     "last_access": None,
                     "pid": None,
-                    # 【核心修复】使用 RLock 替代 Lock，允许同一线程（如 idle_check 调用 stop_model 时）重入锁
-                    # 这直接解决了自动关闭时的死锁问题
+                    # 【核心修复】使用 RLock 允许同一线程（如 auto-stop 逻辑）重入锁，防止死锁
                     "lock": threading.RLock(),
                     "log_thread": None,
                     "current_config": None,
                     "failure_reason": None
                 }
-                # 为每个模型创建专用的启动锁
+                # 启动专用互斥锁
                 self.startup_locks[primary_name] = threading.Lock()
                 self.log_manager.register_model(primary_name)
 
         self.models_state = new_states
 
     def set_api_router(self, api_router: Any):
-        """注入 API Router 实例，用于查询待处理请求数"""
+        """注入 API Router 以获取请求统计"""
         self.api_router = api_router
-        logger.info("API Router 实例已成功注入到 Model Controller")
+        logger.info("API Router 已注入 Model Controller")
 
     def load_plugins(self):
-        """加载设备和接口插件，并更新初始设备状态"""
+        """加载插件并刷新初始设备状态"""
         device_dir = self.config_manager.get_device_plugin_dir()
         interface_dir = self.config_manager.get_interface_plugin_dir()
         self.plugin_manager = PluginManager(device_dir, interface_dir)
 
         try:
             self.plugin_manager.load_all_plugins(model_manager=self)
-            logger.info(f"设备插件已加载: {list(self.plugin_manager.get_all_device_plugins().keys())}")
-            logger.info(f"接口插件已加载: {list(self.plugin_manager.get_all_interface_plugins().keys())}")
+            logger.info(f"插件加载完毕: 设备插件 {len(self.plugin_manager.get_all_device_plugins())} 个, 接口插件 {len(self.plugin_manager.get_all_interface_plugins())} 个")
             
-            logger.info("正在初始化设备状态缓存...")
+            logger.info("初始化设备状态缓存...")
             self.plugin_manager.update_device_status()
-
-            online_devices = self.plugin_manager.get_cached_online_devices()
-            if online_devices:
-                logger.info(f"当前在线设备: {list(online_devices)}")
-            else:
-                logger.warning("未检测到在线设备")
+            
+            online_devs = self.plugin_manager.get_cached_online_devices()
+            logger.info(f"在线设备检测结果: {list(online_devs) if online_devs else '无'}")
 
         except Exception as e:
-            logger.error(f"自动加载插件失败: {e}")
+            logger.error(f"插件加载失败: {e}")
 
     def _check_if_cancelled(self, primary_name: str) -> bool:
         """
-        检查启动流程是否被取消
-
-        Args:
-            primary_name: 模型名称
-
-        Returns:
-            True 表示被取消，False 表示可以继续
+        [Checkpoint] 检查启动流程是否已被用户取消
         """
         state = self.models_state[primary_name]
 
         with state['lock']:
             cancelled = state['status'] == ModelStatus.STOPPED.value
             if cancelled:
-                logger.info(f"检测到停止信号，取消启动: {primary_name}")
-                # 确保状态一致
+                logger.info(f"检测到取消信号，终止启动流程: {primary_name}")
                 state['failure_reason'] = "启动被用户中断"
 
         return cancelled
 
     def start_auto_start_models(self):
-        """并行启动所有标记为自动启动的模型"""
-        logger.info("检查自动启动模型配置...")
+        """批量启动配置为自动启动的模型"""
+        logger.info("正在扫描自动启动配置...")
 
         online_devices = self.plugin_manager.get_cached_online_devices()
         
-        # 如果未禁用监控且无设备在线，跳过自动启动
+        # 若无设备且未禁用监控，则跳过
         if not online_devices and not self.config_manager.is_gpu_monitoring_disabled():
-            logger.warning("没有在线设备，跳过自动启动")
+            logger.warning("未检测到在线设备，跳过自动启动")
             return
 
         auto_start_models = [
@@ -449,7 +432,7 @@ class ModelController:
         ]
 
         if not auto_start_models:
-            logger.info("没有配置为自动启动的模型")
+            logger.info("无自动启动模型")
             return
 
         logger.info(f"准备并行启动 {len(auto_start_models)} 个模型: {auto_start_models}")
@@ -459,98 +442,90 @@ class ModelController:
                 success, msg = self.start_model(model_name)
                 return model_name, success, msg
             except Exception as ex:
-                logger.error(f"自动启动模型 {model_name} 异常: {ex}")
+                logger.error(f"自动启动异常 [{model_name}]: {ex}")
                 return model_name, False, f"异常: {ex}"
 
         futures = []
         for model_name in auto_start_models:
             futures.append(self.executor.submit(start_single_model, model_name))
 
-        started_models = []
+        started_count = 0
         for future in concurrent.futures.as_completed(futures, timeout=120):
             try:
                 name, success, msg = future.result()
                 if success:
-                    logger.info(f"自动启动模型 {name} 成功")
-                    started_models.append(name)
+                    started_count += 1
                 else:
-                    logger.error(f"自动启动模型 {name} 失败: {msg}")
+                    logger.warning(f"自动启动失败 [{name}]: {msg}")
             except Exception as e:
-                logger.error(f"处理启动结果时异常: {e}")
+                logger.error(f"处理启动结果异常: {e}")
 
-        logger.info(f"自动启动流程结束，成功: {len(started_models)}/{len(auto_start_models)}")
+        logger.info(f"自动启动流程完成: 成功 {started_count}/{len(auto_start_models)}")
 
     def start_model(self, primary_name: str) -> Tuple[bool, str]:
         """
-        启动模型（修复逻辑：移除错误的初始状态检查）
+        启动模型（线程安全，支持重入与中断）
+        
+        Returns:
+            (is_success, message)
         """
         state = self.models_state[primary_name]
         model_lock = self.startup_locks[primary_name]
 
-        # 快速状态检查（不加锁先看一眼，提高响应）
+        # 1. 快速状态检查（无锁预览）
         with state['lock']:
             if state['status'] == ModelStatus.ROUTING.value:
                 return True, f"模型 '{primary_name}' 已在运行"
             elif state['status'] == ModelStatus.STARTING.value:
-                logger.info(f"模型 '{primary_name}' 正在启动中，等待完成...")
+                logger.info(f"模型 '{primary_name}' 正在启动中，进入等待模式...")
                 return self._wait_for_model_startup(primary_name, state)
 
-        # 获取启动锁
-        logger.info(f"正在获取模型 '{primary_name}' 的启动锁...")
+        # 2. 获取启动互斥锁
+        logger.info(f"尝试获取启动锁: {primary_name}")
         lock_acquired = False
         try:
             lock_acquired = model_lock.acquire(blocking=True, timeout=60)
             if not lock_acquired:
-                # 再次尝试非阻塞获取，防止极端情况
+                # 再次非阻塞尝试，防止边界情况
                 if not model_lock.acquire(blocking=False):
-                    return False, f"获取启动锁超时，请稍后重试: {primary_name}"
+                    return False, f"获取启动锁超时: {primary_name}"
         except Exception as e:
             if lock_acquired:
                 model_lock.release()
-            return False, f"获取启动锁异常: {e}"
+            return False, f"锁获取异常: {e}"
 
         try:
-            logger.info(f"开始启动流程: {primary_name}")
-
-            # =================================================================
-            # 【修复点】: 删除了这里的 _check_if_cancelled 调用
-            # 因为此时状态本身就是 STOPPED，不能视为被取消
-            # =================================================================
+            logger.info(f"获得锁，开始启动流程: {primary_name}")
 
             with state['lock']:
                 current_status = state['status']
 
-                # 再次确认状态（防止等待锁期间状态变了）
+                # 双重检查
                 if current_status == ModelStatus.ROUTING.value:
-                    return True, f"模型 {primary_name} 已启动"
+                    return True, f"模型已就绪"
                 elif current_status == ModelStatus.STARTING.value:
-                    # 如果等待锁期间别人已经开始启动了
                     return self._wait_for_model_startup(primary_name, state)
 
-                # 正常启动流程：将状态置为 STARTING
-                # 这是启动的第一步，从此之后如果状态变回 STOPPED 才算被取消
+                # 标记状态为启动中
                 state['status'] = ModelStatus.STARTING.value
                 state['failure_reason'] = None
 
             try:
-                # 进入智能启动流程（内部包含后续的 Checkpoint 2/3/4/5/6）
-                # 如果在后续过程中 stop_model 被调用，状态会变为 STOPPED，
-                # 后续的 checkpoints 就会生效。
+                # 执行智能启动（包含 Checkpoint 机制）
                 success, message = self._start_model_intelligent(primary_name)
 
-                # 【检查点 4 - 最终防线】启动完成后再次检查
+                # [Checkpoint 4] 最终防线
                 if self._check_if_cancelled(primary_name):
-                    # 如果启动成功但被标记为停止，需要清理刚启动的进程
                     with state['lock']:
                         pid = state.get('pid')
                         if pid:
-                            logger.warning(f"启动完成后检测到停止信号，清理进程 PID: {pid}")
+                            logger.warning(f"启动完成但收到停止信号，清理残留进程 PID: {pid}")
                             self.process_manager.stop_process(f"model_{primary_name}", force=True)
                             self._reset_model_state(state)
                     return False, "启动完成后被立即停止"
 
                 if success:
-                    logger.info(f"模型 '{primary_name}' 启动成功，刷新设备状态缓存")
+                    logger.info(f"模型 '{primary_name}' 启动成功，刷新缓存")
                     self.plugin_manager.update_device_status()
 
                 return success, message
@@ -558,8 +533,8 @@ class ModelController:
                 with state['lock']:
                     state['status'] = ModelStatus.FAILED.value
                     state['failure_reason'] = str(e)
-                logger.error(f"启动模型 {primary_name} 失败: {e}", exc_info=True)
-                return False, f"启动失败: {e}"
+                logger.error(f"启动过程严重异常 [{primary_name}]: {e}", exc_info=True)
+                return False, f"启动异常: {e}"
 
         finally:
             if lock_acquired:
@@ -569,20 +544,20 @@ class ModelController:
                     logger.error(f"释放启动锁异常: {e}")
 
     def _wait_for_model_startup(self, primary_name: str, state: Dict[str, Any]) -> Tuple[bool, str]:
-        """等待模型启动完成（支持检测停止信号）"""
+        """等待其他线程的启动结果"""
         wait_start = time.time()
         max_wait = 120
         check_interval = 0.5
         last_log = wait_start
 
-        logger.info(f"开始等待模型 '{primary_name}' 启动，超时时间: {max_wait}s")
+        logger.info(f"等待模型启动: {primary_name} (超时: {max_wait}s)")
 
         while True:
             now = time.time()
             elapsed = now - wait_start
 
             if now - last_log >= 30:
-                logger.info(f"模型 '{primary_name}' 仍在启动中... 已等待 {elapsed:.1f}s")
+                logger.info(f"等待中... {primary_name} ({elapsed:.1f}s)")
                 last_log = now
 
             with state['lock']:
@@ -590,41 +565,38 @@ class ModelController:
                 fail_reason = state.get('failure_reason')
 
             if elapsed > max_wait:
-                return False, f"启动超时 ({max_wait}s)"
+                return False, f"等待超时"
 
             if status == ModelStatus.ROUTING.value:
-                return True, f"模型 {primary_name} 已成功启动"
+                return True, f"模型启动成功"
             elif status == ModelStatus.FAILED.value:
-                msg = f"启动失败: {fail_reason}"
-                logger.error(msg)
-                return False, msg
+                return False, f"启动失败: {fail_reason}"
             elif status == ModelStatus.STOPPED.value:
-                # 【关键】检测到停止信号
-                logger.info(f"检测到停止信号，放弃等待: {primary_name}")
+                logger.info(f"等待期间检测到停止信号: {primary_name}")
                 return False, "启动被用户中断"
 
             time.sleep(check_interval)
 
     def _start_model_intelligent(self, primary_name: str) -> Tuple[bool, str]:
         """
-        智能启动：检查设备、自适应配置、资源释放
-
-        优化：
-        1. 使用缓存状态避免阻塞
-        2. 支持无监控模式强制启动
-        3. 适配 Linux 路径
-        4. 增加取消检查点
+        智能启动流程
+        
+        流程：
+        1. 检查在线设备。
+        2. 获取适配配置。
+        3. 检查资源（必要时释放空闲模型）。
+        4. 启动进程。
+        5. 健康检查。
         """
         state = self.models_state[primary_name]
 
         try:
-            # 1. 确定在线设备（可能耗时）
+            # 1. 确定可用设备
             if self.config_manager.is_gpu_monitoring_disabled():
-                logger.info("GPU监控禁用，忽略在线状态，使用所有可能设备")
+                logger.info("GPU监控已禁用，尝试使用配置文件中的所有设备")
                 online_devices = set()
                 base_conf = self.config_manager.get_model_config(primary_name)
                 if base_conf:
-                    # 尝试从配置提取所需设备，或回退到所有插件
                     for val in base_conf.values():
                         if isinstance(val, dict) and "required_devices" in val:
                             online_devices.update(val["required_devices"])
@@ -633,54 +605,53 @@ class ModelController:
             else:
                 online_devices = self.plugin_manager.get_cached_online_devices()
 
-            # 【检查点 2】设备检查后检查取消状态
+            # [Checkpoint 2] 设备检查后
             if self._check_if_cancelled(primary_name):
-                return False, "启动被用户中断（设备检查后）"
+                return False, "启动中断（阶段2）"
 
             # 2. 获取自适应配置
             model_config = self.config_manager.get_adaptive_model_config(primary_name, online_devices)
             if not model_config:
-                error_msg = f"无可用配置 (在线设备: {list(online_devices)})"
+                error_msg = f"无适配配置 (可用设备: {list(online_devices)})"
                 with state['lock']:
                     state['status'] = ModelStatus.FAILED.value
                     state['failure_reason'] = error_msg
-                logger.error(f"启动 '{primary_name}' 失败: {error_msg}")
+                logger.error(f"启动失败: {error_msg}")
                 return False, error_msg
 
             state['current_config'] = model_config
             with state['lock']:
                 state['status'] = ModelStatus.INIT_SCRIPT.value
 
-            # 3. 资源检查与释放（可能很耗时）
+            # 3. 资源管理（关键路径）
             if not self._check_and_free_resources(model_config):
-                error_msg = "设备资源不足，且无法通过释放空闲模型满足需求"
+                error_msg = "资源不足且无法通过释放腾出空间"
                 with state['lock']:
                     state['status'] = ModelStatus.FAILED.value
                     state['failure_reason'] = error_msg
-                logger.error(f"启动 '{primary_name}' 失败: {error_msg}")
+                logger.error(f"启动失败: {error_msg}")
                 return False, error_msg
 
-            # 【检查点 3】资源检查后检查取消状态
+            # [Checkpoint 3] 资源检查后
             if self._check_if_cancelled(primary_name):
-                return False, "启动被用户中断（资源检查后）"
+                return False, "启动中断（阶段3）"
 
-            # 4. 准备进程启动
-            logger.info(f"启动进程: {primary_name} (脚本: {model_config['script_path']})")
+            # 4. 启动进程
+            logger.info(f"执行启动脚本: {model_config['script_path']}")
 
             project_root = os.path.dirname(os.path.abspath(self.config_manager.config_path))
             process_name = f"model_{primary_name}"
 
-            # 回调函数：捕获输出到日志管理器
+            # 日志回调
             def output_callback(stream_type: str, message: str):
                 self.log_manager.add_console_log(primary_name, message)
 
-            # Windows 特定标志
+            # Windows 进程组标志
             creation_flags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == 'nt' else None
 
-            # 5. 执行启动
             success, msg, pid = self.process_manager.start_process(
                 name=process_name,
-                command=model_config['script_path'],  # Linux/Windows 适配路径
+                command=model_config['script_path'],
                 cwd=project_root,
                 description=f"模型进程: {primary_name}",
                 shell=True,
@@ -695,31 +666,29 @@ class ModelController:
                     state['failure_reason'] = msg
                 return False, f"进程启动失败: {msg}"
 
-            # 【检查点 4 - 关键】PID 生成后立即检查
-            # 此时进程已经启动，如果需要停止必须终止它
+            # [Checkpoint 4] 进程启动后立即检查
             with state['lock']:
                 if state['status'] == ModelStatus.STOPPED.value:
-                    logger.warning(f"进程刚启动 (PID: {pid}) 即被要求停止，立即终止")
+                    logger.warning(f"进程已启动(PID {pid})但收到停止请求，立即终止")
                     self.process_manager.stop_process(f"model_{primary_name}", force=True)
-                    return False, "启动被中断（进程已终止）"
+                    return False, "启动中断（进程已终止）"
 
-                # 正常情况：更新状态和 PID
-                state['process'] = None  # 这里的 process 引用由 process_manager 管理
+                state['process'] = None
                 state['pid'] = pid
                 state['log_thread'] = None
 
-            # 6. 健康检查（长耗时操作）
+            # 5. 健康检查
             return self._perform_health_checks(primary_name, model_config)
 
         except Exception as e:
-            logger.error(f"智能启动异常: {e}", exc_info=True)
+            logger.error(f"智能启动流程异常: {e}", exc_info=True)
             with state['lock']:
                 state['status'] = ModelStatus.FAILED.value
                 state['failure_reason'] = str(e)
             return False, f"启动异常: {e}"
 
     def _check_and_free_resources(self, model_config: Dict[str, Any]) -> bool:
-        """检查资源，如果不足则尝试循环释放空闲模型"""
+        """检查资源是否满足，不足则尝试循环释放低优先级的模型"""
         if self.config_manager.is_gpu_monitoring_disabled():
             return True
 
@@ -743,22 +712,26 @@ class ModelController:
                     resource_ok = False
 
             if resource_ok:
-                logger.info("资源检查通过")
+                logger.debug("资源检查通过")
                 return True
 
-            logger.warning(f"资源不足: {deficit_devices}，尝试释放空闲模型...")
+            logger.warning(f"资源不足 {deficit_devices}，尝试释放空闲模型...")
             
-            # 尝试停止一个模型，如果成功则 continue 再次检查，否则 break
+            # 尝试停止一个模型，成功则 continue 重新检查，失败则 break
             if self._stop_idle_models_for_resources(deficit_devices):
                 continue
             else:
-                logger.error("无法释放足够资源")
+                logger.error("无法释放足够的资源")
                 break
 
         return False
 
     def _stop_idle_models_for_resources(self, deficit_devices: Dict[str, int]) -> bool:
-        """选择并停止一个最佳的空闲模型以释放资源"""
+        """
+        寻找并停止最合适的空闲模型
+        
+        评分策略: 空闲时间 / 占用显存 (单位GB)
+        """
         candidates = []
         now = time.time()
 
@@ -767,7 +740,7 @@ class ModelController:
                 if state['status'] != ModelStatus.ROUTING.value:
                     continue
 
-                # 如果有待处理请求，跳过
+                # 避开正在处理请求的模型
                 if self.api_router and self.api_router.pending_requests.get(name, 0) > 0:
                     continue
                 
@@ -775,12 +748,12 @@ class ModelController:
                 if not config:
                     continue
                 
-                # 检查是否使用了需要释放的设备
+                # 仅考虑占用了所需资源设备的模型
                 used_devs = set(config.get('required_devices', []) or config.get('memory_mb', {}).keys())
                 if used_devs.isdisjoint(set(deficit_devices.keys())):
                     continue
                 
-                # 计算评分 (空闲时间 / 占用显存)
+                # 计算评分
                 last_access = state.get('last_access') or 0
                 idle_sec = max(0, now - last_access)
                 mem_mb = sum(config.get('memory_mb', {}).values())
@@ -797,15 +770,15 @@ class ModelController:
         if not candidates:
             return False
 
-        # 按分数降序排序，停止分数最高的
+        # 停止得分最高的模型
         target = sorted(candidates, key=lambda x: x['score'], reverse=True)[0]
-        logger.info(f"为释放资源停止模型: {target['name']} (空闲: {target['idle']:.0f}s, 显存: {target['mem']:.2f}GB)")
+        logger.info(f"释放资源: 停止模型 '{target['name']}' (空闲: {target['idle']:.0f}s, 显存: {target['mem']:.2f}GB)")
         
         success, _ = self.stop_model(target['name'])
         return success
 
     def _perform_health_checks(self, primary_name: str, model_config: Dict[str, Any]) -> Tuple[bool, str]:
-        """执行模型健康检查（带取消检查）"""
+        """执行健康检查（含中断检测）"""
         state = self.models_state[primary_name]
         port = model_config['port']
         timeout = 300
@@ -814,31 +787,29 @@ class ModelController:
         with state['lock']:
             state['status'] = ModelStatus.HEALTH_CHECK.value
 
-        logger.info(f"开始健康检查: {primary_name} (端口: {port})")
+        logger.info(f"开始健康检查: {primary_name} (Port: {port})")
 
         mode = model_config.get("mode", "Chat")
         plugin = self.plugin_manager.get_interface_plugin(mode)
 
         if not plugin:
             msg = f"未找到模式 '{mode}' 的接口插件"
-            logger.error(msg)
             self._handle_startup_failure(primary_name, msg)
             return False, msg
 
-        # 【检查点 5】健康检查前检查
+        # [Checkpoint 5] 检查前
         if self._check_if_cancelled(primary_name):
-            return False, "启动被中断（健康检查前）"
+            return False, "启动中断（阶段5）"
 
-        # 执行健康检查（可能需要修改插件支持定期检查状态）
-        # 如果插件不支持中断，我们至少在检查前验证一次
+        # 调用插件进行检查
         ok, msg = plugin.health_check(primary_name, port, start_ts, timeout)
 
-        # 【检查点 6】健康检查后检查
+        # [Checkpoint 6] 检查后
         if self._check_if_cancelled(primary_name):
-            return False, "启动被中断（健康检查后）"
+            return False, "启动中断（阶段6）"
 
         if ok:
-            logger.info(f"模型 '{primary_name}' 健康检查通过")
+            logger.info(f"健康检查通过: {primary_name}")
             with state['lock']:
                 state['status'] = ModelStatus.ROUTING.value
                 state['last_access'] = time.time()
@@ -850,8 +821,8 @@ class ModelController:
             return False, f"健康检查失败: {msg}"
 
     def _handle_startup_failure(self, primary_name: str, reason: str):
-        """处理启动失败：更新状态并停止进程"""
-        logger.error(f"模型 '{primary_name}' 启动失败: {reason}")
+        """处理启动失败逻辑"""
+        logger.error(f"启动失败清理 [{primary_name}]: {reason}")
         state = self.models_state[primary_name]
         with state['lock']:
             state['status'] = ModelStatus.FAILED.value
@@ -860,39 +831,28 @@ class ModelController:
 
     def stop_model(self, primary_name: str, refresh_cache: bool = True) -> Tuple[bool, str]:
         """
-        停止模型（支持中断启动中的流程）
+        停止模型（支持中断启动中的模型）
 
-        设计：
-        - 不等待启动锁，立即设置停止信号
-        - 如果进程已存在（有PID），直接终止
-        - 如果进程不存在（启动中），依赖启动线程的检查点自行中断
-
-        Args:
-            primary_name: 模型名称
-            refresh_cache: 停止后是否刷新设备状态缓存
-
-        Returns:
-            (是否成功, 消息)
+        策略：
+        1. 立即设置 STOPPED 状态（不等待启动锁，让启动线程在 Checkpoint 处自杀）。
+        2. 如果有 PID，强制终止进程。
+        3. 刷新监控和设备状态。
         """
         state = self.models_state[primary_name]
 
         logger.info(f"收到停止请求: {primary_name}")
 
-        # 步骤1：无条件设置停止信号（不获取启动锁）
+        # 1. 设置信号
         with state['lock']:
             current_status = state['status']
-
             if current_status in [ModelStatus.STOPPED.value, ModelStatus.FAILED.value]:
                 return True, "模型已停止"
 
-            # 【核心】设置停止信号，启动线程会在检查点检测到
             state['status'] = ModelStatus.STOPPED.value
             state['failure_reason'] = "被用户请求停止"
-
-            # 获取 PID（可能为 None，如果还在启动中）
             pid = state.get('pid')
 
-        # 步骤2：终止已存在的进程（如果有）
+        # 2. 终止进程
         stopped_process = False
         if pid:
             proc_name = f"model_{primary_name}"
@@ -901,27 +861,26 @@ class ModelController:
                 logger.info(f"进程已终止: PID {pid}")
                 stopped_process = True
             else:
-                logger.warning(f"进程终止失败: {msg}")
+                logger.warning(f"进程终止异常: {msg}")
 
-        # 步骤3：清理状态（不管是否还在启动，都强制清理）
+        # 3. 清理状态
         with state['lock']:
             self._reset_model_state(state)
 
-        # 步骤4：记录监控和刷新缓存
+        # 4. 后续处理
         if self.runtime_monitor.is_model_monitored(primary_name):
             self.runtime_monitor.record_model_stop(primary_name)
 
         if refresh_cache:
             self.plugin_manager.update_device_status()
 
-        # 步骤5：根据是否终止进程返回不同消息
         if stopped_process:
             return True, "模型已停止"
         else:
             return True, "已发送停止信号，正在中断启动流程..."
 
     def _reset_model_state(self, state: Dict[str, Any]):
-        """重置模型状态字典"""
+        """重置状态字典为初始值"""
         state.update({
             "process": None,
             "pid": None,
@@ -933,29 +892,23 @@ class ModelController:
         })
 
     def unload_all_models(self):
-        """
-        并行卸载所有模型 (防死锁优化)
-        
-        Returns:
-            成功停止的模型数量
-        """
-        logger.info("开始卸载所有运行中的模型...")
+        """并行卸载所有运行中的模型"""
+        logger.info("开始卸载所有模型...")
         models_to_stop = []
 
-        # 1. 筛选需要停止的模型
+        # 筛选
         for name, state in self.models_state.items():
             with state['lock']:
                 if state['status'] not in [ModelStatus.STOPPED.value, ModelStatus.FAILED.value]:
                     models_to_stop.append(name)
 
         if not models_to_stop:
-            logger.info("没有运行中的模型")
+            logger.info("无运行中的模型")
             return 0
 
-        # 2. 并行停止
+        # 执行
         def stop_task(name):
             try:
-                # 批量停止时不刷新缓存，最后统一刷新
                 ok, msg = self.stop_model(name, refresh_cache=False)
                 return name, ok, msg
             except Exception as e:
@@ -964,7 +917,6 @@ class ModelController:
         futures = [self.executor.submit(stop_task, name) for name in models_to_stop]
         stopped_count = 0
         
-        # 3. 等待结果
         timeout = len(models_to_stop) * 5 + 10
         for future in concurrent.futures.as_completed(futures, timeout=timeout):
             try:
@@ -972,25 +924,24 @@ class ModelController:
                 if ok:
                     stopped_count += 1
                 else:
-                    logger.warning(f"模型 '{name}' 卸载失败: {msg}")
+                    logger.warning(f"卸载失败 [{name}]: {msg}")
             except Exception as e:
-                logger.error(f"处理卸载结果异常: {e}")
+                logger.error(f"处理结果异常: {e}")
 
-        # 4. 统一刷新缓存
         if stopped_count > 0:
             self.plugin_manager.update_device_status()
 
-        logger.info(f"全部卸载完成，成功: {stopped_count}/{len(models_to_stop)}")
+        logger.info(f"卸载完成: {stopped_count}/{len(models_to_stop)}")
         return stopped_count
 
     def idle_check_loop(self):
         """
-        空闲检查循环
+        空闲检查守护线程
         
-        策略：
-        - 仅在模型处于 ROUTING 状态时检查
-        - 结合 `last_access` 时间和当前 API `pending_requests` 计数
-        - 避免在有请求处理时关闭模型
+        规则：
+        1. 模型处于 ROUTING 状态。
+        2. 空闲时间超过配置阈值。
+        3. 当前无待处理请求 (Pending Requests)。
         """
         while self.is_running:
             time.sleep(30)
@@ -1021,19 +972,19 @@ class ModelController:
                             to_stop.append(name)
 
                 for name in to_stop:
-                    # 双重检查：防止停止前一刻有新请求
+                    # 二次确认：防止在判断间隙有新请求进入
                     if self.api_router and self.api_router.pending_requests.get(name, 0) > 0:
-                        logger.info(f"模型 {name} 收到新请求，取消自动关闭")
+                        logger.info(f"模型 '{name}' 有新请求，取消自动关闭")
                         continue
                     
-                    logger.info(f"触发自动关闭策略: {name}")
+                    logger.info(f"触发空闲自动关闭: {name}")
                     self.stop_model(name)
 
             except Exception as e:
                 logger.error(f"空闲检查线程异常: {e}")
 
     def get_all_models_status(self) -> Dict[str, Dict[str, Any]]:
-        """获取所有模型详细状态"""
+        """获取所有模型的详细状态信息"""
         status_map = {}
         now = time.time()
         online_devs = self.plugin_manager.get_cached_online_devices()
@@ -1052,7 +1003,7 @@ class ModelController:
                 "idle_time_sec": idle_str,
                 "mode": conf.get("mode", "Chat") if conf else "Chat",
                 "is_available": bool(adaptive),
-                "current_script_path": adaptive.get("script_path", "") if adaptive else "无可用配置",
+                "current_script_path": adaptive.get("script_path", "") if adaptive else "配置不可用",
                 "config_source": adaptive.get("config_source", "N/A") if adaptive else "N/A",
                 "failure_reason": state.get('failure_reason')
             }
@@ -1062,8 +1013,8 @@ class ModelController:
         try:
             return self.log_manager.get_logs(primary_name)
         except Exception as e:
-            logger.error(f"获取日志失败: {e}")
-            return [{"timestamp": time.time(), "message": f"错误: {e}"}]
+            logger.error(f"获取日志异常: {e}")
+            return [{"timestamp": time.time(), "message": f"System Error: {e}"}]
 
     def subscribe_to_model_logs(self, primary_name: str) -> queue.Queue:
         return self.log_manager.subscribe_to_logs(primary_name)
@@ -1075,7 +1026,7 @@ class ModelController:
         return self.log_manager.get_log_stats()
 
     def get_model_list(self) -> Dict[str, Any]:
-        """获取符合 OpenAI 格式的模型列表"""
+        """获取符合 OpenAI API 规范的模型列表"""
         data = []
         for name in self.models_state.keys():
             conf = self.config_manager.get_model_config(name)
@@ -1092,12 +1043,13 @@ class ModelController:
 
     def shutdown(self):
         """
-        关闭模型控制器
+        关闭控制器
         
-        1. 停止监控
-        2. 取消启动任务
-        3. 并行终止所有模型进程
-        4. 清理资源
+        执行步骤：
+        1. 停止接收新任务。
+        2. 取消所有等待中的启动任务。
+        3. 并行终止所有子进程。
+        4. 释放所有资源。
         """
         logger.info("正在关闭模型控制器...")
         self.is_running = False
@@ -1106,18 +1058,19 @@ class ModelController:
         if self.plugin_manager:
             self.plugin_manager.stop_monitor()
 
-        # 取消等待中的启动任务
+        # 取消任务
         for name, future in self.startup_futures.items():
             if not future.done():
                 future.cancel()
 
-        # 并行终止进程
+        # 收集待终止进程
         stop_tasks = []
         for name, state in self.models_state.items():
             with state['lock']:
                 if state.get('pid'):
                     stop_tasks.append((name, f"model_{name}"))
 
+        # 执行终止
         def kill_task(name, proc_name):
             try:
                 ok, msg = self.process_manager.stop_process(proc_name, force=True, timeout=3)
@@ -1126,28 +1079,29 @@ class ModelController:
                 return name, False, str(e)
 
         futures = [self.executor.submit(kill_task, n, p) for n, p in stop_tasks]
-        terminated = []
+        terminated_count = 0
         
         timeout = len(stop_tasks) * 2 + 5
         try:
             for f in concurrent.futures.as_completed(futures, timeout=timeout):
                 name, ok, msg = f.result()
                 if ok:
-                    terminated.append(name)
+                    terminated_count += 1
                     with self.models_state[name]['lock']:
                         self._reset_model_state(self.models_state[name])
                 else:
-                    logger.warning(f"终止模型 {name} 失败: {msg}")
+                    logger.warning(f"进程终止失败 [{name}]: {msg}")
         except concurrent.futures.TimeoutError:
             logger.error("关闭过程超时")
 
-        # 记录停止时间
+        # 记录统计
         for name in self.models_state:
             if self.runtime_monitor.is_model_monitored(name):
                 self.runtime_monitor.record_model_stop(name)
 
+        # 释放资源
         self.runtime_monitor.shutdown()
         self.log_manager.shutdown()
         self.executor.shutdown(wait=True)
 
-        logger.info(f"控制器关闭完成，已清理 {len(terminated)} 个模型进程")
+        logger.info(f"控制器关闭完毕，清理了 {terminated_count} 个模型进程")
