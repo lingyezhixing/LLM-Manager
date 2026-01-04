@@ -22,7 +22,7 @@ from core.data_manager import Monitor
 from core.model_controller import ModelController
 
 # ==================== 版本信息 ====================
-__version__ = "2.3.0"
+__version__ = "2.4.0"
 APP_TITLE = "LLM-Manager"
 API_TITLE = "LLM-Manager API"
 # =================================================
