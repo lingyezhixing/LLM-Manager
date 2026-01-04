@@ -452,9 +452,8 @@ class ModelController:
             logger.info(f"设备插件自动加载完成: {list(self.plugin_manager.get_all_device_plugins().keys())}")
             logger.info(f"接口插件自动加载完成: {list(self.plugin_manager.get_all_interface_plugins().keys())}")
             
-            # 按需监控：不在启动时自动开启监控，等待首次API请求时再启动
-            logger.info("设备监控设置为按需模式，将在首次请求时启动")
-            # self.plugin_manager.start_monitor()  # 已禁用自动启动
+            logger.info("正在初始化设备状态缓存...")
+            self.plugin_manager.update_device_status()
 
             # 检查是否有设备在线 (使用缓存读取)
             online_devices = self.plugin_manager.get_cached_online_devices()
