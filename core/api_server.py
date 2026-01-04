@@ -21,15 +21,16 @@ logger = get_logger(__name__)
 class APIServer:
     """API服务器 - 负责FastAPI应用管理和路由配置"""
 
-    def __init__(self, config_manager: ConfigManager, model_controller: ModelController):
+    def __init__(self, config_manager: ConfigManager, model_controller: ModelController,
+                 app_version: str):
         self.config_manager = config_manager
-        # 【核心修复】直接使用传入的控制器实例，不再创建新实例
         self.model_controller = model_controller
+        self.app_version = app_version
         self.monitor = Monitor()
         self.token_tracker = TokenTracker(self.monitor, self.config_manager)
         self.api_router = APIRouter(self.config_manager, self.model_controller)
         self.model_controller.set_api_router(self.api_router)
-        self.app = FastAPI(title="LLM-Manager API", version="2.2.0")
+        self.app = FastAPI(title="LLM-Manager API", version=app_version)
         self._setup_routes()
         
         # 【核心修复】移除此处的自动启动调用
@@ -267,7 +268,7 @@ class APIServer:
 
         @self.app.get("/api/info")
         async def api_info():
-            return {"message": "LLM-Manager API Server", "version": "2.2.0", "models_url": "/v1/models"}
+            return {"message": "LLM-Manager API Server", "version": self.app_version, "models_url": "/v1/models"}
 
         @self.app.get("/api/health")
         async def health_check():
@@ -1304,11 +1305,11 @@ class APIServer:
 _app_instance: Optional[FastAPI] = None
 _server_instance: Optional[APIServer] = None
 
-# 【核心修改】函数签名增加 model_controller
-def run_api_server(config_manager: ConfigManager, model_controller: ModelController, host: Optional[str] = None, port: Optional[int] = None):
+def run_api_server(config_manager: ConfigManager, model_controller: ModelController,
+                   app_version: str,
+                   host: Optional[str] = None, port: Optional[int] = None):
     """运行API服务器"""
     global _app_instance, _server_instance
-    # 【核心修改】传递 model_controller 实例
-    _server_instance = APIServer(config_manager, model_controller)
+    _server_instance = APIServer(config_manager, model_controller, app_version)
     _app_instance = _server_instance.app
     _server_instance.run(host, port)

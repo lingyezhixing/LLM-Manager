@@ -21,6 +21,12 @@ from core.process_manager import get_process_manager, cleanup_process_manager
 from core.data_manager import Monitor
 from core.model_controller import ModelController
 
+# ==================== 版本信息 ====================
+__version__ = "2.3.0"
+APP_TITLE = "LLM-Manager"
+API_TITLE = "LLM-Manager API"
+# =================================================
+
 # 修改为 .yaml
 CONFIG_PATH = 'config.yaml'
 
@@ -149,7 +155,7 @@ class Application:
         # 将 self.model_controller 传递给 API Server，确保单例
         api_thread = threading.Thread(
             target=run_api_server,
-            args=(self.config_manager, self.model_controller),
+            args=(self.config_manager, self.model_controller, __version__),
             daemon=False  # 不能设置为daemon，否则程序会立即退出
         )
         api_thread.start()
