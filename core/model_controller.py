@@ -1086,28 +1086,50 @@ class ModelController:
 
     def unload_all_models(self):
         """
-        卸载所有运行中的模型
-        [重构] 基于 stop_model 实现，避免代码重复，自动获得缓存刷新功能
+        [并行优化版] 卸载所有运行中的模型
+        使用线程池并行停止模型，大幅提升关闭速度
         """
-        logger.info("正在卸载所有运行中的模型...")
+        logger.info("正在并行卸载所有运行中的模型...")
         primary_names = list(self.models_state.keys())
 
-        terminated_count = 0
-        failed_models = []
+        if not primary_names:
+            logger.info("没有需要卸载的模型")
+            return 0
 
-        # [优化] 直接调用 stop_model，复用其所有逻辑（包括缓存刷新）
-        for name in primary_names:
+        def stop_single_model(name):
+            """停止单个模型的包装函数"""
             try:
                 success, message = self.stop_model(name)
-                if success:
-                    terminated_count += 1
-                    logger.debug(f"模型 '{name}' 已成功卸载")
-                else:
-                    logger.warning(f"模型 '{name}' 卸载失败: {message}")
-                    failed_models.append(name)
+                return name, success, message
             except Exception as e:
                 logger.error(f"卸载模型 '{name}' 时发生异常: {e}")
-                failed_models.append(name)
+                return name, False, str(e)
+
+        # 并行提交所有停止任务
+        futures = []
+        for name in primary_names:
+            future = self.executor.submit(stop_single_model, name)
+            futures.append(future)
+
+        # 收集结果，设置合理超时（每个模型最多5秒）
+        terminated_count = 0
+        failed_models = []
+        timeout = len(primary_names) * 5 + 10  # 总超时时间
+
+        try:
+            for future in concurrent.futures.as_completed(futures, timeout=timeout):
+                try:
+                    name, success, message = future.result()
+                    if success:
+                        terminated_count += 1
+                        logger.debug(f"模型 '{name}' 已成功卸载")
+                    else:
+                        logger.warning(f"模型 '{name}' 卸载失败: {message}")
+                        failed_models.append(name)
+                except Exception as e:
+                    logger.error(f"处理模型停止结果时发生异常: {e}")
+        except concurrent.futures.TimeoutError:
+            logger.error("并行卸载模型超时")
 
         logger.info(f"所有模型卸载完成，成功: {terminated_count}/{len(primary_names)}")
         if failed_models:

@@ -137,25 +137,9 @@ class SystemTray:
         return "LLM-Manager (设备状态未知)"
 
     def exit_application(self):
-        """退出应用程序 - 通过API服务器关闭所有模型"""
+        """退出应用程序 - 快速退出，避免双重关闭"""
         logger.info("正在退出应用程序...")
 
-        # 通过API服务器关闭所有模型
-        try:
-            logger.info("正在通过API关闭所有模型...")
-            response = requests.post(f"{self.server_url}/api/models/stop-all", timeout=10)
-            if response.status_code == 200:
-                result = response.json()
-                if result.get("success"):
-                    logger.info("所有模型已通过API关闭")
-                else:
-                    logger.warning("通过API关闭模型失败")
-            else:
-                logger.warning("无法连接到API服务器关闭模型")
-        except Exception as e:
-            logger.warning(f"通过API关闭模型时出错: {e}")
-
-        # 调用退出回调
         if self.exit_callback:
             logger.info("调用退出回调...")
             try:
