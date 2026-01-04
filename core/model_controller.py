@@ -411,6 +411,27 @@ class ModelController:
         except Exception as e:
             logger.error(f"自动加载插件失败: {e}")
 
+    def _check_if_cancelled(self, primary_name: str) -> bool:
+        """
+        检查启动流程是否被取消
+
+        Args:
+            primary_name: 模型名称
+
+        Returns:
+            True 表示被取消，False 表示可以继续
+        """
+        state = self.models_state[primary_name]
+
+        with state['lock']:
+            cancelled = state['status'] == ModelStatus.STOPPED.value
+            if cancelled:
+                logger.info(f"检测到停止信号，取消启动: {primary_name}")
+                # 确保状态一致
+                state['failure_reason'] = "启动被用户中断"
+
+        return cancelled
+
     def start_auto_start_models(self):
         """并行启动所有标记为自动启动的模型"""
         logger.info("检查自动启动模型配置...")
@@ -461,18 +482,12 @@ class ModelController:
 
     def start_model(self, primary_name: str) -> Tuple[bool, str]:
         """
-        启动模型（支持并发安全和状态检测）
-
-        Args:
-            primary_name: 模型主名称
-
-        Returns:
-            (是否成功, 提示消息)
+        启动模型（修复逻辑：移除错误的初始状态检查）
         """
         state = self.models_state[primary_name]
         model_lock = self.startup_locks[primary_name]
 
-        # 快速状态检查
+        # 快速状态检查（不加锁先看一眼，提高响应）
         with state['lock']:
             if state['status'] == ModelStatus.ROUTING.value:
                 return True, f"模型 '{primary_name}' 已在运行"
@@ -480,16 +495,15 @@ class ModelController:
                 logger.info(f"模型 '{primary_name}' 正在启动中，等待完成...")
                 return self._wait_for_model_startup(primary_name, state)
 
-        # 获取启动锁（带超时防死锁）
+        # 获取启动锁
         logger.info(f"正在获取模型 '{primary_name}' 的启动锁...")
         lock_acquired = False
         try:
             lock_acquired = model_lock.acquire(blocking=True, timeout=60)
             if not lock_acquired:
-                logger.error(f"获取启动锁超时，尝试强制获取锁: {primary_name}")
-                lock_acquired = model_lock.acquire(blocking=False)
-                if not lock_acquired:
-                    return False, f"获取启动锁失败，请稍后重试: {primary_name}"
+                # 再次尝试非阻塞获取，防止极端情况
+                if not model_lock.acquire(blocking=False):
+                    return False, f"获取启动锁超时，请稍后重试: {primary_name}"
         except Exception as e:
             if lock_acquired:
                 model_lock.release()
@@ -498,27 +512,47 @@ class ModelController:
         try:
             logger.info(f"开始启动流程: {primary_name}")
 
-            # 双重状态检查
+            # =================================================================
+            # 【修复点】: 删除了这里的 _check_if_cancelled 调用
+            # 因为此时状态本身就是 STOPPED，不能视为被取消
+            # =================================================================
+
             with state['lock']:
                 current_status = state['status']
 
+                # 再次确认状态（防止等待锁期间状态变了）
                 if current_status == ModelStatus.ROUTING.value:
                     return True, f"模型 {primary_name} 已启动"
-                elif current_status == ModelStatus.STOPPED.value:
-                    if state.get('failure_reason') == "被用户请求停止":
-                        return False, "启动已被用户中断"
                 elif current_status == ModelStatus.STARTING.value:
+                    # 如果等待锁期间别人已经开始启动了
                     return self._wait_for_model_startup(primary_name, state)
 
-                # 更新状态为启动中
+                # 正常启动流程：将状态置为 STARTING
+                # 这是启动的第一步，从此之后如果状态变回 STOPPED 才算被取消
                 state['status'] = ModelStatus.STARTING.value
                 state['failure_reason'] = None
 
             try:
+                # 进入智能启动流程（内部包含后续的 Checkpoint 2/3/4/5/6）
+                # 如果在后续过程中 stop_model 被调用，状态会变为 STOPPED，
+                # 后续的 checkpoints 就会生效。
                 success, message = self._start_model_intelligent(primary_name)
+
+                # 【检查点 4 - 最终防线】启动完成后再次检查
+                if self._check_if_cancelled(primary_name):
+                    # 如果启动成功但被标记为停止，需要清理刚启动的进程
+                    with state['lock']:
+                        pid = state.get('pid')
+                        if pid:
+                            logger.warning(f"启动完成后检测到停止信号，清理进程 PID: {pid}")
+                            self.process_manager.stop_process(f"model_{primary_name}", force=True)
+                            self._reset_model_state(state)
+                    return False, "启动完成后被立即停止"
+
                 if success:
                     logger.info(f"模型 '{primary_name}' 启动成功，刷新设备状态缓存")
                     self.plugin_manager.update_device_status()
+
                 return success, message
             except Exception as e:
                 with state['lock']:
@@ -535,7 +569,7 @@ class ModelController:
                     logger.error(f"释放启动锁异常: {e}")
 
     def _wait_for_model_startup(self, primary_name: str, state: Dict[str, Any]) -> Tuple[bool, str]:
-        """等待模型启动完成"""
+        """等待模型启动完成（支持检测停止信号）"""
         wait_start = time.time()
         max_wait = 120
         check_interval = 0.5
@@ -565,25 +599,26 @@ class ModelController:
                 logger.error(msg)
                 return False, msg
             elif status == ModelStatus.STOPPED.value:
-                if fail_reason and "被用户请求停止" in fail_reason:
-                    return False, "启动被用户中断"
-                return False, "启动过程被意外停止"
+                # 【关键】检测到停止信号
+                logger.info(f"检测到停止信号，放弃等待: {primary_name}")
+                return False, "启动被用户中断"
 
             time.sleep(check_interval)
 
     def _start_model_intelligent(self, primary_name: str) -> Tuple[bool, str]:
         """
         智能启动：检查设备、自适应配置、资源释放
-        
+
         优化：
         1. 使用缓存状态避免阻塞
         2. 支持无监控模式强制启动
         3. 适配 Linux 路径
+        4. 增加取消检查点
         """
         state = self.models_state[primary_name]
 
         try:
-            # 1. 确定在线设备
+            # 1. 确定在线设备（可能耗时）
             if self.config_manager.is_gpu_monitoring_disabled():
                 logger.info("GPU监控禁用，忽略在线状态，使用所有可能设备")
                 online_devices = set()
@@ -597,6 +632,10 @@ class ModelController:
                     online_devices = set(self.plugin_manager.get_all_device_plugins().keys())
             else:
                 online_devices = self.plugin_manager.get_cached_online_devices()
+
+            # 【检查点 2】设备检查后检查取消状态
+            if self._check_if_cancelled(primary_name):
+                return False, "启动被用户中断（设备检查后）"
 
             # 2. 获取自适应配置
             model_config = self.config_manager.get_adaptive_model_config(primary_name, online_devices)
@@ -612,7 +651,7 @@ class ModelController:
             with state['lock']:
                 state['status'] = ModelStatus.INIT_SCRIPT.value
 
-            # 3. 资源检查与释放
+            # 3. 资源检查与释放（可能很耗时）
             if not self._check_and_free_resources(model_config):
                 error_msg = "设备资源不足，且无法通过释放空闲模型满足需求"
                 with state['lock']:
@@ -621,9 +660,13 @@ class ModelController:
                 logger.error(f"启动 '{primary_name}' 失败: {error_msg}")
                 return False, error_msg
 
+            # 【检查点 3】资源检查后检查取消状态
+            if self._check_if_cancelled(primary_name):
+                return False, "启动被用户中断（资源检查后）"
+
             # 4. 准备进程启动
             logger.info(f"启动进程: {primary_name} (脚本: {model_config['script_path']})")
-            
+
             project_root = os.path.dirname(os.path.abspath(self.config_manager.config_path))
             process_name = f"model_{primary_name}"
 
@@ -652,13 +695,20 @@ class ModelController:
                     state['failure_reason'] = msg
                 return False, f"进程启动失败: {msg}"
 
-            state.update({
-                "process": None, # 这里的 process 引用由 process_manager 管理
-                "pid": pid,
-                "log_thread": None
-            })
+            # 【检查点 4 - 关键】PID 生成后立即检查
+            # 此时进程已经启动，如果需要停止必须终止它
+            with state['lock']:
+                if state['status'] == ModelStatus.STOPPED.value:
+                    logger.warning(f"进程刚启动 (PID: {pid}) 即被要求停止，立即终止")
+                    self.process_manager.stop_process(f"model_{primary_name}", force=True)
+                    return False, "启动被中断（进程已终止）"
 
-            # 6. 健康检查
+                # 正常情况：更新状态和 PID
+                state['process'] = None  # 这里的 process 引用由 process_manager 管理
+                state['pid'] = pid
+                state['log_thread'] = None
+
+            # 6. 健康检查（长耗时操作）
             return self._perform_health_checks(primary_name, model_config)
 
         except Exception as e:
@@ -755,7 +805,7 @@ class ModelController:
         return success
 
     def _perform_health_checks(self, primary_name: str, model_config: Dict[str, Any]) -> Tuple[bool, str]:
-        """执行模型健康检查"""
+        """执行模型健康检查（带取消检查）"""
         state = self.models_state[primary_name]
         port = model_config['port']
         timeout = 300
@@ -775,14 +825,24 @@ class ModelController:
             self._handle_startup_failure(primary_name, msg)
             return False, msg
 
+        # 【检查点 5】健康检查前检查
+        if self._check_if_cancelled(primary_name):
+            return False, "启动被中断（健康检查前）"
+
+        # 执行健康检查（可能需要修改插件支持定期检查状态）
+        # 如果插件不支持中断，我们至少在检查前验证一次
         ok, msg = plugin.health_check(primary_name, port, start_ts, timeout)
-        
+
+        # 【检查点 6】健康检查后检查
+        if self._check_if_cancelled(primary_name):
+            return False, "启动被中断（健康检查后）"
+
         if ok:
             logger.info(f"模型 '{primary_name}' 健康检查通过")
             with state['lock']:
                 state['status'] = ModelStatus.ROUTING.value
                 state['last_access'] = time.time()
-            
+
             self.runtime_monitor.record_model_start(primary_name)
             return True, "启动成功"
         else:
@@ -800,71 +860,65 @@ class ModelController:
 
     def stop_model(self, primary_name: str, refresh_cache: bool = True) -> Tuple[bool, str]:
         """
-        停止模型
-        
+        停止模型（支持中断启动中的流程）
+
+        设计：
+        - 不等待启动锁，立即设置停止信号
+        - 如果进程已存在（有PID），直接终止
+        - 如果进程不存在（启动中），依赖启动线程的检查点自行中断
+
         Args:
             primary_name: 模型名称
             refresh_cache: 停止后是否刷新设备状态缓存
-            
+
         Returns:
             (是否成功, 消息)
         """
         state = self.models_state[primary_name]
-        model_lock = self.startup_locks[primary_name]
-        
-        # 尝试处理正在启动中的模型
-        startup_lock_released = False
-        try:
-            if not model_lock.acquire(blocking=False):
-                logger.info(f"模型 '{primary_name}' 正在启动，尝试中断...")
-                if model_lock.acquire(blocking=True, timeout=10):
-                    startup_lock_released = True
-                    logger.info("已获取启动锁，将中断启动")
-                else:
-                    # 无法获取锁，强制标记状态
-                    logger.warning("无法获取启动锁，强制标记为停止")
-                    with state['lock']:
-                        state['status'] = ModelStatus.STOPPED.value
-                        state['failure_reason'] = "被外部请求中断"
-                    return False, "无法中断启动过程（可能死锁）"
+
+        logger.info(f"收到停止请求: {primary_name}")
+
+        # 步骤1：无条件设置停止信号（不获取启动锁）
+        with state['lock']:
+            current_status = state['status']
+
+            if current_status in [ModelStatus.STOPPED.value, ModelStatus.FAILED.value]:
+                return True, "模型已停止"
+
+            # 【核心】设置停止信号，启动线程会在检查点检测到
+            state['status'] = ModelStatus.STOPPED.value
+            state['failure_reason'] = "被用户请求停止"
+
+            # 获取 PID（可能为 None，如果还在启动中）
+            pid = state.get('pid')
+
+        # 步骤2：终止已存在的进程（如果有）
+        stopped_process = False
+        if pid:
+            proc_name = f"model_{primary_name}"
+            success, msg = self.process_manager.stop_process(proc_name, force=True, timeout=3)
+            if success:
+                logger.info(f"进程已终止: PID {pid}")
+                stopped_process = True
             else:
-                startup_lock_released = True
-        except Exception:
-            pass
+                logger.warning(f"进程终止失败: {msg}")
 
-        try:
-            with state['lock']:
-                if state['status'] in [ModelStatus.STOPPED.value, ModelStatus.FAILED.value]:
-                    return True, "模型已停止"
+        # 步骤3：清理状态（不管是否还在启动，都强制清理）
+        with state['lock']:
+            self._reset_model_state(state)
 
-                logger.info(f"停止模型: {primary_name} (原状态: {state['status']})")
-                state['status'] = ModelStatus.STOPPED.value
-                state['failure_reason'] = "被用户请求停止"
+        # 步骤4：记录监控和刷新缓存
+        if self.runtime_monitor.is_model_monitored(primary_name):
+            self.runtime_monitor.record_model_stop(primary_name)
 
-                pid = state.get('pid')
-                if pid:
-                    proc_name = f"model_{primary_name}"
-                    success, msg = self.process_manager.stop_process(proc_name, force=True)
-                    if success:
-                        logger.info(f"进程终止成功 (PID: {pid})")
-                    else:
-                        logger.warning(f"进程终止失败: {msg}")
+        if refresh_cache:
+            self.plugin_manager.update_device_status()
 
-                self._reset_model_state(state)
-
-            if self.runtime_monitor.is_model_monitored(primary_name):
-                self.runtime_monitor.record_model_stop(primary_name)
-
-            if refresh_cache:
-                self.plugin_manager.update_device_status()
-
+        # 步骤5：根据是否终止进程返回不同消息
+        if stopped_process:
             return True, "模型已停止"
-        finally:
-            if startup_lock_released:
-                try:
-                    model_lock.release()
-                except Exception:
-                    pass
+        else:
+            return True, "已发送停止信号，正在中断启动流程..."
 
     def _reset_model_state(self, state: Dict[str, Any]):
         """重置模型状态字典"""
