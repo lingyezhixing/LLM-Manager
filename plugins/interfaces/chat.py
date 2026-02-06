@@ -68,7 +68,7 @@ class ChatInterface(InterfacePlugin):
         """验证请求路径是否适合聊天接口"""
         supported_endpoints = self.get_supported_endpoints()
 
-        # Check if path is a supported endpoint
+        # 检查路径是否在支持的端点列表中
         if path not in supported_endpoints:
             return False, f"模型 '{model_alias}' 的接口插件不支持路径 '{path}'"
 
