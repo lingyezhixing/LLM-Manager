@@ -62,14 +62,15 @@ class ChatInterface(InterfacePlugin):
 
     def get_supported_endpoints(self) -> Set[str]:
         """获取聊天接口支持的API端点"""
-        return {"v1/chat/completions"}
+        return {"v1/chat/completions", "v1/completions"}
 
     def validate_request(self, path: str, model_alias: str) -> Tuple[bool, str]:
         """验证请求路径是否适合聊天接口"""
-        is_completion_endpoint = "v1/completions" in path
+        supported_endpoints = self.get_supported_endpoints()
 
-        if is_completion_endpoint:
-            return False, f"模型 '{model_alias}' 是 'Chat' 模式, 不支持文本补全接口"
+        # Check if path is a supported endpoint
+        if path not in supported_endpoints:
+            return False, f"模型 '{model_alias}' 的接口插件不支持路径 '{path}'"
 
         return True, ""
 
