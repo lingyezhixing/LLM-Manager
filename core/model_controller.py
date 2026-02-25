@@ -419,6 +419,10 @@ class ModelController:
         """批量启动配置为自动启动的模型"""
         logger.info("正在扫描自动启动配置...")
 
+        # 刷新设备状态缓存，确保检测到新上线的硬件
+        if not self.config_manager.is_gpu_monitoring_disabled():
+            self.plugin_manager.update_device_status()
+
         online_devices = self.plugin_manager.get_cached_online_devices()
         
         # 若无设备且未禁用监控，则跳过
@@ -580,7 +584,7 @@ class ModelController:
     def _start_model_intelligent(self, primary_name: str) -> Tuple[bool, str]:
         """
         智能启动流程
-        
+
         流程：
         1. 检查在线设备。
         2. 获取适配配置。
@@ -591,6 +595,10 @@ class ModelController:
         state = self.models_state[primary_name]
 
         try:
+            # 刷新设备状态缓存，确保检测到新上线的硬件
+            if not self.config_manager.is_gpu_monitoring_disabled():
+                self.plugin_manager.update_device_status()
+
             # 1. 确定可用设备
             if self.config_manager.is_gpu_monitoring_disabled():
                 logger.info("GPU监控已禁用，尝试使用配置文件中的所有设备")

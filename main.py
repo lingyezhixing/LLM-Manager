@@ -22,7 +22,17 @@ from core.data_manager import Monitor
 from core.model_controller import ModelController
 
 # ==================== 版本信息 ====================
-__version__ = "2.4.0"
+# 从VERSION文件读取版本号
+def _get_version():
+    """读取版本号文件"""
+    version_path = os.path.join(os.path.dirname(__file__), 'VERSION')
+    try:
+        with open(version_path, 'r', encoding='utf-8') as f:
+            return f.read().strip()
+    except Exception:
+        return "unknown"
+
+__version__ = _get_version()
 APP_TITLE = "LLM-Manager"
 API_TITLE = "LLM-Manager API"
 # =================================================
@@ -188,7 +198,7 @@ class Application:
                 raise RuntimeError("配置管理器未初始化")
 
             self.logger.info("正在启动系统托盘服务...")
-            self.tray_service = SystemTray(self.config_manager)
+            self.tray_service = SystemTray(self.config_manager, self.model_controller)
 
             # 设置退出回调
             self.tray_service.set_exit_callback(self._on_tray_exit)
