@@ -95,6 +95,8 @@ config.yaml
 **/*.db
 **/*.sqlite
 **/*.sqlite3
+*.db-shm
+*.db-wal
 
 # 忽略代码统计工具
 quick_stats.py

@@ -887,7 +887,7 @@ class APIServer:
                                     "output_tokens": int(point_data["output_tokens"]),
                                     "total_tokens": int(point_data["total_tokens"]),
                                     "cache_hit_tokens": int(point_data["cache_n"]),
-                                    "cache_miss_tokens": int(point_data["prompt_n"] - point_data["cache_n"]),
+                                    "cache_miss_tokens": int(point_data["prompt_n"]),
                                     "cost": round(float(point_data["cost"]), 6)
                                 }
                             })

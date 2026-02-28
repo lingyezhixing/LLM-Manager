@@ -21,14 +21,6 @@ class TokenTracker:
         logger.info("Token跟踪器初始化完成")
         logger.info(f"Token追踪模式: {self.config_manager.get_token_tracker_modes()}")
 
-    def extract_tokens_from_usage(self, usage_data: Dict[str, Any]) -> tuple[int, int, int, int]:
-        """从usage数据中提取token数量"""
-        prompt_tokens = usage_data.get("prompt_tokens", 0)
-        completion_tokens = usage_data.get("completion_tokens", 0)
-        cache_n = usage_data.get("cache_n", 0)
-        prompt_n = usage_data.get("prompt_n", 0)
-        return prompt_tokens, completion_tokens, cache_n, prompt_n
-
     def extract_tokens_from_response(self, response_content: bytes) -> tuple[int, int, int, int]:
         """从响应内容中提取token信息"""
         try:
