@@ -164,7 +164,12 @@ class TokenTracker:
             await asyncio.to_thread(
                 self.monitor.add_model_request,
                 model_name,
-                [final_start_time, final_end_time, input_tokens, output_tokens, cache_n, prompt_n]
+                final_start_time,
+                final_end_time,
+                input_tokens,
+                output_tokens,
+                cache_n,
+                prompt_n
             )
 
             logger.debug(f"[TOKEN_TRACKER] 异步记录token成功 - 模型: {model_name}, 模式: {model_mode}, 总token数: {input_tokens + output_tokens}, cache_n: {cache_n}, prompt_n: {prompt_n}")
