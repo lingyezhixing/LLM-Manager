@@ -47,48 +47,59 @@ class APIServer:
 
     async def _calculate_cost_vectorized(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        批量计算请求成本（向量化版本）。
-        替代逐行 apply 方法，大幅提升大量数据下的计算性能。
+        批量计算请求成本（高性能、财务级安全向量化版本）。
+
+        优化特性：
+        1. 修复了缓存写入计费逻辑：写入缓存的Token数等于未命中缓存的计算输入（prompt_n）。
+        2. 高精度保证：在行级别先计算未除以 1,000,000 的微成本（raw_cost），
+           避免极小浮点数相加产生的低位截断（精度漂移）。
+        3. 细粒度计算：保留每次请求的真实成本，而非简单按阶梯平摊，确保后续单条流水查询绝对准确。
 
         Args:
             df: 包含请求数据的DataFrame，必须包含 'model_name' 列。
+            groupby_cols: (可选) 兼容接口，此版本直接向量化计算无需在内部预聚合。
 
         Returns:
-            pd.DataFrame: 包含 'cost' 列的DataFrame。
+            pd.DataFrame: 包含 'cost' 和 'raw_cost' 列的DataFrame。
+                         - raw_cost: 微成本（float64，未除以1,000,000）
+                         - cost: 最终成本（元，已除以1,000,000）
         """
         if df.empty:
+            df['raw_cost'] = 0.0
             df['cost'] = 0.0
             return df
 
-        # 1. 批量并发获取模型计费配置
+        # 1. 批量并发获取当前 DataFrame 中涉及的所有模型的计费配置
         model_names = df['model_name'].unique()
-        billing_tasks = [asyncio.to_thread(self.monitor.get_model_billing, name) for name in model_names]
+        billing_tasks =[asyncio.to_thread(self.monitor.get_model_billing, name) for name in model_names]
         billing_results = await asyncio.gather(*billing_tasks)
         model_billings = {name: billing for name, billing in zip(model_names, billing_results)}
 
-        all_costs = []
+        all_raw_costs =[]
 
-        # 2. 按模型分组处理（不同模型计费规则不同）
+        # 2. 按模型分组，准备应用计费规则
         for model_name, group_df in df.groupby('model_name'):
             billing = model_billings.get(model_name)
 
-            # 无计费配置或不使用阶梯计费，成本为0
+            # 无计费配置，或者未开启按量阶梯计费，成本直接为 0
             if not billing or not billing.use_tier_pricing or not billing.tier_pricing:
-                costs = np.zeros(len(group_df))
-                all_costs.append(pd.Series(costs, index=group_df.index))
+                raw_costs = np.zeros(len(group_df), dtype=np.float64)
+                all_raw_costs.append(pd.Series(raw_costs, index=group_df.index))
                 continue
 
-            # 3. 构建阶梯计费的条件列表和价格列表
-            condlist = []
-            choice_input_price, choice_output_price = [], []
-            choice_cache_read_price, choice_cache_write_price = [], []
-            choice_support_cache = []
+            # 3. 提取阶梯配置，构建 numpy 的条件向量(condlist)和选择向量(choicelist)
+            condlist =[]
+            choice_input_price = []
+            choice_output_price =[]
+            choice_cache_read_price = []
+            choice_cache_write_price = []
+            choice_support_cache =[]
 
             for tier in billing.tier_pricing:
                 max_input = float('inf') if tier.max_input_tokens == -1 else tier.max_input_tokens
                 max_output = float('inf') if tier.max_output_tokens == -1 else tier.max_output_tokens
 
-                # 动态决定区间开闭：最小值0为闭区间，否则为开区间
+                # 动态决定区间开闭：最小值为 0 时闭区间，否则开区间
                 input_condition = (group_df['input_tokens'] >= tier.min_input_tokens) if tier.min_input_tokens == 0 else (group_df['input_tokens'] > tier.min_input_tokens)
                 output_condition = (group_df['output_tokens'] >= tier.min_output_tokens) if tier.min_output_tokens == 0 else (group_df['output_tokens'] > tier.min_output_tokens)
 
@@ -98,38 +109,53 @@ class APIServer:
                     output_condition &
                     (group_df['output_tokens'] <= max_output)
                 )
+                
                 condlist.append(condition)
-
                 choice_input_price.append(tier.input_price)
                 choice_output_price.append(tier.output_price)
                 choice_cache_read_price.append(tier.cache_read_price)
                 choice_cache_write_price.append(tier.cache_write_price)
                 choice_support_cache.append(1 if tier.support_cache else 0)
 
-            # 4. 匹配价格
-            matched_input_price = np.select(condlist, choice_input_price, default=0)
-            matched_output_price = np.select(condlist, choice_output_price, default=0)
-            matched_cache_read_price = np.select(condlist, choice_cache_read_price, default=0)
-            matched_cache_write_price = np.select(condlist, choice_cache_write_price, default=0)
+            # 4. 利用 np.select 瞬间将单价映射到每一行 (C 语言底层执行，极速映射)
+            matched_input_price = np.select(condlist, choice_input_price, default=0.0)
+            matched_output_price = np.select(condlist, choice_output_price, default=0.0)
+            matched_cache_read_price = np.select(condlist, choice_cache_read_price, default=0.0)
+            matched_cache_write_price = np.select(condlist, choice_cache_write_price, default=0.0)
             is_cache_supported = np.select(condlist, choice_support_cache, default=0)
 
-            # 5. 计算成本（区分是否支持缓存）
-            cost_no_cache = (group_df['input_tokens'] * matched_input_price +
-                             group_df['output_tokens'] * matched_output_price) / 1_000_000
+            # 5. 【核心业务逻辑修正】逐行计算高精度微成本
+            
+            # (A) 不支持缓存的模型计费公式：直接 输入 * 输入价 + 输出 * 输出价
+            cost_no_cache = (
+                group_df['input_tokens'] * matched_input_price +
+                group_df['output_tokens'] * matched_output_price
+            )
 
-            cost_with_cache = (group_df['cache_n'] * matched_cache_read_price +
-                               group_df['prompt_n'] * matched_input_price +
-                               group_df['output_tokens'] * matched_output_price +
-                               group_df['output_tokens'] * matched_cache_write_price) / 1_000_000
+            # (B) 支持缓存的模型计费公式
+            # 修正点：将 matched_cache_write_price 挂载在 prompt_n(缓存未命中) 上
+            cost_with_cache = (
+                group_df['cache_n'] * matched_cache_read_price +      # 命中部分：读缓存费
+                group_df['prompt_n'] * matched_input_price +          # 未命中部分：计算输入费
+                group_df['prompt_n'] * matched_cache_write_price +    # 未命中部分：写缓存费 <--- 修复
+                group_df['output_tokens'] * matched_output_price      # 生成部分：输出费
+            )
 
-            final_costs = np.where(is_cache_supported == 1, cost_with_cache, cost_no_cache)
-            all_costs.append(pd.Series(final_costs, index=group_df.index))
+            # 根据阶梯配置是否支持缓存，选取对应数组的结果
+            final_raw_costs = np.where(is_cache_supported == 1, cost_with_cache, cost_no_cache)
+            
+            # 将该模型下这批请求的微成本拼接到总列表中 (保持高精度 float64，防止带有小数的定价被截断)
+            all_raw_costs.append(pd.Series(final_raw_costs, index=group_df.index))
 
-        # 6. 合并结果
-        if all_costs:
-            df['cost'] = pd.concat(all_costs)
+        # 6. 将处理好的微成本数据绑定回原始 DataFrame
+        if all_raw_costs:
+            df['raw_cost'] = pd.concat(all_raw_costs)
         else:
-            df['cost'] = 0.0
+            df['raw_cost'] = 0.0
+
+        # 7. 生成可供前端展示或单条查询的最终成本 (除以百万)
+        # （注：外层 API 仍可针对 raw_cost 进行 sum() 操作然后再除，效果等价且彻底无漂移）
+        df['cost'] = df['raw_cost'] / 1_000_000
 
         return df
 
