@@ -21,17 +21,35 @@ class TokenTracker:
         logger.info("Token跟踪器初始化完成")
         logger.info(f"Token追踪模式: {self.config_manager.get_token_tracker_modes()}")
 
+    def _extract_timings(self, data: dict) -> tuple[int, int, int, int]:
+        """内部辅助方法：从JSON字典中统一提取并计算 timings 相关的 token"""
+        if "timings" in data:
+            timings = data["timings"]
+            cache_n = timings.get("cache_n", 0)
+            prompt_n = timings.get("prompt_n", 0)
+            predicted_n = timings.get("predicted_n", 0)
+
+            # 根据业务逻辑计算 input 和 output
+            input_tokens = cache_n + prompt_n
+            output_tokens = predicted_n
+
+            if input_tokens > 0 or output_tokens > 0 or cache_n > 0 or prompt_n > 0:
+                logger.debug(f"[TOKEN_TRACKER] 提取到 timings 信息: input={input_tokens}, output={output_tokens}, cache_n={cache_n}, prompt_n={prompt_n}")
+                return input_tokens, output_tokens, cache_n, prompt_n
+                
+        return 0, 0, 0, 0
+
     def extract_tokens_from_response(self, response_content: bytes) -> tuple[int, int, int, int]:
-        """从响应内容中提取token信息"""
+        """从响应内容中提取token信息 (仅依赖 timings)"""
         try:
             content_str = response_content.decode('utf-8')
             logger.debug(f"[TOKEN_TRACKER] 开始提取token信息，响应大小: {len(response_content)} bytes")
 
-            # 处理SSE格式响应
+            # 1. 处理SSE格式响应
             if "data: " in content_str:
                 logger.debug(f"[TOKEN_TRACKER] 检测到SSE格式响应")
 
-                # 从后向前查找包含usage/timings的JSON数据，跳过[DONE]标记
+                # 从后向前查找包含timings的JSON数据，跳过[DONE]标记
                 lines = content_str.split('\n')
                 for line in reversed(lines):
                     if not line.startswith('data: '):
@@ -43,86 +61,40 @@ class TokenTracker:
 
                     try:
                         data = json.loads(data_str)
-                        # 检查是否包含token相关信息
-                        if "usage" in data or "timings" in data:
-                            input_tokens = output_tokens = cache_n = prompt_n = 0
-
-                            # 从usage字段提取token数量
-                            if "usage" in data:
-                                usage = data["usage"]
-                                input_tokens = usage.get("prompt_tokens", 0)
-                                output_tokens = usage.get("completion_tokens", 0)
-                                logger.debug(f"[TOKEN_TRACKER] 从usage提取到: input={input_tokens}, output={output_tokens}")
-
-                            # 从timings字段提取cache_n和prompt_n
-                            if "timings" in data:
-                                timings = data["timings"]
-                                cache_n = timings.get("cache_n", 0)
-                                prompt_n = timings.get("prompt_n", 0)
-                                logger.debug(f"[TOKEN_TRACKER] 从timings提取到: cache_n={cache_n}, prompt_n={prompt_n}")
-
-                            if input_tokens > 0 or output_tokens > 0 or cache_n > 0 or prompt_n > 0:
-                                logger.debug(f"[TOKEN_TRACKER] SSE解析成功: {input_tokens}, {output_tokens}, {cache_n}, {prompt_n}")
-                                return input_tokens, output_tokens, cache_n, prompt_n
+                        result = self._extract_timings(data)
+                        if any(result):  # 如果不是 (0,0,0,0) 则代表提取成功
+                            logger.debug(f"[TOKEN_TRACKER] SSE解析成功: {result}")
+                            return result
                     except json.JSONDecodeError:
                         continue
 
-            # 处理普通JSON响应
+            # 2. 处理普通JSON响应
             try:
                 data = json.loads(content_str)
-                input_tokens = output_tokens = cache_n = prompt_n = 0
-
-                # 从usage字段提取token数量
-                if "usage" in data:
-                    usage = data["usage"]
-                    input_tokens = usage.get("prompt_tokens", 0)
-                    output_tokens = usage.get("completion_tokens", 0)
-                    logger.debug(f"[TOKEN_TRACKER] 从usage提取到: input={input_tokens}, output={output_tokens}")
-
-                # 从timings字段提取cache_n和prompt_n
-                if "timings" in data:
-                    timings = data["timings"]
-                    cache_n = timings.get("cache_n", 0)
-                    prompt_n = timings.get("prompt_n", 0)
-                    logger.debug(f"[TOKEN_TRACKER] 从timings提取到: cache_n={cache_n}, prompt_n={prompt_n}")
-
-                if input_tokens > 0 or output_tokens > 0 or cache_n > 0 or prompt_n > 0:
-                    logger.debug(f"[TOKEN_TRACKER] JSON解析成功: {input_tokens}, {output_tokens}, {cache_n}, {prompt_n}")
-                    return input_tokens, output_tokens, cache_n, prompt_n
+                result = self._extract_timings(data)
+                if any(result):
+                    logger.debug(f"[TOKEN_TRACKER] JSON解析成功: {result}")
+                    return result
             except json.JSONDecodeError:
                 logger.debug(f"[TOKEN_TRACKER] 普通JSON解析失败，尝试正则提取")
 
-            # 使用正则表达式提取JSON对象
             import re
+            # 3. 使用正则表达式提取JSON对象
             json_pattern = r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}'
             json_matches = re.findall(json_pattern, content_str)
 
-            for match in json_matches:
+            # 使用倒序遍历，因为包含 timings 的总结块通常位于流的最末尾，可以极大提升性能
+            for match in reversed(json_matches):
                 try:
                     data = json.loads(match)
-                    input_tokens = output_tokens = cache_n = prompt_n = 0
-
-                    # 从usage字段提取token数量
-                    if "usage" in data:
-                        usage = data["usage"]
-                        input_tokens = usage.get("prompt_tokens", 0)
-                        output_tokens = usage.get("completion_tokens", 0)
-                        logger.debug(f"[TOKEN_TRACKER] 正则提取到usage: input={input_tokens}, output={output_tokens}")
-
-                    # 从timings字段提取cache_n和prompt_n
-                    if "timings" in data:
-                        timings = data["timings"]
-                        cache_n = timings.get("cache_n", 0)
-                        prompt_n = timings.get("prompt_n", 0)
-                        logger.debug(f"[TOKEN_TRACKER] 正则提取到timings: cache_n={cache_n}, prompt_n={prompt_n}")
-
-                    if input_tokens > 0 or output_tokens > 0 or cache_n > 0 or prompt_n > 0:
-                        logger.debug(f"[TOKEN_TRACKER] 正则提取成功: {input_tokens}, {output_tokens}, {cache_n}, {prompt_n}")
-                        return input_tokens, output_tokens, cache_n, prompt_n
+                    result = self._extract_timings(data)
+                    if any(result):
+                        logger.debug(f"[TOKEN_TRACKER] 正则提取成功: {result}")
+                        return result
                 except json.JSONDecodeError:
                     continue
 
-            logger.debug(f"[TOKEN_TRACKER] 未找到有效的token信息")
+            logger.debug(f"[TOKEN_TRACKER] 未找到有效的 timings 信息")
             return 0, 0, 0, 0
 
         except Exception as e:
@@ -197,7 +169,6 @@ class TokenTracker:
 
             except Exception as e:
                 logger.error(f"[TOKEN_TRACKER] 流式响应token记录失败 - 模型: {model_name}, 错误: {e}")
-
 
 class APIRouter:
     """API路由器 - 负责请求路由和转发"""
