@@ -1001,7 +1001,8 @@ class APIServer:
                     if field not in pricing_data:
                         return {"success": False, "error": f"缺少必要字段: {field}"}
 
-                tier_data = [
+                self.monitor.upsert_tier_pricing(
+                    primary_name,
                     pricing_data["tier_index"],
                     pricing_data["min_input_tokens"],
                     pricing_data["max_input_tokens"],
@@ -1012,8 +1013,7 @@ class APIServer:
                     pricing_data["support_cache"],
                     pricing_data["cache_write_price"],
                     pricing_data["cache_read_price"]
-                ]
-                self.monitor.upsert_tier_pricing(primary_name, tier_data)
+                )
                 return {"success": True, "message": f"模型 '{model_name}' 阶梯计费配置已更新"}
             except KeyError:
                 return {"success": False, "error": f"模型 '{model_name}' 不存在"}
