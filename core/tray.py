@@ -2,6 +2,7 @@ import os
 import threading
 import webbrowser
 import time
+import socket
 from typing import Optional
 from PIL import Image
 from utils.logger import get_logger
@@ -46,6 +47,37 @@ class SystemTray:
             return [name for name, info in devices.items() if info.get("online", False)]
         except Exception:
             return []
+
+    def send_wol_packet(self, icon=None, item=None):
+        """发送网络唤醒魔术包"""
+        wol_config = self.config_manager.get_wol_config()
+        if not wol_config:
+            logger.warning("未找到网络唤醒配置")
+            return
+        
+        broadcast_addr = wol_config.get("broadcast_address")
+        mac_address = wol_config.get("mac_address")
+        
+        if not broadcast_addr or not mac_address:
+            logger.warning("网络唤醒配置不完整")
+            return
+        
+        # 清理 MAC 地址格式（移除冒号、短横线、空格）
+        mac_clean = mac_address.replace(":", "").replace("-", "").replace(" ", "")
+        mac_bytes = bytes.fromhex(mac_clean)
+        
+        # 构建魔术包：6 字节前缀 + 16 组 MAC 地址
+        magic_packet = b'\xff' * 6 + mac_bytes * 16
+        
+        # 发送 UDP 广播
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+            sock.sendto(magic_packet, (broadcast_addr, 9))
+            sock.close()
+            logger.info(f"网络唤醒包已发送到 {broadcast_addr}")
+        except Exception as e:
+            logger.error(f"发送网络唤醒包失败：{e}")
 
     # ============ 鼠标悬停提示 (Tooltip) ============
     def _update_tooltip(self):
@@ -111,7 +143,8 @@ class SystemTray:
             TrayMenuItem('🌐 打开 WebUI', self.open_webui, default=True),
             TrayMenu.SEPARATOR,
 
-            # 2. 核心控制
+            # 2. 网络唤醒
+            TrayMenuItem('🔔 网络唤醒飞牛', self.send_wol_packet),
             TrayMenuItem('▶ 重启自启模型', self.restart_auto_start_models),
             TrayMenuItem('⏹ 卸载全部模型', self.unload_all_models_action),
             TrayMenu.SEPARATOR,

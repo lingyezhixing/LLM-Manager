@@ -182,11 +182,15 @@ class ConfigManager:
         return self.get_program_config().get('interface_plugin_dir', 'plugins/interfaces')
 
     def get_openai_config(self) -> Dict[str, Any]:
-        """获取API服务器配置"""
+        """获取 API 服务器配置"""
         return {
             "host": self.get_program_config().get('host', '0.0.0.0'),
             "port": self.get_program_config().get('port', 8080)
         }
+
+    def get_wol_config(self) -> Dict[str, Any]:
+        """获取网络唤醒配置"""
+        return self.config.get("wake_on_lan", {})
 
     def get_token_tracker_modes(self) -> List[str]:
         """获取需要追踪token的模型模式列表"""
