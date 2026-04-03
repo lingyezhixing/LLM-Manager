@@ -612,17 +612,36 @@ class Monitor:
         config_models = set(self.config_manager.get_model_names())
         return sorted(list(db_models - config_models))
 
-    def delete_model_tables(self, model_name: str):
-        """删除模型的所有数据（级联删除相关表）"""
+    def delete_model_tables(self, model_name: str, auto_vacuum: bool = True):
+        """删除模型的所有数据（级联删除相关表）
+        
+        Args:
+            model_name: 模型名称
+            auto_vacuum: 是否自动执行 VACUUM 回收空间 (默认 True)
+        """
         conn = self._get_connection()
         try:
             cursor = conn.cursor()
             cursor.execute("DELETE FROM models WHERE original_name = ?", (model_name,))
             conn.commit()
-            logger.info(f"已删除模型数据: {model_name}")
+            logger.info(f"已删除模型数据：{model_name}")
+            
+            # 自动回收空间
+            if auto_vacuum:
+                try:
+                    logger.info("执行 VACUUM 回收数据库空间...")
+                    start_time = time.time()
+                    conn.execute("VACUUM")
+                    # 截断 WAL 文件
+                    conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                    elapsed = time.time() - start_time
+                    logger.info(f"VACUUM 完成，耗时：{elapsed:.2f} 秒")
+                except Exception as v_e:
+                    logger.warning(f"VACUUM 失败 (不影响删除结果): {v_e}")
+                    
         except Exception as e:
             conn.rollback()
-            logger.error(f"删除模型数据失败: model={model_name}, {e}")
+            logger.error(f"删除模型数据失败：model={model_name}, {e}")
             raise
 
     def get_single_model_storage_stats(self, model_name: str) -> Dict[str, Union[int, bool]]:
