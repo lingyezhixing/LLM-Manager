@@ -62,7 +62,7 @@ class ChatInterface(InterfacePlugin):
 
     def get_supported_endpoints(self) -> Set[str]:
         """获取聊天接口支持的API端点"""
-        return {"v1/chat/completions", "v1/completions"}
+        return {"v1/chat/completions", "v1/completions", "v1/messages"}
 
     def validate_request(self, path: str, model_alias: str) -> Tuple[bool, str]:
         """验证请求路径是否适合聊天接口"""
