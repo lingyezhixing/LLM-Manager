@@ -1,3 +1,4 @@
+import json
 import os
 import threading
 import webbrowser
@@ -7,6 +8,23 @@ from typing import Optional
 from PIL import Image
 from utils.logger import get_logger
 from core.config_manager import ConfigManager
+
+CLAUDE_SETTINGS_PATH = r"C:\Users\31940\.claude\settings.json"
+
+CLAUDE_CONFIGS = {
+    "GLM": {
+        "ANTHROPIC_BASE_URL": "https://open.bigmodel.cn/api/anthropic",
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL": "GLM-4.5-air",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL": "GLM-5.1",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL": "GLM-5.1",
+    },
+    "Local": {
+        "ANTHROPIC_BASE_URL": "http://127.0.0.1:8080/v1",
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL": "Qwen3.6-27B-150K",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL": "Qwen3.6-27B-150K",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL": "Qwen3.6-27B-150K",
+    },
+}
 
 try:
     from pystray import Icon as TrayIcon, Menu as TrayMenu, MenuItem as TrayMenuItem
@@ -79,16 +97,66 @@ class SystemTray:
         except Exception as e:
             logger.error(f"发送网络唤醒包失败：{e}")
 
+    # ============ Claude 配置切换 ============
+    def _read_claude_base_url(self) -> str:
+        """读取 settings.json 中的 ANTHROPIC_BASE_URL"""
+        try:
+            with open(CLAUDE_SETTINGS_PATH, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            return data.get("env", {}).get("ANTHROPIC_BASE_URL", "")
+        except Exception as e:
+            logger.error(f"读取 Claude 配置失败: {e}")
+            return ""
+
+    def _detect_claude_config(self) -> str:
+        """根据 ANTHROPIC_BASE_URL 判断当前配置"""
+        base_url = self._read_claude_base_url()
+        if "bigmodel" in base_url:
+            return "GLM"
+        return "Local"
+
+    def _apply_claude_config(self, config_name: str):
+        """应用指定的 Claude 配置"""
+        preset = CLAUDE_CONFIGS.get(config_name)
+        if not preset:
+            logger.error(f"未知的 Claude 配置: {config_name}")
+            return
+
+        try:
+            with open(CLAUDE_SETTINGS_PATH, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+
+            if "env" not in data:
+                data["env"] = {}
+
+            for key, value in preset.items():
+                data["env"][key] = value
+
+            with open(CLAUDE_SETTINGS_PATH, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+
+            logger.info(f"Claude 配置已切换至 {config_name}")
+        except Exception as e:
+            logger.error(f"写入 Claude 配置失败: {e}")
+
+    def toggle_claude_config(self, icon=None, item=None):
+        """在 GLM 和 Local 之间切换 Claude 配置"""
+        current = self._detect_claude_config()
+        target = "Local" if current == "GLM" else "GLM"
+        logger.info(f"切换 Claude 配置: {current} → {target}")
+        self._apply_claude_config(target)
+        self._update_tooltip()
+
     # ============ 鼠标悬停提示 (Tooltip) ============
     def _update_tooltip(self):
         """更新鼠标悬浮在图标上时显示的文字"""
         if not self.tray_icon: return
 
         devices = self.get_online_devices()
-        if devices:
-            self.tray_icon.title = f"在线设备: {', '.join(devices)}"
-        else:
-            self.tray_icon.title = "在线设备: (暂无)"
+        device_str = ', '.join(devices) if devices else '(暂无)'
+
+        claude_cfg = self._detect_claude_config()
+        self.tray_icon.title = f"在线设备: {device_str}\nClaude: {claude_cfg}"
 
     # ============ 业务交互 ============
     def open_webui(self, icon=None, item=None):
@@ -143,8 +211,9 @@ class SystemTray:
             TrayMenuItem('🌐 打开 WebUI', self.open_webui, default=True),
             TrayMenu.SEPARATOR,
 
-            # 2. 网络唤醒
+            # 2. 功能
             TrayMenuItem('🔔 网络唤醒飞牛', self.send_wol_packet),
+            TrayMenuItem('🔄 切换claude配置', self.toggle_claude_config),
             TrayMenuItem('▶ 重启自启模型', self.restart_auto_start_models),
             TrayMenuItem('⏹ 卸载全部模型', self.unload_all_models_action),
             TrayMenu.SEPARATOR,
