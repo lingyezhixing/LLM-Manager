@@ -192,6 +192,14 @@ class ConfigManager:
         """获取网络唤醒配置"""
         return self.config.get("wake_on_lan", {})
 
+    def get_claude_settings_path(self) -> str:
+        """获取 Claude settings.json 路径"""
+        return self.get_program_config().get('claude_settings_path', '')
+
+    def get_claude_configs(self) -> Dict[str, Dict[str, str]]:
+        """获取 Claude 配置预设"""
+        return self.config.get("claude_configs", {})
+
     def get_token_tracker_modes(self) -> List[str]:
         """获取需要追踪token的模型模式列表"""
         return self.get_program_config().get('TokenTracker', ["Chat", "Base", "Embedding", "Reranker"])

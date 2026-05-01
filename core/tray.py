@@ -1,3 +1,4 @@
+import json
 import os
 import threading
 import webbrowser
@@ -79,16 +80,88 @@ class SystemTray:
         except Exception as e:
             logger.error(f"发送网络唤醒包失败：{e}")
 
+    # ============ Claude 配置切换 ============
+    def _read_claude_base_url(self) -> str:
+        """读取 settings.json 中的 ANTHROPIC_BASE_URL"""
+        settings_path = self.config_manager.get_claude_settings_path()
+        if not settings_path:
+            return ""
+        try:
+            with open(settings_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            return data.get("env", {}).get("ANTHROPIC_BASE_URL", "")
+        except Exception as e:
+            logger.error(f"读取 Claude 配置失败: {e}")
+            return ""
+
+    def _detect_claude_config(self) -> str:
+        """根据 ANTHROPIC_BASE_URL 匹配当前配置名称"""
+        base_url = self._read_claude_base_url()
+        if not base_url:
+            return "(未知)"
+        configs = self.config_manager.get_claude_configs()
+        for name, preset in configs.items():
+            if preset.get("ANTHROPIC_BASE_URL", "") in base_url:
+                return name
+        return "(未知)"
+
+    def _apply_claude_config(self, config_name: str):
+        """应用指定的 Claude 配置"""
+        preset = self.config_manager.get_claude_configs().get(config_name)
+        if not preset:
+            logger.error(f"未知的 Claude 配置: {config_name}")
+            return
+
+        settings_path = self.config_manager.get_claude_settings_path()
+        if not settings_path:
+            logger.error("未配置 Claude settings 路径")
+            return
+
+        try:
+            with open(settings_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+
+            if "env" not in data:
+                data["env"] = {}
+
+            for key, value in preset.items():
+                data["env"][key] = value
+
+            with open(settings_path, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+
+            logger.info(f"Claude 配置已切换至 {config_name}")
+        except Exception as e:
+            logger.error(f"写入 Claude 配置失败: {e}")
+
+    def toggle_claude_config(self, icon=None, item=None):
+        """在已配置的 Claude 预设之间循环切换"""
+        configs = self.config_manager.get_claude_configs()
+        config_names = list(configs.keys())
+        if len(config_names) < 2:
+            logger.warning("Claude 配置预设不足，无法切换")
+            return
+        current = self._detect_claude_config()
+        try:
+            idx = config_names.index(current)
+            next_idx = (idx + 1) % len(config_names)
+        except ValueError:
+            next_idx = 0
+        target = config_names[next_idx]
+        logger.info(f"切换 Claude 配置: {current} → {target}")
+        self._apply_claude_config(target)
+        self._update_tooltip()
+
     # ============ 鼠标悬停提示 (Tooltip) ============
     def _update_tooltip(self):
         """更新鼠标悬浮在图标上时显示的文字"""
         if not self.tray_icon: return
 
         devices = self.get_online_devices()
-        if devices:
-            self.tray_icon.title = f"在线设备: {', '.join(devices)}"
-        else:
-            self.tray_icon.title = "在线设备: (暂无)"
+        device_str = ', '.join(devices) if devices else '(暂无)'
+
+        claude_cfg = self._detect_claude_config()
+        self.tray_icon.title = f"在线设备: {device_str}\nClaude: {claude_cfg}"
 
     # ============ 业务交互 ============
     def open_webui(self, icon=None, item=None):
@@ -143,8 +216,9 @@ class SystemTray:
             TrayMenuItem('🌐 打开 WebUI', self.open_webui, default=True),
             TrayMenu.SEPARATOR,
 
-            # 2. 网络唤醒
+            # 2. 功能
             TrayMenuItem('🔔 网络唤醒飞牛', self.send_wol_packet),
+            TrayMenuItem('🔄 切换claude配置', self.toggle_claude_config),
             TrayMenuItem('▶ 重启自启模型', self.restart_auto_start_models),
             TrayMenuItem('⏹ 卸载全部模型', self.unload_all_models_action),
             TrayMenu.SEPARATOR,
