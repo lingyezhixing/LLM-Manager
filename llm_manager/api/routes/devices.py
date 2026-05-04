@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 
 from llm_manager.api.dependencies import get_service
 from llm_manager.services.device_monitor import DeviceMonitor
@@ -34,7 +34,7 @@ async def get_device(
 ):
     status = svc.get_status(device_name)
     if status is None:
-        return {"error": f"Device '{device_name}' not found"}
+        raise HTTPException(status_code=404, detail=f"Device '{device_name}' not found")
     return {
         "name": status.name,
         "state": status.state.value,
