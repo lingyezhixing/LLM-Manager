@@ -9,7 +9,7 @@ from llm_manager.services.request_router import RequestRouter
 router = APIRouter()
 
 
-@router.post("/v1/chat/completions")
+@router.post("/chat/completions")
 async def chat_completions(
     request: Request,
     svc: RequestRouter = Depends(get_service(RequestRouter)),
@@ -33,7 +33,7 @@ async def chat_completions(
         raise HTTPException(status_code=503, detail=str(e))
 
 
-@router.post("/v1/completions")
+@router.post("/completions")
 async def completions(
     request: Request,
     svc: RequestRouter = Depends(get_service(RequestRouter)),
@@ -50,7 +50,7 @@ async def completions(
         raise HTTPException(status_code=503, detail=str(e))
 
 
-@router.post("/v1/embeddings")
+@router.post("/embeddings")
 async def embeddings(
     request: Request,
     svc: RequestRouter = Depends(get_service(RequestRouter)),
@@ -67,10 +67,10 @@ async def embeddings(
         raise HTTPException(status_code=503, detail=str(e))
 
 
-@router.api_route("/v1/{path:path}", methods=["GET", "POST", "PUT", "DELETE"])
+@router.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE"])
 async def proxy_catch_all(
     path: str,
     request: Request,
     svc: RequestRouter = Depends(get_service(RequestRouter)),
 ):
-    raise HTTPException(status_code=404, detail=f"Endpoint /v1/{path} not supported")
+    raise HTTPException(status_code=404, detail=f"Endpoint /{path} not supported")

@@ -4,6 +4,7 @@ import asyncio
 import logging
 import sys
 import threading
+import time
 from pathlib import Path
 
 import uvicorn
@@ -17,6 +18,7 @@ from llm_manager.events import EventBus
 from llm_manager.plugins.base_interface import InterfacePlugin
 from llm_manager.plugins.loader import PluginLoader
 from llm_manager.plugins.registry import PluginRegistry
+from llm_manager.schemas.model import ModelState
 from llm_manager.database.repos.billing_repo import BillingRepository
 from llm_manager.database.repos.model_repo import ModelRuntimeRepository, ProgramRuntimeRepository
 from llm_manager.database.repos.request_repo import RequestRepository
@@ -56,7 +58,16 @@ class Application:
         container = self._create_container(config)
         self._container = container
 
+        self._program_runtime_id: int | None = None
+
         await container.start_all()
+
+        billing_repo = container.resolve(BillingRepository)
+        for model_name in config.models:
+            billing_repo.seed_default_billing(model_name)
+
+        program_repo = container.resolve(ProgramRuntimeRepository)
+        self._program_runtime_id = program_repo.record_start(time.time())
 
         self._load_plugins(config, container)
 
@@ -220,5 +231,21 @@ class Application:
 
     async def _shutdown(self, container: Container) -> None:
         logger.info("Shutting down...")
+
+        model_mgr = container.resolve(ModelManager)
+        for name, inst in list(model_mgr.get_all_instances().items()):
+            if inst.state == ModelState.RUNNING:
+                try:
+                    await model_mgr.stop_model(name)
+                except Exception:
+                    logger.exception("Failed to stop model '%s' during shutdown", name)
+
+        if self._program_runtime_id is not None:
+            try:
+                program_repo = container.resolve(ProgramRuntimeRepository)
+                program_repo.update_end(self._program_runtime_id, time.time())
+            except Exception:
+                logger.exception("Failed to update program runtime end time")
+
         await container.stop_all()
         logger.info("LLM-Manager stopped")
