@@ -27,6 +27,7 @@ from llm_manager.services.model_manager import ModelManager
 from llm_manager.services.monitor import MonitorService
 from llm_manager.services.process_manager import ProcessManager
 from llm_manager.services.request_router import RequestRouter
+from llm_manager.services.token_tracker import TokenTracker
 from llm_manager.utils.logger import setup_logging
 
 logger = logging.getLogger(__name__)
@@ -106,6 +107,7 @@ class Application:
         container.register(ProcessManager, ProcessManager)
         container.register(DeviceMonitor, DeviceMonitor)
         container.register(ModelManager, ModelManager)
+        container.register(TokenTracker, TokenTracker)
         container.register(RequestRouter, RequestRouter)
         container.register(BillingService, BillingService)
         container.register(MonitorService, MonitorService)
