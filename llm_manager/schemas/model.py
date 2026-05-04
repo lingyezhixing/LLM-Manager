@@ -6,6 +6,7 @@ from pathlib import Path
 class ModelState(Enum):
     STOPPED = "stopped"
     STARTING = "starting"
+    HEALTH_CHECK = "health_check"
     RUNNING = "running"
     STOPPING = "stopping"
     FAILED = "failed"

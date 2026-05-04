@@ -131,13 +131,37 @@ class ModelManager(BaseService):
                 logger.exception("Failed to record model start for '%s'", name)
                 instance.runtime_record_id = None
 
+            with self._lock:
+                instance.state = ModelState.HEALTH_CHECK
+
             interface_plugin = self._plugin_registry.get_interface(config.mode)
             if interface_plugin:
-                healthy = await interface_plugin.health_check(config.port)
+                healthy = await interface_plugin.health_check(
+                    port=config.port,
+                    model_name=name,
+                    start_time=time.time(),
+                    timeout_seconds=300.0,
+                )
                 if not healthy:
-                    logger.warning("Health check failed for model '%s', but process started", name)
+                    logger.error("Health check failed for model '%s', stopping process", name)
+                    await self._process_manager.stop_process(name)
+                    if instance.runtime_record_id is not None:
+                        try:
+                            self._runtime_repo.record_end_by_id(
+                                instance.runtime_record_id, time.time()
+                            )
+                        except Exception:
+                            pass
+                        instance.runtime_record_id = None
+                    with self._lock:
+                        instance.state = ModelState.FAILED
+                        instance.pid = None
+                        instance.active_deployment = None
+                        instance.started_at = None
+                    raise RuntimeError(f"Health check failed for model '{name}'")
 
-            instance.state = ModelState.RUNNING
+            with self._lock:
+                instance.state = ModelState.RUNNING
             instance.last_request_at = None
 
             await self._event_bus.publish(

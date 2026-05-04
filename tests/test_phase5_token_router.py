@@ -47,6 +47,16 @@ def _make_app_config() -> AppConfig:
     })
 
 
+def _mock_httpx_response(status_code=200, json_data=None):
+    resp = MagicMock()
+    resp.status_code = status_code
+    resp.headers = {"content-type": "application/json"}
+    body = json.dumps(json_data or {}).encode()
+    resp.aread = AsyncMock(return_value=body)
+    resp.aclose = AsyncMock()
+    return resp
+
+
 def _make_token_tracker(config: AppConfig | None = None) -> TokenTracker:
     config = config or _make_app_config()
     container = Container()
@@ -313,11 +323,10 @@ class TestSmartAutoStart:
         mgr = env["manager"]
         router = env["router"]
 
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {}
+        resp = _mock_httpx_response(200, {})
         with patch.object(router, "_client") as mock_client:
-            mock_client.post = AsyncMock(return_value=mock_response)
+            mock_client.build_request.return_value = MagicMock()
+            mock_client.send = AsyncMock(return_value=resp)
             response = await router.route_request("qwen", "/v1/chat/completions", "POST")
 
         assert response.status_code == 200
@@ -329,11 +338,10 @@ class TestSmartAutoStart:
         env = _make_router_env()
         router = env["router"]
 
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {}
+        resp = _mock_httpx_response(200, {})
         with patch.object(router, "_client") as mock_client:
-            mock_client.post = AsyncMock(return_value=mock_response)
+            mock_client.build_request.return_value = MagicMock()
+            mock_client.send = AsyncMock(return_value=resp)
             response = await router.route_request("qwen7b", "/v1/chat/completions", "POST")
 
         assert response.status_code == 200
@@ -362,11 +370,10 @@ class TestSmartAutoStart:
 
         asyncio.create_task(_set_running())
 
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {}
+        mock_response = _mock_httpx_response(200, {})
         with patch.object(router, "_client") as mock_client:
-            mock_client.post = AsyncMock(return_value=mock_response)
+            mock_client.build_request.return_value = MagicMock()
+            mock_client.send = AsyncMock(return_value=mock_response)
             response = await router.route_request("qwen", "/v1/chat/completions", "POST")
 
         assert response.status_code == 200
@@ -396,11 +403,10 @@ class TestSmartAutoStart:
 
         mgr.start_model = _tracked_start
 
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {}
+        mock_response = _mock_httpx_response(200, {})
         with patch.object(router, "_client") as mock_client:
-            mock_client.post = AsyncMock(return_value=mock_response)
+            mock_client.build_request.return_value = MagicMock()
+            mock_client.send = AsyncMock(return_value=mock_response)
             results = await asyncio.gather(
                 router.route_request("qwen", "/v1/chat/completions", "POST"),
                 router.route_request("qwen", "/v1/chat/completions", "POST"),
@@ -468,11 +474,10 @@ class TestPendingTracking:
         env = _make_router_env()
         router = env["router"]
 
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {}
+        mock_response = _mock_httpx_response(200, {})
         with patch.object(router, "_client") as mock_client:
-            mock_client.post = AsyncMock(return_value=mock_response)
+            mock_client.build_request.return_value = MagicMock()
+            mock_client.send = AsyncMock(return_value=mock_response)
             await router.route_request("qwen", "/v1/chat/completions", "POST")
 
         assert router._pending.get("qwen", 0) == 0
@@ -483,8 +488,9 @@ class TestPendingTracking:
         router = env["router"]
 
         with patch.object(router, "_client") as mock_client:
-            mock_client.post = AsyncMock(side_effect=Exception("connection error"))
-            with pytest.raises(Exception, match="connection error"):
+            mock_client.build_request.return_value = MagicMock()
+            mock_client.send = AsyncMock(side_effect=Exception("connection error"))
+            with pytest.raises(RuntimeError, match="connection error"):
                 await router.route_request("qwen", "/v1/chat/completions", "POST")
 
         assert router._pending.get("qwen", 0) == 0
@@ -502,13 +508,12 @@ class TestRouteRequestTokenIntegration:
         router = env["router"]
         env["config"].program.token_tracker = ["Chat"]
 
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {
+        resp = _mock_httpx_response(200, {
             "usage": {"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150}
-        }
+        })
         with patch.object(router, "_client") as mock_client:
-            mock_client.post = AsyncMock(return_value=mock_response)
+            mock_client.build_request.return_value = MagicMock()
+            mock_client.send = AsyncMock(return_value=resp)
             await router.route_request("qwen", "/v1/chat/completions", "POST")
 
         env["request_repo"].save_request.assert_called_once()
@@ -519,11 +524,10 @@ class TestRouteRequestTokenIntegration:
         router = env["router"]
         env["config"].program.token_tracker = ["Chat"]
 
-        mock_response = MagicMock()
-        mock_response.status_code = 500
-        mock_response.json.return_value = {}
+        resp = _mock_httpx_response(500, {})
         with patch.object(router, "_client") as mock_client:
-            mock_client.post = AsyncMock(return_value=mock_response)
+            mock_client.build_request.return_value = MagicMock()
+            mock_client.send = AsyncMock(return_value=resp)
             await router.route_request("qwen", "/v1/chat/completions", "POST")
 
         env["request_repo"].save_request.assert_not_called()

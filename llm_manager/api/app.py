@@ -16,12 +16,11 @@ def create_api_app(container: Container) -> FastAPI:
     app.add_middleware(RequestLoggingMiddleware)
 
     app.include_router(models.router, prefix="/api/models")
-    app.include_router(proxy.router, prefix="/api/proxy/v1")
-    app.include_router(proxy.router, prefix="/v1")
     app.include_router(devices.router, prefix="/api/devices")
     app.include_router(billing.router, prefix="/api/billing")
     app.include_router(analytics.router, prefix="/api/analytics")
     app.include_router(system.router, prefix="/api/system")
+    app.include_router(proxy.router, prefix="/v1")
 
     @app.get("/health")
     async def health():

@@ -165,7 +165,7 @@ class Application:
             return cpu_cls
         if any(kw in name for kw in ("rtx", "gtx", "geforce", "v100", "nvidia")):
             return nvidia_cls
-        if "amd" in name:
+        if any(kw in name for kw in ("amd", "780m", "680m", "780", "680", "radeon")):
             return amd_cls
         return None
 

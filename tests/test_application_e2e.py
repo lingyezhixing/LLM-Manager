@@ -1,4 +1,5 @@
 """Phase 6 — Application E2E integration tests"""
+import json
 import time
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -97,6 +98,23 @@ async def _start_container(container: Container) -> None:
             result = instance.on_start()
             if hasattr(result, "__await__"):
                 await result
+
+
+def _mock_httpx_response(status_code=200, json_data=None):
+    resp = MagicMock()
+    resp.status_code = status_code
+    resp.headers = {"content-type": "application/json"}
+    body = json.dumps(json_data or {}).encode()
+    resp.aread = AsyncMock(return_value=body)
+    resp.aclose = AsyncMock()
+    return resp
+
+
+def _setup_mock_client(router, mock_response):
+    mock_client = MagicMock()
+    mock_client.build_request.return_value = MagicMock()
+    mock_client.send = AsyncMock(return_value=mock_response)
+    return mock_client
 
 
 # ============================================================
@@ -276,43 +294,20 @@ class TestEndToEndProxy:
         loop.run_until_complete(container.stop_all())
         loop.close()
 
-    def _mock_httpx_response(self, json_data, status_code=200):
-        response = MagicMock(spec=Response)
-        response.status_code = status_code
-        response.json.return_value = json_data
-        return response
-
     def test_proxy_request_to_running_model(self, proxy_env):
         client = proxy_env["client"]
         router = proxy_env["container"].resolve(RequestRouter)
 
-        mock_response = self._mock_httpx_response({
+        resp = _mock_httpx_response(200, {
             "choices": [{"message": {"content": "hello"}}],
             "usage": {"prompt_tokens": 10, "completion_tokens": 5},
         })
+        with patch.object(router, "_client", _setup_mock_client(router, resp)):
+            http_resp = client.post("/v1/chat/completions", json={"model": "qwen"})
 
-        with patch.object(router, "_client") as mock_client:
-            mock_client.post = AsyncMock(return_value=mock_response)
-            resp = client.post("/v1/chat/completions", json={"model": "qwen"})
-
-        assert resp.status_code == 200
-        data = resp.json()
+        assert http_resp.status_code == 200
+        data = http_resp.json()
         assert "choices" in data
-
-    def test_proxy_via_api_prefix_also_works(self, proxy_env):
-        client = proxy_env["client"]
-        router = proxy_env["container"].resolve(RequestRouter)
-
-        mock_response = self._mock_httpx_response({
-            "choices": [{"message": {"content": "hello"}}],
-            "usage": {"prompt_tokens": 10, "completion_tokens": 5},
-        })
-
-        with patch.object(router, "_client") as mock_client:
-            mock_client.post = AsyncMock(return_value=mock_response)
-            resp = client.post("/api/proxy/v1/chat/completions", json={"model": "qwen"})
-
-        assert resp.status_code == 200
 
     def test_proxy_auto_starts_stopped_model(self, proxy_env):
         client = proxy_env["client"]
@@ -323,28 +318,25 @@ class TestEndToEndProxy:
         asyncio.get_event_loop().run_until_complete(model_mgr.stop_model("qwen"))
         assert model_mgr.get_instance("qwen").state == ModelState.STOPPED
 
-        mock_response = self._mock_httpx_response({"choices": []})
-        with patch.object(router, "_client") as mock_client:
-            mock_client.post = AsyncMock(return_value=mock_response)
-            resp = client.post("/v1/chat/completions", json={"model": "qwen"})
+        resp = _mock_httpx_response(200, {"choices": []})
+        with patch.object(router, "_client", _setup_mock_client(router, resp)):
+            http_resp = client.post("/v1/chat/completions", json={"model": "qwen"})
 
-        assert resp.status_code == 200
+        assert http_resp.status_code == 200
         assert model_mgr.get_instance("qwen").state == ModelState.RUNNING
 
     def test_token_recorded_after_request(self, proxy_env):
         client = proxy_env["client"]
         router = proxy_env["container"].resolve(RequestRouter)
 
-        mock_response = self._mock_httpx_response({
+        resp = _mock_httpx_response(200, {
             "choices": [{"message": {"content": "hello"}}],
             "usage": {"prompt_tokens": 100, "completion_tokens": 50},
         })
+        with patch.object(router, "_client", _setup_mock_client(router, resp)):
+            http_resp = client.post("/v1/chat/completions", json={"model": "qwen"})
 
-        with patch.object(router, "_client") as mock_client:
-            mock_client.post = AsyncMock(return_value=mock_response)
-            resp = client.post("/v1/chat/completions", json={"model": "qwen"})
-
-        assert resp.status_code == 200
+        assert http_resp.status_code == 200
 
         db = proxy_env["container"].resolve(DatabaseEngine)
         with db.engine.connect() as conn:
@@ -368,9 +360,8 @@ class TestEndToEndProxy:
         client = proxy_env["client"]
         router = proxy_env["container"].resolve(RequestRouter)
 
-        mock_response = self._mock_httpx_response({})
-        with patch.object(router, "_client") as mock_client:
-            mock_client.post = AsyncMock(return_value=mock_response)
-            resp = client.post("/v1/chat/completions", json={"model": "nonexistent"})
+        resp = _mock_httpx_response(200, {})
+        with patch.object(router, "_client", _setup_mock_client(router, resp)):
+            http_resp = client.post("/v1/chat/completions", json={"model": "nonexistent"})
 
-        assert resp.status_code == 404
+        assert http_resp.status_code == 404

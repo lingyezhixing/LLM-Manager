@@ -9,6 +9,7 @@ from llm_manager.container import Container
 from llm_manager.schemas.model import ModelState
 from llm_manager.services.base import BaseService
 from llm_manager.services.model_manager import ModelManager
+from llm_manager.services.request_router import RequestRouter
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +21,7 @@ class IdleMonitor(BaseService):
         super().__init__(container)
         self._task: asyncio.Task | None = None
         self._running = False
+        self._request_router: RequestRouter | None = None
 
     async def on_start(self) -> None:
         app_config = self._container.resolve(AppConfig)
@@ -27,6 +29,10 @@ class IdleMonitor(BaseService):
         if alive_time <= 0:
             logger.info("Idle monitor disabled (alive_time=%d)", alive_time)
             return
+        try:
+            self._request_router = self._container.resolve(RequestRouter)
+        except Exception:
+            logger.debug("RequestRouter not available for idle monitor")
         self._running = True
         self._task = asyncio.create_task(self._check_loop())
         logger.info("Idle monitor started (alive_time=%d min)", alive_time)
@@ -72,6 +78,10 @@ class IdleMonitor(BaseService):
             if instance.state != ModelState.RUNNING:
                 continue
             if instance.last_request_at is None:
+                continue
+
+            # 检查是否有进行中的请求
+            if self._request_router and self._request_router.get_pending_count(name) > 0:
                 continue
 
             idle_duration = now - instance.last_request_at

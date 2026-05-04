@@ -11,7 +11,15 @@ class InterfacePlugin(ABC):
         ...
 
     @abstractmethod
-    async def health_check(self, port: int, timeout: float = 300.0) -> bool:
+    async def health_check(
+        self,
+        port: int,
+        model_name: str,
+        start_time: float,
+        timeout_seconds: float = 300.0,
+    ) -> bool:
+        """双阶段健康检查。浅层检查服务可用性，深层检查接口功能。
+        两阶段共享 start_time ~ timeout_seconds 的超时预算。"""
         ...
 
     @abstractmethod

@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from dataclasses import dataclass
+from typing import AsyncIterator
 
 import httpx
 
@@ -14,6 +16,21 @@ from llm_manager.services.model_manager import ModelManager
 from llm_manager.services.token_tracker import TokenTracker
 
 logger = logging.getLogger(__name__)
+
+_HEADERS_TO_STRIP = {"host", "content-length", "transfer-encoding", "content-type"}
+
+
+@dataclass
+class RouteResult:
+    is_streaming: bool = False
+    status_code: int = 200
+    content: bytes = b""
+    response_headers: dict = None
+    stream: AsyncIterator[bytes] = None
+
+    def __post_init__(self):
+        if self.response_headers is None:
+            self.response_headers = {}
 
 
 class RequestRouter(BaseService):
@@ -37,12 +54,18 @@ class RequestRouter(BaseService):
             await self._client.aclose()
             self._client = None
 
+    def get_pending_count(self, name: str) -> int:
+        return self._pending.get(name, 0)
+
     def _validate_path(self, resolved: str, instance, path: str) -> None:
         interface = self._plugin_registry.get_interface(instance.config.mode)
         if interface:
             is_valid, error_msg = interface.validate_request(path, resolved)
             if not is_valid:
                 raise ValueError(error_msg)
+
+    def _clean_headers(self, headers: dict) -> dict:
+        return {k: v for k, v in headers.items() if k.lower() not in _HEADERS_TO_STRIP}
 
     def _increment_pending(self, name: str) -> None:
         self._pending[name] = self._pending.get(name, 0) + 1
@@ -64,7 +87,7 @@ class RequestRouter(BaseService):
             if instance.state == ModelState.RUNNING:
                 return
 
-            is_starting = instance.state == ModelState.STARTING
+            is_starting = instance.state in (ModelState.STARTING, ModelState.HEALTH_CHECK)
             is_starting_local = resolved in self._starting_models
 
             if is_starting or is_starting_local:
@@ -87,8 +110,9 @@ class RequestRouter(BaseService):
         path: str,
         method: str,
         body: dict | None = None,
-        headers: dict | None = None,
-    ) -> httpx.Response:
+        raw_body: bytes | None = None,
+        request_headers: dict | None = None,
+    ) -> RouteResult:
         resolved = self._model_manager.resolve_model_name(model_name_or_alias)
         if resolved is None:
             raise ValueError(f"Model '{model_name_or_alias}' not found")
@@ -102,54 +126,60 @@ class RequestRouter(BaseService):
             self._validate_path(resolved, instance, path)
 
             url = f"http://127.0.0.1:{instance.config.port}{path}"
+            headers = self._clean_headers(request_headers) if request_headers else {}
+            content = raw_body if raw_body is not None else (body if body is not None else None)
 
-            if method.upper() == "POST":
-                response = await self._client.post(url, json=body, headers=headers)
-            elif method.upper() == "GET":
-                response = await self._client.get(url, headers=headers)
-            else:
-                response = await self._client.request(method, url, json=body, headers=headers)
+            req = self._client.build_request(
+                method=method.upper(),
+                url=url,
+                json=content if isinstance(content, dict) else None,
+                content=content if isinstance(content, bytes) else None,
+                headers=headers,
+            )
 
-            if response.status_code == 200:
-                try:
-                    data = response.json()
-                    usage = self._token_tracker.extract_tokens(data)
-                    await self._token_tracker.record_request(
-                        resolved, usage, start_time, time.time(), instance.config.mode,
-                    )
-                except Exception:
-                    logger.debug("Token extraction failed for non-streaming response")
+            response = await self._client.send(req, stream=True)
+            is_streaming = "text/event-stream" in response.headers.get("content-type", "")
 
-            return response
-        finally:
-            self._decrement_pending(resolved)
-
-    async def route_streaming(
-        self,
-        model_name_or_alias: str,
-        path: str,
-        body: dict | None = None,
-        headers: dict | None = None,
-    ):
-        resolved = self._model_manager.resolve_model_name(model_name_or_alias)
-        if resolved is None:
-            raise ValueError(f"Model '{model_name_or_alias}' not found")
-
-        self._increment_pending(resolved)
-        start_time = time.time()
-
-        try:
-            await self._ensure_model_running(resolved)
-            instance = self._model_manager.get_instance(resolved)
-            self._validate_path(resolved, instance, path)
-
-            url = f"http://127.0.0.1:{instance.config.port}{path}"
-
-            async with self._client.stream("POST", url, json=body, headers=headers) as response:
+            if is_streaming:
                 token_stream = self._token_tracker.wrap_streaming_response(
                     resolved, response, start_time, instance.config.mode,
                 )
-                async for chunk in token_stream:
-                    yield chunk
+                return RouteResult(
+                    is_streaming=True,
+                    status_code=response.status_code,
+                    response_headers=dict(response.headers),
+                    stream=token_stream,
+                )
+            else:
+                resp_content = await response.aread()
+                resp_status = response.status_code
+                resp_headers = dict(response.headers)
+                await response.aclose()
+
+                try:
+                    import json as _json
+                    data = _json.loads(resp_content) if resp_content else None
+                    if data and resp_status == 200:
+                        usage = self._token_tracker.extract_tokens(data)
+                        await self._token_tracker.record_request(
+                            resolved, usage, start_time, time.time(), instance.config.mode,
+                        )
+                except Exception:
+                    pass
+
+                return RouteResult(
+                    is_streaming=False,
+                    status_code=resp_status,
+                    content=resp_content,
+                    response_headers=resp_headers,
+                )
+
+        except ValueError as e:
+            raise e
+        except RuntimeError as e:
+            raise e
+        except Exception as e:
+            logger.exception("Request routing failed for model '%s'", resolved)
+            raise RuntimeError(str(e)) from e
         finally:
             self._decrement_pending(resolved)
