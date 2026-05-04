@@ -37,3 +37,4 @@ class ModelInstance:
     pid: int | None = None
     started_at: float | None = None
     last_request_at: float | None = None
+    runtime_record_id: int | None = None

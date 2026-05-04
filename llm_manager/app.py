@@ -21,6 +21,7 @@ from llm_manager.database.repos.billing_repo import BillingRepository
 from llm_manager.database.repos.model_repo import ModelRuntimeRepository, ProgramRuntimeRepository
 from llm_manager.database.repos.request_repo import RequestRepository
 from llm_manager.services.billing import BillingService
+from llm_manager.services.idle_monitor import IdleMonitor
 from llm_manager.services.device_monitor import DeviceMonitor
 from llm_manager.services.model_manager import ModelManager
 from llm_manager.services.monitor import MonitorService
@@ -108,6 +109,7 @@ class Application:
         container.register(RequestRouter, RequestRouter)
         container.register(BillingService, BillingService)
         container.register(MonitorService, MonitorService)
+        container.register(IdleMonitor, IdleMonitor)
 
         return container
 

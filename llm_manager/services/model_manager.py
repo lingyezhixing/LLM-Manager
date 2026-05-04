@@ -5,6 +5,7 @@ import threading
 import time
 
 from llm_manager.config.models import AppConfig, ModelConfigEntry
+from llm_manager.database.repos.model_repo import ModelRuntimeRepository
 from llm_manager.events import Event, EventBus
 from llm_manager.schemas.model import ModelInstance, ModelState
 from llm_manager.plugins.registry import PluginRegistry
@@ -26,6 +27,7 @@ class ModelManager(BaseService):
         self._device_monitor: DeviceMonitor | None = None
         self._process_manager: ProcessManager | None = None
         self._plugin_registry: PluginRegistry | None = None
+        self._runtime_repo: ModelRuntimeRepository | None = None
 
     async def on_start(self) -> None:
         self._app_config = self._container.resolve(AppConfig)
@@ -33,6 +35,7 @@ class ModelManager(BaseService):
         self._device_monitor = self._container.resolve(DeviceMonitor)
         self._process_manager = self._container.resolve(ProcessManager)
         self._plugin_registry = self._container.resolve(PluginRegistry)
+        self._runtime_repo = self._container.resolve(ModelRuntimeRepository)
         self._build_instances()
 
     def _build_instances(self):
@@ -86,16 +89,27 @@ class ModelManager(BaseService):
                 raise RuntimeError(f"Model '{name}' is already starting")
 
         config = instance.config
-        dep_name = deployment_name or next(iter(config.deployments), None)
-        if dep_name is None:
-            raise ValueError(f"No deployment available for model '{name}'")
 
-        deployment = config.deployments[dep_name]
-
-        if not self._device_monitor.check_devices_available(deployment.required_devices):
-            raise RuntimeError(
-                f"Required devices not available: {deployment.required_devices}"
-            )
+        if deployment_name is not None:
+            dep_name = deployment_name
+            if dep_name not in config.deployments:
+                raise ValueError(f"Deployment '{dep_name}' not found for model '{name}'")
+            deployment = config.deployments[dep_name]
+            if not self._device_monitor.check_devices_available(deployment.required_devices):
+                raise RuntimeError(
+                    f"Required devices not available: {deployment.required_devices}"
+                )
+        else:
+            entry = self._app_config.models[name]
+            online_devices = self._device_monitor.get_online_devices()
+            result = entry.select_deployment(online_devices)
+            if result is None:
+                raise RuntimeError(
+                    f"No compatible deployment for model '{name}' "
+                    f"(online devices: {sorted(online_devices)})"
+                )
+            dep_name, _ = result
+            deployment = config.deployments[dep_name]
 
         with self._lock:
             instance.state = ModelState.STARTING
@@ -108,6 +122,14 @@ class ModelManager(BaseService):
             )
             instance.pid = process_info.pid
             instance.started_at = time.time()
+
+            try:
+                instance.runtime_record_id = self._runtime_repo.record_start(
+                    name, instance.started_at
+                )
+            except Exception:
+                logger.exception("Failed to record model start for '%s'", name)
+                instance.runtime_record_id = None
 
             interface_plugin = self._plugin_registry.get_interface(config.mode)
             if interface_plugin:
@@ -122,7 +144,10 @@ class ModelManager(BaseService):
                 _ModelStarted(model_name=name, port=config.port)
             )
 
-            logger.info("Model '%s' started on port %d", name, config.port)
+            logger.info(
+                "Model '%s' started on port %d (deployment: %s)",
+                name, config.port, dep_name,
+            )
             return instance
 
         except Exception:
@@ -142,9 +167,20 @@ class ModelManager(BaseService):
         try:
             await self._process_manager.stop_process(name)
 
+            if instance.runtime_record_id is not None:
+                try:
+                    self._runtime_repo.record_end_by_id(
+                        instance.runtime_record_id, time.time()
+                    )
+                except Exception:
+                    logger.exception("Failed to record model end for '%s'", name)
+                instance.runtime_record_id = None
+
             instance.state = ModelState.STOPPED
             instance.pid = None
             instance.active_deployment = None
+            instance.started_at = None
+            instance.last_request_at = None
 
             await self._event_bus.publish(
                 _ModelStopped(model_name=name, reason="manual")

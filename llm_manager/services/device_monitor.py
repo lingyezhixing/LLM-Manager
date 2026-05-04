@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 
-from llm_manager.schemas.device import DeviceStatus
+from llm_manager.schemas.device import DeviceState, DeviceStatus
 from llm_manager.plugins.registry import PluginRegistry
 from llm_manager.services.base import BaseService
 from llm_manager.container import Container
@@ -39,6 +39,13 @@ class DeviceMonitor(BaseService):
         except Exception:
             logger.exception("Failed to get status for device '%s'", device_name)
             return None
+
+    def get_online_devices(self) -> set[str]:
+        statuses = self.get_all_statuses()
+        return {
+            name for name, status in statuses.items()
+            if status.state == DeviceState.ONLINE
+        }
 
     def check_devices_available(self, required_devices: list[str]) -> bool:
         statuses = self.get_all_statuses()
