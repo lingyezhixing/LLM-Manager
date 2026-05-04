@@ -6,7 +6,6 @@ import time
 import httpx
 
 from llm_manager.schemas.model import ModelState
-from llm_manager.schemas.request import TokenUsage
 from llm_manager.plugins.registry import PluginRegistry
 from llm_manager.services.base import BaseService
 from llm_manager.container import Container
@@ -32,6 +31,13 @@ class RequestRouter(BaseService):
             await self._client.aclose()
             self._client = None
 
+    def _validate_path(self, resolved: str, instance, path: str) -> None:
+        interface = self._plugin_registry.get_interface(instance.config.mode)
+        if interface:
+            is_valid, error_msg = interface.validate_request(path, resolved)
+            if not is_valid:
+                raise ValueError(error_msg)
+
     async def route_request(
         self,
         model_name_or_alias: str,
@@ -47,6 +53,8 @@ class RequestRouter(BaseService):
         instance = self._model_manager.get_instance(resolved)
         if instance is None or instance.state != ModelState.RUNNING:
             raise RuntimeError(f"Model '{resolved}' is not running")
+
+        self._validate_path(resolved, instance, path)
 
         url = f"http://127.0.0.1:{instance.config.port}{path}"
 
@@ -76,6 +84,8 @@ class RequestRouter(BaseService):
         if instance is None or instance.state != ModelState.RUNNING:
             raise RuntimeError(f"Model '{resolved}' is not running")
 
+        self._validate_path(resolved, instance, path)
+
         url = f"http://127.0.0.1:{instance.config.port}{path}"
 
         async with self._client.stream("POST", url, json=body, headers=headers) as response:
@@ -83,25 +93,8 @@ class RequestRouter(BaseService):
 
     def _track_request(self, model_name: str, instance, response: httpx.Response):
         instance.last_request_at = time.time()
-
-        try:
-            interface = self._plugin_registry.get_interface(instance.config.mode)
-            if interface and response.status_code == 200:
-                try:
-                    data = response.json()
-                    usage = interface.extract_token_usage(data)
-                except Exception:
-                    usage = TokenUsage()
-            else:
-                usage = TokenUsage()
-        except Exception:
-            usage = TokenUsage()
-
         logger.debug(
-            "Request to '%s': %d tokens (%d+%d), status=%d",
+            "Request to '%s': status=%d",
             model_name,
-            usage.total_tokens,
-            usage.prompt_tokens,
-            usage.completion_tokens,
             response.status_code,
         )

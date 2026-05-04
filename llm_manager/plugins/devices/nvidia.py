@@ -20,7 +20,10 @@ class NvidiaDevice(DevicePlugin):
             import GPUtil
 
             gpus = GPUtil.getGPUs()
-            return self._gpu_index < len(gpus)
+            if self._gpu_index >= len(gpus):
+                return False
+            gpu = gpus[self._gpu_index]
+            return self.name in gpu.name.lower()
         except Exception:
             return False
 

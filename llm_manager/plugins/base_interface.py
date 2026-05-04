@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
-from llm_manager.schemas.request import TokenUsage
-
 
 class InterfacePlugin(ABC):
     name: str
@@ -17,5 +15,5 @@ class InterfacePlugin(ABC):
         ...
 
     @abstractmethod
-    def extract_token_usage(self, response: dict) -> TokenUsage:
+    def validate_request(self, path: str, model_name: str) -> tuple[bool, str]:
         ...

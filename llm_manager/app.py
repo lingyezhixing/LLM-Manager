@@ -14,7 +14,6 @@ from llm_manager.config.models import AppConfig
 from llm_manager.container import Container
 from llm_manager.database.engine import DatabaseEngine
 from llm_manager.events import EventBus
-from llm_manager.plugins.base_device import DevicePlugin
 from llm_manager.plugins.base_interface import InterfacePlugin
 from llm_manager.plugins.loader import PluginLoader
 from llm_manager.plugins.registry import PluginRegistry
@@ -116,31 +115,88 @@ class Application:
         plugin_loader = PluginLoader()
         registry = container.resolve(PluginRegistry)
 
-        device_classes = plugin_loader.discover(config.program.device_plugin_dir, DevicePlugin)
-        for cls in device_classes:
+        self._load_device_plugins(config, plugin_loader, registry)
+        self._load_interface_plugins(config, plugin_loader, registry)
+
+    def _load_device_plugins(self, config: AppConfig, loader: PluginLoader, registry: PluginRegistry) -> None:
+        from llm_manager.plugins.devices import CPUDevice, NvidiaDevice, AMDDevice
+
+        needed: set[str] = set()
+        for entry in config.models.values():
+            for dep in entry.get_deployments().values():
+                needed.update(dep.required_devices)
+
+        for dev_name in needed:
+            cls = self._resolve_device_class(dev_name, CPUDevice, NvidiaDevice, AMDDevice)
+            if cls is None:
+                logger.warning("Unknown device name '%s', skipping", dev_name)
+                continue
             try:
-                instance = plugin_loader.load(cls)
-                errors = plugin_loader.validate(instance)
+                kwargs = {"device_name": dev_name} if cls is not CPUDevice else {}
+                instance = loader.load(cls, **kwargs)
+                errors = loader.validate(instance)
                 if errors:
-                    logger.warning("Plugin %s validation errors: %s", cls.__name__, errors)
+                    logger.warning("Device plugin '%s' validation errors: %s", dev_name, errors)
                     continue
                 registry.register_device(instance)
                 logger.info("Loaded device plugin: %s", instance.name)
             except Exception:
-                logger.exception("Failed to load device plugin: %s", cls.__name__)
+                logger.exception("Failed to load device plugin: %s", dev_name)
 
-        interface_classes = plugin_loader.discover(config.program.interface_plugin_dir, InterfacePlugin)
-        for cls in interface_classes:
+    @staticmethod
+    def _resolve_device_class(dev_name: str, cpu_cls: type, nvidia_cls: type, amd_cls: type) -> type | None:
+        name = dev_name.lower()
+        if name == "cpu":
+            return cpu_cls
+        if any(kw in name for kw in ("rtx", "gtx", "geforce", "v100", "nvidia")):
+            return nvidia_cls
+        if "amd" in name:
+            return amd_cls
+        return None
+
+    def _load_interface_plugins(self, config: AppConfig, loader: PluginLoader, registry: PluginRegistry) -> None:
+        from llm_manager.plugins.interfaces import ChatInterface, EmbeddingInterface, RerankerInterface
+
+        for cls in [ChatInterface, EmbeddingInterface, RerankerInterface]:
             try:
-                instance = plugin_loader.load(cls)
-                errors = plugin_loader.validate(instance)
+                instance = loader.load(cls)
+                errors = loader.validate(instance)
                 if errors:
-                    logger.warning("Plugin %s validation errors: %s", cls.__name__, errors)
+                    logger.warning("Built-in interface plugin %s validation errors: %s", cls.__name__, errors)
                     continue
                 registry.register_interface(instance)
                 logger.info("Loaded interface plugin: %s", instance.name)
             except Exception:
                 logger.exception("Failed to load interface plugin: %s", cls.__name__)
+
+        self._discover_extension_plugins(
+            loader, registry, config.program.interface_plugin_dir, InterfacePlugin, is_device=False,
+        )
+
+    def _discover_extension_plugins(
+        self,
+        loader: PluginLoader,
+        registry: PluginRegistry,
+        plugin_dir,
+        base_class: type,
+        *,
+        is_device: bool,
+    ) -> None:
+        classes = loader.discover(plugin_dir, base_class)
+        for cls in classes:
+            try:
+                instance = loader.load(cls)
+                errors = loader.validate(instance)
+                if errors:
+                    logger.warning("Extension plugin %s validation errors: %s", cls.__name__, errors)
+                    continue
+                if is_device:
+                    registry.register_device(instance)
+                else:
+                    registry.register_interface(instance)
+                logger.info("Loaded extension plugin: %s", instance.name)
+            except Exception:
+                logger.exception("Failed to load extension plugin: %s", cls.__name__)
 
     def _start_tray(self, container: Container) -> None:
         try:

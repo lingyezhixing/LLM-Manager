@@ -2,7 +2,9 @@
 
 ## 目标
 
-将 V2 的设备插件和接口插件实现迁移到 V3 的插件架构中，确保硬件检测、状态读取、健康检查、请求校验、token 提取等功能完整。
+将 V2 的设备插件和接口插件实现迁移到 V3 的插件架构中，确保硬件检测、状态读取、健康检查、请求校验等功能完整。
+
+> **注意**：`extract_token_usage()` 已从接口插件中移除。Token 提取逻辑将在 Phase 5 统一到 `utils/tokens.py` + `services/token_tracker.py`，避免分散在各插件中。
 
 ## 前置条件
 
@@ -15,7 +17,7 @@
 | 接口 | V2 方法 | V3 方法 | 差异 |
 |------|---------|---------|------|
 | DevicePlugin | `is_online()`, `get_devices_info()` | `is_available()`, `get_status()` | V2 返回 dict，V3 返回 `DeviceStatus` dataclass |
-| InterfacePlugin | `health_check()`, `get_supported_endpoints()`, `validate_request()` | `health_check()`, `get_supported_endpoints()`, `extract_token_usage()` | V3 新增 `extract_token_usage`，V2 有 `validate_request` |
+| InterfacePlugin | `health_check()`, `get_supported_endpoints()`, `validate_request()` | `health_check()`, `get_supported_endpoints()`, `validate_request()` | V3 迁移后方法一致，token 提取移至 Phase 5 |
 
 ### 设备插件实现差异
 

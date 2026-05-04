@@ -19,7 +19,7 @@ class PluginRegistry:
         return self._devices.get(name)
 
     def get_interface(self, name: str) -> InterfacePlugin | None:
-        return self._interfaces.get(name)
+        return self._interfaces.get(name.lower())
 
     def get_all_devices(self) -> list[DevicePlugin]:
         return list(self._devices.values())

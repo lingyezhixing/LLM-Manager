@@ -4,7 +4,6 @@ import logging
 
 import httpx
 
-from llm_manager.schemas.request import TokenUsage
 from llm_manager.plugins.base_interface import InterfacePlugin
 
 logger = logging.getLogger(__name__)
@@ -43,10 +42,7 @@ class RerankerInterface(InterfacePlugin):
         except Exception:
             return False
 
-    def extract_token_usage(self, response: dict) -> TokenUsage:
-        usage = response.get("usage", {})
-        return TokenUsage(
-            prompt_tokens=usage.get("prompt_tokens", 0),
-            completion_tokens=0,
-            total_tokens=usage.get("total_tokens", 0),
-        )
+    def validate_request(self, path: str, model_name: str) -> tuple[bool, str]:
+        if "/v1/rerank" not in path and "/rerank" not in path:
+            return False, f"模型 '{model_name}' 是 'Reranker' 模式, 只支持重排序接口"
+        return True, ""

@@ -8,7 +8,9 @@
 
 - Phase 1 数据库层已完成（token 记录需要 `RequestRepository`）
 - Phase 2 配置系统已完成（`should_track_tokens()`）
-- Phase 3 插件系统已完成（接口插件的 `validate_request` + `extract_token_usage`）
+- Phase 3 插件系统已完成（接口插件的 `validate_request`）
+
+> **Phase 3 变更说明**：`extract_token_usage()` 已从 `InterfacePlugin` 基类和各接口插件中移除。Token 提取逻辑应统一到 `utils/tokens.py`（已有 `extract_tokens_from_streaming()`），Phase 5 需补充非流式提取函数并整合到 `TokenTracker` 服务中。
 - Phase 4 模型管理器已完成（自适应启动 + 运行记录）
 
 ## V2 → V3 差异分析

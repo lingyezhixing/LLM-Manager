@@ -55,7 +55,7 @@ class PluginLoader:
         if isinstance(plugin, DevicePlugin):
             required_attrs = ["name", "is_available", "get_status"]
         elif isinstance(plugin, InterfacePlugin):
-            required_attrs = ["name", "get_supported_endpoints", "health_check", "extract_token_usage"]
+            required_attrs = ["name", "get_supported_endpoints", "health_check", "validate_request"]
 
         for attr in required_attrs:
             if not hasattr(plugin, attr):
