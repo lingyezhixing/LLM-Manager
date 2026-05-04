@@ -5,7 +5,7 @@ import threading
 import time
 
 from llm_manager.config.models import AppConfig, ModelConfigEntry
-from llm_manager.events import EventBus
+from llm_manager.events import Event, EventBus
 from llm_manager.schemas.model import ModelInstance, ModelState
 from llm_manager.plugins.registry import PluginRegistry
 from llm_manager.services.base import BaseService
@@ -22,9 +22,17 @@ class ModelManager(BaseService):
         self._instances: dict[str, ModelInstance] = {}
         self._lock = threading.RLock()
         self._app_config: AppConfig | None = None
+        self._event_bus: EventBus | None = None
+        self._device_monitor: DeviceMonitor | None = None
+        self._process_manager: ProcessManager | None = None
+        self._plugin_registry: PluginRegistry | None = None
 
     async def on_start(self) -> None:
         self._app_config = self._container.resolve(AppConfig)
+        self._event_bus = self._container.resolve(EventBus)
+        self._device_monitor = self._container.resolve(DeviceMonitor)
+        self._process_manager = self._container.resolve(ProcessManager)
+        self._plugin_registry = self._container.resolve(PluginRegistry)
         self._build_instances()
 
     def _build_instances(self):
@@ -84,8 +92,7 @@ class ModelManager(BaseService):
 
         deployment = config.deployments[dep_name]
 
-        device_svc = self._container.resolve(DeviceMonitor)
-        if not device_svc.check_devices_available(deployment.required_devices):
+        if not self._device_monitor.check_devices_available(deployment.required_devices):
             raise RuntimeError(
                 f"Required devices not available: {deployment.required_devices}"
             )
@@ -95,15 +102,14 @@ class ModelManager(BaseService):
             instance.active_deployment = dep_name
 
         try:
-            process_svc = self._container.resolve(ProcessManager)
-            process_info = await process_svc.start_process(
+            process_info = await self._process_manager.start_process(
                 name=name,
                 script_path=str(deployment.script_path),
             )
             instance.pid = process_info.pid
             instance.started_at = time.time()
 
-            interface_plugin = self._container.resolve(PluginRegistry).get_interface(config.mode)
+            interface_plugin = self._plugin_registry.get_interface(config.mode)
             if interface_plugin:
                 healthy = await interface_plugin.health_check(config.port)
                 if not healthy:
@@ -112,8 +118,7 @@ class ModelManager(BaseService):
             instance.state = ModelState.RUNNING
             instance.last_request_at = None
 
-            event_bus = self._container.resolve(EventBus)
-            await event_bus.publish(
+            await self._event_bus.publish(
                 _ModelStarted(model_name=name, port=config.port)
             )
 
@@ -135,15 +140,13 @@ class ModelManager(BaseService):
             instance.state = ModelState.STOPPING
 
         try:
-            process_svc = self._container.resolve(ProcessManager)
-            await process_svc.stop_process(name)
+            await self._process_manager.stop_process(name)
 
             instance.state = ModelState.STOPPED
             instance.pid = None
             instance.active_deployment = None
 
-            event_bus = self._container.resolve(EventBus)
-            await event_bus.publish(
+            await self._event_bus.publish(
                 _ModelStopped(model_name=name, reason="manual")
             )
 
@@ -173,15 +176,15 @@ class ModelManager(BaseService):
         return None
 
 
-class _ModelStarted:
+class _ModelStarted(Event):
     def __init__(self, model_name: str, port: int):
+        super().__init__()
         self.model_name = model_name
         self.port = port
-        self.timestamp = time.time()
 
 
-class _ModelStopped:
+class _ModelStopped(Event):
     def __init__(self, model_name: str, reason: str):
+        super().__init__()
         self.model_name = model_name
         self.reason = reason
-        self.timestamp = time.time()
