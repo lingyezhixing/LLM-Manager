@@ -148,7 +148,7 @@ async def stop_model(self, name: str) -> ModelInstance:
         # ... 发布事件等 ...
 ```
 
-**注意**：`ModelRuntimeRepository` 需新增 `record_end_by_id(record_id, end_time)` 方法。
+`record_end_by_id(record_id, end_time)` 已在 Phase 1 实现。
 
 ### 4.3 空闲检测循环
 

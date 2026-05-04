@@ -19,7 +19,7 @@ from llm_manager.plugins.base_interface import InterfacePlugin
 from llm_manager.plugins.loader import PluginLoader
 from llm_manager.plugins.registry import PluginRegistry
 from llm_manager.database.repos.billing_repo import BillingRepository
-from llm_manager.database.repos.model_repo import ModelRepository, ProgramRepository
+from llm_manager.database.repos.model_repo import ModelRuntimeRepository, ProgramRuntimeRepository
 from llm_manager.database.repos.request_repo import RequestRepository
 from llm_manager.services.billing import BillingService
 from llm_manager.services.device_monitor import DeviceMonitor
@@ -98,8 +98,8 @@ class Application:
         container.register(PluginRegistry, PluginRegistry)
         container.register(DatabaseEngine, lambda: DatabaseEngine(config.program))
 
-        container.register(ModelRepository, ModelRepository)
-        container.register(ProgramRepository, ProgramRepository)
+        container.register(ModelRuntimeRepository, ModelRuntimeRepository)
+        container.register(ProgramRuntimeRepository, ProgramRuntimeRepository)
         container.register(RequestRepository, RequestRepository)
         container.register(BillingRepository, BillingRepository)
 

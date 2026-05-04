@@ -70,7 +70,7 @@ class TokenTracker(BaseService):
 
     def extract_tokens(self, data: dict) -> TokenUsage:
         """从解析后的 JSON dict 中提取 token"""
-        # 1. 优先 timings
+        # 1. 优先 timings（llama.cpp 等推理引擎提供 cache_n/prompt_n）
         if "timings" in data:
             timings = data["timings"]
             cache_n = timings.get("cache_n", 0)
@@ -78,18 +78,20 @@ class TokenTracker(BaseService):
             predicted_n = timings.get("predicted_n", 0)
             if cache_n or prompt_n or predicted_n:
                 return TokenUsage(
-                    prompt_tokens=cache_n + prompt_n,
-                    completion_tokens=predicted_n,
-                    total_tokens=cache_n + prompt_n + predicted_n,
+                    input_tokens=cache_n + prompt_n,
+                    output_tokens=predicted_n,
+                    cache_n=cache_n,
+                    prompt_n=prompt_n,
                 )
 
-        # 2. 降级 usage
+        # 2. 降级 usage（OpenAI 兼容接口，无 cache 区分）
         if "usage" in data:
             usage = data["usage"]
             return TokenUsage(
-                prompt_tokens=usage.get("prompt_tokens", 0),
-                completion_tokens=usage.get("completion_tokens", 0),
-                total_tokens=usage.get("total_tokens", 0),
+                input_tokens=usage.get("prompt_tokens", 0),
+                output_tokens=usage.get("completion_tokens", 0),
+                cache_n=0,
+                prompt_n=0,
             )
 
         return TokenUsage()
@@ -106,20 +108,19 @@ class TokenTracker(BaseService):
     async def record_request(
         self, model_name: str, usage: TokenUsage,
         start_time: float, end_time: float,
-        cache_n: int = 0, prompt_n: int = 0,
     ) -> None:
         """异步记录 token 到数据库"""
         mode = ...  # 获取模型 mode
         if not self._config.should_track_tokens(mode):
             return
-        if not any([usage.prompt_tokens, usage.completion_tokens, cache_n, prompt_n]):
+        if not any([usage.input_tokens, usage.output_tokens, usage.cache_n, usage.prompt_n]):
             return
 
         await asyncio.to_thread(
             self._request_repo.save_request,
             model_name, start_time, end_time,
-            usage.prompt_tokens, usage.completion_tokens,
-            cache_n, prompt_n,
+            usage.input_tokens, usage.output_tokens,
+            usage.cache_n, usage.prompt_n,
         )
 
     async def wrap_streaming_response(self, model_name: str, response, start_time: float):
@@ -236,22 +237,27 @@ class TestTokenExtraction:
         tracker = TokenTracker(...)
         data = {"timings": {"cache_n": 80, "prompt_n": 20, "predicted_n": 50}}
         usage = tracker.extract_tokens(data)
-        assert usage.prompt_tokens == 100  # cache_n + prompt_n
-        assert usage.completion_tokens == 50
+        assert usage.input_tokens == 100  # cache_n + prompt_n
+        assert usage.output_tokens == 50
+        assert usage.cache_n == 80
+        assert usage.prompt_n == 20
 
     def test_fallback_to_usage(self):
         """无 timings 时降级到 usage"""
         tracker = TokenTracker(...)
         data = {"usage": {"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150}}
         usage = tracker.extract_tokens(data)
-        assert usage.prompt_tokens == 100
-        assert usage.completion_tokens == 50
+        assert usage.input_tokens == 100
+        assert usage.output_tokens == 50
+        assert usage.cache_n == 0
+        assert usage.prompt_n == 0
 
     def test_both_zero_returns_empty(self):
         """无 timings 无 usage 时返回空"""
         tracker = TokenTracker(...)
         usage = tracker.extract_tokens({})
-        assert usage.total_tokens == 0
+        assert usage.input_tokens == 0
+        assert usage.output_tokens == 0
 
 
 class TestStreamTokenExtraction:
@@ -262,14 +268,16 @@ class TestStreamTokenExtraction:
         sse_content = b'data: {"choices": []}\ndata: {"usage": {"prompt_tokens": 50, "completion_tokens": 30, "total_tokens": 80}}\ndata: [DONE]\n'
         tracker = TokenTracker(...)
         usage = tracker.extract_from_stream(sse_content)
-        assert usage.total_tokens == 80
+        assert usage.input_tokens == 50
+        assert usage.output_tokens == 30
 
     def test_extract_from_json_response(self):
         """从 JSON 响应提取 token"""
         json_content = b'{"usage": {"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150}}'
         tracker = TokenTracker(...)
         usage = tracker.extract_from_stream(json_content)
-        assert usage.total_tokens == 150
+        assert usage.input_tokens == 100
+        assert usage.output_tokens == 50
 
 
 class TestTokenRecording:

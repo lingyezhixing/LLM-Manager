@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from sqlalchemy import select
+from sqlalchemy import and_, select
 
 from llm_manager.database.engine import DatabaseEngine
-from llm_manager.database.schema import request_logs
+from llm_manager.database.schema import model_requests, models
 from llm_manager.database.repos.base import BaseRepository
 
 
@@ -13,49 +13,56 @@ class RequestRepository(BaseRepository[dict]):
 
     def save_request(
         self,
-        request_id: str,
         model_name: str,
-        timestamp: float,
-        prompt_tokens: int,
-        completion_tokens: int,
-        total_tokens: int,
-        latency_ms: float,
-        success: bool = True,
-        error_message: str | None = None,
+        start_time: float,
+        end_time: float,
+        input_tokens: int,
+        output_tokens: int,
+        cache_n: int,
+        prompt_n: int,
     ) -> None:
+        model_id = self._get_or_create_model_id(model_name)
         self._execute(
-            request_logs.insert().values(
-                request_id=request_id,
-                model_name=model_name,
-                timestamp=timestamp,
-                prompt_tokens=prompt_tokens,
-                completion_tokens=completion_tokens,
-                total_tokens=total_tokens,
-                latency_ms=latency_ms,
-                success=1 if success else 0,
-                error_message=error_message,
+            model_requests.insert().values(
+                model_id=model_id,
+                start_time=start_time,
+                end_time=end_time,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                cache_n=cache_n,
+                prompt_n=prompt_n,
             )
         )
 
-    def get_model_requests(self, model_name: str, limit: int = 100) -> list[dict]:
-        return self._query(
-            select(request_logs)
-            .where(request_logs.c.model_name == model_name)
-            .order_by(request_logs.c.timestamp.desc())
-            .limit(limit)
+    def get_requests(
+        self,
+        model_name: str,
+        start_time: float = 0,
+        end_time: float = 0,
+        buffer_seconds: int = 60,
+    ) -> list[dict]:
+        import time
+
+        row = self._query_one(
+            select(models).where(models.c.original_name == model_name)
         )
+        if not row:
+            return []
+        model_id = row["id"]
 
-    def get_model_token_totals(self, model_name: str) -> dict:
-        from sqlalchemy import func
+        if end_time == 0:
+            end_time = time.time()
 
-        stmt = select(
-            func.sum(request_logs.c.prompt_tokens).label("prompt_tokens"),
-            func.sum(request_logs.c.completion_tokens).label("completion_tokens"),
-            func.sum(request_logs.c.total_tokens).label("total_tokens"),
-            func.count().label("request_count"),
-        ).where(request_logs.c.model_name == model_name)
+        query_start = start_time - buffer_seconds if start_time > 0 else 0
 
-        result = self._query_one(stmt)
-        if result and result.get("total_tokens") is not None:
-            return result
-        return {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "request_count": 0}
+        return self._query(
+            select(model_requests)
+            .where(
+                and_(
+                    model_requests.c.model_id == model_id,
+                    model_requests.c.end_time >= query_start,
+                    model_requests.c.end_time <= end_time,
+                )
+            )
+            .order_by(model_requests.c.end_time.asc())
+        )

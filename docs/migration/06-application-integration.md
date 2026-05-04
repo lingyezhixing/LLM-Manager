@@ -63,8 +63,9 @@ async def _async_run(self) -> None:
     await container.start_all()
 
     # 初始化计费默认值
-    db_engine = container.resolve(DatabaseEngine)
-    db_engine.initialize_billing(config)
+    billing_repo = container.resolve(BillingRepository)
+    for model_name in config.models:
+        billing_repo.seed_default_billing(model_name)
 
     # 记录程序启动时间
     program_repo = container.resolve(ProgramRuntimeRepository)

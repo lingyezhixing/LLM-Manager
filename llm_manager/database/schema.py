@@ -1,44 +1,67 @@
-from sqlalchemy import Column, Float, Integer, MetaData, String, Table, Text
+from sqlalchemy import Boolean, Column, Float, Integer, MetaData, String, Table
 
 metadata = MetaData()
 
-model_runtimes = Table(
-    "model_runtimes",
-    metadata,
+models = Table(
+    "models", metadata,
     Column("id", Integer, primary_key=True, autoincrement=True),
-    Column("model_name", String(128), nullable=False, index=True),
-    Column("start_time", Float, nullable=False),
-    Column("end_time", Float, nullable=True),
-)
-
-request_logs = Table(
-    "request_logs",
-    metadata,
-    Column("id", Integer, primary_key=True, autoincrement=True),
-    Column("request_id", String(64), nullable=False, unique=True),
-    Column("model_name", String(128), nullable=False, index=True),
-    Column("timestamp", Float, nullable=False),
-    Column("prompt_tokens", Integer, default=0),
-    Column("completion_tokens", Integer, default=0),
-    Column("total_tokens", Integer, default=0),
-    Column("latency_ms", Float, default=0.0),
-    Column("success", Integer, default=1),
-    Column("error_message", Text, nullable=True),
+    Column("original_name", String(128), nullable=False, unique=True),
+    Column("created_at", Float, nullable=False),
 )
 
 program_runtimes = Table(
-    "program_runtimes",
-    metadata,
+    "program_runtimes", metadata,
     Column("id", Integer, primary_key=True, autoincrement=True),
     Column("start_time", Float, nullable=False),
     Column("end_time", Float, nullable=True),
 )
 
-billing_configs = Table(
-    "billing_configs",
-    metadata,
+model_runtime = Table(
+    "model_runtime", metadata,
     Column("id", Integer, primary_key=True, autoincrement=True),
-    Column("model_name", String(128), nullable=False, unique=True),
-    Column("mode", String(32), nullable=False),
-    Column("config_json", Text, nullable=False),
+    Column("model_id", Integer, nullable=False, index=True),
+    Column("start_time", Float, nullable=False),
+    Column("end_time", Float, nullable=True),
+)
+
+model_requests = Table(
+    "model_requests", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("model_id", Integer, nullable=False, index=True),
+    Column("start_time", Float, nullable=False),
+    Column("end_time", Float, nullable=False),
+    Column("input_tokens", Integer, nullable=False, default=0),
+    Column("output_tokens", Integer, nullable=False, default=0),
+    Column("cache_n", Integer, nullable=False, default=0),
+    Column("prompt_n", Integer, nullable=False, default=0),
+)
+
+billing_methods = Table(
+    "billing_methods", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("model_id", Integer, nullable=False, unique=True),
+    Column("use_tier_pricing", Boolean, nullable=False, default=True),
+)
+
+hourly_pricing = Table(
+    "hourly_pricing", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("model_id", Integer, nullable=False, unique=True),
+    Column("hourly_price", Float, nullable=False, default=0.0),
+)
+
+tier_pricing = Table(
+    "tier_pricing", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("model_id", Integer, nullable=False, index=True),
+    Column("tier_index", Integer, nullable=False),
+    Column("min_input_tokens", Integer, nullable=False),
+    Column("max_input_tokens", Integer, nullable=False),
+    Column("min_output_tokens", Integer, nullable=False),
+    Column("max_output_tokens", Integer, nullable=False),
+    Column("input_price", Float, nullable=False),
+    Column("output_price", Float, nullable=False),
+    Column("support_cache", Boolean, nullable=False, default=False),
+    Column("cache_write_price", Float, nullable=False, default=0.0),
+    Column("cache_read_price", Float, nullable=False, default=0.0),
 )
