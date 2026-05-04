@@ -2,11 +2,11 @@
 
 ## Context
 
-LLM-Manager V1 从一个小型本地 LLM 管理工具发展到 ~6600 行 Python + React WebUI。V1 架构存在核心模块过大、模块间紧耦合、插件系统重复抽象、缺乏数据库 migration 等问题，已无法支撑进一步开发。
+LLM-Manager V2 从一个小型本地 LLM 管理工具发展到 ~6600 行 Python + React WebUI。虽然经历过V1 - V2的一次重构，但V2 架构依然存在核心模块过大、模块间紧耦合、插件系统重复抽象、缺乏数据库 migration 等问题，已无法支撑进一步开发。
 
-V2 重构建立了分层架构脚手架，但在命名上有设计缺陷（`models/` 与 LLM 模型歧义、`extensions/` vs `plugins/` 语义重叠、`infra/` 目录不合理等）。
+V3 重构建立了分层架构脚手架，但在命名上有设计缺陷（`models/` 与 LLM 模型歧义、`extensions/` vs `plugins/` 语义重叠、`infra/` 目录不合理等）。
 
-V3 在 V2 基础上修正命名并完善 DI 容器，形成当前最终版本。
+目前的V3版 在 V3方案版的基础上修正命名并完善 DI 容器，形成当前最终版本。
 
 **定位**：以个人使用为主，架构上保持扩展性以便将来开源。
 
