@@ -390,6 +390,15 @@ class PluginManager:
         """获取接口插件"""
         return self.interface_plugins.get(interface_name)
 
+    def get_probe(self, mode: str):
+        """按 mode 取健康探测函数 (probe_registry 查找)。
+
+        替代旧的 get_interface_plugin 用于冷启动健康检查。
+        返回 None 表示该 mode 未注册探测器。
+        """
+        from core.probes import probe_registry
+        return probe_registry.get(mode)
+
     def get_all_device_plugins(self) -> Dict[str, Any]:
         """获取所有设备插件"""
         return self.device_plugins.copy()

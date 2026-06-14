@@ -798,10 +798,10 @@ class ModelController:
         logger.info(f"开始健康检查: {primary_name} (Port: {port})")
 
         mode = model_config.get("mode", "Chat")
-        plugin = self.plugin_manager.get_interface_plugin(mode)
+        probe_fn = self.plugin_manager.get_probe(mode)
 
-        if not plugin:
-            msg = f"未找到模式 '{mode}' 的接口插件"
+        if not probe_fn:
+            msg = f"未找到模式 '{mode}' 的健康探测器"
             self._handle_startup_failure(primary_name, msg)
             return False, msg
 
@@ -809,8 +809,8 @@ class ModelController:
         if self._check_if_cancelled(primary_name):
             return False, "启动中断（阶段5）"
 
-        # 调用插件进行检查
-        ok, msg = plugin.health_check(primary_name, port, start_ts, timeout)
+        # 调用探测器进行检查 (签名: model_alias, port, start_time, timeout)
+        ok, msg = probe_fn(primary_name, port, start_ts, timeout)
 
         # [Checkpoint 6] 检查后
         if self._check_if_cancelled(primary_name):
