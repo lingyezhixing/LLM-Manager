@@ -80,6 +80,11 @@ LLM-Manager.code-workspace
 **/*test*/
 **/test_*
 
+# 但保留项目正式测试套件（pytest 测试框架）
+!pytest.ini
+!tests/
+!tests/*.py
+
 # 忽略指定的markdown文档
 monitor_manual.md
 openai_api_manual.md
