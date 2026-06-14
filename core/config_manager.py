@@ -200,22 +200,12 @@ class ConfigManager:
         """获取 Claude 配置预设"""
         return self.config.get("claude_configs", {})
 
-    def get_token_tracker_modes(self) -> List[str]:
-        """获取需要追踪token的模型模式列表"""
-        return self.get_program_config().get('TokenTracker', ["Chat", "Base", "Embedding", "Reranker"])
-
     def get_all_model_modes(self) -> List[str]:
         """返回所有模型配置中出现的 distinct mode（去重、排序）。
 
-        track-all 之后取代 get_token_tracker_modes()，作为分析看板
-        mode_breakdown 维度的键来源。
+        作为分析看板 mode_breakdown 维度的键来源。
         """
         return sorted({cfg.get("mode", "Chat") for cfg in self.get_all_model_configs().values()})
-
-    def should_track_tokens_for_mode(self, mode: str) -> bool:
-        """检查指定模式的模型是否需要追踪token"""
-        tracked_modes = self.get_token_tracker_modes()
-        return mode in tracked_modes
 
     def get_alive_time(self) -> int:
         """获取模型存活时间（分钟）"""
