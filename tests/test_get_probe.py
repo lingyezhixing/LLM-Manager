@@ -3,8 +3,7 @@ from core.probes import probe_registry
 
 
 def make_pm():
-    # Constructor still takes (device_dir, interface_dir) until Task 7.
-    return PluginManager("plugins/devices", "plugins/interfaces")
+    return PluginManager("plugins/devices")
 
 
 def test_get_probe_returns_registered_fn_for_each_mode():

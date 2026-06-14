@@ -177,10 +177,6 @@ class ConfigManager:
         """获取设备插件目录"""
         return self.get_program_config().get('device_plugin_dir', 'plugins/devices')
 
-    def get_interface_plugin_dir(self) -> str:
-        """获取接口插件目录"""
-        return self.get_program_config().get('interface_plugin_dir', 'plugins/interfaces')
-
     def get_openai_config(self) -> Dict[str, Any]:
         """获取 API 服务器配置"""
         return {

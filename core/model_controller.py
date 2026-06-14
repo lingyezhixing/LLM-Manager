@@ -385,12 +385,11 @@ class ModelController:
     def load_plugins(self):
         """加载插件并刷新初始设备状态"""
         device_dir = self.config_manager.get_device_plugin_dir()
-        interface_dir = self.config_manager.get_interface_plugin_dir()
-        self.plugin_manager = PluginManager(device_dir, interface_dir)
+        self.plugin_manager = PluginManager(device_dir)
 
         try:
             self.plugin_manager.load_all_plugins(model_manager=self)
-            logger.info(f"插件加载完毕: 设备插件 {len(self.plugin_manager.get_all_device_plugins())} 个, 接口插件 {len(self.plugin_manager.get_all_interface_plugins())} 个")
+            logger.info(f"插件加载完毕: 设备插件 {len(self.plugin_manager.get_all_device_plugins())} 个")
             
             logger.info("初始化设备状态缓存...")
             self.plugin_manager.update_device_status()

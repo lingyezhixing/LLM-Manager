@@ -167,37 +167,13 @@ class DevicePluginLoader(PluginLoader):
             return plugin_instance.device_name
         return None
 
-class InterfacePluginLoader(PluginLoader):
-    """接口插件加载器"""
-
-    def __init__(self, plugin_dir: str = "plugins/interfaces", model_manager=None):
-        from plugins.interfaces.Base_Class import InterfacePlugin
-        self.model_manager = model_manager
-        super().__init__(plugin_dir, InterfacePlugin)
-
-    def load_plugins(self, **kwargs) -> Dict[str, Any]:
-        """重写加载方法，传入model_manager"""
-        self.model_manager = kwargs.get('model_manager', self.model_manager)
-        # 移除重复的model_manager参数，只传递一次
-        filtered_kwargs = {k: v for k, v in kwargs.items() if k != 'model_manager'}
-        return super().load_plugins(model_manager=self.model_manager, **filtered_kwargs)
-
-    def _get_plugin_id(self, plugin_instance: Any) -> Optional[str]:
-        """接口插件使用interface_name作为标识符"""
-        if hasattr(plugin_instance, 'interface_name'):
-            return plugin_instance.interface_name
-        return None
-
 class PluginManager:
     """统一的插件管理器"""
 
-    def __init__(self, device_dir: str = "plugins/devices", interface_dir: str = "plugins/interfaces"):
+    def __init__(self, device_dir: str = "plugins/devices"):
         self.device_dir = device_dir
-        self.interface_dir = interface_dir
         self.device_loader = DevicePluginLoader(device_dir)
-        self.interface_loader = InterfacePluginLoader(interface_dir)
         self.device_plugins: Dict[str, Any] = {}
-        self.interface_plugins: Dict[str, Any] = {}
         self.last_reload_time = 0
         
         # --- 设备状态缓存机制 ---
@@ -328,14 +304,13 @@ class PluginManager:
     def load_all_plugins(self, model_manager=None) -> Dict[str, Dict[str, Any]]:
         """加载所有插件"""
         result = {
-            "device_plugins": {},
-            "interface_plugins": {}
+            "device_plugins": {}
         }
 
         # 加载设备插件
         try:
             self.device_plugins = self.device_loader.load_plugins()
-            
+
             # 初始填充缓存（使用默认值，等待monitor线程更新真实值）
             with self.cache_lock:
                 for name, plugin in self.device_plugins.items():
@@ -357,21 +332,6 @@ class PluginManager:
             logger.error(f"加载设备插件失败: {e}")
             result["device_plugins"]["error"] = str(e)
 
-        # 加载接口插件
-        try:
-            self.interface_loader.model_manager = model_manager
-            self.interface_plugins = self.interface_loader.load_plugins(model_manager=model_manager)
-            result["interface_plugins"] = {
-                name: {
-                    "status": "loaded",
-                    "type": type(plugin).__name__
-                }
-                for name, plugin in self.interface_plugins.items()
-            }
-        except Exception as e:
-            logger.error(f"加载接口插件失败: {e}")
-            result["interface_plugins"]["error"] = str(e)
-
         self.last_reload_time = time.time()
         return result
 
@@ -379,21 +339,16 @@ class PluginManager:
         """重新加载所有插件"""
         logger.info("重新加载所有插件...")
         self.device_plugins.clear()
-        self.interface_plugins.clear()
         return self.load_all_plugins(model_manager)
 
     def get_device_plugin(self, device_name: str) -> Optional[Any]:
         """获取设备插件"""
         return self.device_plugins.get(device_name)
 
-    def get_interface_plugin(self, interface_name: str) -> Optional[Any]:
-        """获取接口插件"""
-        return self.interface_plugins.get(interface_name)
-
     def get_probe(self, mode: str):
         """按 mode 取健康探测函数 (probe_registry 查找)。
 
-        替代旧的 get_interface_plugin 用于冷启动健康检查。
+        用于冷启动健康检查。
         返回 None 表示该 mode 未注册探测器。
         """
         from core.probes import probe_registry
@@ -402,10 +357,6 @@ class PluginManager:
     def get_all_device_plugins(self) -> Dict[str, Any]:
         """获取所有设备插件"""
         return self.device_plugins.copy()
-
-    def get_all_interface_plugins(self) -> Dict[str, Any]:
-        """获取所有接口插件"""
-        return self.interface_plugins.copy()
 
     def get_plugin_status(self) -> Dict[str, Any]:
         """
@@ -423,21 +374,13 @@ class PluginManager:
                 }
                 for name, data in device_status.items()
             },
-            "interface_plugins": {
-                name: {
-                    "type": type(plugin).__name__,
-                    "supported_modes": [name]
-                }
-                for name, plugin in self.interface_plugins.items()
-            },
             "last_reload": self.last_reload_time
         }
 
     def discover_new_plugins(self) -> Dict[str, List[str]]:
         """发现新插件（不加载）"""
         new_plugins = {
-            "device_plugins": [],
-            "interface_plugins": []
+            "device_plugins": []
         }
 
         # 发现设备插件
@@ -447,14 +390,6 @@ class PluginManager:
                     plugin_name = filename[:-3]
                     if plugin_name not in self.device_plugins:
                         new_plugins["device_plugins"].append(plugin_name)
-
-        # 发现接口插件
-        if os.path.exists(self.interface_dir):
-            for filename in os.listdir(self.interface_dir):
-                if filename.endswith('.py') and not filename.startswith('__') and filename != 'Base_Class.py':
-                    plugin_name = filename[:-3]
-                    if plugin_name not in self.interface_plugins:
-                        new_plugins["interface_plugins"].append(plugin_name)
 
         return new_plugins
 
@@ -519,7 +454,3 @@ class PluginManager:
     def get_device_loader(self) -> DevicePluginLoader:
         """获取设备插件加载器"""
         return self.device_loader
-
-    def get_interface_loader(self) -> InterfacePluginLoader:
-        """获取接口插件加载器"""
-        return self.interface_loader
