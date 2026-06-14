@@ -255,6 +255,11 @@ class ConfigManager:
                     if req_key not in model_cfg:
                         errors.append(f"模型 '{key}' 缺少必需配置项: {req_key}")
 
+                # 校验 mode 是受支持的健康探测器之一
+                mode_val = model_cfg.get('mode', 'Chat')
+                if mode_val not in ('Chat', 'Base', 'Embedding', 'Reranker'):
+                    errors.append(f"模型 '{key}' 的 mode '{mode_val}' 不受支持 (支持: Chat, Base, Embedding, Reranker)")
+
                 # 检查别名
                 aliases = model_cfg.get('aliases', [])
                 if not aliases or not isinstance(aliases, list):
