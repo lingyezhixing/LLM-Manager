@@ -166,9 +166,6 @@ class APIServer:
         async def get_model_requests_with_mode(model_name: str):
             try:
                 mode = self.config_manager.get_model_mode(model_name)
-                if not self.config_manager.should_track_tokens_for_mode(mode):
-                    return []
-                
                 requests = await asyncio.wait_for(
                     asyncio.to_thread(self.monitor.get_model_requests, model_name, start_time, end_time),
                     timeout=15.0
@@ -181,10 +178,7 @@ class APIServer:
                 logger.error(f"[API_SERVER] 获取模型 {model_name} 请求数据失败: {e}")
                 return []
 
-        model_names_to_track = [
-            name for name in self.config_manager.get_model_names()
-            if self.config_manager.should_track_tokens_for_mode(self.config_manager.get_model_mode(name))
-        ]
+        model_names_to_track = self.config_manager.get_model_names()
 
         if not model_names_to_track:
             return pd.DataFrame()
@@ -221,7 +215,7 @@ class APIServer:
 
         interval = (end_time - start_time) / n_samples
         total_costs_per_bucket = np.zeros(n_samples)
-        tracked_modes = self.config_manager.get_token_tracker_modes()
+        tracked_modes = self.config_manager.get_all_model_modes()
         mode_costs_per_bucket = {mode: np.zeros(n_samples) for mode in tracked_modes}
 
         def calculate_overlap_duration(start1: float, end1: float, start2: float, end2: float) -> float:
@@ -507,7 +501,7 @@ class APIServer:
                     return JSONResponse(status_code=400, content={"success": False, "error": "无效的时间范围或采样数"})
 
                 interval = (end_time - start_time) / n_samples
-                tracked_modes = self.config_manager.get_token_tracker_modes()
+                tracked_modes = self.config_manager.get_all_model_modes()
                 point_template = {"input_tokens_per_sec": 0.0, "output_tokens_per_sec": 0.0, "total_tokens_per_sec": 0.0, "cache_hit_tokens_per_sec": 0.0, "cache_miss_tokens_per_sec": 0.0}
 
                 df = await self._get_enriched_requests_dataframe(start_time, end_time)
@@ -651,7 +645,7 @@ class APIServer:
                 tiered_models = [name for name, cfg in billing_configs.items() if cfg and cfg.use_tier_pricing]
                 hourly_models = [name for name, cfg in billing_configs.items() if cfg and not cfg.use_tier_pricing]
 
-                tracked_modes = self.config_manager.get_token_tracker_modes()
+                tracked_modes = self.config_manager.get_all_model_modes()
                 mode_summary = {mode: {"total_tokens": 0, "total_cost": 0.0} for mode in tracked_modes}
                 overall_summary = {"total_tokens": 0, "total_cost": 0.0}
 
@@ -705,7 +699,7 @@ class APIServer:
                     return JSONResponse(status_code=400, content={"success": False, "error": "无效的时间范围或采样数"})
 
                 interval = (end_time - start_time) / n_samples
-                tracked_modes = self.config_manager.get_token_tracker_modes()
+                tracked_modes = self.config_manager.get_all_model_modes()
                 point_template = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "cache_hit_tokens": 0, "cache_miss_tokens": 0}
 
                 df = await self._get_enriched_requests_dataframe(start_time, end_time)
@@ -765,7 +759,7 @@ class APIServer:
                     return JSONResponse(status_code=400, content={"success": False, "error": "无效的时间范围或采样数"})
 
                 interval = (end_time - start_time) / n_samples
-                tracked_modes = self.config_manager.get_token_tracker_modes()
+                tracked_modes = self.config_manager.get_all_model_modes()
 
                 all_model_names = self.config_manager.get_model_names()
                 billing_configs = {}

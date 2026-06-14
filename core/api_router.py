@@ -18,7 +18,7 @@ class TokenTracker:
     def __init__(self, monitor: Monitor, config_manager: ConfigManager):
         self.monitor = monitor
         self.config_manager = config_manager
-        logger.info(f"[TokenTracker] 初始化完成, 当前追踪模式: {self.config_manager.get_token_tracker_modes()}")
+        logger.info("[TokenTracker] 初始化完成, 追踪全部转发的 LLM 流量 (track-all)")
 
     def _extract_tokens(self, data: dict) -> tuple[int, int, int, int]:
         """从字典中提取Token信息"""
@@ -130,11 +130,6 @@ class TokenTracker:
             final_end_time = end_time if end_time > 0 else time.time()
             final_start_time = start_time if start_time > 0 else final_end_time
 
-            model_mode = self.config_manager.get_model_mode(model_name)
-            if not self.config_manager.should_track_tokens_for_mode(model_mode):
-                logger.debug(f"[TokenTracker] 忽略记录: 模型 {model_name} (模式 {model_mode}) 不在追踪列表中")
-                return
-
             if not any([input_tokens, output_tokens, cache_n, prompt_n]):
                 logger.debug("[TokenTracker] 忽略记录: 提取的Token数均为0")
                 return
@@ -150,7 +145,7 @@ class TokenTracker:
                 prompt_n
             )
 
-            logger.debug(f"[TokenTracker] 记录成功: 模型 {model_name} (模式 {model_mode}), 总Tokens {input_tokens + output_tokens}, cache_n: {cache_n}, prompt_n: {prompt_n}")
+            logger.debug(f"[TokenTracker] 记录成功: 模型 {model_name}, 总Tokens {input_tokens + output_tokens}, cache_n: {cache_n}, prompt_n: {prompt_n}")
         except Exception as e:
             logger.error(f"[TokenTracker] 记录失败: 模型 {model_name}, 错误: {e}")
 
