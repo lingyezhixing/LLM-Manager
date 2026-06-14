@@ -1,7 +1,7 @@
 """Health-check probes, selected by model `mode` at cold start.
 
 Each probe has the pinned signature (model_alias, port, start_time, timeout) -> (bool, str).
-Bodies are moved verbatim from the former plugins/interfaces/*.py health_check methods.
+These replaced the former InterfacePlugin.health_check methods during the Phase A refactor.
 """
 import openai
 import time
