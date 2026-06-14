@@ -269,15 +269,6 @@ class APIRouter:
         if not model_config:
             raise HTTPException(status_code=404, detail=f"模型 '{model_name}' 配置未找到")
 
-        model_mode = model_config.get("mode", "Chat")
-        interface_plugin = self.model_controller.plugin_manager.get_interface_plugin(model_mode)
-        if not interface_plugin:
-            raise HTTPException(status_code=400, detail=f"不支持的模型模式: {model_mode}")
-
-        is_valid, error_message = interface_plugin.validate_request(path, model_name)
-        if not is_valid:
-            raise HTTPException(status_code=400, detail=error_message)
-
         self.increment_pending_requests(model_name)
         request_start_time = time.time()  # 在请求转发前记录开始时间
 
