@@ -134,8 +134,35 @@ def parse_anthropic(body: bytes) -> Tuple[int, int, int, int]:
 
 @_safe
 def parse_responses(body: bytes) -> Tuple[int, int, int, int]:
-    """占位,Task 3 实现。"""
-    return (0, 0, 0, 0)
+    """/v1/responses(llama.cpp + lmdeploy)。无 timings。
+    input_tokens 是【总量含缓存】→ prompt_n = input_tokens - cached_tokens。
+    非流式:顶层 usage。流式:找带 response.usage 的终止事件(completed 或 incomplete),下钻 data['response']['usage']。"""
+    s = _body_str(body)
+    usage = {}
+    if _is_sse(s):
+        for payload in _sse_payloads(s):
+            d = _try_json(payload)
+            if not isinstance(d, dict):
+                continue
+            if d.get("type") in ("response.completed", "response.incomplete"):
+                resp = d.get("response") or {}
+                u = resp.get("usage")
+                if isinstance(u, dict):
+                    usage = u   # 取末个终止事件的 usage
+    else:
+        obj = _try_json(s)
+        if isinstance(obj, dict):
+            usage = obj.get("usage") or {}
+
+    input_tokens = _to_int(usage.get("input_tokens"))
+    output_tokens = _to_int(usage.get("output_tokens"))
+    if not (input_tokens or output_tokens):
+        return (0, 0, 0, 0)
+    details = usage.get("input_tokens_details") or {}
+    cached = min(_to_int(details.get("cached_tokens")), input_tokens)
+    cache_n = cached
+    prompt_n = max(0, input_tokens - cached)
+    return (input_tokens, output_tokens, cache_n, prompt_n)
 
 
 def _parse_noop(body: bytes) -> Tuple[int, int, int, int]:
