@@ -98,8 +98,38 @@ def parse_openai(body: bytes) -> Tuple[int, int, int, int]:
 
 @_safe
 def parse_anthropic(body: bytes) -> Tuple[int, int, int, int]:
-    """占位,Task 2 实现。"""
-    return (0, 0, 0, 0)
+    """/v1/messages(仅 llama.cpp;lmdeploy 不支持)。无 timings。
+    input_tokens 是【非缓存基准】→ cache_n=cache_read, prompt_n=input+cache_creation。
+    流式:正序合并 message_start(input/cache 类)+ 末个 message_delta(output_tokens)。"""
+    s = _body_str(body)
+    in_base = cache_read = cache_create = out = 0
+    if _is_sse(s):
+        for payload in _sse_payloads(s):
+            d = _try_json(payload)
+            if not isinstance(d, dict):
+                continue
+            etype = d.get("type")
+            if etype == "message_start":
+                u = (d.get("message") or {}).get("usage") or {}
+                in_base = _to_int(u.get("input_tokens"))
+                cache_read = _to_int(u.get("cache_read_input_tokens"))
+                cache_create = _to_int(u.get("cache_creation_input_tokens"))
+            elif etype == "message_delta":
+                u = d.get("usage") or {}
+                if "output_tokens" in u:
+                    out = _to_int(u.get("output_tokens"))   # 末个 message_delta 的累计 output
+    else:
+        u = (_try_json(s) or {}).get("usage") or {}
+        in_base = _to_int(u.get("input_tokens"))
+        cache_read = _to_int(u.get("cache_read_input_tokens"))
+        cache_create = _to_int(u.get("cache_creation_input_tokens"))
+        out = _to_int(u.get("output_tokens"))
+
+    if not (in_base or cache_read or cache_create or out):
+        return (0, 0, 0, 0)
+    cache_n = cache_read
+    prompt_n = in_base + cache_create
+    return (in_base + cache_read + cache_create, out, cache_n, prompt_n)
 
 
 @_safe
