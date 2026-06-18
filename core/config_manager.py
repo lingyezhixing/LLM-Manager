@@ -248,6 +248,10 @@ class ConfigManager:
                 # 只是警告，不是错误，因为可能还没配置模型
                 pass
 
+            # 受支持的健康探测器集合（单一数据源：probe_registry，避免与探测器定义处重复维护）
+            from core.probes import probe_registry
+            supported_modes = set(probe_registry.keys())
+
             for key, model_cfg in local_models.items():
                 # 检查必需的模型配置项
                 required_model_keys = ['aliases', 'mode', 'port']
@@ -257,8 +261,8 @@ class ConfigManager:
 
                 # 校验 mode 是受支持的健康探测器之一
                 mode_val = model_cfg.get('mode', 'Chat')
-                if mode_val not in ('Chat', 'Base', 'Embedding', 'Reranker'):
-                    errors.append(f"模型 '{key}' 的 mode '{mode_val}' 不受支持 (支持: Chat, Base, Embedding, Reranker)")
+                if mode_val not in supported_modes:
+                    errors.append(f"模型 '{key}' 的 mode '{mode_val}' 不受支持 (支持: {', '.join(sorted(supported_modes))})")
 
                 # 检查别名
                 aliases = model_cfg.get('aliases', [])
