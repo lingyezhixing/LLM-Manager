@@ -20,109 +20,12 @@ class TokenTracker:
         self.config_manager = config_manager
         logger.info("[TokenTracker] 初始化完成, 追踪全部转发的 LLM 流量 (track-all)")
 
-    def _extract_tokens(self, data: dict) -> tuple[int, int, int, int]:
-        """从字典中提取Token信息"""
-        # 1. 优先尝试从 timings 获取
-        if "timings" in data:
-            timings = data["timings"]
-            cache_n = timings.get("cache_n", 0)
-            prompt_n = timings.get("prompt_n", 0)
-            predicted_n = timings.get("predicted_n", 0)
-
-            input_tokens = cache_n + prompt_n
-            output_tokens = predicted_n
-
-            if any([input_tokens, output_tokens, cache_n, prompt_n]):
-                logger.debug(f"[TokenTracker] 解析到 timings: input={input_tokens}, output={output_tokens}, cache_n={cache_n}, prompt_n={prompt_n}")
-                return input_tokens, output_tokens, cache_n, prompt_n
-
-        # 2. 降级尝试从 usage 获取
-        if "usage" in data:
-            usage = data["usage"]
-            input_tokens = usage.get("prompt_tokens", 0)
-            output_tokens = usage.get("completion_tokens", 0)
-
-            if any([input_tokens, output_tokens]):
-                logger.debug(f"[TokenTracker] 解析到 usage: input={input_tokens}, output={output_tokens}")
-                return input_tokens, output_tokens, 0, 0
-                
-        return 0, 0, 0, 0
-
-    def extract_tokens_from_response(self, response_content: bytes) -> tuple[int, int, int, int]:
-        """从响应中提取Token (包含针对SSE/JSON的倒序解析与Debug打印)"""
-        try:
-            content_str = response_content.decode('utf-8')
-            logger.debug(f"[TokenTracker] 开始解析响应, 大小: {len(response_content)} bytes")
-
-            def get_reversed_blocks():
-                """生成器：倒序获取响应中的有效数据块"""
-                if "data: " in content_str:
-                    for line in reversed(content_str.splitlines()):
-                        if line.startswith('data: '):
-                            data_str = line[6:].strip()
-                            if data_str and data_str != "[DONE]":
-                                yield data_str
-                else:
-                    try:
-                        json.loads(content_str)
-                        yield content_str
-                    except json.JSONDecodeError:
-                        json_pattern = r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}'
-                        for match in reversed(re.findall(json_pattern, content_str)):
-                            yield match
-
-            block_generator = get_reversed_blocks()
-            
-            # 预拉取末尾最多10个块用于Debug
-            first_10_blocks = []
-            for _ in range(10):
-                try:
-                    first_10_blocks.append(next(block_generator))
-                except StopIteration:
-                    break
-
-            if not first_10_blocks:
-                logger.debug("[TokenTracker] 未匹配到任何有效数据块")
-                return 0, 0, 0, 0
-
-            # Debug日志：倒序打印末尾数据块，优化多层级格式提升可读性
-            debug_logs = ["[TokenTracker] 末尾数据块 (倒序输出, 最多10个):"]
-            for i, block_str in enumerate(first_10_blocks):
-                try:
-                    parsed_debug = json.loads(block_str)
-                    pretty_json = json.dumps(parsed_debug, indent=2, ensure_ascii=False)
-                    debug_logs.append(f"--- 倒数第 {i+1} 块 ---\n{pretty_json}")
-                except json.JSONDecodeError:
-                    debug_logs.append(f"--- 倒数第 {i+1} 块 (非合法JSON) ---\n{block_str}")
-            logger.debug("\n".join(debug_logs))
-
-            def _parse_blocks(blocks) -> tuple[int, int, int, int] | None:
-                """内部辅助：遍历指定区块尝试提取Token"""
-                for block in blocks:
-                    try:
-                        result = self._extract_tokens(json.loads(block))
-                        if any(result):
-                            return result
-                    except json.JSONDecodeError:
-                        continue
-                return None
-
-            # 1. 优先在预拉取的末尾10个块中寻找
-            result = _parse_blocks(first_10_blocks)
-            if result:
-                return result
-
-            # 2. 如果未找到，继续遍历剩余迭代器
-            result = _parse_blocks(block_generator)
-            if result:
-                return result
-
-            logger.debug("[TokenTracker] 未找到有效的 Token 统计信息")
-            return 0, 0, 0, 0
-
-        except Exception as e:
-            logger.error(f"[TokenTracker] Token提取异常: {e}")
-            return 0, 0, 0, 0
+    def extract_tokens_from_response(self, response_content: bytes, path: str) -> tuple[int, int, int, int]:
+        """从响应中按 path 分派到对应解析器提取 Token。"""
+        from core.token_parsers import parse_tokens
+        result = parse_tokens(path, response_content)
+        logger.debug(f"[TokenTracker] path={path} bytes={len(response_content)} -> (in,out,cache,prompt)={result}")
+        return result
 
     async def record_request_tokens(self, model_name: str, input_tokens: int, output_tokens: int, cache_n: int = 0, prompt_n: int = 0, start_time: float = 0.0, end_time: float = 0.0):
         """异步记录请求Token到数据库"""
@@ -149,7 +52,7 @@ class TokenTracker:
         except Exception as e:
             logger.error(f"[TokenTracker] 记录失败: 模型 {model_name}, 错误: {e}")
 
-    async def create_stream_with_token_logging(self, model_name: str, response: any, request_start_time: float):
+    async def create_stream_with_token_logging(self, model_name: str, response: any, request_start_time: float, path: str):
         """流式响应包装器：转发流数据并在结束后提取、记录Token"""
         content_chunks = []
         try:
@@ -164,7 +67,7 @@ class TokenTracker:
 
             try:
                 full_content = b''.join(content_chunks)
-                input_tokens, output_tokens, cache_n, prompt_n = self.extract_tokens_from_response(full_content)
+                input_tokens, output_tokens, cache_n, prompt_n = self.extract_tokens_from_response(full_content, path)
 
                 if any([input_tokens, output_tokens, cache_n, prompt_n]):
                     await self.record_request_tokens(model_name, input_tokens, output_tokens, cache_n, prompt_n, request_start_time, request_end_time)
@@ -349,7 +252,7 @@ class APIRouter:
                 async def stream_wrapper():
                     # TokenTracker的生成器负责Token记录
                     token_logging_stream = token_tracker.create_stream_with_token_logging(
-                        model_name, response, request_start_time
+                        model_name, response, request_start_time, path
                     )
                     try:
                         async for chunk in token_logging_stream:
@@ -373,7 +276,7 @@ class APIRouter:
                 logger.debug(f"[API_ROUTER] 非流式响应读取完成 - 模型: {model_name}, 响应大小: {len(content)} bytes")
 
                 try:
-                    input_tokens, output_tokens, cache_n, prompt_n = token_tracker.extract_tokens_from_response(content)
+                    input_tokens, output_tokens, cache_n, prompt_n = token_tracker.extract_tokens_from_response(content, path)
                     if input_tokens > 0 or output_tokens > 0 or cache_n > 0 or prompt_n > 0:
                         logger.debug(f"[API_ROUTER] 准备异步记录非流式响应token - 模型: {model_name}, 总token数: {input_tokens + output_tokens}, cache_n: {cache_n}, prompt_n: {prompt_n}")
                         # 传递开始和结束时间
