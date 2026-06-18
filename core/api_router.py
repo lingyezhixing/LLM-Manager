@@ -149,6 +149,13 @@ class APIRouter:
             if "application/json" in request.headers.get("content-type", ""):
                 body = await request.json()
                 model_alias = body.get("model")
+                # 流式 chat/completions 注入 include_usage,确保 lmdeploy 等后端末块返回 usage 供 token 追踪
+                if body.get("stream") is True:
+                    _norm_path = path.lstrip("/").split("?")[0]
+                    if _norm_path in ("v1/chat/completions", "v1/completions"):
+                        _so = body.get("stream_options") or {}
+                        _so.setdefault("include_usage", True)
+                        body["stream_options"] = _so
                 request_data = json.dumps(body).encode('utf-8')
             else:
                 request_data = await request.body()
