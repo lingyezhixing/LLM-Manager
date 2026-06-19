@@ -1,0 +1,57 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "llm-manager"
+version = "2.7.0"
+description = "Local LLM gateway + orchestrator (backend framework)"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn>=0.27",
+    "httpx>=0.27",
+    "openai>=1.30",
+    "psutil>=5.9",
+    "GPUtil>=1.4",
+    "pydantic>=2.6",
+    "PyYAML>=6.0",
+    "python-dotenv>=1.0",
+    "requests>=2.31",
+]
+
+[project.optional-dependencies]
+desktop = ["pystray>=0.19", "Pillow>=10", "pythonnet>=3"]
+analytics = ["pandas>=2", "numpy>=1.26"]
+dev = ["pytest>=8", "pytest-asyncio>=0.23", "ruff>=0.4", "pyright>=1.1.350"]
+
+[project.scripts]
+llm-manager = "llm_manager.app:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "TID", "UP", "B"]
+
+[tool.ruff.lint.flake8-tidy-imports]
+ban-relative-imports = "all"
+# Cross-layer dependency direction (domain <- ports <- config) is enforced by the
+# AST scan in Task 14. ruff "banned-api" is intentionally NOT used here: it bans a
+# module path globally (incl. submodules), which would break legitimate intra-layer
+# absolute imports (e.g. config importing config.schema).
+
+[tool.pyright]
+include = ["src/llm_manager"]
+strict = ["src/llm_manager/domain", "src/llm_manager/ports"]
+pythonVersion = "3.11"
