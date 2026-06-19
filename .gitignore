@@ -110,3 +110,6 @@ QUICK_STATS_README.md
 # 忽略AI上下文生成器
 generate_ai_context.py
 ai_context.md
+
+# 忽略docs设计文档
+docs/

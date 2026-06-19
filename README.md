@@ -12,32 +12,43 @@
 ## 核心功能
 
 1. **统一 API 接口**  
-   提供兼容 OpenAI 格式的标准接口：  
-   - `/v1/completions`
-   - `/v1/chat/completions`  
-   - `/v1/embeddings`  
-   - `/v1/rerank`
-   - `/v1/models`
+   提供兼容 OpenAI 格式的标准接口，同时支持 Anthropic 与 Responses API：  
+   - `/v1/chat/completions`（OpenAI Chat）  
+   - `/v1/completions`（OpenAI Completions）  
+   - `/v1/embeddings`（OpenAI Embedding）  
+   - `/v1/rerank`（Reranker）  
+   - `/v1/messages`（Anthropic Claude API）  
+   - `/v1/responses`（OpenAI Responses API）  
+   - `/v1/models`  
    请求自动路由至对应本地模型服务端口。
 
-2. **插件化架构**  
-   - **接口插件**：支持 `Chat`、`Base`、`Embedding`、`Reranker` 四种模型模式。  
-   - **设备插件**：检测 `NVIDIA GPU`、`CPU`、`AMD 核显 780M`状态，用于动态调度。
+2. **函数式探测器架构**  
+   - **健康探测器**：以纯函数 `probe_registry` 替代接口插件，支持 `Chat`、`Base`、`Embedding`、`Reranker` 四种模型模式的健康检查。  
+   - **设备插件**：检测 `NVIDIA GPU`、`CPU`、`AMD 核显 780M` 状态，用于动态调度。
 
 3. **智能资源调度**  
    - **按需启动**：请求到达时自动启动模型，空闲超时后关闭以释放显存。  
    - **环境适配**：根据当前在线显卡型号自动选择匹配的启动参数。  
    - **并发控制**：优化高并发下的冷启动流程，避免线程阻塞。
 
-4. **数据监控与计费**  
-   - 使用 SQLite 记录请求日志。  
+4. **多端点 Token 追踪**  
+   - 按请求路径自动分派到对应解析器（OpenAI / Anthropic / Responses 三种格式）  
+   - 适配 `llama.cpp` 与 `lmdeploy` 双后端（流式请求自动注入 `include_usage`）  
+   - 全量追踪（track-all）：所有模型的流量自动纳入统计，无需手动配置白名单
+
+5. **数据监控与计费**  
+   - 使用 SQLite 记录请求日志，删除模型后自动执行 `VACUUM` 回收空间。  
    - 支持两种计费模式：  
      - 按 Token 消耗（阶梯定价）  
      - 按使用时长（租赁场景）  
    - 提供 WebUI 实时展示吞吐量、成本统计与日志流。
 
-5. **跨平台支持**  
-   支持 Windows，Linux。
+6. **系统托盘增强**  
+   - **网络唤醒（WOL）**：托盘菜单支持唤醒远程设备（如飞牛 NAS）  
+   - **Claude 配置切换**：在预设的 Claude API 配置间一键切换（如 GLM / Local），tooltip 显示当前配置
+
+7. **跨平台支持**  
+   支持 Windows、Linux。
 
 ---
 

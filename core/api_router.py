@@ -4,7 +4,6 @@ from typing import Dict, Set
 import json
 import time
 import asyncio
-import re
 from utils.logger import get_logger
 from core.model_controller import ModelController
 from core.config_manager import ConfigManager
