@@ -53,6 +53,12 @@ __pycache__/
 *.pyd
 .Python
 
+# 忽略setuptools构建产物与可编辑安装的egg-info/egg-link
+*.egg-info/
+*.egg-link
+build/
+dist/
+
 # 忽略虚拟环境
 venv/
 env/
@@ -84,6 +90,7 @@ LLM-Manager.code-workspace
 !pytest.ini
 !tests/
 !tests/*.py
+!tests/**/*.py
 
 # 忽略指定的markdown文档
 monitor_manual.md
