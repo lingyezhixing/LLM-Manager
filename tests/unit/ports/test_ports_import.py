@@ -16,16 +16,21 @@ def test_ports_modules_import():
     import llm_manager.ports.system_ops  # noqa: F401
 
 
-def test_all_four_registries_exist_and_are_empty():
-    """Spec §8 mandates four global registry instances."""
+def test_all_four_registries_exist():
+    """Spec §8 mandates four global registry instances.
+
+    probes/devices stay empty until their impl layers (later plans) load.
+    token_parsers/endpoint_shapes are populated by the metering impl layer
+    (Plan 2) via the conftest session bootstrap.
+    """
     from llm_manager.ports.devices import devices, probes
     from llm_manager.ports.gateway import endpoint_shapes
     from llm_manager.ports.metering import token_parsers
 
     assert isinstance(probes, Registry) and ModelMode.CHAT not in probes
     assert isinstance(devices, Registry) and DeviceName("rtx 4060") not in devices
-    assert isinstance(token_parsers, Registry) and "v1/messages" not in token_parsers
-    assert isinstance(endpoint_shapes, Registry) and "v1/chat/completions" not in endpoint_shapes
+    assert isinstance(token_parsers, Registry) and "v1/messages" in token_parsers
+    assert isinstance(endpoint_shapes, Registry) and "v1/chat/completions" in endpoint_shapes
 
 
 def test_protocol_symbols_exist():
