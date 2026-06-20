@@ -55,6 +55,21 @@ ALLOWED: dict[str, set[str]] = {
         "llm_manager.domain", "llm_manager.ports", "llm_manager.registry",
         "llm_manager.config", "llm_manager.runtime",
     },
+    # Plan 3: gateway is a leaf host (imports bootstrap.lifespan + config.loader);
+    # bootstrap is the composition root — bootstrap.container is the single module
+    # allowed to import every impl layer. (Guard is per-directory: today only
+    # container.py uses the impl-layer imports; siblings stay clean.)
+    "gateway": {
+        "llm_manager.domain", "llm_manager.ports", "llm_manager.registry",
+        "llm_manager.config", "llm_manager.gateway", "llm_manager.bootstrap",
+    },
+    "bootstrap": {
+        "llm_manager.domain", "llm_manager.ports", "llm_manager.registry",
+        "llm_manager.config", "llm_manager.bootstrap",
+        "llm_manager.persistence", "llm_manager.metering", "llm_manager.ops",
+        "llm_manager.events", "llm_manager.devices", "llm_manager.process",
+        "llm_manager.runtime", "llm_manager.gateway",
+    },
 }
 
 
