@@ -6,8 +6,8 @@ Replaces the flattened dict + magic key-blacklist in the old ConfigManager.
 from __future__ import annotations
 
 import pathlib
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Mapping
 
 from llm_manager.domain.device import DeviceName
 
