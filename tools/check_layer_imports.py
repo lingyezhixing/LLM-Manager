@@ -24,6 +24,37 @@ ALLOWED: dict[str, set[str]] = {
         "llm_manager.registry",
         "llm_manager.config",
     },
+    # Plan 2 impl layers: each may import domain/ports/registry (+ own package);
+    # runtime also imports config; ops imports config. None may import a sibling
+    # impl package — collaborators arrive via ports (constructor injection).
+    "persistence": {
+        "llm_manager.domain", "llm_manager.ports", "llm_manager.registry",
+        "llm_manager.persistence",
+    },
+    "metering": {
+        "llm_manager.domain", "llm_manager.ports", "llm_manager.registry",
+        "llm_manager.metering",
+    },
+    "ops": {
+        "llm_manager.domain", "llm_manager.ports", "llm_manager.registry",
+        "llm_manager.config", "llm_manager.ops",
+    },
+    "events": {
+        "llm_manager.domain", "llm_manager.ports", "llm_manager.registry",
+        "llm_manager.events",
+    },
+    "devices": {
+        "llm_manager.domain", "llm_manager.ports", "llm_manager.registry",
+        "llm_manager.devices",
+    },
+    "process": {
+        "llm_manager.domain", "llm_manager.ports", "llm_manager.registry",
+        "llm_manager.process",
+    },
+    "runtime": {
+        "llm_manager.domain", "llm_manager.ports", "llm_manager.registry",
+        "llm_manager.config", "llm_manager.runtime",
+    },
 }
 
 
@@ -60,7 +91,8 @@ def main() -> int:
     if violations:
         print("\n".join(violations))
         return 1
-    print("OK: dependency direction clean across domain/ports/config")
+    checked = sorted(d.name for d in ROOT.iterdir() if d.is_dir() and d.name in ALLOWED)
+    print(f"OK: dependency direction clean across {', '.join(checked)}")
     return 0
 
 
