@@ -3,7 +3,7 @@ import pytest
 
 from llm_manager.state import (
     ModelStatus, set_status, get_status, is_starting, is_runnable, is_failed,
-    record_failure, touch_activity, pending_count, inc_pending, dec_pending,
+    record_failure, pending_count, inc_pending, dec_pending,
     begin_request, end_request, claim_start, finish_start, _reset,
 )
 
@@ -58,9 +58,12 @@ def test_force_stop_from_any_state():
         if target == ModelStatus.INIT_SCRIPT:
             set_status("M", ModelStatus.INIT_SCRIPT)
         elif target == ModelStatus.HEALTH_CHECK:
-            set_status("M", ModelStatus.INIT_SCRIPT); set_status("M", ModelStatus.HEALTH_CHECK)
+            set_status("M", ModelStatus.INIT_SCRIPT)
+            set_status("M", ModelStatus.HEALTH_CHECK)
         elif target == ModelStatus.ROUTING:
-            set_status("M", ModelStatus.INIT_SCRIPT); set_status("M", ModelStatus.HEALTH_CHECK); set_status("M", ModelStatus.ROUTING)
+            set_status("M", ModelStatus.INIT_SCRIPT)
+            set_status("M", ModelStatus.HEALTH_CHECK)
+            set_status("M", ModelStatus.ROUTING)
         elif target == ModelStatus.FAILED:
             set_status("M", ModelStatus.FAILED, reason="x")
         set_status("M", ModelStatus.STOPPED, force=True)
@@ -74,9 +77,12 @@ def test_record_failure_helper():
 
 
 def test_pending_inc_dec_clamped():
-    inc_pending("M"); inc_pending("M")
+    inc_pending("M")
+    inc_pending("M")
     assert pending_count("M") == 2
-    dec_pending("M"); dec_pending("M"); dec_pending("M")
+    dec_pending("M")
+    dec_pending("M")
+    dec_pending("M")
     assert pending_count("M") == 0
 
 
@@ -107,7 +113,8 @@ def test_claim_start_winner_runs_loser_awaits():
 
 def test_claim_start_after_finish_allows_new_start():
     async def main():
-        fut, won = claim_start("M"); assert won
+        fut, won = claim_start("M")
+        assert won
         finish_start("M", ModelStatus.FAILED)
         fut2, won2 = claim_start("M")
         assert won2 is True

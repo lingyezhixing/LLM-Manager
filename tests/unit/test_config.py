@@ -83,6 +83,7 @@ def test_resolve_alias_to_primary():
     assert resolve_alias(cfg, "q4") == "Qwen3-4B"
     assert resolve_alias(cfg, "Qwen3-4B") == "Qwen3-4B"
     try:
-        resolve_alias(cfg, "nope"); assert False, "expected KeyError"
+        resolve_alias(cfg, "nope")
+        assert False, "expected KeyError"
     except KeyError:
         pass
