@@ -16,5 +16,6 @@ def test_session_fields():
 
 
 def test_lifecycle_event_kind_values():
-    assert LifecycleEvent(LifecycleKind.MODEL_ROUTING, "qwen", 1.5).kind is LifecycleKind.MODEL_ROUTING
+    ev = LifecycleEvent(LifecycleKind.MODEL_ROUTING, "qwen", 1.5)
+    assert ev.kind is LifecycleKind.MODEL_ROUTING
     assert LifecycleEvent(LifecycleKind.MODEL_EVICTED, "qwen", 1.5).primary_name == "qwen"

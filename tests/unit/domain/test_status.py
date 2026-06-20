@@ -8,11 +8,17 @@ from llm_manager.domain.status import (
 
 
 def test_stop_to_start_allowed():
-    assert TransitionTable.transition(ModelStatus.STOPPED, ModelStatus.STARTING) == ModelStatus.STARTING
+    assert (
+        TransitionTable.transition(ModelStatus.STOPPED, ModelStatus.STARTING)
+        == ModelStatus.STARTING
+    )
 
 
 def test_routing_to_stopped_allowed():
-    assert TransitionTable.transition(ModelStatus.ROUTING, ModelStatus.STOPPED) == ModelStatus.STOPPED
+    assert (
+        TransitionTable.transition(ModelStatus.ROUTING, ModelStatus.STOPPED)
+        == ModelStatus.STOPPED
+    )
 
 
 def test_illegal_transition_raises():
