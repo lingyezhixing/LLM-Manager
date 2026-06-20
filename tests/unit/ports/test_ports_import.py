@@ -19,15 +19,18 @@ def test_ports_modules_import():
 def test_all_four_registries_exist():
     """Spec §8 mandates four global registry instances.
 
-    probes/devices stay empty until their impl layers (later plans) load.
-    token_parsers/endpoint_shapes are populated by the metering impl layer
-    (Plan 2) via the conftest session bootstrap.
+    probes/token_parsers/endpoint_shapes are populated by their impl layers
+    (devices.probes, metering.parsers) as an import side effect — the same
+    side effect bootstrap.container relies on. devices stays empty until
+    @device plugins are added (later phase).
     """
+    import llm_manager.devices.probes  # noqa: F401  (side-effect: registers probes)
+    import llm_manager.metering.parsers  # noqa: F401  (side-effect: registers parsers+shapes)
     from llm_manager.ports.devices import devices, probes
     from llm_manager.ports.gateway import endpoint_shapes
     from llm_manager.ports.metering import token_parsers
 
-    assert isinstance(probes, Registry) and ModelMode.CHAT not in probes
+    assert isinstance(probes, Registry) and ModelMode.CHAT in probes
     assert isinstance(devices, Registry) and DeviceName("rtx 4060") not in devices
     assert isinstance(token_parsers, Registry) and "v1/messages" in token_parsers
     assert isinstance(endpoint_shapes, Registry) and "v1/chat/completions" in endpoint_shapes
