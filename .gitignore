@@ -84,6 +84,7 @@ LLM-Manager.code-workspace
 !pytest.ini
 !tests/
 !tests/*.py
+!tests/**/*.py
 
 # 忽略指定的markdown文档
 monitor_manual.md
