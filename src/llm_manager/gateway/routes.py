@@ -3,7 +3,7 @@ short-circuit (204 + open CORS, before body/alias), non-GET catch-all -> proxy.f
 from __future__ import annotations
 
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 
 from llm_manager import config
 from llm_manager.gateway import proxy
@@ -15,7 +15,7 @@ _CORS = {
 }
 
 
-def register_routes(app: FastAPI, cfg: config.AppConfig) -> None:
+def register_routes(app: FastAPI, lifecycle, cfg: config.AppConfig, db, client_pool) -> None:
     @app.get("/health")
     def health() -> dict[str, str]:
         return {"status": "ok"}
@@ -30,5 +30,5 @@ def register_routes(app: FastAPI, cfg: config.AppConfig) -> None:
         return JSONResponse(status_code=204, content={}, headers=_CORS)
 
     @app.api_route("/{path:path}", methods=["POST", "PUT", "DELETE", "PATCH"])
-    async def catch_all(path: str, request: Request) -> JSONResponse:
-        return await proxy.forward(request, path, cfg)
+    async def catch_all(path: str, request: Request) -> Response:
+        return await proxy.forward(request, path, lifecycle, cfg, db, client_pool)
