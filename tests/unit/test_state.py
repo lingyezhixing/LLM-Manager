@@ -174,3 +174,19 @@ async def _owner_guard_body():
     # winner2 用自己的 fut2 正常 finish → 生效
     state.finish_start("m1", ModelStatus.ROUTING, owner=fut2)
     assert state.get_status("m1") == ModelStatus.ROUTING
+
+
+def test_get_last_access():
+    from llm_manager import state
+    state._reset()
+    assert state.get_last_access("m1") == 0.0
+    state.touch_activity("m1")
+    assert state.get_last_access("m1") > 0.0
+
+
+def test_get_failure_reason():
+    from llm_manager import state
+    state._reset()
+    assert state.get_failure_reason("m1") is None
+    state.record_failure("m1", "exited code=1")
+    assert state.get_failure_reason("m1") == "exited code=1"

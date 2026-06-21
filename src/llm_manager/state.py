@@ -91,8 +91,16 @@ def record_failure(name: str, reason: str) -> None:
     rec.failure_reason = reason
 
 
+def get_failure_reason(name: str) -> str | None:
+    return _rec(name).failure_reason
+
+
 def touch_activity(name: str) -> None:
     _rec(name).last_access = time.monotonic()
+
+
+def get_last_access(name: str) -> float:
+    return _rec(name).last_access
 
 
 def pending_count(name: str) -> int:
