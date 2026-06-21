@@ -143,12 +143,34 @@ def claim_start(name: str) -> tuple[asyncio.Future, bool]:
     return fut, True
 
 
-def finish_start(name: str, status: ModelStatus) -> None:
-    """Winner calls this when the pipeline ends (ROUTING or FAILED)."""
-    fut = _inflight.pop(name, None)
+def finish_start(name: str, status: ModelStatus, *, owner: asyncio.Future | None = None) -> None:
+    """Winner calls this when the pipeline ends (ROUTING/FAILED/STOPPED).
+
+    owner: the future this winner obtained from claim_start. If given and the
+    current _inflight[name] is a DIFFERENT future (stop already popped ours, or
+    a concurrent restart re-claimed), this call is a no-op — we must NOT clobber
+    the new owner's inflight or overwrite rec.status. Guards invariant 5
+    against the slow-probe + concurrent-restart interleaving (orphan winner)."""
     rec = _rec(name)
+    if owner is not None and _inflight.get(name) is not owner:
+        return
+    fut = _inflight.pop(name, None)
     rec.status = status
     if status == ModelStatus.FAILED and rec.failure_reason is None:
         rec.failure_reason = "startup failed"
     if fut is not None and not fut.done():
         fut.set_result(status)
+
+
+def has_inflight(name: str) -> bool:
+    return name in _inflight
+
+
+def clear_inflight(name: str) -> None:
+    _inflight.pop(name, None)
+
+
+def pop_inflight(name: str) -> asyncio.Future | None:
+    """Atomically remove + return the inflight future (stop releases the slot
+    so the model can restart immediately)."""
+    return _inflight.pop(name, None)

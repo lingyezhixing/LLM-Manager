@@ -129,3 +129,48 @@ def test_pid_accessors():
     assert state.get_pid("m1") == 1234
     state.clear_pid("m1")
     assert state.get_pid("m1") is None
+
+
+def test_inflight_introspection_and_release():
+    import asyncio
+    from llm_manager import state
+    asyncio.run(_inflight_body())
+
+
+async def _inflight_body():
+    from llm_manager import state
+    from llm_manager.state import ModelStatus
+    state._reset()
+    assert state.has_inflight("m1") is False
+    fut, won = state.claim_start("m1")
+    assert won is True
+    assert state.has_inflight("m1") is True
+    popped = state.pop_inflight("m1")
+    assert popped is fut
+    assert state.has_inflight("m1") is False
+    assert state.pop_inflight("m1") is None
+    state.claim_start("m2")
+    state.clear_inflight("m2")
+    assert state.has_inflight("m2") is False
+
+
+def test_finish_start_owner_guard_no_clobber():
+    import asyncio
+    from llm_manager import state
+    asyncio.run(_owner_guard_body())
+
+
+async def _owner_guard_body():
+    from llm_manager import state
+    from llm_manager.state import ModelStatus
+    state._reset()
+    fut1, won = state.claim_start("m1")          # winner1
+    # 模拟:stop pop 走 fut1,并发重启 claim fut2
+    state.pop_inflight("m1")
+    fut2, _ = state.claim_start("m1")            # winner2 接管, _inflight[m1]=fut2
+    # 孤儿 winner1 用自己的 fut1 作 owner 调 finish_start → 必须 no-op
+    state.finish_start("m1", ModelStatus.STOPPED, owner=fut1)
+    assert state.get_status("m1") == ModelStatus.STARTING  # 未被 STOPPED 覆盖
+    # winner2 用自己的 fut2 正常 finish → 生效
+    state.finish_start("m1", ModelStatus.ROUTING, owner=fut2)
+    assert state.get_status("m1") == ModelStatus.ROUTING
