@@ -1,25 +1,29 @@
-"""Composition root: setup_logging + load/validate config + FastAPI app.
+"""Composition root: setup_logging + load/validate config + FastAPI app with lifespan.
 
-Plan 1 wires only /health. Plan 2 adds a `lifespan` context (DB, httpx pool,
-DeviceMonitor), /v1/models, OPTIONS preflight, and the proxy stub."""
+lifespan opens the DB, DeviceMonitor (initial refresh), and an httpx-client pool;
+closes them on shutdown. Plan 3 fills the proxy + lifecycle wiring."""
 from __future__ import annotations
 
+import asyncio
 import logging
 import logging.handlers
 import sys
+from contextlib import asynccontextmanager
 from pathlib import Path
 
+import httpx
 from fastapi import FastAPI
 
 from llm_manager import config
+from llm_manager.data.persistence import open_db
+from llm_manager.devices import DEVICES, DeviceMonitor
 from llm_manager.gateway.routes import register_routes
 
 _logging_configured = False
 
 
 def setup_logging(level: str = "INFO", log_dir: str = "logs") -> None:
-    """Configure root logger once: stdout console + TimedRotatingFileHandler.
-    Idempotent (clears existing handlers). No custom manager class."""
+    """Configure root logger once: stdout console + TimedRotatingFileHandler. Idempotent."""
     global _logging_configured
     if _logging_configured:
         return
@@ -52,9 +56,25 @@ def create_app(config_path: Path) -> FastAPI:
     errors = config.validate(cfg)
     if errors:
         raise ValueError("Invalid config:\n" + "\n".join(f"  - {e}" for e in errors))
-    app = FastAPI(title="LLM-Manager")
-    register_routes(app)
-    # Plan 2 adds a `lifespan` context here to open/close DB, httpx pool, DeviceMonitor.
+    db = open_db(Path(cfg.program.db_path))
+    monitor = DeviceMonitor(DEVICES)
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        app.state.db = db
+        app.state.monitor = monitor
+        clients: dict[int, httpx.AsyncClient] = {}
+        app.state.clients = clients
+        await asyncio.to_thread(monitor.refresh)
+        try:
+            yield
+        finally:
+            for client in app.state.clients.values():
+                await client.aclose()
+            db.conn.close()
+
+    app = FastAPI(title="LLM-Manager", lifespan=lifespan)
+    register_routes(app, cfg)
     return app
 
 
