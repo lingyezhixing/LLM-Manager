@@ -99,6 +99,18 @@ def pending_count(name: str) -> int:
     return _rec(name).pending
 
 
+def record_pid(name: str, pid: int) -> None:
+    _rec(name).pid = pid
+
+
+def get_pid(name: str) -> int | None:
+    return _rec(name).pid
+
+
+def clear_pid(name: str) -> None:
+    _rec(name).pid = None
+
+
 def inc_pending(name: str) -> None:
     _rec(name).pending += 1
 

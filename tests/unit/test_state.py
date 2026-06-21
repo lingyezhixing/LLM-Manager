@@ -120,3 +120,12 @@ def test_claim_start_after_finish_allows_new_start():
         assert won2 is True
         assert fut2 is not fut
     asyncio.run(main())
+
+
+def test_pid_accessors():
+    from llm_manager import state
+    state._reset()
+    state.record_pid("m1", 1234)
+    assert state.get_pid("m1") == 1234
+    state.clear_pid("m1")
+    assert state.get_pid("m1") is None
