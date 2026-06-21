@@ -18,6 +18,9 @@ from llm_manager import config
 from llm_manager.data.persistence import open_db
 from llm_manager.devices import DEVICES, DeviceMonitor
 from llm_manager.gateway.routes import register_routes
+from llm_manager.probes import probe_registry
+from llm_manager.runtime.lifecycle import Lifecycle
+from llm_manager.supervisor import Supervisor
 
 _logging_configured = False
 
@@ -58,23 +61,26 @@ def create_app(config_path: Path) -> FastAPI:
         raise ValueError("Invalid config:\n" + "\n".join(f"  - {e}" for e in errors))
     db = open_db(Path(cfg.program.db_path))
     monitor = DeviceMonitor(DEVICES)
+    supervisor = Supervisor()
+    lifecycle = Lifecycle(cfg=cfg, supervisor=supervisor, devices=monitor, probes=probe_registry)
+    clients: dict[int, httpx.AsyncClient] = {}
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         app.state.db = db
         app.state.monitor = monitor
-        clients: dict[int, httpx.AsyncClient] = {}
         app.state.clients = clients
         await asyncio.to_thread(monitor.refresh)
         try:
             yield
         finally:
-            for client in app.state.clients.values():
+            await lifecycle.unload_all()
+            for client in clients.values():
                 await client.aclose()
             db.conn.close()
 
     app = FastAPI(title="LLM-Manager", lifespan=lifespan)
-    register_routes(app, cfg)
+    register_routes(app, lifecycle, cfg, db, clients)
     return app
 
 
