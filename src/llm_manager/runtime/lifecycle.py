@@ -39,7 +39,7 @@ class Lifecycle:
         self._devices = devices
         self._probes = probes
         self._scheme_select = scheme_select
-        self._startup_timeout = startup_timeout
+        self.startup_timeout = startup_timeout
         self._stop_events: dict[str, asyncio.Event] = {}
         self._active_schemes: dict[str, Scheme] = {}
 
@@ -212,4 +212,4 @@ class Lifecycle:
     def _probe(self, alias: str, mode: str) -> ProbeResult:
         port = self._cfg_model(alias).port
         fn = self._probes[mode]
-        return fn(alias, port, None, self._startup_timeout)
+        return fn(alias, port, None, self.startup_timeout)
