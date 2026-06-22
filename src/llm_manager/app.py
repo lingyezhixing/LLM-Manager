@@ -16,7 +16,9 @@ from fastapi import FastAPI
 
 from llm_manager import config
 from llm_manager.data.persistence import open_db
-from llm_manager.devices import DEVICES, DeviceMonitor
+from llm_manager.devices import (
+    DEVICES, DeviceMonitor, detect_amd_apu, is_lhm_available, lhm_sensors_780m,
+)
 from llm_manager.gateway.routes import register_routes
 from llm_manager.probes import probe_registry
 from llm_manager.runtime.lifecycle import Lifecycle
@@ -61,7 +63,10 @@ def create_app(config_path: Path) -> FastAPI:
     if errors:
         raise ValueError("Invalid config:\n" + "\n".join(f"  - {e}" for e in errors))
     db = open_db(Path(cfg.program.db_path))
-    monitor = DeviceMonitor(DEVICES)
+    devices = dict(DEVICES)  # 拷贝,不污染模块级常量
+    if is_lhm_available():
+        devices["780m"] = lambda: detect_amd_apu("780m", lhm_sensors_780m)
+    monitor = DeviceMonitor(devices)
     supervisor = Supervisor()
     lifecycle = Lifecycle(cfg=cfg, supervisor=supervisor, devices=monitor, probes=probe_registry)
     clients: dict[int, httpx.AsyncClient] = {}

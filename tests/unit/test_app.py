@@ -1,5 +1,4 @@
 import time
-from pathlib import Path
 
 from fastapi.testclient import TestClient
 
@@ -35,3 +34,23 @@ def test_lifespan_starts_and_stops_background(tmp_path):
             time.sleep(0.1)
         assert state.get_status("m1") == ModelStatus.FAILED
     # with 退出 → lifespan finally:stop_event.set() + unload_all + cancel+gather,干净关闭无异常
+
+
+def test_app_registers_780m_when_lhm_available(tmp_path, monkeypatch):
+    cfg_path = tmp_path / "config.yaml"
+    cfg_path.write_text(_CFG_BODY, encoding="utf-8")
+    monkeypatch.setattr("llm_manager.app.is_lhm_available", lambda: True)
+    app = create_app(cfg_path)
+    with TestClient(app) as c:
+        assert c.get("/health").status_code == 200
+        assert "780m" in app.state.monitor._devices
+
+
+def test_app_skips_780m_when_lhm_unavailable(tmp_path, monkeypatch):
+    cfg_path = tmp_path / "config.yaml"
+    cfg_path.write_text(_CFG_BODY, encoding="utf-8")
+    monkeypatch.setattr("llm_manager.app.is_lhm_available", lambda: False)
+    app = create_app(cfg_path)
+    with TestClient(app) as c:
+        assert c.get("/health").status_code == 200
+        assert "780m" not in app.state.monitor._devices
