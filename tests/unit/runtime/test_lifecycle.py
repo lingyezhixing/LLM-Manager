@@ -85,7 +85,7 @@ class FakeDevices:
 
 def _model(name="m1", mode="Chat", port=8000, dev="rtx 4060", mem=2048):
     return ModelConfig(
-        primary_name=name, aliases=frozenset({name}), mode=mode, port=port,
+        primary_name=name, aliases=(name,), mode=mode, port=port,
         schemes={"s": Scheme(config_source="s", required_devices=frozenset({dev}),
                              script_path=Path("run.cmd"), memory_mb={dev: mem})},
     )

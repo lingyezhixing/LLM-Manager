@@ -27,7 +27,7 @@ class Scheme:
 @dataclass(frozen=True, slots=True)
 class ModelConfig:
     primary_name: str
-    aliases: frozenset[str]
+    aliases: tuple[str, ...]  # 有序:aliases[0]=主别名=下游 served name(lmdeploy --model-name / llama.cpp -a)
     mode: str
     port: int
     auto_start: bool = False
@@ -92,7 +92,7 @@ def load(path: Path) -> AppConfig:
             )
         models[name] = ModelConfig(
             primary_name=name,
-            aliases=frozenset(m.get("aliases", [])),
+            aliases=tuple(m.get("aliases", [])),  # tuple 保 yaml 顺序,aliases[0]=served
             mode=m.get("mode", "Chat"),
             port=int(m["port"]),
             auto_start=bool(m.get("auto_start", False)),
@@ -114,7 +114,7 @@ def validate(cfg: AppConfig) -> list[str]:
         else:
             seen_ports[m.port] = name
         if not m.aliases:
-            errors.append(f"Model '{name}' has no aliases")
+            errors.append(f"Model '{name}' has no aliases")  # aliases[0]=下游 served name 必须
         for a in m.aliases:
             if a in seen_aliases:
                 errors.append(f"Alias '{a}' shared by models '{seen_aliases[a]}' and '{name}'")

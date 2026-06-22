@@ -42,10 +42,10 @@ def test_validate_flags_port_and_alias_clash_and_bad_mode():
     cfg = AppConfig(
         program=ProgramConfig(host="0.0.0.0", port=8080, alive_time=60, log_level="INFO"),
         models={
-            "A": ModelConfig("A", frozenset({"x"}), "Chat", 1, False, {}),
-            "B": ModelConfig("B", frozenset({"x"}), "Base", 1, False, {}),
-            "C": ModelConfig("C", frozenset({"y"}), "Bogus", 2, False, {}),
-            "D": ModelConfig("D", frozenset({"z"}), "Chat", 3, False, {}),
+            "A": ModelConfig("A", ("x",), "Chat", 1, False, {}),
+            "B": ModelConfig("B", ("x",), "Base", 1, False, {}),
+            "C": ModelConfig("C", ("y",), "Bogus", 2, False, {}),
+            "D": ModelConfig("D", ("z",), "Chat", 3, False, {}),
         },
         wol=None, claude_configs={},
     )
@@ -59,7 +59,7 @@ def test_validate_flags_port_and_alias_clash_and_bad_mode():
 def test_validate_passes_clean_config():
     cfg = AppConfig(
         program=ProgramConfig(host="0.0.0.0", port=8080, alive_time=60, log_level="INFO"),
-        models={"A": ModelConfig("A", frozenset({"a"}), "Chat", 1, False, {"S": Scheme("S", frozenset({"gpu"}), Path("a.bat"), {"gpu": 1})})},
+        models={"A": ModelConfig("A", ("a",), "Chat", 1, False, {"S": Scheme("S", frozenset({"gpu"}), Path("a.bat"), {"gpu": 1})})},
         wol=None, claude_configs={},
     )
     assert validate(cfg) == []
@@ -68,7 +68,7 @@ def test_validate_passes_clean_config():
 def test_select_adaptive_first_subset_wins():
     s_gpu = Scheme("GPU", frozenset({"gpu"}), Path("g.bat"), {"gpu": 1})
     s_apu = Scheme("APU", frozenset({"apu"}), Path("a.bat"), {"apu": 1})
-    m = ModelConfig("M", frozenset({"M"}), "Chat", 1, False, {"GPU": s_gpu, "APU": s_apu})
+    m = ModelConfig("M", ("M",), "Chat", 1, False, {"GPU": s_gpu, "APU": s_apu})
     assert select_adaptive(m, {"gpu"}).config_source == "GPU"
     assert select_adaptive(m, {"apu"}).config_source == "APU"
     assert select_adaptive(m, set()) is None
@@ -77,7 +77,7 @@ def test_select_adaptive_first_subset_wins():
 def test_resolve_alias_to_primary():
     cfg = AppConfig(
         program=ProgramConfig(host="0.0.0.0", port=8080, alive_time=60, log_level="INFO"),
-        models={"Qwen3-4B": ModelConfig("Qwen3-4B", frozenset({"Qwen3-4B", "q4"}), "Chat", 1)},
+        models={"Qwen3-4B": ModelConfig("Qwen3-4B", ("Qwen3-4B", "q4"), "Chat", 1)},
         wol=None, claude_configs={},
     )
     assert resolve_alias(cfg, "q4") == "Qwen3-4B"

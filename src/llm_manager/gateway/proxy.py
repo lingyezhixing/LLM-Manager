@@ -123,7 +123,9 @@ async def forward(request: Request, path: str, lifecycle, cfg, db, client_pool) 
     body = await _read_body(request)
     alias = _extract_model_alias(body)
     primary = _resolve_alias(cfg, alias)
+    served = cfg.models[primary].aliases[0]  # aliases[0]=主别名=下游 served name
     if isinstance(body, dict):
+        body["model"] = served  # 内部统一用 aliases[0] 调下游
         if _is_stream(body):
             body = _inject_include_usage(body, path)
         request_data = _reserialize(body)

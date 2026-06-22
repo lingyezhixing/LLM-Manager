@@ -110,7 +110,8 @@ class Lifecycle:
         to_stop = scheduling.check_and_free(scheme.memory_mb, snap, runnable, time.monotonic())
         if to_stop:
             await asyncio.gather(*[self.stop(n) for n in to_stop], return_exceptions=True)
-            snap = self._devices.snapshot()   # re-snapshot after eviction (spec §8)
+            await asyncio.to_thread(self._devices.refresh)   # eviction 释放显存,refresh 更新 _cache(spec §8 补:原仅 snapshot() 取 stale 缓存 → _deficit_satisfied 误判)
+            snap = self._devices.snapshot()   # re-snapshot after eviction
 
         if not self._deficit_satisfied(scheme.memory_mb, snap):
             state.record_failure(alias, "insufficient resource after eviction")
@@ -214,6 +215,7 @@ class Lifecycle:
         return out
 
     def _probe(self, alias: str, mode: str) -> ProbeResult:
-        port = self._cfg_model(alias).port
+        model = self._cfg_model(alias)
+        served = model.aliases[0]  # aliases[0]=主别名=下游 served name(lmdeploy --model-name / llama.cpp -a)
         fn = self._probes[mode]
-        return fn(alias, port, None, self.startup_timeout)
+        return fn(served, model.port, None, self.startup_timeout)

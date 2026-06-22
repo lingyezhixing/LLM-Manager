@@ -14,7 +14,7 @@ from llm_manager.state import ModelStatus
 
 
 def _cfg():
-    m = ModelConfig(primary_name="m1", aliases=frozenset({"m1", "alias1"}), mode="Chat",
+    m = ModelConfig(primary_name="m1", aliases=("m1", "alias1"), mode="Chat",
                     port=8000,
                     schemes={"s": Scheme("s", frozenset({"rtx 4060"}), Path("r.cmd"), {"rtx 4060": 2048})})
     return AppConfig(program=ProgramConfig(host="127.0.0.1", port=8080, alive_time=60, log_level="INFO"),
