@@ -109,3 +109,45 @@ def test_is_lhm_available_dll_missing(monkeypatch, tmp_path):
     monkeypatch.setitem(sys.modules, "clr", types.ModuleType("clr"))
     monkeypatch.setattr(dev, "_LHM_DLL", tmp_path / "nonexistent.dll")
     assert dev.is_lhm_available() is False
+
+
+def test_detect_amd_apu_none_adapter_returns_none():
+    from llm_manager.devices import detect_amd_apu
+    assert detect_amd_apu("780m", None) is None
+
+
+def test_detect_amd_apu_fake_sensors_returns_deviceinfo():
+    from llm_manager.devices import detect_amd_apu, DeviceInfo
+
+    def fake():
+        return iter([
+            ("Load", "D3D", 42.0),
+            ("SmallData", "Dedicated Used VRAM", 1000.0),
+            ("SmallData", "Dedicated Total VRAM", 4000.0),
+            ("Temperature", "GPU/CPU max", 60.0),
+        ])
+
+    info = detect_amd_apu("780m", fake)
+    assert isinstance(info, DeviceInfo)
+    assert info.device_name == "780m"
+    assert info.total_memory_mb == 4000
+    assert info.used_memory_mb == 1000
+    assert info.usage_percentage == 42.0
+    assert info.temperature_celsius == 60.0
+
+
+def test_detect_amd_apu_raising_adapter_returns_none():
+    from llm_manager.devices import detect_amd_apu
+
+    def raising():
+        raise RuntimeError("LHM boom")
+
+    assert detect_amd_apu("780m", raising) is None
+
+
+def test_detect_amd_apu_empty_sensors_fallback_total():
+    from llm_manager.devices import detect_amd_apu
+    info = detect_amd_apu("780m", lambda: iter([]))
+    assert info is not None
+    assert info.total_memory_mb == 512  # _aggregate_sensors 兜底分支(total<=0 → 512)
+    assert info.used_memory_mb == 0
