@@ -73,3 +73,39 @@ def test_devices_keys_are_normalized_lowercase():
     # 否则 select_adaptive 的 scheme.required_devices <= online 匹配失败(scheme 归一化为小写)
     from llm_manager.devices import DEVICES
     assert all(k == k.strip().lower() for k in DEVICES), list(DEVICES)
+
+
+def test_is_lhm_available_no_pythonnet(monkeypatch):
+    import builtins
+    real_import = builtins.__import__
+
+    def fake_import(name, *args, **kwargs):
+        if name == "clr":
+            raise ImportError("no pythonnet")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+    from llm_manager.devices import is_lhm_available
+    assert is_lhm_available() is False
+
+
+def test_is_lhm_available_dll_present(monkeypatch, tmp_path):
+    import sys
+    import types
+    import llm_manager.devices as dev
+
+    monkeypatch.setitem(sys.modules, "clr", types.ModuleType("clr"))  # 假装 pythonnet 已装
+    fake_dll = tmp_path / "LibreHardwareMonitorLib.dll"
+    fake_dll.write_text("fake")
+    monkeypatch.setattr(dev, "_LHM_DLL", fake_dll)
+    assert dev.is_lhm_available() is True
+
+
+def test_is_lhm_available_dll_missing(monkeypatch, tmp_path):
+    import sys
+    import types
+    import llm_manager.devices as dev
+
+    monkeypatch.setitem(sys.modules, "clr", types.ModuleType("clr"))
+    monkeypatch.setattr(dev, "_LHM_DLL", tmp_path / "nonexistent.dll")
+    assert dev.is_lhm_available() is False

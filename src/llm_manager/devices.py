@@ -5,6 +5,7 @@ from __future__ import annotations
 import shutil
 import subprocess
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Callable, Iterator, NamedTuple, Protocol, runtime_checkable
 
 
@@ -109,6 +110,19 @@ def detect_amd_apu(device_name: str, lhm_adapter: Callable[[], Iterator[tuple[st
         return _aggregate_sensors(device_name, lhm_adapter())
     except Exception:
         return None
+
+
+_LHM_DLL = Path(__file__).resolve().parents[2] / "utils" / "dll" / "LibreHardwareMonitorLib.dll"
+
+
+def is_lhm_available() -> bool:
+    """pythonnet 可 import + LHM DLL 存在。app.py 装配位一次性判断
+    (DLL 路径复用 _LHM_DLL 单一来源)。"""
+    try:
+        import clr  # type: ignore[import-not-found]  # noqa: F401
+    except ImportError:
+        return False
+    return _LHM_DLL.exists()
 
 
 DEVICES: dict[str, Callable[[], DeviceInfo | None]] = {
