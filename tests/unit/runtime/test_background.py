@@ -172,3 +172,29 @@ async def test_auto_start_empty_models_noop():
     life = _FakeLife()
     await background.auto_start(life, [], timeout=1.0, stop_event=asyncio.Event())
     assert life.started == []
+
+
+# ---------- _plan_batches (Task 1) ----------
+def test_plan_batches_device_isolation():
+    from llm_manager.runtime.background import _plan_batches
+    from llm_manager.config import Scheme
+    from pathlib import Path
+    s_rtx = Scheme("RTX", frozenset({"rtx 4060"}), Path("a.bat"), {"rtx 4060": 5120})
+    s_v100_780 = Scheme("V100-780M", frozenset({"v100", "780m"}), Path("c.bat"), {"v100": 0, "780m": 2048})
+    planned = [("qwen4b", s_rtx), ("qwen2b", s_v100_780), ("reranker", s_rtx)]
+    parallel, serial = _plan_batches(planned)
+    assert parallel == ["qwen4b", "qwen2b"]
+    assert serial == ["reranker"]
+
+
+def test_plan_batches_all_same_device_only_first_parallel():
+    from llm_manager.runtime.background import _plan_batches
+    from llm_manager.config import Scheme
+    from pathlib import Path
+    s = Scheme("S", frozenset({"rtx 4060"}), Path("a.bat"), {"rtx 4060": 5120})
+    assert _plan_batches([("a", s), ("b", s), ("c", s)]) == (["a"], ["b", "c"])
+
+
+def test_plan_batches_empty():
+    from llm_manager.runtime.background import _plan_batches
+    assert _plan_batches([]) == ([], [])
