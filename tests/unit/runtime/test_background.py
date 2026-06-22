@@ -66,3 +66,75 @@ def test_select_idle_candidates_excludes_not_yet_idle():
     state.set_status("m", ModelStatus.ROUTING, force=True)
     state._set_last_access("m", time.monotonic())  # 刚访问,未超时
     assert background.select_idle_candidates(60, time.monotonic()) == []
+
+
+# ---------- idle_reclamation_loop ----------
+async def test_idle_loop_reclaims_stale_routing():
+    state.set_status("m", ModelStatus.ROUTING, force=True)
+    state._set_last_access("m", time.monotonic() - 120)
+    life = _FakeLife()
+    ev = asyncio.Event()
+    task = asyncio.create_task(background.idle_reclamation_loop(life, 60, ev, period=0.01))
+    await asyncio.sleep(0.05)
+    ev.set()
+    await task
+    assert life.stopped == ["m"]
+
+
+async def test_idle_loop_skips_when_pending_at_scan():
+    state.set_status("m", ModelStatus.ROUTING, force=True)
+    state._set_last_access("m", time.monotonic() - 120)
+    state.inc_pending("m")
+    life = _FakeLife()
+    ev = asyncio.Event()
+    task = asyncio.create_task(background.idle_reclamation_loop(life, 60, ev, period=0.01))
+    await asyncio.sleep(0.05)
+    ev.set()
+    await task
+    assert life.stopped == []
+
+
+async def test_idle_loop_double_check_skips_new_pending():
+    # a、b 都超时;stop(a) 期间 b 来请求(inc_pending b)→ 处理 b 时二次确认跳过
+    state.set_status("a", ModelStatus.ROUTING, force=True)
+    state.set_status("b", ModelStatus.ROUTING, force=True)
+    state._set_last_access("a", time.monotonic() - 120)
+    state._set_last_access("b", time.monotonic() - 120)
+
+    def stop_during_a(name):
+        if name == "a":
+            state.inc_pending("b")
+
+    life = _FakeLife(stop=stop_during_a)
+    ev = asyncio.Event()
+    task = asyncio.create_task(background.idle_reclamation_loop(life, 60, ev, period=0.01))
+    await asyncio.sleep(0.05)
+    ev.set()
+    await task
+    assert "a" in life.stopped
+    assert "b" not in life.stopped
+
+
+async def test_idle_loop_disabled_when_alive_sec_le_zero():
+    state.set_status("m", ModelStatus.ROUTING, force=True)
+    state._set_last_access("m", time.monotonic() - 120)
+    life = _FakeLife()
+    ev = asyncio.Event()
+    await background.idle_reclamation_loop(life, 0, ev, period=0.01)
+    assert life.stopped == []
+
+
+async def test_idle_loop_survives_stop_exception(caplog):
+    state.set_status("m", ModelStatus.ROUTING, force=True)
+    state._set_last_access("m", time.monotonic() - 120)
+
+    def boom(name):
+        raise RuntimeError("stop failed")
+
+    life = _FakeLife(stop=boom)
+    ev = asyncio.Event()
+    task = asyncio.create_task(background.idle_reclamation_loop(life, 60, ev, period=0.01))
+    await asyncio.sleep(0.05)
+    ev.set()
+    await task  # 不崩
+    assert life.stopped == ["m"]

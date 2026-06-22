@@ -20,7 +20,28 @@ def select_idle_candidates(alive_sec: float, now: float) -> list[str]:
 
 
 async def idle_reclamation_loop(lifecycle, alive_sec: float, stop_event: asyncio.Event, *, period: float = 30.0) -> None:
-    raise NotImplementedError("Plan 5: idle loop (Task 4)")
+    if alive_sec <= 0:
+        logger.info("idle reclamation disabled (alive_time<=0)")
+        return
+    while not stop_event.is_set():
+        try:
+            now = time.monotonic()
+            for name in select_idle_candidates(alive_sec, now):
+                # 二次确认(0-await 间隙防护):临界段内 logger 走同步 handler 不 yield
+                if state.pending_count(name) > 0:
+                    logger.info("skip reclaim %s: new request in flight", name)
+                    continue
+                logger.info("idle reclaim %s (idle %.0fs)", name, now - state.get_last_access(name))
+                try:
+                    await lifecycle.stop(name)
+                except Exception as e:
+                    logger.error("idle reclaim stop failed %s: %s", name, e)
+        except Exception as e:
+            logger.error("idle reclamation iteration error: %s", e)
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=period)   # 可中断 sleep
+        except asyncio.TimeoutError:
+            pass
 
 
 async def auto_start(lifecycle, models: list[str], *, timeout: float, stop_event: asyncio.Event) -> None:
