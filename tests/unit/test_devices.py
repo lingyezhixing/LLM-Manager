@@ -59,3 +59,17 @@ def test_device_monitor_atomic_rebind_no_inplace_mutation():
     mon.refresh()  # rebuilds a NEW dict, rebinds
     snap_after = mon.snapshot()
     assert snap_before is not snap_after  # snapshot() returns a copy each call; _cache itself is rebound
+
+
+def test_devices_registry_has_v100_and_780m_comment_slot():
+    from llm_manager.devices import DEVICES
+    assert "v100" in DEVICES
+    assert "rtx 4060" in DEVICES
+    assert "780m" not in DEVICES  # 注释位:780m 由 app.py 按 is_lhm_available() 条件注册
+
+
+def test_devices_keys_are_normalized_lowercase():
+    # 防御:DEVICES key 必须小写归一化,对齐 config._norm_device,
+    # 否则 select_adaptive 的 scheme.required_devices <= online 匹配失败(scheme 归一化为小写)
+    from llm_manager.devices import DEVICES
+    assert all(k == k.strip().lower() for k in DEVICES), list(DEVICES)

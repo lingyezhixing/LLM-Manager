@@ -113,7 +113,8 @@ def detect_amd_apu(device_name: str, lhm_adapter: Callable[[], Iterator[tuple[st
 
 DEVICES: dict[str, Callable[[], DeviceInfo | None]] = {
     "rtx 4060": lambda: detect_nvidia("rtx 4060", "4060"),
-    # "780M": wired in app.py when pythonnet + DLL available (monitoring extra)
+    "v100": lambda: detect_nvidia("v100", "V100"),
+    # "780m": wired in app.py when pythonnet + DLL available (monitoring extra)
 }
 
 
