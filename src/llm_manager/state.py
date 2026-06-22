@@ -103,8 +103,18 @@ def get_last_access(name: str) -> float:
     return _rec(name).last_access
 
 
+def _set_last_access(name: str, ts: float) -> None:
+    """Test helper:设任意 last_access(background 测试控时间相对值,同 _reset)."""
+    _rec(name).last_access = ts
+
+
 def pending_count(name: str) -> int:
     return _rec(name).pending
+
+
+def routing_names() -> list[str]:
+    """当前 ROUTING 模型名(background 空闲扫描用,单一真相源,不持 cfg.models 副本)。"""
+    return [n for n, r in _state.items() if r.status == ModelStatus.ROUTING]
 
 
 def record_pid(name: str, pid: int) -> None:

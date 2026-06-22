@@ -190,3 +190,19 @@ def test_get_failure_reason():
     assert state.get_failure_reason("m1") is None
     state.record_failure("m1", "exited code=1")
     assert state.get_failure_reason("m1") == "exited code=1"
+
+
+def test_routing_names_returns_only_routing():
+    from llm_manager import state
+    state._reset()
+    state.set_status("a", ModelStatus.ROUTING, force=True)
+    state.set_status("b", ModelStatus.STARTING, force=True)
+    state.set_status("c", ModelStatus.STOPPED, force=True)
+    assert state.routing_names() == ["a"]
+
+
+def test_set_last_access_test_helper():
+    from llm_manager import state
+    state._reset()
+    state._set_last_access("m1", 1234.5)
+    assert state.get_last_access("m1") == 1234.5
