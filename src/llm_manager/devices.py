@@ -2,8 +2,10 @@
 + on-demand DeviceMonitor (rebuild-then-atomic-rebind cache; no in-place mutation)."""
 from __future__ import annotations
 
+import atexit
 import shutil
 import subprocess
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Iterator, NamedTuple, Protocol, runtime_checkable
@@ -123,6 +125,72 @@ def is_lhm_available() -> bool:
     except ImportError:
         return False
     return _LHM_DLL.exists()
+
+
+_LHM_COMPUTER = None  # 模块级单例,lazy init
+_LHM_LOCK = threading.Lock()  # 防 monitor.refresh() 跨 asyncio.to_thread 并发 → Computer 双初始化/泄漏
+
+
+def _close_lhm() -> None:
+    global _LHM_COMPUTER
+    if _LHM_COMPUTER is not None:
+        try:
+            _LHM_COMPUTER.Close()
+        except Exception:
+            pass
+        _LHM_COMPUTER = None
+
+
+def _lhm_max_temp(gpu_temp: float | None, cpu_temp: float | None) -> float | None:
+    """纯函数:GPU/CPU 温度取 max(继承 legacy CPU Tctl/Tdie 经验:Admin 下更准更热)。
+    提取出来便于单测,防回归。"""
+    candidates = [v for v in (gpu_temp, cpu_temp) if v is not None]
+    return float(max(candidates)) if candidates else None
+
+
+def lhm_sensors_780m() -> Iterator[tuple[str, str, float]]:
+    """LHM(pythonnet)→ GpuAmd + Ryzen CPU sensor tuples。温度取 GPU/CPU 之 max。
+    失败 raise(由 detect_amd_apu 吞 → None → DeviceMonitor 跳过 → 780m 离线)。"""
+    global _LHM_COMPUTER
+    if _LHM_COMPUTER is None:
+        with _LHM_LOCK:
+            if _LHM_COMPUTER is None:  # double-checked locking(持锁后再确认,防并发双初始化)
+                import clr  # type: ignore[import-not-found]  # 惰性:无 monitoring extra 时 devices.py 仍可 import
+                clr.AddReference(str(_LHM_DLL))
+                from LibreHardwareMonitor.Hardware import Computer  # type: ignore[import-not-found]
+                c = Computer()
+                c.IsGpuEnabled = True
+                c.IsCpuEnabled = True
+                c.Open()
+                _LHM_COMPUTER = c
+                atexit.register(_close_lhm)
+    gpu = cpu = None
+    for hw in _LHM_COMPUTER.Hardware:
+        if str(hw.HardwareType) == "GpuAmd":
+            gpu = hw
+        elif str(hw.HardwareType) == "Cpu" and "Ryzen" in str(hw.Name):
+            cpu = hw
+    if gpu is None:
+        raise RuntimeError("no AMD GPU (GpuAmd) in LHM hardware list")
+    gpu.Update()
+    if cpu is not None:
+        cpu.Update()
+    temp_g = None
+    for s in gpu.Sensors:
+        st, sn, val = str(s.SensorType), str(s.Name), (s.Value if s.Value is not None else 0.0)
+        if st == "Temperature":
+            temp_g = val
+        else:
+            yield (st, sn, val)  # Load/SmallData 透传给 _aggregate_sensors
+    temp_c = None
+    if cpu is not None:
+        for s in cpu.Sensors:
+            if str(s.SensorType) == "Temperature" and "Tctl" in str(s.Name):
+                temp_c = s.Value
+                break
+    final = _lhm_max_temp(temp_g, temp_c)
+    if final is not None:
+        yield ("Temperature", "GPU/CPU max", final)
 
 
 DEVICES: dict[str, Callable[[], DeviceInfo | None]] = {

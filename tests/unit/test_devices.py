@@ -151,3 +151,23 @@ def test_detect_amd_apu_empty_sensors_fallback_total():
     assert info is not None
     assert info.total_memory_mb == 512  # _aggregate_sensors 兜底分支(total<=0 → 512)
     assert info.used_memory_mb == 0
+
+
+def test_lhm_max_temp_gpu_only():
+    from llm_manager.devices import _lhm_max_temp
+    assert _lhm_max_temp(60.0, None) == 60.0
+
+
+def test_lhm_max_temp_cpu_higher_wins():
+    from llm_manager.devices import _lhm_max_temp
+    assert _lhm_max_temp(55.0, 72.0) == 72.0  # CPU Tctl/Tdie 更高 → 取 CPU
+
+
+def test_lhm_max_temp_gpu_higher_wins():
+    from llm_manager.devices import _lhm_max_temp
+    assert _lhm_max_temp(80.0, 70.0) == 80.0
+
+
+def test_lhm_max_temp_both_none_returns_none():
+    from llm_manager.devices import _lhm_max_temp
+    assert _lhm_max_temp(None, None) is None
