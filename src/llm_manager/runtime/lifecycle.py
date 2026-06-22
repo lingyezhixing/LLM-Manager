@@ -59,6 +59,10 @@ class Lifecycle:
         try:
             status = await self._run_pipeline(alias)
             state.finish_start(alias, status, owner=future)
+        except asyncio.CancelledError:
+            state.record_failure(alias, "startup cancelled")
+            state.finish_start(alias, ModelStatus.FAILED, owner=future)
+            raise
         except Exception as e:
             state.record_failure(alias, f"pipeline error: {e}")
             state.finish_start(alias, ModelStatus.FAILED, owner=future)
@@ -153,7 +157,7 @@ class Lifecycle:
             state.touch_activity(alias)
             self._supervisor.on_exit(rec.pid, lambda code: self._on_crash(alias, code))
             return ModelStatus.ROUTING
-        except Exception:
+        except (Exception, asyncio.CancelledError):
             await self._supervisor.kill_tree(rec.pid)
             raise
 

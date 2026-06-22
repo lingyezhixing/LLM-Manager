@@ -376,3 +376,22 @@ async def test_unload_all_tolerates_one_stop_failure():
     assert "m1" in stopped
     assert "m2" not in stopped
     assert state.get_status("m1") == ModelStatus.STOPPED
+
+
+# ---------- Task 6: cancel-safe hardening ----------
+async def test_ensure_running_cancelled_after_spawn_kills_pid_clears_slot():
+    """cancel-safe:ensure_running 被 cancel 落在 post-spawn 阶段(spawn 后 probe 中)→
+    kill_tree 被调(无孤儿)+ finish_start 清 slot(状态 FAILED、inflight 释放)+ CancelledError 传播。"""
+    def slow_probe(alias, port, start_time=None, timeout=60):
+        _time.sleep(0.3)
+        return ProbeResult(True, "ok")
+    life, sup, dev, cfg = _make(probes={"Chat": slow_probe})
+    task = asyncio.create_task(life.ensure_running("m1"))
+    await asyncio.sleep(0.05)                  # winner 进 spawn → HEALTH_CHECK → probe(to_thread)
+    assert state.get_pid("m1") is not None     # post-spawn:pid 已记
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert 1000 in sup.killed                   # 无孤儿:post-spawn except 拓宽后 kill_tree 被调
+    assert state.has_inflight("m1") is False    # slot 清(ensure_running except CancelledError → finish_start)
+    assert state.get_status("m1") == ModelStatus.FAILED
