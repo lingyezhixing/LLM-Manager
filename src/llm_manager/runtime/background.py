@@ -45,4 +45,21 @@ async def idle_reclamation_loop(lifecycle, alive_sec: float, stop_event: asyncio
 
 
 async def auto_start(lifecycle, models: list[str], *, timeout: float, stop_event: asyncio.Event) -> None:
-    raise NotImplementedError("Plan 5: auto_start (Task 5)")
+    if not models:
+        logger.info("no auto_start models")
+        return
+    logger.info("auto_start %d models: %s", len(models), models)
+
+    async def _one(name: str) -> None:
+        if stop_event.is_set():
+            return
+        try:
+            status = await asyncio.wait_for(lifecycle.ensure_running(name), timeout)
+            logger.info("auto_start %s -> %s", name, status.value)
+        except asyncio.TimeoutError:
+            logger.warning("auto_start %s timeout (%.0fs)", name, timeout)
+        except Exception as e:
+            logger.error("auto_start %s failed: %s", name, e)
+
+    await asyncio.gather(*[_one(n) for n in models])
+    logger.info("auto_start batch complete")

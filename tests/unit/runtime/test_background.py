@@ -138,3 +138,37 @@ async def test_idle_loop_survives_stop_exception(caplog):
     ev.set()
     await task  # 不崩
     assert life.stopped == ["m"]
+
+
+# ---------- auto_start ----------
+async def test_auto_start_concurrent_all_models():
+    life = _FakeLife()
+    await background.auto_start(life, ["a", "b", "c"], timeout=1.0, stop_event=asyncio.Event())
+    assert sorted(life.started) == ["a", "b", "c"]
+
+
+async def test_auto_start_timeout_does_not_raise(caplog):
+    async def slow(name):
+        await asyncio.sleep(10)
+        return ModelStatus.ROUTING
+
+    life = _FakeLife(ensure_running=slow)
+    with caplog.at_level(logging.WARNING):
+        await background.auto_start(life, ["x"], timeout=0.05, stop_event=asyncio.Event())
+    assert any("timeout" in r.message for r in caplog.records)
+
+
+async def test_auto_start_failure_does_not_raise(caplog):
+    def boom(name):
+        raise RuntimeError("ensure boom")
+
+    life = _FakeLife(ensure_running=boom)
+    with caplog.at_level(logging.ERROR):
+        await background.auto_start(life, ["x"], timeout=1.0, stop_event=asyncio.Event())
+    assert any("failed" in r.message for r in caplog.records)
+
+
+async def test_auto_start_empty_models_noop():
+    life = _FakeLife()
+    await background.auto_start(life, [], timeout=1.0, stop_event=asyncio.Event())
+    assert life.started == []
