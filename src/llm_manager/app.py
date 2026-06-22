@@ -20,6 +20,7 @@ from llm_manager.devices import DEVICES, DeviceMonitor
 from llm_manager.gateway.routes import register_routes
 from llm_manager.probes import probe_registry
 from llm_manager.runtime.lifecycle import Lifecycle
+from llm_manager.runtime import background
 from llm_manager.supervisor import Supervisor
 
 _logging_configured = False
@@ -71,10 +72,27 @@ def create_app(config_path: Path) -> FastAPI:
         app.state.monitor = monitor
         app.state.clients = clients
         await asyncio.to_thread(monitor.refresh)
+        stop_event = asyncio.Event()
+        auto_models = [n for n, m in cfg.models.items() if m.auto_start]
+        alive_sec = cfg.program.alive_time * 60.0
+        auto_task = asyncio.create_task(
+            background.auto_start(lifecycle, auto_models,
+                                  timeout=lifecycle.startup_timeout + background.AUTO_START_MARGIN,
+                                  stop_event=stop_event))
+        idle_task = asyncio.create_task(
+            background.idle_reclamation_loop(lifecycle, alive_sec, stop_event))
         try:
             yield
         finally:
-            await lifecycle.unload_all()
+            stop_event.set()
+            try:
+                await lifecycle.unload_all()
+            finally:
+                if not idle_task.done():
+                    idle_task.cancel()
+                if not auto_task.done():
+                    auto_task.cancel()
+                await asyncio.gather(idle_task, auto_task, return_exceptions=True)
             for client in clients.values():
                 await client.aclose()
             db.conn.close()
