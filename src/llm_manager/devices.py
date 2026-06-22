@@ -60,7 +60,8 @@ def _run_smi() -> str:
         return ""
     try:
         r = subprocess.run(
-            [smi, "--query-gpu=name,memory.total,memory.used,memory.free,utilization.gpu,temperature.gpu"],
+            [smi, "--query-gpu=name,memory.total,memory.used,memory.free,utilization.gpu,temperature.gpu",
+             "--format=csv,noheader,nounits"],
             capture_output=True, text=True, timeout=5, check=False,
         )
         return r.stdout if r.returncode == 0 else ""
@@ -156,7 +157,7 @@ def lhm_sensors_780m() -> Iterator[tuple[str, str, float]]:
         with _LHM_LOCK:
             if _LHM_COMPUTER is None:  # double-checked locking(持锁后再确认,防并发双初始化)
                 import clr  # type: ignore[import-not-found]  # 惰性:无 monitoring extra 时 devices.py 仍可 import
-                clr.AddReference(str(_LHM_DLL))
+                clr.AddReference(str(_LHM_DLL))  # type: ignore[attr-defined]
                 from LibreHardwareMonitor.Hardware import Computer  # type: ignore[import-not-found]
                 c = Computer()
                 c.IsGpuEnabled = True

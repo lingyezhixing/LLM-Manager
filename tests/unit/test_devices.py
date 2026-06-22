@@ -171,3 +171,43 @@ def test_lhm_max_temp_gpu_higher_wins():
 def test_lhm_max_temp_both_none_returns_none():
     from llm_manager.devices import _lhm_max_temp
     assert _lhm_max_temp(None, None) is None
+
+
+def test_run_smi_uses_noheader_nounits_format(monkeypatch):
+    # 真机验证发现:nvidia-smi 默认输出带 [MiB]/[%] 单位,_parse_smi 的 int() 解析失败 →
+    # 必须用 --format=csv,noheader,nounits 让输出纯数字(_parse_smi 纯函数不变)。
+    import llm_manager.devices as dev
+    captured = {}
+
+    class _R:
+        returncode = 0
+        stdout = "GPU, 8192, 0, 8192, 0, 40\n"
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        return _R()
+
+    monkeypatch.setattr(dev.subprocess, "run", fake_run)
+    dev._run_smi()
+    assert "--format=csv,noheader,nounits" in captured["cmd"], captured["cmd"]
+
+
+def test_parse_smi_handles_multi_gpu_csv_noheader_nounits():
+    # nvidia-smi --query-gpu=... --format=csv,noheader,nounits 的实际多 GPU 输出(纯数字)
+    out = ("NVIDIA GeForce RTX 4060 Laptop GPU, 8188, 1692, 6266, 35, 51\n"
+           "Tesla V100-SXM2-32GB, 32768, 0, 32365, 0, 40\n")
+    rows = _parse_smi(out)
+    assert len(rows) == 2
+    assert "4060" in rows[0].name.lower() and rows[0].total_mb == 8188
+    assert "v100" in rows[1].name.lower() and rows[1].total_mb == 32768
+
+
+def test_detect_nvidia_finds_multiple_gpus_by_name_token(monkeypatch):
+    import llm_manager.devices as dev
+    real_smi = ("NVIDIA GeForce RTX 4060 Laptop GPU, 8188, 1692, 6266, 35, 51\n"
+                "Tesla V100-SXM2-32GB, 32768, 0, 32365, 0, 40\n")
+    monkeypatch.setattr(dev, "_run_smi", lambda: real_smi)
+    rtx = dev.detect_nvidia("rtx 4060", "4060")
+    assert rtx is not None and rtx.device_name == "rtx 4060" and rtx.total_memory_mb == 8188
+    v100 = dev.detect_nvidia("v100", "V100")
+    assert v100 is not None and v100.device_name == "v100" and v100.total_memory_mb == 32768

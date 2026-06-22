@@ -21,15 +21,19 @@ Local-Models:
 """
 
 
-def test_lifespan_starts_and_stops_background(tmp_path):
+def test_lifespan_starts_and_stops_background(tmp_path, monkeypatch):
+    # 装 monitoring extra 后 is_lhm_available() 返 True,create_app 注册 780m 且 lifespan
+    # refresh 调真 LHM(慢 + 硬件依赖),干扰本测 m1 时序断言。mock False 隔离设备,聚焦 lifespan+background。
+    monkeypatch.setattr("llm_manager.app.is_lhm_available", lambda: False)
     cfg_path = tmp_path / "config.yaml"
     cfg_path.write_text(_CFG_BODY, encoding="utf-8")
     app = create_app(cfg_path)
     with TestClient(app) as c:
         assert c.get("/health").status_code == 200   # fire-and-forget:就绪不等 auto_start
-        # 轮询:auto_start 后台真跑(spawn nonexistent.cmd → 无 scheme 或 probe refused → FAILED),
-        # 证明 create_task 真起 + _one try/except 容错(不抛)+ 不阻塞 /health
-        deadline = time.monotonic() + 10
+        # 轮询:auto_start 后台真跑(spawn nonexistent.cmd → 不起服务 → probe 重试 startup_timeout=60s → FAILED)。
+        # deadline 须 > startup_timeout(60s):装 monitoring 后 probe/on_exit 时序使 m1 走完整 probe 重试才 FAILED。
+        # 证明 create_task 真起 + _one try/except 容错(不抛)+ 不阻塞 /health。
+        deadline = time.monotonic() + 75
         while time.monotonic() < deadline and state.get_status("m1") != ModelStatus.FAILED:
             time.sleep(0.1)
         assert state.get_status("m1") == ModelStatus.FAILED
