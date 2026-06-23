@@ -95,8 +95,8 @@ class SystemTray:
         try:
             self._icon = self._build_icon()
             self._icon.run()
-        except Exception as e:  # 托盘失败不应拖垮服务
-            logger.error("托盘运行失败,程序继续后台运行: %s", e)
+        except Exception:  # 托盘失败不应拖垮服务
+            logger.error("托盘运行失败,程序继续后台运行", exc_info=True)
 
     def shutdown(self) -> None:
         if self._icon is not None:
@@ -123,7 +123,7 @@ class SystemTray:
         ]
         if self._cfg.claude_configs:
             submenu = pystray.Menu(*[self._preset_menuitem(n) for n in self._cfg.claude_configs])
-            items.append(pystray.MenuItem("🔄 Claude 配置", None, submenu=submenu))
+            items.append(pystray.MenuItem("🔄 Claude 配置", submenu))  # action=Menu 即子菜单(本版无 submenu kwarg)
         items += [
             pystray.MenuItem("▶ 重启自启模型", self.restart_auto_start),
             pystray.MenuItem("⏹ 卸载全部模型", self.unload_all),
@@ -133,11 +133,15 @@ class SystemTray:
         return pystray.Icon("LLM-Manager", self._load_image(), "LLM-Manager", pystray.Menu(*items))
 
     def _preset_menuitem(self, name: str):
-        return pystray.MenuItem(
-            name,
-            lambda icon, item, n=name: self.apply_claude(n),
-            checked=lambda item, n=name: self._current_preset() == n,
-        )
+        # pystray _assert_action 要求 action 正好 1 或 2 参(数 inspect.signature 参数);
+        # 故用闭包捕获 name,而非默认参数(action 留 (icon, item) 两参、checked 留 (item) 一参)。
+        def action(icon, item):
+            self.apply_claude(name)
+
+        def checked(item):
+            return self._current_preset() == name
+
+        return pystray.MenuItem(name, action, checked=checked)
 
     def _current_preset(self) -> str:
         return claude.detect_current_preset(self._settings_path, dict(self._cfg.claude_configs))

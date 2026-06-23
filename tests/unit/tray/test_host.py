@@ -104,8 +104,9 @@ async def test_unload_all_marshals_lifecycle_unload_all():
     captured = []
 
     def fake_schedule(coro):
-        captured.append(coro)
-        return asyncio.ensure_future(coro)
+        task = asyncio.ensure_future(coro)
+        captured.append(task)   # 捕获 task 而非 coro:ensure_future 已驱动 coro,再 await 原始 coro 会报 "cannot reuse already awaited coroutine"
+        return task
 
     tray._run_coro_threadsafe = fake_schedule
     tray.unload_all()
@@ -120,8 +121,9 @@ async def test_restart_auto_start_unloads_then_autostarts(monkeypatch):
     captured = []
 
     def fake_schedule(coro):
-        captured.append(coro)
-        return asyncio.ensure_future(coro)
+        task = asyncio.ensure_future(coro)
+        captured.append(task)   # 捕获 task 而非 coro:ensure_future 已驱动 coro,再 await 原始 coro 会报 "cannot reuse already awaited coroutine"
+        return task
 
     tray._run_coro_threadsafe = fake_schedule
     autostart_calls = []
