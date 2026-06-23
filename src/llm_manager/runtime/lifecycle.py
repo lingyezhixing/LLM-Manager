@@ -48,6 +48,7 @@ class Lifecycle:
     async def ensure_running(self, alias: str) -> ModelStatus:
         self._reconcile(alias)
         if state.is_runnable(alias):
+            logger.debug("%s already %s (skip)", alias, state.get_status(alias).value)
             return state.get_status(alias)
         future, won = state.claim_start(alias)
         if not won:
@@ -103,8 +104,11 @@ class Lifecycle:
 
         scheme = self._scheme_select(model, self._devices.online_devices())
         if scheme is None:
+            logger.warning("%s: no adaptive scheme (devices offline)", alias)
             state.record_failure(alias, "no adaptive scheme (devices offline)")
             return ModelStatus.FAILED
+        logger.info("cold start %s scheme=%s devices=%s",
+                    alias, scheme.config_source, sorted(scheme.required_devices))
 
         # === spawn 锁:check_and_free + spawn 串行,避免并发 spawn 显存超量(spec §3.2) ===
         async with self._spawn_lock:
@@ -112,10 +116,12 @@ class Lifecycle:
             runnable = self._runnable(exclude=alias)
             to_stop = scheduling.check_and_free(scheme.memory_mb, snap, runnable, time.monotonic())
             if to_stop:
+                logger.info("evict %s to free mem for %s", list(to_stop), alias)
                 await asyncio.gather(*[self.stop(n) for n in to_stop], return_exceptions=True)
                 await asyncio.to_thread(self._devices.refresh)
                 snap = self._devices.snapshot()   # re-snapshot after eviction
             if not self._deficit_satisfied(scheme.memory_mb, snap):
+                logger.warning("%s: insufficient resource after eviction", alias)
                 state.record_failure(alias, "insufficient resource after eviction")
                 return ModelStatus.FAILED
             if ev.is_set():
@@ -123,6 +129,7 @@ class Lifecycle:
 
             cmd = [str(scheme.script_path)]
             rec = await self._supervisor.spawn(cmd)
+            logger.info("spawn %s pid=%d", alias, rec.pid)
 
             # === post-spawn critical section (no await) === invariant 3
             state.record_pid(alias, rec.pid)
@@ -145,6 +152,7 @@ class Lifecycle:
             if ev.is_set():
                 return await self._abort_spawned(rec.pid)
             probe = await asyncio.to_thread(self._probe, alias, model.mode)
+            logger.info("probe %s %s", alias, "ok" if probe.ok else "fail: " + str(probe.message))
             if ev.is_set():
                 return await self._abort_spawned(rec.pid)
             if not probe.ok:
@@ -160,6 +168,7 @@ class Lifecycle:
             state.set_status(alias, ModelStatus.ROUTING)
             state.touch_activity(alias)
             self._supervisor.on_exit(rec.pid, lambda code: self._on_crash(alias, code))
+            logger.info("%s -> routing", alias)
             return ModelStatus.ROUTING
         except (Exception, asyncio.CancelledError):
             await self._supervisor.kill_tree(rec.pid)

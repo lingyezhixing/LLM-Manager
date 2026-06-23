@@ -120,9 +120,11 @@ async def forward(request: Request, path: str, lifecycle, cfg, db, client_pool) 
     from llm_manager import state
     from llm_manager.state import ModelStatus
 
+    t0 = time.monotonic()
     body = await _read_body(request)
     alias = _extract_model_alias(body)
     primary = _resolve_alias(cfg, alias)
+    logger.info("REQ %s /%s model=%s", request.method, path, primary)
     served = cfg.models[primary].aliases[0]  # aliases[0]=主别名=下游 served name
     if isinstance(body, dict):
         body["model"] = served  # 内部统一用 aliases[0] 调下游
@@ -134,6 +136,7 @@ async def forward(request: Request, path: str, lifecycle, cfg, db, client_pool) 
 
     status = await lifecycle.ensure_running(primary)
     if status != ModelStatus.ROUTING:
+        logger.warning("model %s not routing (%s)", primary, status.value)
         raise HTTPException(503, f"model '{primary}' not routing (status={status.value})")
 
     state.begin_request(primary)
@@ -147,6 +150,7 @@ async def forward(request: Request, path: str, lifecycle, cfg, db, client_pool) 
                 params=request.query_params),
             stream=True)
         if _detect_sse(resp):
+            logger.info("RESP %d stream model=%s %.2fs", resp.status_code, primary, time.monotonic() - t0)
             return StreamingResponse(
                 _stream_wrapper(resp, path, primary, db, request_start),
                 status_code=resp.status_code, headers=_strip_response_headers(resp.headers))
@@ -154,6 +158,7 @@ async def forward(request: Request, path: str, lifecycle, cfg, db, client_pool) 
         await resp.aclose()
         await _record_usage(db, primary, path, content, request_start, time.monotonic())
         state.end_request(primary)
+        logger.info("RESP %d model=%s %.2fs", resp.status_code, primary, time.monotonic() - t0)
         return Response(content=content, status_code=resp.status_code,
                         headers=_strip_response_headers(resp.headers))
     except HTTPException:
@@ -161,7 +166,9 @@ async def forward(request: Request, path: str, lifecycle, cfg, db, client_pool) 
         raise
     except httpx.HTTPError as e:
         state.end_request(primary)
+        logger.warning("upstream error model=%s: %s", primary, e)
         raise HTTPException(502, f"upstream error: {e}")
     except Exception as e:
         state.end_request(primary)
+        logger.warning("internal model=%s: %s", primary, e)
         raise HTTPException(500, f"internal: {e}")

@@ -5,8 +5,8 @@ closes them on shutdown. Plan 3 fills the proxy + lifecycle wiring."""
 from __future__ import annotations
 
 import asyncio
+import datetime
 import logging
-import logging.handlers
 import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -27,10 +27,23 @@ from llm_manager.supervisor import Supervisor
 from llm_manager.tray import host as tray_host
 
 _logging_configured = False
+logger = logging.getLogger(__name__)
+
+
+def _cleanup_old_logs(log_dir: str, keep: int = 10) -> None:
+    """保留最近 keep 个 llm-manager_*.log(按 mtime),删旧的。"""
+    files = sorted(Path(log_dir).glob("llm-manager_*.log"),
+                   key=lambda p: p.stat().st_mtime, reverse=True)
+    for stale in files[keep:]:
+        try:
+            stale.unlink()
+        except OSError:
+            pass
 
 
 def setup_logging(level: str = "INFO", log_dir: str = "logs") -> None:
-    """Configure root logger once: stdout console + TimedRotatingFileHandler. Idempotent."""
+    """配置 root logger(一次性):控制台 + 每次启动一个时间戳文件(留 10 个)。
+    每次启动 = 新文件 logs/llm-manager_{ts}.log(非按天轮换,避免长期堆一个文件)。"""
     global _logging_configured
     if _logging_configured:
         return
@@ -39,21 +52,23 @@ def setup_logging(level: str = "INFO", log_dir: str = "logs") -> None:
     root.setLevel(numeric)
     for h in list(root.handlers):
         root.removeHandler(h)
-    fmt = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s %(message)s", "%H:%M:%S")
+    fmt = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s", "%H:%M:%S")
     console = logging.StreamHandler(sys.stdout)
     console.setLevel(numeric)
     console.setFormatter(fmt)
     root.addHandler(console)
     try:
         Path(log_dir).mkdir(parents=True, exist_ok=True)
-        fh = logging.handlers.TimedRotatingFileHandler(
-            Path(log_dir) / "llm-manager.log", when="midnight", backupCount=10, encoding="utf-8"
-        )
+        log_file = Path(log_dir) / f"llm-manager_{datetime.datetime.now().strftime('%Y%m%d-%H%M%S')}.log"
+        fh = logging.FileHandler(log_file, encoding="utf-8")
         fh.setLevel(numeric)
         fh.setFormatter(fmt)
         root.addHandler(fh)
+        _cleanup_old_logs(log_dir, keep=10)
+        logger.info("logging to %s", log_file)
     except OSError:
         pass
+    logging.getLogger("httpx").setLevel(logging.WARNING)  # 降噪:每请求一行太吵,REQ/RESP 已覆盖
     _logging_configured = True
 
 
@@ -63,6 +78,8 @@ def create_app(config_path: Path) -> FastAPI:
     errors = config.validate(cfg)
     if errors:
         raise ValueError("Invalid config:\n" + "\n".join(f"  - {e}" for e in errors))
+    logger.info("config loaded: %d models, %s:%d, alive %dmin",
+                len(cfg.models), cfg.program.host, cfg.program.port, cfg.program.alive_time)
     db = open_db(Path(cfg.program.db_path))
     devices = dict(DEVICES)  # 拷贝,不污染模块级常量
     if is_lhm_available():
@@ -81,6 +98,8 @@ def create_app(config_path: Path) -> FastAPI:
         app.state.cfg = cfg
         app.state.loop = asyncio.get_running_loop()
         await asyncio.to_thread(monitor.refresh)
+        online = sorted(monitor.online_devices())
+        logger.info("devices online: %s", ", ".join(online) if online else "(none)")
         stop_event = asyncio.Event()
         auto_models = [n for n, m in cfg.models.items() if m.auto_start]
         alive_sec = cfg.program.alive_time * 60.0
