@@ -42,6 +42,7 @@ class Lifecycle:
         self.startup_timeout = startup_timeout
         self._stop_events: dict[str, asyncio.Event] = {}
         self._active_schemes: dict[str, Scheme] = {}
+        self._spawn_lock = asyncio.Lock()   # Plan 7:全局 spawn 锁(spec §3.2)
 
     # ---------- public ----------
     async def ensure_running(self, alias: str) -> ModelStatus:
@@ -105,27 +106,29 @@ class Lifecycle:
             state.record_failure(alias, "no adaptive scheme (devices offline)")
             return ModelStatus.FAILED
 
-        snap = self._devices.snapshot()
-        runnable = self._runnable(exclude=alias)
-        to_stop = scheduling.check_and_free(scheme.memory_mb, snap, runnable, time.monotonic())
-        if to_stop:
-            await asyncio.gather(*[self.stop(n) for n in to_stop], return_exceptions=True)
-            await asyncio.to_thread(self._devices.refresh)   # eviction 释放显存,refresh 更新 _cache(spec §8 补:原仅 snapshot() 取 stale 缓存 → _deficit_satisfied 误判)
-            snap = self._devices.snapshot()   # re-snapshot after eviction
+        # === spawn 锁:check_and_free + spawn 串行,避免并发 spawn 显存超量(spec §3.2) ===
+        async with self._spawn_lock:
+            snap = self._devices.snapshot()
+            runnable = self._runnable(exclude=alias)
+            to_stop = scheduling.check_and_free(scheme.memory_mb, snap, runnable, time.monotonic())
+            if to_stop:
+                await asyncio.gather(*[self.stop(n) for n in to_stop], return_exceptions=True)
+                await asyncio.to_thread(self._devices.refresh)
+                snap = self._devices.snapshot()   # re-snapshot after eviction
+            if not self._deficit_satisfied(scheme.memory_mb, snap):
+                state.record_failure(alias, "insufficient resource after eviction")
+                return ModelStatus.FAILED
+            if ev.is_set():
+                return ModelStatus.STOPPED
 
-        if not self._deficit_satisfied(scheme.memory_mb, snap):
-            state.record_failure(alias, "insufficient resource after eviction")
-            return ModelStatus.FAILED
-        if ev.is_set():
-            return ModelStatus.STOPPED
+            cmd = [str(scheme.script_path)]
+            rec = await self._supervisor.spawn(cmd)
 
-        cmd = [str(scheme.script_path)]
-        rec = await self._supervisor.spawn(cmd)
-
-        # === post-spawn critical section (no await) === invariant 3
-        state.record_pid(alias, rec.pid)
-        orphan_pid = rec.pid if ev.is_set() else None
-        # === end critical section ===
+            # === post-spawn critical section (no await) === invariant 3
+            state.record_pid(alias, rec.pid)
+            orphan_pid = rec.pid if ev.is_set() else None
+            # === end critical section ===
+        # === 锁外:orphan kill + probe 并行 ===
         if orphan_pid is not None:
             await self._supervisor.kill_tree(orphan_pid)
             return ModelStatus.STOPPED

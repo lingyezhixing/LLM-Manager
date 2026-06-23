@@ -395,3 +395,43 @@ async def test_ensure_running_cancelled_after_spawn_kills_pid_clears_slot():
     assert 1000 in sup.killed                   # 无孤儿:post-spawn except 拓宽后 kill_tree 被调
     assert state.has_inflight("m1") is False    # slot 清(ensure_running except CancelledError → finish_start)
     assert state.get_status("m1") == ModelStatus.FAILED
+
+
+# ---------- Task 2 (Plan 7): spawn lock ----------
+async def test_spawn_lock_serializes_concurrent_spawns():
+    import time as _t
+    sup = FakeSupervisor()
+    spawn_log: list = []
+    _real_spawn = sup.spawn
+
+    async def logged_spawn(cmd, *, shell=True, on_output=None):
+        spawn_log.append(("start", _t.monotonic()))
+        await asyncio.sleep(0.05)  # 模拟 spawn 耗时:无锁则 a/b spawn 并行交错,有锁则串行
+        rec = await _real_spawn(cmd, shell=shell, on_output=on_output)
+        spawn_log.append(("end", _t.monotonic()))
+        return rec
+    sup.spawn = logged_spawn
+
+    models = [_model("a", dev="rtx 4060"), _model("b", dev="780m")]
+    life, _sup, _d, _c = _make(sup=sup, dev=FakeDevices(
+        online={"rtx 4060", "780m"},
+        snap={"rtx 4060": _dev("rtx 4060", 8192), "780m": _dev("780m", 8192)}),
+        models=models, probes={"Chat": _ok_probe})
+    await asyncio.gather(life.ensure_running("a"), life.ensure_running("b"))
+    assert spawn_log[0][0] == "start"
+    assert spawn_log[1][0] == "end"
+    assert spawn_log[2][0] == "start"
+
+
+async def test_spawn_lock_preserves_inflight_eviction_protection():
+    # 回归:spawn 锁不破坏 inflight 保护(pending>0 不被 eviction 驱;spec §3.3)
+    models = [_model("a", dev="rtx 4060", mem=4096), _model("b", dev="rtx 4060", mem=8192)]
+    life, sup, _d, _c = _make(sup=FakeSupervisor(), dev=FakeDevices(
+        online={"rtx 4060"}, snap={"rtx 4060": _dev("rtx 4060", 4096)}),
+        models=models, probes={"Chat": _ok_probe})
+    await life.ensure_running("a")
+    state.begin_request("a")
+    status = await life.ensure_running("b")
+    assert "a" not in sup.killed
+    assert status == ModelStatus.FAILED
+    state.end_request("a")
