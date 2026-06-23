@@ -24,6 +24,7 @@ from llm_manager.probes import probe_registry
 from llm_manager.runtime.lifecycle import Lifecycle
 from llm_manager.runtime import background
 from llm_manager.supervisor import Supervisor
+from llm_manager.tray import host as tray_host
 
 _logging_configured = False
 
@@ -76,6 +77,9 @@ def create_app(config_path: Path) -> FastAPI:
         app.state.db = db
         app.state.monitor = monitor
         app.state.clients = clients
+        app.state.lifecycle = lifecycle
+        app.state.cfg = cfg
+        app.state.loop = asyncio.get_running_loop()
         await asyncio.to_thread(monitor.refresh)
         stop_event = asyncio.Event()
         auto_models = [n for n, m in cfg.models.items() if m.auto_start]
@@ -86,9 +90,25 @@ def create_app(config_path: Path) -> FastAPI:
                                   stop_event=stop_event))
         idle_task = asyncio.create_task(
             background.idle_reclamation_loop(lifecycle, alive_sec, stop_event))
+        # 系统托盘(守卫:pystray 可用 + 需 uvicorn server 句柄做优雅退出 + claude_settings_path)
+        tray = None
+        server = getattr(app.state, "uvicorn_server", None)
+        if (tray_host.is_tray_available() and server is not None
+                and cfg.program.claude_settings_path):
+            tray = tray_host.SystemTray(
+                lifecycle=lifecycle, cfg=cfg, monitor=monitor,
+                loop=app.state.loop, server=server,
+                settings_path=cfg.program.claude_settings_path,
+                startup_timeout=lifecycle.startup_timeout,
+                auto_start_margin=background.AUTO_START_MARGIN,
+            )
+            tray.start()
+            app.state.tray = tray
         try:
             yield
         finally:
+            if tray is not None:
+                tray.shutdown()
             stop_event.set()
             try:
                 await lifecycle.unload_all()
@@ -113,4 +133,9 @@ def main() -> None:
     cfg_path = Path("config.yaml")
     app = create_app(cfg_path)
     cfg = config.load(cfg_path)
-    uvicorn.run(app, host=cfg.program.host, port=cfg.program.port)
+    # 编程式 uvicorn:持 Server 句柄供系统托盘「退出」优雅关停
+    # (server.should_exit=True → uvicorn 关停 → lifespan finally:unload_all + 关 clients/db)
+    server = uvicorn.Server(
+        uvicorn.Config(app, host=cfg.program.host, port=cfg.program.port, lifespan="on"))
+    app.state.uvicorn_server = server
+    server.run()
