@@ -115,7 +115,7 @@ def detect_amd_apu(device_name: str, lhm_adapter: Callable[[], Iterator[tuple[st
         return None
 
 
-_LHM_DLL = Path(__file__).resolve().parents[2] / "assets" / "dll" / "LibreHardwareMonitorLib.dll"
+_LHM_DLL = Path(__file__).resolve().parent / "assets" / "dll" / "LibreHardwareMonitorLib.dll"
 
 
 def is_lhm_available() -> bool:

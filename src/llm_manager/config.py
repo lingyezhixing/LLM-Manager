@@ -43,7 +43,6 @@ class ProgramConfig:
     log_dir: str = "logs"
     db_path: str = "data/llm_manager.db"
     claude_settings_path: str | None = None
-    disable_gpu_monitoring: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,7 +74,6 @@ def load(path: Path) -> AppConfig:
         log_dir=p.get("log_dir", "logs"),
         db_path=p.get("db_path", "data/llm_manager.db"),
         claude_settings_path=p.get("claude_settings_path"),
-        disable_gpu_monitoring=bool(p.get("Disable_GPU_monitoring", False)),
     )
     models: dict[str, ModelConfig] = {}
     reserved = {"aliases", "mode", "port", "auto_start"}

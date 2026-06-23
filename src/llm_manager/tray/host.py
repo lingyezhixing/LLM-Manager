@@ -108,7 +108,7 @@ class SystemTray:
     # ---------- icon + menu (need display; not unit-tested) ----------
     def _load_image(self):
         candidates = [self._icon_path] if self._icon_path else [
-            Path(__file__).resolve().parents[3] / "assets" / "icon.ico",
+            Path(__file__).resolve().parents[1] / "assets" / "icon.ico",
         ]
         for p in candidates:
             if p and p.exists():
