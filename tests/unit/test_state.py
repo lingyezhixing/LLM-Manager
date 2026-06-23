@@ -133,13 +133,11 @@ def test_pid_accessors():
 
 def test_inflight_introspection_and_release():
     import asyncio
-    from llm_manager import state
     asyncio.run(_inflight_body())
 
 
 async def _inflight_body():
     from llm_manager import state
-    from llm_manager.state import ModelStatus
     state._reset()
     assert state.has_inflight("m1") is False
     fut, won = state.claim_start("m1")
@@ -156,7 +154,6 @@ async def _inflight_body():
 
 def test_finish_start_owner_guard_no_clobber():
     import asyncio
-    from llm_manager import state
     asyncio.run(_owner_guard_body())
 
 
