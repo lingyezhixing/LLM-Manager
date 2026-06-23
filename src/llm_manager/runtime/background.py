@@ -59,11 +59,14 @@ async def idle_reclamation_loop(lifecycle, alive_sec: float, stop_event: asyncio
             pass
 
 
-async def auto_start(lifecycle, models: list[str], *, timeout: float, stop_event: asyncio.Event) -> None:
+async def auto_start(lifecycle, models: list[str], cfg, monitor, *, timeout: float, stop_event: asyncio.Event) -> None:
+    """设备隔离分批调度(spec §3.1):扫描硬件 → select_adaptive → _plan_batches
+    → parallel gather(spawn 锁串行 spawn,probe 并行)+ serial 逐一(refresh 缓存刷新)。"""
     if not models:
         logger.info("no auto_start models")
         return
     logger.info("auto_start %d models: %s", len(models), models)
+    from llm_manager import config as _cfg
 
     async def _one(name: str) -> None:
         if stop_event.is_set():
@@ -76,5 +79,27 @@ async def auto_start(lifecycle, models: list[str], *, timeout: float, stop_event
         except Exception as e:
             logger.error("auto_start %s failed: %s", name, e)
 
-    await asyncio.gather(*[_one(n) for n in models])
+    # 1. 扫描硬件
+    await asyncio.to_thread(monitor.refresh)
+    online = monitor.online_devices()
+    # 2. 收集需求(无 scheme 跳过)
+    planned = []
+    for name in models:
+        scheme = _cfg.select_adaptive(cfg.models[name], online)
+        if scheme is None:
+            logger.info("auto_start skip %s: no adaptive scheme (devices offline)", name)
+        else:
+            planned.append((name, scheme))
+    # 3. 设备隔离分批
+    parallel, serial = _plan_batches(planned)
+    logger.info("auto_start parallel=%s serial=%s", parallel, serial)
+    # 4. 并行批(设备互斥,spawn 锁串行 spawn + probe 并行)
+    if parallel:
+        await asyncio.gather(*[_one(n) for n in parallel])
+    # 5. 串行队列(设备冲突,逐一 refresh 缓存刷新)
+    for name in serial:
+        if stop_event.is_set():
+            break
+        await asyncio.to_thread(monitor.refresh)
+        await _one(name)
     logger.info("auto_start batch complete")

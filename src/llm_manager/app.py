@@ -81,7 +81,7 @@ def create_app(config_path: Path) -> FastAPI:
         auto_models = [n for n, m in cfg.models.items() if m.auto_start]
         alive_sec = cfg.program.alive_time * 60.0
         auto_task = asyncio.create_task(
-            background.auto_start(lifecycle, auto_models,
+            background.auto_start(lifecycle, auto_models, cfg, monitor,
                                   timeout=lifecycle.startup_timeout + background.AUTO_START_MARGIN,
                                   stop_event=stop_event))
         idle_task = asyncio.create_task(

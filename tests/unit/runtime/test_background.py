@@ -141,9 +141,31 @@ async def test_idle_loop_survives_stop_exception(caplog):
 
 
 # ---------- auto_start ----------
+def _auto_cfg(models_devs):
+    """构造 AppConfig:每模型单 scheme(required dev)。对抗验证 #4:auto_start 显式接收 cfg(避免 lifecycle.cfg 依赖)。"""
+    from llm_manager.config import Scheme, AppConfig, ModelConfig, ProgramConfig
+    from pathlib import Path
+    models = {name: ModelConfig(name, (name,), "Chat", i + 1, False,
+                                {"S": Scheme("S", frozenset({dev}), Path("a.bat"), {dev: 1024})})
+              for i, (name, dev) in enumerate(models_devs)}
+    return AppConfig(program=ProgramConfig(host="x", port=1, alive_time=60, log_level="INFO"),
+                     models=models, wol=None, claude_configs={})
+
+
+class _AutoDev:
+    def __init__(self, online):
+        self._online = set(online)
+        self.refresh_calls = 0
+    def online_devices(self): return set(self._online)
+    def snapshot(self): return {}
+    def refresh(self): self.refresh_calls += 1
+
+
 async def test_auto_start_concurrent_all_models():
     life = _FakeLife()
-    await background.auto_start(life, ["a", "b", "c"], timeout=1.0, stop_event=asyncio.Event())
+    cfg = _auto_cfg([("a", "rtx 4060"), ("b", "rtx 4060"), ("c", "rtx 4060")])
+    await background.auto_start(life, ["a", "b", "c"], cfg, _AutoDev({"rtx 4060"}),
+                                timeout=1.0, stop_event=asyncio.Event())
     assert sorted(life.started) == ["a", "b", "c"]
 
 
@@ -153,8 +175,10 @@ async def test_auto_start_timeout_does_not_raise(caplog):
         return ModelStatus.ROUTING
 
     life = _FakeLife(ensure_running=slow)
+    cfg = _auto_cfg([("x", "rtx 4060")])
     with caplog.at_level(logging.WARNING):
-        await background.auto_start(life, ["x"], timeout=0.05, stop_event=asyncio.Event())
+        await background.auto_start(life, ["x"], cfg, _AutoDev({"rtx 4060"}),
+                                    timeout=0.05, stop_event=asyncio.Event())
     assert any("timeout" in r.message for r in caplog.records)
 
 
@@ -163,15 +187,35 @@ async def test_auto_start_failure_does_not_raise(caplog):
         raise RuntimeError("ensure boom")
 
     life = _FakeLife(ensure_running=boom)
+    cfg = _auto_cfg([("x", "rtx 4060")])
     with caplog.at_level(logging.ERROR):
-        await background.auto_start(life, ["x"], timeout=1.0, stop_event=asyncio.Event())
+        await background.auto_start(life, ["x"], cfg, _AutoDev({"rtx 4060"}),
+                                    timeout=1.0, stop_event=asyncio.Event())
     assert any("failed" in r.message for r in caplog.records)
 
 
 async def test_auto_start_empty_models_noop():
     life = _FakeLife()
-    await background.auto_start(life, [], timeout=1.0, stop_event=asyncio.Event())
+    await background.auto_start(life, [], _auto_cfg([]), _AutoDev(set()),
+                                timeout=1.0, stop_event=asyncio.Event())
     assert life.started == []
+
+
+async def test_auto_start_device_isolation_batches():
+    # m_rtx(rtx)+m_apu(780m) 互斥 → parallel;m_rtx2(rtx) 冲突 → serial(在 parallel 后)
+    cfg = _auto_cfg([("m_rtx", "rtx 4060"), ("m_apu", "780m"), ("m_rtx2", "rtx 4060")])
+    order: list = []
+
+    class _OrderLife:
+        async def ensure_running(self, name):
+            order.append(name)
+            return ModelStatus.ROUTING
+
+    await background.auto_start(_OrderLife(), ["m_rtx", "m_apu", "m_rtx2"], cfg,
+                                _AutoDev({"rtx 4060", "780m"}), timeout=10.0, stop_event=asyncio.Event())
+    assert set(order) == {"m_rtx", "m_apu", "m_rtx2"}
+    assert order.index("m_rtx2") > order.index("m_rtx")   # serial 在 parallel 后
+    assert order.index("m_rtx2") > order.index("m_apu")
 
 
 # ---------- _plan_batches (Task 1) ----------
