@@ -19,6 +19,7 @@ import os
 import threading
 import webbrowser
 from pathlib import Path
+from typing import Any
 
 from llm_manager.runtime import background
 from llm_manager.tray import claude, wol
@@ -26,13 +27,18 @@ from llm_manager.tray import claude, wol
 logger = logging.getLogger(__name__)
 
 try:
-    import pystray  # type: ignore[import-not-found]
-    from PIL import Image  # type: ignore[import-not-found]
+    import pystray as _pystray  # type: ignore[import-not-found]
+    from PIL import Image as _pil_image  # type: ignore[import-not-found]
     _PYSTRAY_AVAILABLE = True
 except ImportError:
-    pystray = None
-    Image = None
+    _pystray = None
+    _pil_image = None
     _PYSTRAY_AVAILABLE = False
+
+# pystray/PIL 无类型存根:别名为 Any,属性访问不做检查;仅在 is_tray_available() 为真
+# (即 import 成功)时才会解引用,故 None 路径不可达。
+pystray: Any = _pystray
+Image: Any = _pil_image
 
 
 def _is_headless_display() -> bool:
