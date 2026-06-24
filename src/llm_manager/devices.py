@@ -113,13 +113,6 @@ def _run_smi() -> str:
         return ""
 
 
-def detect_nvidia(device_name: str, name_token: str) -> DeviceInfo | None:
-    for row in _parse_smi(_run_smi()):
-        if name_token.lower() in row.name.lower():
-            return DeviceInfo(device_name, "GPU", "VRAM", row.total_mb, row.free_mb, row.used_mb, row.util_pct, row.temp_c)
-    return None
-
-
 def enumerate_nvidia() -> list[DeviceInfo]:
     """nvidia-smi 全部 GPU 行 → DeviceInfo(device_name=产品原始名)。无 nvidia-smi / 无 NVIDIA → []。
     字段映射(复用 _GpuRow):
@@ -197,15 +190,6 @@ def _aggregate_sensors(device_name: str, sensors: Iterator[tuple[str, str, float
     )
 
 
-def detect_amd_apu(device_name: str, lhm_adapter: Callable[[], Iterator[tuple[str, str, float]]] | None) -> DeviceInfo | None:
-    if lhm_adapter is None:
-        return None
-    try:
-        return _aggregate_sensors(device_name, lhm_adapter())
-    except Exception:
-        return None
-
-
 _LHM_DLL = Path(__file__).resolve().parent / "assets" / "dll" / "LibreHardwareMonitorLib.dll"
 
 
@@ -277,65 +261,6 @@ def _lhm_cpu_temp() -> float | None:
     except Exception:
         return None
     return None
-
-
-def _lhm_max_temp(gpu_temp: float | None, cpu_temp: float | None) -> float | None:
-    """纯函数:GPU/CPU 温度取 max(继承 legacy CPU Tctl/Tdie 经验:Admin 下更准更热)。
-    提取出来便于单测,防回归。"""
-    candidates = [v for v in (gpu_temp, cpu_temp) if v is not None]
-    return float(max(candidates)) if candidates else None
-
-
-def lhm_sensors_780m() -> Iterator[tuple[str, str, float]]:
-    """LHM(pythonnet)→ GpuAmd + Ryzen CPU sensor tuples。温度取 GPU/CPU 之 max。
-    失败 raise(由 detect_amd_apu 吞 → None → DeviceMonitor 跳过 → 780m 离线)。"""
-    global _LHM_COMPUTER
-    if _LHM_COMPUTER is None:
-        with _LHM_LOCK:
-            if _LHM_COMPUTER is None:  # double-checked locking(持锁后再确认,防并发双初始化)
-                import clr  # type: ignore[import-not-found]  # 惰性:无 monitoring extra 时 devices.py 仍可 import
-                clr.AddReference(str(_LHM_DLL))  # type: ignore[attr-defined]
-                from LibreHardwareMonitor.Hardware import Computer  # type: ignore[import-not-found]
-                c = Computer()
-                c.IsGpuEnabled = True
-                c.IsCpuEnabled = True
-                c.Open()
-                _LHM_COMPUTER = c
-                atexit.register(_close_lhm)
-    gpu = cpu = None
-    for hw in _LHM_COMPUTER.Hardware:
-        if str(hw.HardwareType) == "GpuAmd":
-            gpu = hw
-        elif str(hw.HardwareType) == "Cpu" and "Ryzen" in str(hw.Name):
-            cpu = hw
-    if gpu is None:
-        raise RuntimeError("no AMD GPU (GpuAmd) in LHM hardware list")
-    gpu.Update()
-    if cpu is not None:
-        cpu.Update()
-    temp_g = None
-    for s in gpu.Sensors:
-        st, sn, val = str(s.SensorType), str(s.Name), (s.Value if s.Value is not None else 0.0)
-        if st == "Temperature":
-            temp_g = val
-        else:
-            yield (st, sn, val)  # Load/SmallData 透传给 _aggregate_sensors
-    temp_c = None
-    if cpu is not None:
-        for s in cpu.Sensors:
-            if str(s.SensorType) == "Temperature" and "Tctl" in str(s.Name):
-                temp_c = s.Value
-                break
-    final = _lhm_max_temp(temp_g, temp_c)
-    if final is not None:
-        yield ("Temperature", "GPU/CPU max", final)
-
-
-DEVICES: dict[str, Callable[[], DeviceInfo | None]] = {
-    "rtx 4060": lambda: detect_nvidia("rtx 4060", "4060"),
-    "v100": lambda: detect_nvidia("v100", "V100"),
-    # "780m": wired in app.py when pythonnet + DLL available (monitoring extra)
-}
 
 
 @runtime_checkable
