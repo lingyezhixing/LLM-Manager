@@ -335,3 +335,44 @@ def test_lhm_computer_init_failure_returns_none(monkeypatch):
     monkeypatch.setitem(sys.modules, "clr", fake_clr)
     monkeypatch.setattr(dev, "_LHM_COMPUTER", None)
     assert dev._lhm_computer() is None
+
+
+def test_enumerate_cpu_basic(monkeypatch):
+    import llm_manager.devices as dev
+
+    class _Mem:
+        total = 16 * 1024**3
+        available = 8 * 1024**3
+        used = 8 * 1024**3
+
+    monkeypatch.setattr(dev.psutil, "virtual_memory", lambda: _Mem())
+    monkeypatch.setattr(dev.psutil, "cpu_percent", lambda interval=None: 33.0)
+    monkeypatch.setattr(dev, "_lhm_cpu_temp", lambda: None)
+    out = dev.enumerate_cpu()
+    assert len(out) == 1
+    info = out[0]
+    assert info.device_name == "CPU"
+    assert info.device_type == "CPU" and info.memory_type == "RAM"
+    assert info.total_memory_mb == 16 * 1024  # 16 GB
+    assert info.available_memory_mb == 8 * 1024
+    assert info.usage_percentage == 33.0
+    assert info.temperature_celsius is None
+
+
+def test_enumerate_cpu_psutil_failure_degraded(monkeypatch):
+    import llm_manager.devices as dev
+
+    def boom():
+        raise OSError("psutil broke")
+
+    monkeypatch.setattr(dev.psutil, "virtual_memory", boom)
+    out = dev.enumerate_cpu()
+    assert len(out) == 1  # 恒 1 元素:降级不抛
+    assert out[0].device_name == "CPU"
+    assert out[0].total_memory_mb == 0  # 降级零值
+
+
+def test_lhm_cpu_temp_unavailable_returns_none(monkeypatch):
+    import llm_manager.devices as dev
+    monkeypatch.setattr(dev, "_lhm_computer", lambda: None)
+    assert dev._lhm_cpu_temp() is None

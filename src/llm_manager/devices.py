@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import atexit
+import psutil
 import re
 import shutil
 import subprocess
@@ -130,6 +131,20 @@ def enumerate_nvidia() -> list[DeviceInfo]:
     ]
 
 
+def enumerate_cpu() -> list[DeviceInfo]:
+    """主机 CPU:psutil 取 RAM/占用 + LHM Cpu Tctl 取温度。device_name='CPU'(token 含 cpu)。
+    CPU 物理恒在 → 恒返回 1 元素:psutil 调用包 try/except,失败返回降级 DeviceInfo(零值/温度 None)不抛。"""
+    try:
+        mem = psutil.virtual_memory()
+        total = int(mem.total // (1024 * 1024))
+        avail = int(mem.available // (1024 * 1024))
+        used = int(mem.used // (1024 * 1024))
+        usage = float(psutil.cpu_percent(interval=None))
+    except Exception:
+        return [DeviceInfo("CPU", "CPU", "RAM", 0, 0, 0, 0.0, None)]
+    return [DeviceInfo("CPU", "CPU", "RAM", total, avail, used, usage, _lhm_cpu_temp())]
+
+
 def _aggregate_sensors(device_name: str, sensors: Iterator[tuple[str, str, float]]) -> DeviceInfo:
     """Pure: fold LHM sensor tuples into DeviceInfo. Port semantics from legacy amd_780m.py."""
     core_load = 0.0
@@ -220,6 +235,26 @@ def _lhm_computer():
                 except Exception:
                     return None  # 初始化失败(DLL 损坏/Open 失败等)→ None,调用方降级
     return _LHM_COMPUTER
+
+
+def _lhm_cpu_temp() -> float | None:
+    """从共享 LHM Computer 读 Cpu 硬件的 Tctl/Tdie 温度。不可用(无 LHM / 无 Cpu / 异常)→ None。"""
+    c = _lhm_computer()
+    if c is None:
+        return None
+    try:
+        for hw in c.Hardware:
+            if str(hw.HardwareType) != "Cpu":
+                continue
+            hw.Update()
+            for s in hw.Sensors:
+                if str(s.SensorType) == "Temperature" and (
+                    "Tctl" in str(s.Name) or "Tdie" in str(s.Name)
+                ):
+                    return float(s.Value) if s.Value is not None else None
+    except Exception:
+        return None
+    return None
 
 
 def _lhm_max_temp(gpu_temp: float | None, cpu_temp: float | None) -> float | None:
