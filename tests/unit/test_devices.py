@@ -312,3 +312,26 @@ def test_enumerate_nvidia_empty_when_no_smi(monkeypatch):
     import llm_manager.devices as dev
     monkeypatch.setattr(dev, "_run_smi", lambda: "")
     assert dev.enumerate_nvidia() == []
+
+
+def test_lhm_computer_unavailable_returns_none(monkeypatch):
+    import llm_manager.devices as dev
+    monkeypatch.setattr(dev, "is_lhm_available", lambda: False)
+    assert dev._lhm_computer() is None
+
+
+def test_lhm_computer_init_failure_returns_none(monkeypatch):
+    # 初始化抛异常(AddReference 失败等)→ None,不穿透(防 enumerate_cpu 的 try 外调用)
+    import sys
+    import types
+    import llm_manager.devices as dev
+
+    def boom(*a, **k):
+        raise RuntimeError("AddReference failed")
+
+    fake_clr = types.ModuleType("clr")
+    fake_clr.AddReference = boom
+    monkeypatch.setattr(dev, "is_lhm_available", lambda: True)
+    monkeypatch.setitem(sys.modules, "clr", fake_clr)
+    monkeypatch.setattr(dev, "_LHM_COMPUTER", None)
+    assert dev._lhm_computer() is None

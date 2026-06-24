@@ -196,6 +196,32 @@ def _close_lhm() -> None:
         _LHM_COMPUTER = None
 
 
+def _lhm_computer():
+    """共享 LHM Computer 单例。**契约:永不抛**(返回 Computer | None)——初始化失败→None,
+    使 enumerate_cpu/enumerate_lhm_gpus 降级而非 raise(防 _lhm_cpu_temp 在 enumerate_cpu 的 try 外调用时穿透)。
+    惰性首次调用初始化(非模块加载时):import clr + AddReference + Computer() + Open() 只首次发生(Lock double-check);
+    其后 fast-path = 缓存返回。is_lhm_available() 为假→直接 None。IsCpu+IsGpu 一次开,共用。"""
+    global _LHM_COMPUTER
+    if not is_lhm_available():
+        return None
+    if _LHM_COMPUTER is None:
+        with _LHM_LOCK:
+            if _LHM_COMPUTER is None:  # double-checked locking
+                try:
+                    import clr  # type: ignore[import-not-found]
+                    clr.AddReference(str(_LHM_DLL))  # type: ignore[attr-defined]
+                    from LibreHardwareMonitor.Hardware import Computer  # type: ignore[import-not-found]
+                    c = Computer()
+                    c.IsGpuEnabled = True
+                    c.IsCpuEnabled = True
+                    c.Open()
+                    _LHM_COMPUTER = c
+                    atexit.register(_close_lhm)
+                except Exception:
+                    return None  # 初始化失败(DLL 损坏/Open 失败等)→ None,调用方降级
+    return _LHM_COMPUTER
+
+
 def _lhm_max_temp(gpu_temp: float | None, cpu_temp: float | None) -> float | None:
     """纯函数:GPU/CPU 温度取 max(继承 legacy CPU Tctl/Tdie 经验:Admin 下更准更热)。
     提取出来便于单测,防回归。"""
