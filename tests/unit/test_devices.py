@@ -312,3 +312,15 @@ def test_device_monitor_enumerator_exception_isolated():
     mon = DeviceMonitor([boom, ok], {"cpu"})
     mon.refresh()
     assert "cpu" in mon.online_devices()
+
+
+def test_new_gpu_model_matches_via_config_only(monkeypatch):
+    """加设备零改代码:config 写 'rtx 5090',mock nvidia-smi 返回 5090 行 → 匹配成功,无需改 devices.py。"""
+    import llm_manager.devices as dev
+    smi = "NVIDIA GeForce RTX 5090, 32768, 1000, 31768, 5, 45\n"
+    monkeypatch.setattr(dev, "_run_smi", lambda: smi)
+    matched, unmatched = dev.match_devices({"rtx 5090"}, dev.enumerate_nvidia())
+    assert "rtx 5090" in matched
+    assert matched["rtx 5090"].device_name == "NVIDIA GeForce RTX 5090"
+    assert matched["rtx 5090"].total_memory_mb == 32768
+    assert unmatched == []
