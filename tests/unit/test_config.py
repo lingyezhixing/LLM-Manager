@@ -87,3 +87,29 @@ def test_resolve_alias_to_primary():
         assert False, "expected KeyError"
     except KeyError:
         pass
+
+
+def test_referenced_devices_unions_required_and_memory_keys():
+    from pathlib import Path
+    from llm_manager.config import (
+        referenced_devices, AppConfig, ProgramConfig, ModelConfig, Scheme,
+    )
+    s1 = Scheme(config_source="S1", required_devices=frozenset({"rtx 4060", "v100"}),
+                script_path=Path("a.bat"), memory_mb={"rtx 4060": 5120})
+    s2 = Scheme(config_source="S2", required_devices=frozenset({"780m"}),
+                script_path=Path("b.bat"), memory_mb={"780m": 2048, "v100": 0})
+    m = ModelConfig(primary_name="M", aliases=("m",), mode="Chat", port=1000,
+                    schemes={"S1": s1, "S2": s2})
+    cfg = AppConfig(program=ProgramConfig("0.0.0.0", 8080, 60, "INFO"),
+                    models={"M": m}, wol=None, claude_configs={})
+    assert referenced_devices(cfg) == {"rtx 4060", "v100", "780m"}
+
+
+def test_referenced_devices_empty_when_no_schemes():
+    from llm_manager.config import (
+        referenced_devices, AppConfig, ProgramConfig, ModelConfig,
+    )
+    m = ModelConfig(primary_name="M", aliases=("m",), mode="Chat", port=1000)
+    cfg = AppConfig(program=ProgramConfig("0.0.0.0", 8080, 60, "INFO"),
+                    models={"M": m}, wol=None, claude_configs={})
+    assert referenced_devices(cfg) == set()

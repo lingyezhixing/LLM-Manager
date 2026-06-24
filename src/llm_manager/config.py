@@ -132,6 +132,17 @@ def select_adaptive(model: ModelConfig, online: set[str]) -> Scheme | None:
     return None
 
 
+def referenced_devices(cfg: AppConfig) -> set[str]:
+    """收集 config 引用过的全部设备名 = ∪ scheme.required_devices ∪ ∪ scheme.memory_mb.keys()。
+    config load 时已 _norm_device 归一化(小写+strip);此处幂等再收集。供 DeviceMonitor 匹配。"""
+    names: set[str] = set()
+    for m in cfg.models.values():
+        for scheme in m.schemes.values():
+            names |= set(scheme.required_devices)
+            names |= set(scheme.memory_mb)
+    return names
+
+
 def resolve_alias(cfg: AppConfig, alias: str) -> str:
     for name, m in cfg.models.items():
         if alias == name or alias in m.aliases:
