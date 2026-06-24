@@ -1,29 +1,8 @@
-# 核心依赖
-fastapi>=0.104.0
-uvicorn[standard]>=0.24.0
-gradio>=4.0.0
-pystray>=0.19.0
-Pillow>=10.0.0
-PyYAML
-pythonnet
-
-# HTTP客户端
-httpx>=0.25.0
-openai>=1.0.0
-
-# 系统监控
-psutil>=5.9.0
-GPUtil>=1.4.0
-
-# 配置和日志
-pydantic>=2.0.0
-
-# Web框架
-python-multipart>=0.0.6
-
-# 其他
-python-dotenv>=1.0.0
-requests>=2.31.0
-
-# 开发/测试
-pytest>=8.0.0
+# 依赖以 pyproject.toml 为唯一来源（核心 6 项 + extras）。
+# 本文件仅为兼容 `pip install -r requirements.txt` 习惯保留，等价执行下方命令。
+#
+# 仅运行（NVIDIA nvidia-smi 默认可用；AMD 780M 监控需 monitoring，系统托盘需 tray）：
+-e .[monitoring,tray]
+#
+# 开发 / 测试（pytest + pytest-asyncio + ruff + pyright）：
+#   pip install -e ".[monitoring,tray,dev]"

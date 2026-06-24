@@ -15,7 +15,7 @@ import time
 from collections.abc import Callable
 
 from llm_manager import state
-from llm_manager.config import AppConfig, ModelConfig, Scheme, select_adaptive
+from llm_manager.config import AppConfig, ModelConfig, Scheme, resolve_alias, select_adaptive
 from llm_manager.probes import ProbeResult
 from llm_manager.runtime import scheduling
 from llm_manager.state import ModelStatus
@@ -208,10 +208,8 @@ class Lifecycle:
         return not scheduling.compute_deficit(required, avail)
 
     def _cfg_model(self, alias: str) -> ModelConfig:
-        for m in self._cfg.models.values():
-            if alias == m.primary_name or alias in m.aliases:
-                return m
-        raise KeyError(alias)
+        # 委托 config.resolve_alias,避免与它重复实现别名解析循环
+        return self._cfg.models[resolve_alias(self._cfg, alias)]
 
     def _runnable(self, exclude: str) -> dict[str, scheduling.RunnableInfo]:
         out: dict[str, scheduling.RunnableInfo] = {}

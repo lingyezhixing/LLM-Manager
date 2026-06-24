@@ -18,9 +18,6 @@ class TokenUsage:
     cache_tokens: int
     prompt_tokens: int
 
-    def is_zero(self) -> bool:
-        return self == TokenUsage(0, 0, 0, 0)
-
 
 def _safe(parser: Callable[[bytes], TokenUsage]) -> Callable[[bytes], TokenUsage]:
     def wrapped(body: bytes) -> TokenUsage:

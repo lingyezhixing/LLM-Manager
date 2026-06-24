@@ -211,7 +211,7 @@ class DeviceSource(Protocol):
 class DeviceMonitor:
     """On-demand poll + cache. refresh() rebuilds a fresh dict and atomically rebinds
     self._cache (CPython attribute store is atomic: readers see whole old/new, never torn)."""
-    def __init__(self, devices: dict[str, Callable[[], DeviceInfo | None]], cache_ttl: float = 10.0) -> None:
+    def __init__(self, devices: dict[str, Callable[[], DeviceInfo | None]]) -> None:
         self._devices = devices
         self._cache: dict[str, DeviceInfo] = {}
 

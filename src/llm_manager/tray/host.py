@@ -64,7 +64,6 @@ class SystemTray:
         settings_path,
         startup_timeout: float,
         auto_start_margin: float,
-        icon_path=None,
     ) -> None:
         self._lifecycle = lifecycle
         self._cfg = cfg
@@ -74,7 +73,6 @@ class SystemTray:
         self._settings_path = Path(settings_path)
         self._startup_timeout = startup_timeout
         self._auto_start_margin = auto_start_margin
-        self._icon_path = Path(icon_path) if icon_path else None
         self._icon = None
         self._thread: threading.Thread | None = None
 
@@ -107,12 +105,9 @@ class SystemTray:
 
     # ---------- icon + menu (need display; not unit-tested) ----------
     def _load_image(self):
-        candidates = [self._icon_path] if self._icon_path else [
-            Path(__file__).resolve().parents[1] / "assets" / "icon.ico",
-        ]
-        for p in candidates:
-            if p and p.exists():
-                return Image.open(p)
+        icon = Path(__file__).resolve().parents[1] / "assets" / "icon.ico"
+        if icon.exists():
+            return Image.open(icon)
         return Image.new("RGB", (64, 64), "black")
 
     def _build_icon(self):
