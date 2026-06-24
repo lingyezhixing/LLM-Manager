@@ -346,25 +346,37 @@ class DeviceSource(Protocol):
 
 
 class DeviceMonitor:
-    """On-demand poll + cache. refresh() rebuilds a fresh dict and atomically rebinds
-    self._cache (CPython attribute store is atomic: readers see whole old/new, never torn)."""
-    def __init__(self, devices: dict[str, Callable[[], DeviceInfo | None]]) -> None:
-        self._devices = devices
+    """On-demand 枚举 + 模糊匹配。refresh() 跑全部枚举器 → candidates → match_devices(referenced)
+    → 原子 rebind self._cache(config 名键控 + 未引用实测名键控)。"""
+    def __init__(
+        self,
+        enumerators: list[Callable[[], list[DeviceInfo]]],
+        referenced: set[str],
+    ) -> None:
+        self._enumerators = enumerators
+        self._referenced = set(referenced)
         self._cache: dict[str, DeviceInfo] = {}
 
     def refresh(self) -> None:
-        new: dict[str, DeviceInfo] = {}
-        for name, det in self._devices.items():
+        candidates: list[DeviceInfo] = []
+        for enum in self._enumerators:
             try:
-                info = det()
-                if info is not None:
-                    new[name] = info
+                result = enum()
+                if result:
+                    candidates.extend(result)
             except Exception:
-                pass
-        self._cache = new  # atomic rebind — never mutate in place
+                pass  # 单个后端失败不影响其他
+        matched, unmatched = match_devices(self._referenced, candidates)
+        cache: dict[str, DeviceInfo] = dict(matched)
+        for c in unmatched:
+            cache[c.device_name] = c  # 未引用:以实测名入快照供展示(对调度无害)
+        self._cache = cache  # 原子 rebind
 
     def online_devices(self) -> set[str]:
         return set(self._cache)
 
     def snapshot(self) -> dict[str, DeviceInfo]:
         return dict(self._cache)
+
+
+ENUMERATORS: list[Callable[[], list[DeviceInfo]]] = [enumerate_nvidia, enumerate_lhm_gpus, enumerate_cpu]

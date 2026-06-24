@@ -34,33 +34,6 @@ def test_aggregate_sensors_dedicated_and_shared():
     assert info.temperature_celsius == 60.0
 
 
-def test_device_monitor_rebuild_then_rebind():
-    def det_a():
-        return DeviceInfo("a", "GPU", "VRAM", 1000, 800, 200, 20.0, 40.0)
-
-    def det_off():
-        return None
-
-    mon = DeviceMonitor({"a": det_a, "b": det_off})
-    mon.refresh()
-    assert mon.online_devices() == {"a"}
-    assert set(mon.snapshot()) == {"a"}
-    assert mon.snapshot()["a"].total_memory_mb == 1000
-
-
-def test_device_monitor_atomic_rebind_no_inplace_mutation():
-    def det():
-        return DeviceInfo("a", "GPU", "VRAM", 1000, 800, 200, 20.0, 40.0)
-
-    mon = DeviceMonitor({"a": det})
-    mon.refresh()
-    snap_before = mon.snapshot()
-    mon._cache["a"]  # touch
-    mon.refresh()  # rebuilds a NEW dict, rebinds
-    snap_after = mon.snapshot()
-    assert snap_before is not snap_after  # snapshot() returns a copy each call; _cache itself is rebound
-
-
 def test_devices_registry_has_v100_and_780m_comment_slot():
     from llm_manager.devices import DEVICES
     assert "v100" in DEVICES
@@ -382,3 +355,47 @@ def test_enumerate_lhm_gpus_unavailable_returns_empty(monkeypatch):
     import llm_manager.devices as dev
     monkeypatch.setattr(dev, "_lhm_computer", lambda: None)
     assert dev.enumerate_lhm_gpus() == []
+
+
+def test_device_monitor_matches_config_names_and_keeps_unmatched():
+    from llm_manager.devices import DeviceMonitor, DeviceInfo
+
+    def enum_gpus():
+        return [
+            DeviceInfo("NVIDIA GeForce RTX 4060", "GPU", "VRAM", 8188, 6266, 1692, 35.0, 51.0),
+            DeviceInfo("Tesla V100-SXM2-32GB", "GPU", "VRAM", 32768, 32365, 0, 0.0, 40.0),
+        ]
+
+    def enum_cpu():
+        return [DeviceInfo("CPU", "CPU", "RAM", 16384, 8192, 8192, 33.0, None)]
+
+    mon = DeviceMonitor([enum_gpus, enum_cpu], {"rtx 4060", "v100"})
+    mon.refresh()
+    online = mon.online_devices()
+    assert "rtx 4060" in online and "v100" in online  # config 名(已匹配)
+    assert "CPU" in online  # 未引用,以实测名保留供展示
+    snap = mon.snapshot()
+    assert snap["rtx 4060"].total_memory_mb == 8188
+    assert snap["v100"].total_memory_mb == 32768
+
+
+def test_device_monitor_unmatched_referenced_is_offline():
+    from llm_manager.devices import DeviceMonitor
+    mon = DeviceMonitor([lambda: []], {"rtx 5090"})  # 什么都没枚举到
+    mon.refresh()
+    assert "rtx 5090" not in mon.online_devices()
+
+
+def test_device_monitor_enumerator_exception_isolated():
+    # 单个枚举器抛异常不影响其他
+    from llm_manager.devices import DeviceMonitor, DeviceInfo
+
+    def boom():
+        raise RuntimeError("backend broke")
+
+    def ok():
+        return [DeviceInfo("CPU", "CPU", "RAM", 0, 0, 0, 0.0, None)]
+
+    mon = DeviceMonitor([boom, ok], {"cpu"})
+    mon.refresh()
+    assert "cpu" in mon.online_devices()

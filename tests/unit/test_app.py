@@ -22,9 +22,10 @@ Local-Models:
 
 
 def test_lifespan_starts_and_stops_background(tmp_path, monkeypatch):
-    # 装 monitoring extra 后 is_lhm_available() 返 True,create_app 注册 780m 且 lifespan
-    # refresh 调真 LHM(慢 + 硬件依赖),干扰本测 m1 时序断言。mock False 隔离设备,聚焦 lifespan+background。
-    monkeypatch.setattr("llm_manager.app.is_lhm_available", lambda: False)
+    # enumerate_lhm_gpus 内部职责,app.py 不再注册 780m;但 lifespan refresh 仍调真 LHM(慢 + 硬件依赖,
+    # 经 _lhm_computer),干扰本测 m1 时序断言。mock devices.is_lhm_available=False → _lhm_computer 返 None,
+    # 等效隔离 LHM 慢调用,聚焦 lifespan+background。
+    monkeypatch.setattr("llm_manager.devices.is_lhm_available", lambda: False)
     cfg_path = tmp_path / "config.yaml"
     cfg_path.write_text(_CFG_BODY, encoding="utf-8")
     app = create_app(cfg_path)
@@ -38,23 +39,3 @@ def test_lifespan_starts_and_stops_background(tmp_path, monkeypatch):
             time.sleep(0.1)
         assert state.get_status("m1") == ModelStatus.FAILED
     # with 退出 → lifespan finally:stop_event.set() + unload_all + cancel+gather,干净关闭无异常
-
-
-def test_app_registers_780m_when_lhm_available(tmp_path, monkeypatch):
-    cfg_path = tmp_path / "config.yaml"
-    cfg_path.write_text(_CFG_BODY, encoding="utf-8")
-    monkeypatch.setattr("llm_manager.app.is_lhm_available", lambda: True)
-    app = create_app(cfg_path)
-    with TestClient(app) as c:
-        assert c.get("/health").status_code == 200
-        assert "780m" in app.state.monitor._devices
-
-
-def test_app_skips_780m_when_lhm_unavailable(tmp_path, monkeypatch):
-    cfg_path = tmp_path / "config.yaml"
-    cfg_path.write_text(_CFG_BODY, encoding="utf-8")
-    monkeypatch.setattr("llm_manager.app.is_lhm_available", lambda: False)
-    app = create_app(cfg_path)
-    with TestClient(app) as c:
-        assert c.get("/health").status_code == 200
-        assert "780m" not in app.state.monitor._devices
