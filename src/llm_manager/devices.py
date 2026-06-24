@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import atexit
+import re
 import shutil
 import subprocess
 import threading
@@ -21,6 +22,17 @@ class DeviceInfo:
     used_memory_mb: int
     usage_percentage: float
     temperature_celsius: float | None
+
+
+def _tokens(name: str) -> set[str]:
+    """小写 + 按非字母数字拆 token。'RTX 4060 Ti'→{rtx,4060,ti};'V100-SXM2'→{v100,sxm2}。"""
+    return set(re.findall(r"[a-z0-9]+", name.lower()))
+
+
+def _match_score(config_name: str, detected_tokens: set[str]) -> float:
+    """config token 与实测 token 的交集占比;1.0 = 全子集。空 config→0。"""
+    ct = _tokens(config_name)
+    return len(ct & detected_tokens) / len(ct) if ct else 0.0
 
 
 class _GpuRow(NamedTuple):

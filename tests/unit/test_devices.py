@@ -211,3 +211,26 @@ def test_detect_nvidia_finds_multiple_gpus_by_name_token(monkeypatch):
     assert rtx is not None and rtx.device_name == "rtx 4060" and rtx.total_memory_mb == 8188
     v100 = dev.detect_nvidia("v100", "V100")
     assert v100 is not None and v100.device_name == "v100" and v100.total_memory_mb == 32768
+
+
+def test_tokens_splits_alnum():
+    from llm_manager.devices import _tokens
+    assert _tokens("RTX 4060 Ti") == {"rtx", "4060", "ti"}
+    assert _tokens("V100-SXM2") == {"v100", "sxm2"}
+    assert _tokens("780M Graphics") == {"780m", "graphics"}
+    assert _tokens("") == set()
+
+
+def test_match_score_full_subset_is_one():
+    from llm_manager.devices import _match_score
+    assert _match_score("rtx 4060", {"nvidia", "geforce", "rtx", "4060", "ti"}) == 1.0
+
+
+def test_match_score_partial_below_one():
+    from llm_manager.devices import _match_score
+    assert _match_score("rtx 4060", {"rtx", "3090"}) == 0.5  # only "rtx" of {rtx,4060}
+
+
+def test_match_score_empty_config_is_zero():
+    from llm_manager.devices import _match_score
+    assert _match_score("", {"rtx", "4060"}) == 0.0
