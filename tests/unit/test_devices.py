@@ -234,3 +234,62 @@ def test_match_score_partial_below_one():
 def test_match_score_empty_config_is_zero():
     from llm_manager.devices import _match_score
     assert _match_score("", {"rtx", "4060"}) == 0.0
+
+
+def _di(name):
+    """测试用 DeviceInfo 构造器(仅 device_name 重要,其余置零)。"""
+    from llm_manager.devices import DeviceInfo
+    return DeviceInfo(name, "GPU", "VRAM", 0, 0, 0, 0.0, None)
+
+
+def test_match_devices_full_match_keyed_by_config_name():
+    from llm_manager.devices import match_devices
+    candidates = [
+        _di("NVIDIA GeForce RTX 4060 Ti"),
+        _di("Tesla V100-SXM2-32GB"),
+        _di("AMD Radeon 780M Graphics"),
+        _di("CPU"),
+    ]
+    matched, unmatched = match_devices({"rtx 4060", "v100", "780m", "cpu"}, candidates)
+    assert set(matched) == {"rtx 4060", "v100", "780m", "cpu"}
+    assert matched["v100"].device_name == "Tesla V100-SXM2-32GB"
+    assert unmatched == []
+
+
+def test_match_devices_no_match_returns_empty_and_unmatched_preserved():
+    from llm_manager.devices import match_devices
+    candidates = [_di("NVIDIA GeForce RTX 4060")]
+    matched, unmatched = match_devices({"rtx 5090"}, candidates)
+    assert matched == {}
+    assert [c.device_name for c in unmatched] == ["NVIDIA GeForce RTX 4060"]
+
+
+def test_match_devices_disambiguation_prefers_fewer_extra_tokens():
+    # config 'rtx 4060' 同时全子集匹配 'RTX 4060'(多余 2)与 'RTX 4060 Ti'(多余 3)→ 选前者
+    from llm_manager.devices import match_devices
+    candidates = [_di("NVIDIA GeForce RTX 4060 Ti"), _di("NVIDIA GeForce RTX 4060")]
+    matched, _ = match_devices({"rtx 4060"}, candidates)
+    assert matched["rtx 4060"].device_name == "NVIDIA GeForce RTX 4060"
+
+
+def test_match_devices_cpu_token_matches_cpu_candidate():
+    from llm_manager.devices import match_devices
+    matched, unmatched = match_devices({"cpu"}, [_di("CPU")])
+    assert "cpu" in matched
+    assert unmatched == []
+
+
+def test_match_devices_one_candidate_one_name():
+    # 重叠 config 名:sorted 先到先得,单候选只配一个
+    from llm_manager.devices import match_devices
+    matched, unmatched = match_devices({"4060", "rtx 4060"}, [_di("NVIDIA GeForce RTX 4060")])
+    assert set(matched) == {"4060"}  # sorted: "4060" < "rtx 4060";后者候选已被占用
+    assert unmatched == []
+
+
+def test_match_devices_requires_full_subset_not_partial():
+    # 'rtx 4060' {rtx,4060} 对 'RTX 3090' {rtx,3090} 非 full subset(4060 不在)→ 不匹配
+    from llm_manager.devices import match_devices
+    matched, unmatched = match_devices({"rtx 4060"}, [_di("NVIDIA GeForce RTX 3090")])
+    assert matched == {}
+    assert [c.device_name for c in unmatched] == ["NVIDIA GeForce RTX 3090"]

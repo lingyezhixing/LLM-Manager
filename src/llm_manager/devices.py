@@ -35,6 +35,37 @@ def _match_score(config_name: str, detected_tokens: set[str]) -> float:
     return len(ct & detected_tokens) / len(ct) if ct else 0.0
 
 
+def match_devices(
+    referenced: set[str], candidates: list[DeviceInfo]
+) -> tuple[dict[str, DeviceInfo], list[DeviceInfo]]:
+    """每个 config 名取全子集(score==1.0)的候选;并列去歧义键=(精确等同, -多余 token 数, -索引)
+    取最大。多余 token 数 = |detected − config|(越少越贴近 config)。一个候选只配一个 config 名(used 集)。
+    返回 (config 键控匹配 dict, 未引用候选 list)。遍历 referenced 按 sorted() 保证赋值决定性。"""
+    matched: dict[str, DeviceInfo] = {}
+    used: set[int] = set()
+    for name in sorted(referenced):
+        ct = _tokens(name)
+        if not ct:
+            continue
+        best_idx = -1
+        best_key: tuple | None = None
+        for i, cand in enumerate(candidates):
+            if i in used:
+                continue
+            dt = _tokens(cand.device_name)
+            if not ct <= dt:  # 要求全子集(score==1.0)
+                continue
+            key = (ct == dt, -len(dt - ct), -i)  # 精确等同优先 → 多余 token 最少 → 索引最小
+            if best_key is None or key > best_key:
+                best_key = key
+                best_idx = i
+        if best_idx >= 0:
+            matched[name] = candidates[best_idx]
+            used.add(best_idx)
+    unmatched = [c for i, c in enumerate(candidates) if i not in used]
+    return matched, unmatched
+
+
 class _GpuRow(NamedTuple):
     name: str
     total_mb: int
