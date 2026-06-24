@@ -145,6 +145,28 @@ def enumerate_cpu() -> list[DeviceInfo]:
     return [DeviceInfo("CPU", "CPU", "RAM", total, avail, used, usage, _lhm_cpu_temp())]
 
 
+def enumerate_lhm_gpus() -> list[DeviceInfo]:
+    """LHM 的 GpuAmd 硬件 → 经 _aggregate_sensors → DeviceInfo。_lhm_computer 不可用 → []。
+    NVIDIA 不走此(由 enumerate_nvidia 负责),避免重复计数。"""
+    c = _lhm_computer()
+    if c is None:
+        return []
+    out: list[DeviceInfo] = []
+    for hw in c.Hardware:
+        if str(hw.HardwareType) != "GpuAmd":
+            continue
+        try:
+            hw.Update()
+            sensors = (
+                (str(s.SensorType), str(s.Name), s.Value if s.Value is not None else 0.0)
+                for s in hw.Sensors
+            )
+            out.append(_aggregate_sensors(str(hw.Name), sensors))
+        except Exception:
+            pass
+    return out
+
+
 def _aggregate_sensors(device_name: str, sensors: Iterator[tuple[str, str, float]]) -> DeviceInfo:
     """Pure: fold LHM sensor tuples into DeviceInfo. Port semantics from legacy amd_780m.py."""
     core_load = 0.0

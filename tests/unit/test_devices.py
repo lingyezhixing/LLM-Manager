@@ -376,3 +376,9 @@ def test_lhm_cpu_temp_unavailable_returns_none(monkeypatch):
     import llm_manager.devices as dev
     monkeypatch.setattr(dev, "_lhm_computer", lambda: None)
     assert dev._lhm_cpu_temp() is None
+
+
+def test_enumerate_lhm_gpus_unavailable_returns_empty(monkeypatch):
+    import llm_manager.devices as dev
+    monkeypatch.setattr(dev, "_lhm_computer", lambda: None)
+    assert dev.enumerate_lhm_gpus() == []
