@@ -1,5 +1,7 @@
-"""Device detection (NVIDIA via nvidia-smi subprocess; AMD APU via LHM adapter)
-+ on-demand DeviceMonitor (rebuild-then-atomic-rebind cache; no in-place mutation)."""
+"""Device detection: backends enumerate all present hardware (NVIDIA via nvidia-smi,
+AMD GPU via LHM, CPU via psutil) → DeviceMonitor fuzzy-matches config device names to
+detected hardware (token-subset) and atomically rebinds a config-keyed cache
+(+ unmatched devices keyed by raw name for display)."""
 from __future__ import annotations
 
 import atexit
