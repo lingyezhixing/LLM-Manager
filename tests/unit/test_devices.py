@@ -293,3 +293,22 @@ def test_match_devices_requires_full_subset_not_partial():
     matched, unmatched = match_devices({"rtx 4060"}, [_di("NVIDIA GeForce RTX 3090")])
     assert matched == {}
     assert [c.device_name for c in unmatched] == ["NVIDIA GeForce RTX 3090"]
+
+
+def test_enumerate_nvidia_returns_all_rows_with_raw_names(monkeypatch):
+    import llm_manager.devices as dev
+    smi = ("NVIDIA GeForce RTX 4060 Laptop GPU, 8188, 1692, 6266, 35, 51\n"
+           "Tesla V100-SXM2-32GB, 32768, 0, 32365, 0, 40\n")
+    monkeypatch.setattr(dev, "_run_smi", lambda: smi)
+    out = dev.enumerate_nvidia()
+    assert len(out) == 2
+    assert out[0].device_name == "NVIDIA GeForce RTX 4060 Laptop GPU"  # 原始名,非 config 键
+    assert out[0].device_type == "GPU" and out[0].memory_type == "VRAM"
+    assert out[0].total_memory_mb == 8188 and out[0].available_memory_mb == 6266
+    assert out[1].device_name == "Tesla V100-SXM2-32GB" and out[1].total_memory_mb == 32768
+
+
+def test_enumerate_nvidia_empty_when_no_smi(monkeypatch):
+    import llm_manager.devices as dev
+    monkeypatch.setattr(dev, "_run_smi", lambda: "")
+    assert dev.enumerate_nvidia() == []

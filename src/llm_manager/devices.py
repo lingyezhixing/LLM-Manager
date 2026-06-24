@@ -119,6 +119,17 @@ def detect_nvidia(device_name: str, name_token: str) -> DeviceInfo | None:
     return None
 
 
+def enumerate_nvidia() -> list[DeviceInfo]:
+    """nvidia-smi 全部 GPU 行 → DeviceInfo(device_name=产品原始名)。无 nvidia-smi / 无 NVIDIA → []。
+    字段映射(复用 _GpuRow):
+      total_memory_mb=memory.total; used_memory_mb=memory.used; available_memory_mb=memory.free;
+      usage_percentage=utilization.gpu; temperature_celsius=temperature.gpu。"""
+    return [
+        DeviceInfo(row.name, "GPU", "VRAM", row.total_mb, row.free_mb, row.used_mb, row.util_pct, row.temp_c)
+        for row in _parse_smi(_run_smi())
+    ]
+
+
 def _aggregate_sensors(device_name: str, sensors: Iterator[tuple[str, str, float]]) -> DeviceInfo:
     """Pure: fold LHM sensor tuples into DeviceInfo. Port semantics from legacy amd_780m.py."""
     core_load = 0.0
