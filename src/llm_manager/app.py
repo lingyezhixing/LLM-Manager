@@ -19,6 +19,7 @@ from llm_manager.data.persistence import open_db
 from llm_manager.devices import ENUMERATORS, DeviceMonitor
 from llm_manager.gateway.routes import register_routes
 from llm_manager.probes import probe_registry
+from llm_manager.realtime import DeviceFeed
 from llm_manager.runtime.lifecycle import Lifecycle
 from llm_manager.runtime import background
 from llm_manager.supervisor import Supervisor
@@ -95,6 +96,7 @@ def create_app(config_path: Path) -> FastAPI:
         await asyncio.to_thread(monitor.refresh)
         online = sorted(monitor.online_devices())
         logger.info("devices online: %s", ", ".join(online) if online else "(none)")
+        app.state.device_feed = DeviceFeed(monitor)  # 概览设备栏 SSE 源(订阅门控 2s 刷新)
         stop_event = asyncio.Event()
         auto_models = [n for n, m in cfg.models.items() if m.auto_start]
         alive_sec = cfg.program.alive_time * 60.0
