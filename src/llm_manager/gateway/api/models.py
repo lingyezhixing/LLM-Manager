@@ -2,7 +2,7 @@
 
 Reads module-level state (single-thread event loop → no locks) + cfg. Serves as
 the contract surface for the WebUI; Pydantic response_model → named OpenAPI
-schemas → clean generated TS types (see webui codegen)."""
+schemas → clean generated TS types (see frontend codegen)."""
 from __future__ import annotations
 
 import time
