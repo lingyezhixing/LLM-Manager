@@ -80,6 +80,7 @@ LLM-Manager.code-workspace
 
 # 忽略Claude Code相关文件
 .claude/
+.superpowers/
 
 # 忽略所有包含test的文件和文件夹
 *test*
