@@ -95,7 +95,7 @@ async def auto_start(lifecycle, models: list[str], cfg, monitor, *, timeout: flo
     logger.info("auto_start parallel=%s serial=%s", parallel, serial)
     # 4. 并行批(设备互斥,spawn 锁串行 spawn + probe 并行)
     if parallel:
-        await asyncio.gather(*[_one(n) for n in parallel])
+        await asyncio.gather(*[_one(n) for n in parallel], return_exceptions=True)
     # 5. 串行队列(设备冲突,逐一 refresh 缓存刷新)
     for name in serial:
         if stop_event.is_set():
