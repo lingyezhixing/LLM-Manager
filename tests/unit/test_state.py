@@ -203,3 +203,15 @@ def test_set_last_access_test_helper():
     state._reset()
     state._set_last_access("m1", 1234.5)
     assert state.get_last_access("m1") == 1234.5
+
+
+def test_record_failure_clears_stale_pid():
+    """#1:record_failure 清 stale pid——FAILED 模型的 pid 已死/将死,清掉防 _reconcile 漏清 + stop 误 kill 被复用 pid。"""
+    from llm_manager import state
+    state._reset()
+    state.set_status("m1", ModelStatus.ROUTING, force=True)
+    state.record_pid("m1", 1234)
+    assert state.get_pid("m1") == 1234
+    state.record_failure("m1", "process exited code=1")
+    assert state.get_status("m1") == ModelStatus.FAILED
+    assert state.get_pid("m1") is None   # stale pid 已清

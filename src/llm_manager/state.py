@@ -89,6 +89,7 @@ def record_failure(name: str, reason: str) -> None:
     rec = _rec(name)
     rec.status = ModelStatus.FAILED
     rec.failure_reason = reason
+    rec.pid = None   # 进程已死/将死/未spawn(所有 caller 调用时如此);清 stale pid 防 _reconcile 漏清 + 防 stop 误 kill 被复用的 pid
 
 
 def get_failure_reason(name: str) -> str | None:
