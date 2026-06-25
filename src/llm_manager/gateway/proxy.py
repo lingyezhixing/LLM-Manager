@@ -13,7 +13,7 @@ import logging
 import time
 
 import httpx
-from fastapi import HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import Response, StreamingResponse
 
 from llm_manager import config
@@ -171,3 +171,29 @@ async def forward(request: Request, path: str, lifecycle, cfg, db, client_pool) 
         state.end_request(primary)
         logger.warning("internal model=%s: %s", primary, e)
         raise HTTPException(500, f"internal: {e}")
+
+
+def register_proxy_routes(
+    app: FastAPI, lifecycle, cfg: config.AppConfig, db, client_pool,
+) -> None:
+    """挂载 OpenAI 兼容代理的 catch-all(POST/PUT/DELETE/PATCH)。一方法一 handler,
+    各自独立 operationId(单 api_route 4 方法会撞同 operationId,产生重复键破坏
+    OpenAPI 消费者如前端 codegen)。"""
+    async def _forward(path: str, request: Request) -> Response:
+        return await forward(request, path, lifecycle, cfg, db, client_pool)
+
+    @app.post("/{path:path}", operation_id="catch_all__path__post")
+    async def catch_all_post(path: str, request: Request) -> Response:
+        return await _forward(path, request)
+
+    @app.put("/{path:path}", operation_id="catch_all__path__put")
+    async def catch_all_put(path: str, request: Request) -> Response:
+        return await _forward(path, request)
+
+    @app.delete("/{path:path}", operation_id="catch_all__path__delete")
+    async def catch_all_delete(path: str, request: Request) -> Response:
+        return await _forward(path, request)
+
+    @app.patch("/{path:path}", operation_id="catch_all__path__patch")
+    async def catch_all_patch(path: str, request: Request) -> Response:
+        return await _forward(path, request)

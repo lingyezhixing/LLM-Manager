@@ -19,9 +19,6 @@
 # 忽略config.json文件
 # /config.json'
 
-# 忽略数据库文件
-/webui/monitoring.db
-
 # 忽略CMake相关文件
 CMakeFiles/
 CMakeCache.txt
@@ -67,8 +64,8 @@ env/
 # 忽略Node.js相关文件
 node_modules/
 
-# WebUI 构建产物（源码入库，产物不入库）
-/webui/dist/
+# 前端构建产物（源码入库，产物不入库）
+/frontend/dist/
 
 # 忽略其他临时文件
 *.tmp

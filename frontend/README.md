@@ -1,4 +1,4 @@
-# LLM-Manager WebUI
+# LLM-Manager Frontend
 
 React + Vite + TypeScript + Tailwind v4 + TanStack Query. Served by the FastAPI
 backend in production (no Node at runtime).
@@ -18,7 +18,7 @@ npm run gen:api           # → src/api/types.ts
 
 ## Build (production)
 ```bash
-npm run build            # → webui/dist/, served by FastAPI StaticFiles
+npm run build            # → frontend/dist/, served by FastAPI StaticFiles
 ```
 
 ## Themes
