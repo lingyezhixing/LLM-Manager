@@ -122,3 +122,35 @@ def test_spa_served_and_api_unaffected_when_dist_exists(tmp_path, monkeypatch):
         assert c.get("/api/models").status_code == 200           # 管理接口仍在
         assert c.get("/models").status_code == 200               # SPA 路由回退 index.html
         assert c.get("/assets/app.js").status_code == 200        # 静态资源
+
+
+def test_spa_rejects_path_traversal(tmp_path, monkeypatch):
+    """路径穿越防御:GET /%2e%2e/... 必须返回 404,不能读 dist 外的文件。"""
+    import llm_manager.gateway.routes as routes_mod
+    fake_dist = tmp_path / "dist"
+    (fake_dist / "assets").mkdir(parents=True)
+    (fake_dist / "index.html").write_text("<html>SPA</html>", encoding="utf-8")
+    secret = tmp_path / "config.yaml"          # dist 的同级文件(dist/../config.yaml)
+    secret.write_text("LEAKED-SECRET", encoding="utf-8")
+    monkeypatch.setattr(routes_mod, "_WEBUI_DIST", fake_dist)
+    app = FastAPI()
+    _register(app, _cfg(tmp_path))
+    with TestClient(app) as c:
+        for url in ["/%2e%2e/config.yaml", "/..%2fconfig.yaml", "/%2e%2e/%2e%2e/config.yaml"]:
+            r = c.get(url, follow_redirects=False)
+            assert r.status_code == 404, url
+            assert "LEAKED-SECRET" not in r.text
+
+
+def test_spa_boots_when_dist_lacks_assets(tmp_path, monkeypatch):
+    """dist 存在但无 assets/ 子目录时,网关仍能启动且 GET / 返回 index.html。"""
+    import llm_manager.gateway.routes as routes_mod
+    fake_dist = tmp_path / "dist"
+    fake_dist.mkdir(parents=True)
+    (fake_dist / "index.html").write_text("<html>SPA</html>", encoding="utf-8")  # 注意:无 assets/
+    monkeypatch.setattr(routes_mod, "_WEBUI_DIST", fake_dist)
+    app = FastAPI()
+    _register(app, _cfg(tmp_path))   # 不应抛 RuntimeError
+    with TestClient(app) as c:
+        assert c.get("/").status_code == 200
+        assert c.get("/health").status_code == 200
