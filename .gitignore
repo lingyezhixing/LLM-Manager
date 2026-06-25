@@ -67,6 +67,9 @@ env/
 # 忽略Node.js相关文件
 node_modules/
 
+# WebUI 构建产物（源码入库，产物不入库）
+/webui/dist/
+
 # 忽略其他临时文件
 *.tmp
 *.temp
