@@ -7,6 +7,7 @@ from fastapi.responses import JSONResponse, Response
 
 from llm_manager import config
 from llm_manager.gateway import proxy
+from llm_manager.gateway.api import build_api_router
 
 _CORS = {
     "access-control-allow-origin": "*",
@@ -16,6 +17,8 @@ _CORS = {
 
 
 def register_routes(app: FastAPI, lifecycle, cfg: config.AppConfig, db, client_pool) -> None:
+    app.include_router(build_api_router(cfg))
+
     @app.get("/health")
     def health() -> dict[str, str]:
         return {"status": "ok"}
