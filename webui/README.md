@@ -1,32 +1,27 @@
-# React + TypeScript + Vite
+# LLM-Manager WebUI
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+React + Vite + TypeScript + Tailwind v4 + TanStack Query. Served by the FastAPI
+backend in production (no Node at runtime).
 
-Currently, two official plugins are available:
+## Develop
+```bash
+npm install
+npm run dev          # Vite dev server, proxies /api + /v1 → backend (default :8080)
+```
+Backend must be running (`python -m llm_manager` from repo root) for the dev proxy + data.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
-
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
-
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+## Regenerate API types (after backend /api changes)
+```bash
+python -m llm_manager &   # backend exposing /openapi.json
+npm run gen:api           # → src/api/types.ts
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+## Build (production)
+```bash
+npm run build            # → webui/dist/, served by FastAPI StaticFiles
+```
+
+## Themes
+Three built-in palettes (深色克制 / 浅色通透 / 暖灰沉静) via semantic CSS tokens in
+`src/index.css`; switched by `data-theme` on `<html>` (`src/lib/theme.tsx`). Choice
+persists in localStorage.
