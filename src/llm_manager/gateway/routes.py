@@ -1,13 +1,21 @@
-"""Gateway routes: GET /health, GET /v1/models (catalog), OPTIONS preflight
-short-circuit (204 + open CORS, before body/alias), non-GET catch-all -> proxy.forward."""
+"""Gateway routes: GET /health, GET /v1/models (catalog), /api/* management
+router (see gateway/api), OPTIONS preflight short-circuit (204 + open CORS,
+before body/alias), non-GET catch-all -> proxy.forward, GET catch-all ->
+built WebUI SPA (StaticFiles + index.html fallback; see _WEBUI_DIST)."""
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.staticfiles import StaticFiles
 
 from llm_manager import config
 from llm_manager.gateway import proxy
 from llm_manager.gateway.api import build_api_router
+
+# webui 构建产物:src/llm_manager/gateway/routes.py → 仓库根 webui/dist
+_WEBUI_DIST = Path(__file__).resolve().parents[3] / "webui" / "dist"
 
 _CORS = {
     "access-control-allow-origin": "*",
@@ -56,3 +64,18 @@ def register_routes(app: FastAPI, lifecycle, cfg: config.AppConfig, db, client_p
     @app.patch("/{path:path}", operation_id="catch_all__path__patch")
     async def catch_all_patch(path: str, request: Request) -> Response:
         return await _forward(path, request)
+
+    # WebUI 静态托管(SPA)。仅在已构建时挂载;既有路由(/health,/v1/models,/api/*,代理)
+    # 已先注册,不会被覆盖。未命中文件 → 回退 index.html(前端路由)。
+    if _WEBUI_DIST.is_dir():
+        app.mount("/assets", StaticFiles(directory=_WEBUI_DIST / "assets"), name="webui-assets")
+
+        @app.get("/{path:path}")
+        def spa(path: str) -> Response:
+            candidate = _WEBUI_DIST / path
+            if candidate.is_file():
+                return FileResponse(candidate)
+            index = _WEBUI_DIST / "index.html"
+            if index.is_file():
+                return FileResponse(index)
+            return JSONResponse(status_code=404, content={"detail": "webui not built"})

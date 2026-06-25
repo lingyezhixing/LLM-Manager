@@ -100,3 +100,25 @@ def test_non_get_catchall_forwards_to_proxy(tmp_path):
     with TestClient(app) as c:
         r = c.post("/v1/chat/completions", json={"model": "m1"})
     assert r.status_code == 502
+
+
+def test_spa_served_and_api_unaffected_when_dist_exists(tmp_path, monkeypatch):
+    """StaticFiles+SPA fallback:GET / → index.html;既有 /health、/api/models 不受影响;
+    未命中 GET 路径回退 index.html(SPA 前端路由)。"""
+    import llm_manager.gateway.routes as routes_mod
+
+    fake_dist = tmp_path / "dist"
+    (fake_dist / "assets").mkdir(parents=True)
+    (fake_dist / "assets" / "app.js").write_text("console.log(1)", encoding="utf-8")
+    (fake_dist / "index.html").write_text("<html>SPA</html>", encoding="utf-8")
+    monkeypatch.setattr(routes_mod, "_WEBUI_DIST", fake_dist)
+
+    app = FastAPI()
+    _register(app, _cfg(tmp_path))
+    with TestClient(app) as c:
+        assert c.get("/").status_code == 200                     # index.html
+        assert "SPA" in c.get("/").text
+        assert c.get("/health").status_code == 200               # 既有路由仍在
+        assert c.get("/api/models").status_code == 200           # 管理接口仍在
+        assert c.get("/models").status_code == 200               # SPA 路由回退 index.html
+        assert c.get("/assets/app.js").status_code == 200        # 静态资源
