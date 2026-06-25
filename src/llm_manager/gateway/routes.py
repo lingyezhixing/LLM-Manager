@@ -34,6 +34,25 @@ def register_routes(app: FastAPI, lifecycle, cfg: config.AppConfig, db, client_p
     def preflight(path: str) -> JSONResponse:
         return JSONResponse(status_code=204, content={}, headers=_CORS)
 
-    @app.api_route("/{path:path}", methods=["POST", "PUT", "DELETE", "PATCH"])
-    async def catch_all(path: str, request: Request) -> Response:
+    # One wrapper per method so each gets a distinct OpenAPI operationId
+    # (a single api_route over [POST,PUT,DELETE,PATCH] collides all four onto the
+    # same operationId `catch_all__path__post`, producing duplicate keys in the
+    # generated schema → breaks OpenAPI consumers incl. our webui codegen).
+    async def _forward(path: str, request: Request) -> Response:
         return await proxy.forward(request, path, lifecycle, cfg, db, client_pool)
+
+    @app.post("/{path:path}", operation_id="catch_all__path__post")
+    async def catch_all_post(path: str, request: Request) -> Response:
+        return await _forward(path, request)
+
+    @app.put("/{path:path}", operation_id="catch_all__path__put")
+    async def catch_all_put(path: str, request: Request) -> Response:
+        return await _forward(path, request)
+
+    @app.delete("/{path:path}", operation_id="catch_all__path__delete")
+    async def catch_all_delete(path: str, request: Request) -> Response:
+        return await _forward(path, request)
+
+    @app.patch("/{path:path}", operation_id="catch_all__path__patch")
+    async def catch_all_patch(path: str, request: Request) -> Response:
+        return await _forward(path, request)

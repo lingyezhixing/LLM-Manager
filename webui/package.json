@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "gen:api": "openapi-typescript http://127.0.0.1:8080/openapi.json -o src/api/types.ts",
     "lint": "oxlint",
     "preview": "vite preview"
   },
