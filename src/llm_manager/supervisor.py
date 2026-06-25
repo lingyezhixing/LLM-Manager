@@ -77,6 +77,7 @@ class Supervisor:
                 cb(rc if rc is not None else -1)
             except Exception:
                 pass
+        self._wait_tasks.pop(pid, None)   # 自清:进程已退出,释放 task 表项(防 start/stop 循环累积)
 
     def on_exit(self, pid: int, cb: Callable[[int], None]) -> None:
         self._exit_cbs[pid] = cb
@@ -104,40 +105,45 @@ class Supervisor:
 
     async def kill_tree(self, pid: int) -> bool:
         try:
-            parent = psutil.Process(pid)
-            children = parent.children(recursive=True)
-            for c in children:
+            try:
+                parent = psutil.Process(pid)
+                children = parent.children(recursive=True)
+                for c in children:
+                    try:
+                        c.kill()
+                    except psutil.NoSuchProcess:
+                        pass
+                parent.kill()
+                _, alive = psutil.wait_procs([parent] + children, timeout=3)
+                if not alive:
+                    return True
+            except psutil.NoSuchProcess:
+                return True
+            except Exception:
+                pass
+            if os.name == "nt":
                 try:
-                    c.kill()
-                except psutil.NoSuchProcess:
-                    pass
-            parent.kill()
-            _, alive = psutil.wait_procs([parent] + children, timeout=3)
-            if not alive:
-                return True
-        except psutil.NoSuchProcess:
-            return True
-        except Exception:
-            pass
-        if os.name == "nt":
-            try:
-                r = await asyncio.to_thread(
-                    subprocess.run,
-                    ["taskkill", "/F", "/T", "/PID", str(pid)],
-                    capture_output=True,
-                    timeout=5,
-                )
-                return r.returncode in (0, 128)
-            except Exception:
-                return False
-        else:
-            try:
-                os.killpg(pid, signal.SIGKILL)
-                return True
-            except ProcessLookupError:
-                return True
-            except Exception:
-                return False
+                    r = await asyncio.to_thread(
+                        subprocess.run,
+                        ["taskkill", "/F", "/T", "/PID", str(pid)],
+                        capture_output=True,
+                        timeout=5,
+                    )
+                    return r.returncode in (0, 128)
+                except Exception:
+                    return False
+            else:
+                try:
+                    os.killpg(pid, signal.SIGKILL)
+                    return True
+                except ProcessLookupError:
+                    return True
+                except Exception:
+                    return False
+        finally:
+            # 清理进程表(_wait 自清 _wait_tasks):Popen 句柄/cb 条目不随 start/stop 循环累积(#5)
+            self._procs.pop(pid, None)
+            self._exit_cbs.pop(pid, None)
 
     async def cleanup(self) -> None:
         for pid in list(self._procs):

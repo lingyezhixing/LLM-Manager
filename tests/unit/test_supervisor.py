@@ -42,3 +42,20 @@ def test_on_exit_callback_fires_when_process_exits():
         assert seen[-1] in (0, None)
 
     asyncio.run(main())
+
+
+def test_kill_tree_clears_process_tables():
+    """#5:kill_tree 后 _procs/_exit_cbs 清(_wait 自清 _wait_tasks),防 start/stop 循环累积 Popen 句柄/内存。"""
+    async def main():
+        sup = Supervisor()
+        rec = await sup.spawn([sys.executable, "-c", "import time; time.sleep(30)"], shell=False)
+        sup.on_exit(rec.pid, lambda code: None)
+        await asyncio.sleep(0.3)
+        assert rec.pid in sup._procs and rec.pid in sup._wait_tasks and rec.pid in sup._exit_cbs
+        await sup.kill_tree(rec.pid)
+        assert rec.pid not in sup._procs        # kill_tree finally 清
+        assert rec.pid not in sup._exit_cbs     # kill_tree finally 清
+        await asyncio.sleep(0.5)                # _wait 收尾(popen.wait 返回)+ 自清 _wait_tasks
+        assert rec.pid not in sup._wait_tasks
+
+    asyncio.run(main())
