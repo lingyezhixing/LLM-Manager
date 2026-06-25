@@ -22,7 +22,9 @@ def register_routes(app: FastAPI, lifecycle, cfg: config.AppConfig, db, client_p
 
     @app.get("/v1/models")
     def list_models() -> dict:
-        data = [{"id": name, "object": "model"} for name in cfg.models]
+        # id = aliases[0](主别名 = 下游 served name = 客户端调用名);primary_name 仅为内部键,不外露。
+        # validate() 保证每个模型至少 1 个别名,故 aliases[0] 恒安全。
+        data = [{"id": m.aliases[0], "object": "model"} for m in cfg.models.values()]
         return {"object": "list", "data": data}
 
     @app.options("/{path:path}")
