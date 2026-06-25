@@ -1,6 +1,69 @@
 @import "tailwindcss";
 
+/* ===== Design tokens. Components use ONLY semantic tokens (bg-background etc).
+   3 themes via [data-theme]; default :root = 深色克制. Principles: no gradients,
+   no glassmorphism, no motion; single accent; real component chrome, not bare. ===== */
+
+:root, [data-theme="dark"] {
+  --background: #0d1117;        --foreground: #e6edf3;
+  --card: #161b22;              --card-foreground: #e6edf3;
+  --popover: #161b22;           --popover-foreground: #e6edf3;
+  --primary: #6b8cff;           --primary-foreground: #ffffff;
+  --secondary: #21262d;         --secondary-foreground: #e6edf3;
+  --muted: #21262d;             --muted-foreground: #8b949e;
+  --accent: #21262d;            --accent-foreground: #e6edf3;
+  --destructive: #f85149;       --destructive-foreground: #ffffff;
+  --success: #3fb950;           --success-foreground: #0d1117;
+  --border: #262c36;            --input: #262c36;        --ring: #6b8cff;
+  --radius: 0.625rem;
+}
+
+[data-theme="light"] {
+  --background: #f6f7f9;        --foreground: #16181d;
+  --card: #ffffff;              --card-foreground: #16181d;
+  --popover: #ffffff;           --popover-foreground: #16181d;
+  --primary: #4f46e5;           --primary-foreground: #ffffff;
+  --secondary: #eef0f3;         --secondary-foreground: #16181d;
+  --muted: #eef0f3;             --muted-foreground: #6b7280;
+  --accent: #eef0f3;            --accent-foreground: #16181d;
+  --destructive: #dc2626;       --destructive-foreground: #ffffff;
+  --success: #16a34a;           --success-foreground: #ffffff;
+  --border: #e7e8ec;            --input: #e7e8ec;        --ring: #4f46e5;
+  --radius: 0.75rem;
+}
+
+[data-theme="warm"] {
+  --background: #f6f2ec;        --foreground: #3b352b;
+  --card: #fffdf8;              --card-foreground: #3b352b;
+  --popover: #fffdf8;           --popover-foreground: #3b352b;
+  --primary: #8a6d52;           --primary-foreground: #ffffff;
+  --secondary: #ece4d6;         --secondary-foreground: #3b352b;
+  --muted: #ece4d6;             --muted-foreground: #9a8f7d;
+  --accent: #ece4d6;            --accent-foreground: #3b352b;
+  --destructive: #b5462f;       --destructive-foreground: #ffffff;
+  --success: #6f8f5a;           --success-foreground: #ffffff;
+  --border: #e8e0d3;            --input: #e8e0d3;        --ring: #8a6d52;
+  --radius: 0.75rem;
+}
+
+@theme inline {
+  --color-background: var(--background);          --color-foreground: var(--foreground);
+  --color-card: var(--card);                      --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);                --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);                --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);            --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);                    --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);                  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);        --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);                --color-success-foreground: var(--success-foreground);
+  --color-border: var(--border);                  --color-input: var(--input);    --color-ring: var(--ring);
+  --radius-lg: var(--radius);                     --radius-md: calc(var(--radius) - 2px);
+  --radius-sm: calc(var(--radius) - 4px);
+}
+
 body {
   margin: 0;
+  background: var(--color-background);
+  color: var(--color-foreground);
   font-family: system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
 }
