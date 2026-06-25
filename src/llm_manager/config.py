@@ -11,7 +11,6 @@ import yaml
 class ModelMode(str, Enum):
     """Probe selector; string values are config/registry keys."""
     CHAT = "Chat"
-    BASE = "Base"
     EMBEDDING = "Embedding"
     RERANKER = "Reranker"
 

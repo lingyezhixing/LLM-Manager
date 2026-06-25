@@ -35,7 +35,7 @@ Local-Models:
 
 
 def test_model_mode_values():
-    assert {m.value for m in ModelMode} == {"Chat", "Base", "Embedding", "Reranker"}
+    assert {m.value for m in ModelMode} == {"Chat", "Embedding", "Reranker"}
 
 
 def test_validate_flags_port_and_alias_clash_and_bad_mode():
@@ -43,7 +43,7 @@ def test_validate_flags_port_and_alias_clash_and_bad_mode():
         program=ProgramConfig(host="0.0.0.0", port=8080, alive_time=60, log_level="INFO"),
         models={
             "A": ModelConfig("A", ("x",), "Chat", 1, False, {}),
-            "B": ModelConfig("B", ("x",), "Base", 1, False, {}),
+            "B": ModelConfig("B", ("x",), "Embedding", 1, False, {}),
             "C": ModelConfig("C", ("y",), "Bogus", 2, False, {}),
             "D": ModelConfig("D", ("z",), "Chat", 3, False, {}),
         },

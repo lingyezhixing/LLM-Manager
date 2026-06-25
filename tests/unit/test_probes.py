@@ -4,14 +4,13 @@ from llm_manager import probes
 from llm_manager.probes import probe_registry, ProbeResult, _deep_request
 
 
-def test_registry_has_all_four_modes():
-    assert set(probe_registry) == {"Chat", "Base", "Embedding", "Reranker"}
+def test_registry_has_all_three_modes():
+    assert set(probe_registry) == {"Chat", "Embedding", "Reranker"}
 
 
 def test_deep_request_shape_per_mode():
     assert _deep_request("Chat")[0] == "/chat/completions"
     assert "messages" in _deep_request("Chat")[1]
-    assert _deep_request("Base")[0] == "/completions"
     assert _deep_request("Embedding")[0] == "/embeddings"
     assert _deep_request("Reranker")[0] == "/rerank"
 

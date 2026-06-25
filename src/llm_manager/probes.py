@@ -23,8 +23,6 @@ def _deep_request(mode: str) -> tuple[str, dict]:
     """Pure: (path, json_body_template_without_model) relative to base /v1."""
     if mode == "Chat":
         return "/chat/completions", {"messages": [{"role": "user", "content": "hello"}], "max_tokens": 1, "stream": False}
-    if mode == "Base":
-        return "/completions", {"prompt": "hello", "max_tokens": 1, "stream": False}
     if mode == "Embedding":
         return "/embeddings", {"input": "hello", "encoding_format": "float"}
     if mode == "Reranker":
@@ -66,10 +64,6 @@ def probe_chat(alias, port, start_time=None, timeout=300) -> ProbeResult:
     return _probe("Chat", "聊天", alias, port, start_time, timeout)
 
 
-def probe_base(alias, port, start_time=None, timeout=300) -> ProbeResult:
-    return _probe("Base", "基础", alias, port, start_time, timeout)
-
-
 def probe_embedding(alias, port, start_time=None, timeout=300) -> ProbeResult:
     return _probe("Embedding", "嵌入", alias, port, start_time, timeout)
 
@@ -80,7 +74,6 @@ def probe_reranker(alias, port, start_time=None, timeout=300) -> ProbeResult:
 
 probe_registry: dict[str, Callable[..., ProbeResult]] = {
     "Chat": probe_chat,
-    "Base": probe_base,
     "Embedding": probe_embedding,
     "Reranker": probe_reranker,
 }
