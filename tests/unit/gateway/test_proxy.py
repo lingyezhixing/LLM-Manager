@@ -187,7 +187,9 @@ class FakeLifecycle:
     def __init__(self, status=None):
         self._status = status if status is not None else ModelStatus.ROUTING
 
-    async def ensure_running(self, alias):
+    async def ensure_running(self, alias, *, inc_pending=False):
+        if inc_pending and self._status == ModelStatus.ROUTING:
+            state.begin_request(alias)   # mimic 真实 ensure_running:返回 ROUTING 前原子 inc pending
         return self._status
 
 

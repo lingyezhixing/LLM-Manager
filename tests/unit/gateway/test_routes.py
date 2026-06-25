@@ -30,7 +30,7 @@ def _cfg(tmp_path: Path) -> config.AppConfig:
 
 
 class _FakeLife:
-    async def ensure_running(self, alias):
+    async def ensure_running(self, alias, *, inc_pending=False):
         return ModelStatus.ROUTING
 
 

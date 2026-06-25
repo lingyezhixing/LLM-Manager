@@ -435,3 +435,27 @@ async def test_spawn_lock_preserves_inflight_eviction_protection():
     assert "a" not in sup.killed
     assert status == ModelStatus.FAILED
     state.end_request("a")
+
+
+async def test_ensure_running_inc_pending_closes_idle_reclaim_tocou():
+    """#2:ensure_running(inc_pending=True) 在返回 ROUTING 的同一无 await 临界段内 inc pending,
+    使 idle 回收 loop(查 pending==0)在 ensure_running 返回后看到 pending>=1,不会误回收在途请求的模型。"""
+    life, _sup, _d, _c = _make()
+    await life.ensure_running("m1")                          # 冷启动到 ROUTING(默认不 inc)
+    assert state.get_status("m1") == ModelStatus.ROUTING
+    assert state.pending_count("m1") == 0
+
+    status = await life.ensure_running("m1", inc_pending=True)   # 模拟 proxy 请求
+    assert status == ModelStatus.ROUTING
+    assert state.pending_count("m1") == 1                    # inc 在 ensure_running 内、返回前已生效
+
+    state.end_request("m1")                                  # proxy 完成 → dec
+    assert state.pending_count("m1") == 0
+
+
+async def test_ensure_running_inc_pending_skips_when_not_routing():
+    """inc_pending=True 但未到 ROUTING(FAILED)→ 不 inc(proxy 走 503,无需 dec)。"""
+    life, _sup, _d, _c = _make(probes={"Chat": lambda *a, **k: ProbeResult(False, "fail")})
+    status = await life.ensure_running("m1", inc_pending=True)
+    assert status == ModelStatus.FAILED
+    assert state.pending_count("m1") == 0

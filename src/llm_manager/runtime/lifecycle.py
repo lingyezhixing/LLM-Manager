@@ -45,18 +45,24 @@ class Lifecycle:
         self._spawn_lock = asyncio.Lock()   # Plan 7:全局 spawn 锁(spec §3.2)
 
     # ---------- public ----------
-    async def ensure_running(self, alias: str) -> ModelStatus:
+    async def ensure_running(self, alias: str, *, inc_pending: bool = False) -> ModelStatus:
         self._reconcile(alias)
         if state.is_runnable(alias):
-            logger.debug("%s already %s (skip)", alias, state.get_status(alias).value)
-            return state.get_status(alias)
+            status = state.get_status(alias)
+            if inc_pending and status == ModelStatus.ROUTING:
+                state.begin_request(alias)   # 同一无 await 临界段内 inc → 关闭 idle 回收 TOCTOU(#2)
+            logger.debug("%s already %s (skip)", alias, status.value)
+            return status
         future, won = state.claim_start(alias)
         if not won:
             try:
                 await future
             except Exception:
                 pass
-            return state.get_status(alias)
+            status = state.get_status(alias)
+            if inc_pending and status == ModelStatus.ROUTING:
+                state.begin_request(alias)
+            return status
         self._stop_events[alias] = asyncio.Event()
         try:
             status = await self._run_pipeline(alias)
@@ -68,7 +74,10 @@ class Lifecycle:
         except Exception as e:
             state.record_failure(alias, f"pipeline error: {e}")
             state.finish_start(alias, ModelStatus.FAILED, owner=future)
-        return state.get_status(alias)
+        status = state.get_status(alias)
+        if inc_pending and status == ModelStatus.ROUTING:
+            state.begin_request(alias)
+        return status
 
     async def stop(self, alias: str) -> ModelStatus:
         if state.get_status(alias) in (ModelStatus.STOPPED, ModelStatus.FAILED):

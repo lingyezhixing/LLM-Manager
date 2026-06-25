@@ -134,12 +134,11 @@ async def forward(request: Request, path: str, lifecycle, cfg, db, client_pool) 
     else:
         request_data = body if isinstance(body, bytes) else b""
 
-    status = await lifecycle.ensure_running(primary)
+    status = await lifecycle.ensure_running(primary, inc_pending=True)
     if status != ModelStatus.ROUTING:
         logger.warning("model %s not routing (%s)", primary, status.value)
         raise HTTPException(503, f"model '{primary}' not routing (status={status.value})")
 
-    state.begin_request(primary)
     request_start = time.monotonic()
     try:
         port = cfg.models[primary].port
