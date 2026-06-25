@@ -87,6 +87,10 @@ class DeviceFeed:
     def subscriber_count(self) -> int:
         return self._bc.subscriber_count
 
+    def current_snapshot(self) -> dict[str, DeviceInfo]:
+        """Current cached snapshot (no refresh); the loop keeps it warm while subscribed."""
+        return self._monitor.snapshot()
+
     async def _loop(self) -> None:
         try:
             while self._bc.subscriber_count > 0:
