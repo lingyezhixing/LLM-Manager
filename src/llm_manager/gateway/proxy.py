@@ -88,13 +88,15 @@ def _inject_include_usage(body: dict, path: str) -> dict:
 
 async def _record_usage(db, model, path, body_bytes, start, end) -> None:
     """Best-effort:metering 写库失败不污染透传(非 stream 不改 status/body;stream 不截断)
-    也不短路 end_request。吞所有异常 + log。"""
+    也不短路 end_request。吞所有异常 + log。同时累加进程内 session 统计(概览用)。"""
     from llm_manager.data import metering
     from llm_manager.data import persistence as _p
+    from llm_manager.data import session as _s
     try:
         usage = metering.parse_tokens(path, body_bytes)
         if not any([usage.input_tokens, usage.output_tokens, usage.cache_tokens, usage.prompt_tokens]):
             return
+        _s.add(usage.input_tokens, usage.output_tokens, usage.cache_tokens, usage.prompt_tokens)
         await asyncio.to_thread(
             _p.record_usage, db, model, start, end,
             usage.input_tokens, usage.output_tokens, usage.cache_tokens, usage.prompt_tokens,
