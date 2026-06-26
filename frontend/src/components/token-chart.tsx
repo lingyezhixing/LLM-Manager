@@ -2,7 +2,7 @@ import { useRef, useState, type MouseEvent } from "react";
 
 import type { UsageSeries } from "@/lib/api";
 
-/** Hand-rolled token chart (no lib). Smooth (Catmull-Rom) curves. With few models it
+/** Hand-rolled token chart (no lib). Smooth (monotone-cubic) curves. With few models it
  *  overlays total + per-model lines; with many it switches to a stacked area so series
  *  don't pile on one axis. Theme-aware via currentColor; cursor-following tooltip. */
 
@@ -34,20 +34,46 @@ function fmtTs(ts: number, preset: string): string {
   return md;
 }
 
-/** Catmull-Rom → cubic bezier segments (no leading M). */
+/** Monotone cubic (Fritsch-Carlson) → cubic bezier segments (no leading M).
+ *  Monotone interpolation never overshoots the data, so a non-negative series stays
+ *  non-negative and stacked-area bands never cross. */
 function smoothSegments(pts: Pt[]): string {
-  if (pts.length < 2) return "";
+  const n = pts.length;
+  if (n < 2) return "";
+  const dx: number[] = [];
+  const tangent: number[] = [];
+  for (let i = 0; i < n - 1; i++) {
+    dx[i] = pts[i + 1][0] - pts[i][0];
+    tangent[i] = dx[i] !== 0 ? (pts[i + 1][1] - pts[i][1]) / dx[i] : 0;
+  }
+  const m: number[] = new Array(n);
+  m[0] = tangent[0];
+  m[n - 1] = tangent[n - 2];
+  for (let i = 1; i < n - 1; i++) {
+    m[i] = tangent[i - 1] * tangent[i] <= 0 ? 0 : (tangent[i - 1] + tangent[i]) / 2;
+  }
+  for (let i = 0; i < n - 1; i++) {
+    if (tangent[i] === 0) {
+      m[i] = 0;
+      m[i + 1] = 0;
+      continue;
+    }
+    const a = m[i] / tangent[i];
+    const b = m[i + 1] / tangent[i];
+    const s = a * a + b * b;
+    if (s > 9) {
+      const tau = 3 / Math.sqrt(s);
+      m[i] = tau * a * tangent[i];
+      m[i + 1] = tau * b * tangent[i];
+    }
+  }
   let d = "";
-  for (let i = 0; i < pts.length - 1; i++) {
-    const p0 = pts[i - 1] ?? pts[i];
-    const p1 = pts[i];
-    const p2 = pts[i + 1];
-    const p3 = pts[i + 2] ?? p2;
-    const c1x = p1[0] + (p2[0] - p0[0]) / 6;
-    const c1y = p1[1] + (p2[1] - p0[1]) / 6;
-    const c2x = p2[0] - (p3[0] - p1[0]) / 6;
-    const c2y = p2[1] - (p3[1] - p1[1]) / 6;
-    d += ` C${c1x.toFixed(1)},${c1y.toFixed(1)} ${c2x.toFixed(1)},${c2y.toFixed(1)} ${p2[0].toFixed(1)},${p2[1].toFixed(1)}`;
+  for (let i = 0; i < n - 1; i++) {
+    const c1x = pts[i][0] + dx[i] / 3;
+    const c1y = pts[i][1] + m[i] * dx[i] / 3;
+    const c2x = pts[i + 1][0] - dx[i] / 3;
+    const c2y = pts[i + 1][1] - m[i + 1] * dx[i] / 3;
+    d += ` C${c1x.toFixed(1)},${c1y.toFixed(1)} ${c2x.toFixed(1)},${c2y.toFixed(1)} ${pts[i + 1][0].toFixed(1)},${pts[i + 1][1].toFixed(1)}`;
   }
   return d;
 }
