@@ -215,3 +215,45 @@ def test_record_failure_clears_stale_pid():
     state.record_failure("m1", "process exited code=1")
     assert state.get_status("m1") == ModelStatus.FAILED
     assert state.get_pid("m1") is None   # stale pid 已清
+
+
+def test_routing_records_started_at_and_last_access_wall():
+    from llm_manager import state
+    from llm_manager.state import ModelStatus
+    state._reset()
+    state.set_status("m1", ModelStatus.ROUTING, force=True)
+    assert state.get_started_at("m1") is not None
+    assert state.get_started_at("m1") > 0
+    assert state.get_last_access_wall("m1") > 0
+
+
+def test_started_at_none_unless_routing():
+    from llm_manager import state
+    from llm_manager.state import ModelStatus
+    state._reset()
+    assert state.get_started_at("m1") is None               # default
+    state.set_status("m1", ModelStatus.STARTING, force=True)
+    assert state.get_started_at("m1") is None               # not routing yet
+    state.set_status("m1", ModelStatus.ROUTING, force=True)
+    assert state.get_started_at("m1") is not None
+    state.set_status("m1", ModelStatus.STOPPED, force=True)
+    assert state.get_started_at("m1") is None               # cleared on leaving routing
+
+
+def test_record_failure_clears_started_at():
+    from llm_manager import state
+    from llm_manager.state import ModelStatus
+    state._reset()
+    state.set_status("m1", ModelStatus.ROUTING, force=True)
+    state.record_failure("m1", "x")
+    assert state.get_started_at("m1") is None
+
+
+def test_touch_activity_updates_last_access_wall():
+    from llm_manager import state
+    from llm_manager.state import ModelStatus
+    state._reset()
+    state.set_status("m1", ModelStatus.ROUTING, force=True)
+    wall1 = state.get_last_access_wall("m1")
+    state.touch_activity("m1")
+    assert state.get_last_access_wall("m1") >= wall1

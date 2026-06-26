@@ -35,9 +35,11 @@ _ALLOWED: dict[ModelStatus, frozenset[ModelStatus]] = {
 class _Record:
     status: ModelStatus = ModelStatus.STOPPED
     failure_reason: str | None = None
-    last_access: float = 0.0
+    last_access: float = 0.0          # monotonic — internal idle reclamation
     pending: int = 0
     pid: int | None = None
+    started_at: float | None = None   # wall-clock epoch when entered ROUTING (frontend uptime)
+    last_access_wall: float = 0.0     # wall-clock epoch of last activity (frontend idle)
 
 
 _state: dict[str, _Record] = {}
@@ -70,7 +72,12 @@ def set_status(name: str, status: ModelStatus, *, reason: str | None = None, for
     if status == ModelStatus.FAILED:
         rec.failure_reason = reason
     if status == ModelStatus.ROUTING:
+        now_wall = time.time()
         rec.last_access = time.monotonic()
+        rec.last_access_wall = now_wall
+        rec.started_at = now_wall
+    else:
+        rec.started_at = None   # uptime only while ROUTING
 
 
 def is_starting(name: str) -> bool:
@@ -90,6 +97,7 @@ def record_failure(name: str, reason: str) -> None:
     rec.status = ModelStatus.FAILED
     rec.failure_reason = reason
     rec.pid = None   # 进程已死/将死/未spawn(所有 caller 调用时如此);清 stale pid 防 _reconcile 漏清 + 防 stop 误 kill 被复用的 pid
+    rec.started_at = None   # FAILED → 无 uptime
 
 
 def get_failure_reason(name: str) -> str | None:
@@ -97,11 +105,23 @@ def get_failure_reason(name: str) -> str | None:
 
 
 def touch_activity(name: str) -> None:
-    _rec(name).last_access = time.monotonic()
+    rec = _rec(name)
+    rec.last_access = time.monotonic()
+    rec.last_access_wall = time.time()
 
 
 def get_last_access(name: str) -> float:
     return _rec(name).last_access
+
+
+def get_started_at(name: str) -> float | None:
+    """Wall-clock epoch when the model entered ROUTING (None when not routing). Frontend ticks uptime."""
+    return _rec(name).started_at
+
+
+def get_last_access_wall(name: str) -> float:
+    """Wall-clock epoch of last activity (0.0 if never). Frontend ticks idle locally, no push."""
+    return _rec(name).last_access_wall
 
 
 def _set_last_access(name: str, ts: float) -> None:
