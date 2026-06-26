@@ -1,6 +1,7 @@
 import { useState } from "react";
 
 /** Hand-rolled two-month range picker (no lib — offline, matches the locked mockup).
+ *  Each month navigates independently, so a range can span more than two months.
  *  Click a start day, then an end day; the range commits and the popover closes. */
 
 export interface DateRange {
@@ -85,6 +86,31 @@ function MonthGrid({
   );
 }
 
+function MonthPanel({
+  view,
+  onShift,
+  start,
+  end,
+  onPick,
+}: {
+  view: Date;
+  onShift: (delta: number) => void;
+  start: Date | null;
+  end: Date | null;
+  onPick: (d: Date) => void;
+}) {
+  return (
+    <div>
+      <div className="mb-1 flex items-center justify-between text-xs font-medium">
+        <button type="button" className="px-1" onClick={() => onShift(-1)}>‹</button>
+        <span>{monthLabel(view)}</span>
+        <button type="button" className="px-1" onClick={() => onShift(1)}>›</button>
+      </div>
+      <MonthGrid view={view} start={start} end={end} onPick={onPick} />
+    </div>
+  );
+}
+
 export function CalendarRangePicker({
   value,
   onChange,
@@ -94,7 +120,10 @@ export function CalendarRangePicker({
   onChange: (r: DateRange) => void;
   onClose: () => void;
 }) {
-  const [view, setView] = useState(() => startOfMonth(value?.from ?? new Date()));
+  const [leftView, setLeftView] = useState<Date>(() => startOfMonth(value?.from ?? new Date()));
+  const [rightView, setRightView] = useState<Date>(() =>
+    value?.to ? startOfMonth(value.to) : addMonths(startOfMonth(value?.from ?? new Date()), 1),
+  );
   const [start, setStart] = useState<Date | null>(value?.from ?? null);
   const [end, setEnd] = useState<Date | null>(value?.to ?? null);
 
@@ -124,18 +153,20 @@ export function CalendarRangePicker({
         onClick={onClose}
       />
       <div className="absolute right-0 top-full z-20 mt-1 flex gap-5 rounded-lg border border-border bg-card p-3 shadow-lg">
-        <div>
-          <div className="mb-1 flex items-center justify-between text-xs font-medium">
-            <button type="button" className="px-1" onClick={() => setView((v) => addMonths(v, -1))}>‹</button>
-            <span>{monthLabel(view)}</span>
-            <button type="button" className="px-1" onClick={() => setView((v) => addMonths(v, 1))}>›</button>
-          </div>
-          <MonthGrid view={view} start={start} end={end} onPick={onPick} />
-        </div>
-        <div>
-          <div className="mb-1 text-center text-xs font-medium">{monthLabel(addMonths(view, 1))}</div>
-          <MonthGrid view={addMonths(view, 1)} start={start} end={end} onPick={onPick} />
-        </div>
+        <MonthPanel
+          view={leftView}
+          onShift={(d) => setLeftView((v) => addMonths(v, d))}
+          start={start}
+          end={end}
+          onPick={onPick}
+        />
+        <MonthPanel
+          view={rightView}
+          onShift={(d) => setRightView((v) => addMonths(v, d))}
+          start={start}
+          end={end}
+          onPick={onPick}
+        />
       </div>
     </>
   );
