@@ -38,9 +38,9 @@ def test_usage_session_returns_totals() -> None:
 
 def test_usage_series_endpoint_custom_range(tmp_path) -> None:
     db = open_db(tmp_path / "t.db")
-    record_usage(db, "m1", ts=10, start=0, end=1, input_tokens=5, output_tokens=5, cache_n=0, prompt_n=5)
-    record_usage(db, "m1", ts=70, start=0, end=1, input_tokens=3, output_tokens=3, cache_n=0, prompt_n=3)
-    record_usage(db, "m2", ts=20, start=0, end=1, input_tokens=2, output_tokens=2, cache_n=0, prompt_n=2)
+    record_usage(db, "m1", start=9, end=10, input_tokens=5, output_tokens=5, cache_n=0, prompt_n=5)
+    record_usage(db, "m1", start=69, end=70, input_tokens=3, output_tokens=3, cache_n=0, prompt_n=3)
+    record_usage(db, "m2", start=19, end=20, input_tokens=2, output_tokens=2, cache_n=0, prompt_n=2)
     with TestClient(_app(db)) as c:
         r = c.get("/api/usage/series?start=0&end=120")
     assert r.status_code == 200

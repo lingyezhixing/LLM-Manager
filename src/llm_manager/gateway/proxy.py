@@ -97,9 +97,8 @@ async def _record_usage(db, model, path, body_bytes, start, end) -> None:
         if not any([usage.input_tokens, usage.output_tokens, usage.cache_tokens, usage.prompt_tokens]):
             return
         _s.add(usage.input_tokens, usage.output_tokens, usage.cache_tokens, usage.prompt_tokens)
-        ts = time.time()
         await asyncio.to_thread(
-            _p.record_usage, db, model, ts, start, end,
+            _p.record_usage, db, model, start, end,
             usage.input_tokens, usage.output_tokens, usage.cache_tokens, usage.prompt_tokens,
         )
     except Exception:
@@ -115,7 +114,7 @@ async def _stream_wrapper(resp, path, model, db, request_start):
             yield chunk
     finally:
         await resp.aclose()
-        await _record_usage(db, model, path, b"".join(chunks), request_start, time.monotonic())
+        await _record_usage(db, model, path, b"".join(chunks), request_start, time.time())
         state.end_request(model)
 
 
@@ -142,7 +141,7 @@ async def forward(request: Request, path: str, lifecycle, cfg, db, client_pool) 
         logger.warning("model %s not routing (%s)", primary, status.value)
         raise HTTPException(503, f"model '{primary}' not routing (status={status.value})")
 
-    request_start = time.monotonic()
+    request_start = time.time()
     try:
         port = cfg.models[primary].port
         client = _get_or_create_client(client_pool, port)
@@ -158,7 +157,7 @@ async def forward(request: Request, path: str, lifecycle, cfg, db, client_pool) 
                 status_code=resp.status_code, headers=_strip_response_headers(resp.headers))
         content = await resp.aread()
         await resp.aclose()
-        await _record_usage(db, primary, path, content, request_start, time.monotonic())
+        await _record_usage(db, primary, path, content, request_start, time.time())
         state.end_request(primary)
         logger.info("RESP %d model=%s %.2fs", resp.status_code, primary, time.monotonic() - t0)
         return Response(content=content, status_code=resp.status_code,

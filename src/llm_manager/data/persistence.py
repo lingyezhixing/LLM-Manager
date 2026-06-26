@@ -5,7 +5,6 @@ from __future__ import annotations
 import math
 import sqlite3
 import threading
-import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -33,7 +32,6 @@ def open_db(path: Path) -> Db:
         CREATE TABLE IF NOT EXISTS model_requests (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             model_id INTEGER NOT NULL,
-            ts REAL NOT NULL DEFAULT 0,
             start_time REAL NOT NULL,
             end_time REAL NOT NULL,
             input_tokens INTEGER NOT NULL,
@@ -51,16 +49,14 @@ def open_db(path: Path) -> Db:
 
 
 def _migrate(conn: sqlite3.Connection) -> None:
-    """Add the wall-clock ``ts`` column + index to legacy model_requests tables
-    (created before the usage time-series needed a displayable timestamp)."""
+    """Drop the obsolete ``ts`` column if present (Round-2 era). Option A folds the
+    timestamp back into start_time/end_time (now wall-clock again, as in legacy). No-op
+    on fresh DBs."""
     cols = {row[1] for row in conn.execute("PRAGMA table_info(model_requests)")}
-    if "ts" not in cols:
-        conn.execute("ALTER TABLE model_requests ADD COLUMN ts REAL NOT NULL DEFAULT 0")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_model_requests_ts ON model_requests(ts)")
-    # Legacy rows written before `ts` existed have ts=0; their original wall-clock time is
-    # unrecoverable (start/end were monotonic, process-local). Stamp them to now so they
-    # stay visible on the chart. Runs once per row — ts>0 rows are untouched on later boots.
-    conn.execute("UPDATE model_requests SET ts = ? WHERE ts = 0", (time.time(),))
+    if "ts" in cols:
+        # SQLite refuses DROP COLUMN while an index references it; drop the index first.
+        conn.execute("DROP INDEX IF EXISTS idx_model_requests_ts")
+        conn.execute("ALTER TABLE model_requests DROP COLUMN ts")
 
 
 def _resolve_model_id_locked(db: Db, model_name: str) -> int:
@@ -81,13 +77,13 @@ def resolve_model_id(db: Db, model_name: str) -> int:
         return _resolve_model_id_locked(db, model_name)
 
 
-def record_usage(db: Db, model_name: str, ts: float, start: float, end: float,
+def record_usage(db: Db, model_name: str, start: float, end: float,
                  input_tokens: int, output_tokens: int, cache_n: int, prompt_n: int) -> None:
     with db.write_lock:
         mid = _resolve_model_id_locked(db, model_name)
         db.conn.execute(
-            "INSERT INTO model_requests (model_id, ts, start_time, end_time, input_tokens, output_tokens, cache_n, prompt_n) VALUES (?,?,?,?,?,?,?,?)",
-            (mid, ts, start, end, input_tokens, output_tokens, cache_n, prompt_n),
+            "INSERT INTO model_requests (model_id, start_time, end_time, input_tokens, output_tokens, cache_n, prompt_n) VALUES (?,?,?,?,?,?,?)",
+            (mid, start, end, input_tokens, output_tokens, cache_n, prompt_n),
         )
         db.conn.commit()
 
@@ -108,7 +104,8 @@ class UsageSeries:
 
 
 def usage_series(db: Db, *, start_ts: float, end_ts: float, bucket_seconds: int) -> UsageSeries:
-    """Aggregate token consumption (input + output) per model + total, bucketed by wall-clock ts.
+    """Aggregate token consumption (input + output) per model + total, bucketed by wall-clock
+    end_time (the request's completion timestamp — when usage is recorded).
 
     Returns the full bucket axis ``[start, start+bucket, …)`` 0-filled, so the chart stays
     continuous even when a bucket has no requests. ``tokens = input + output``.
@@ -120,10 +117,10 @@ def usage_series(db: Db, *, start_ts: float, end_ts: float, bucket_seconds: int)
     buckets = [start_ts + i * bucket_seconds for i in range(n)]
     rows = db.conn.execute(
         """SELECT m.original_name AS model,
-                  :start + CAST((r.ts - :start) / :bucket AS INTEGER) * :bucket AS bucket,
+                  :start + CAST((r.end_time - :start) / :bucket AS INTEGER) * :bucket AS bucket,
                   SUM(r.input_tokens + r.output_tokens) AS tokens
            FROM model_requests r JOIN models m ON r.model_id = m.id
-           WHERE r.ts >= :start AND r.ts < :end
+           WHERE r.end_time >= :start AND r.end_time < :end
            GROUP BY m.original_name, bucket""",
         {"start": start_ts, "end": end_ts, "bucket": bucket_seconds},
     ).fetchall()

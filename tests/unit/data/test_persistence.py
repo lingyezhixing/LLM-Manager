@@ -1,52 +1,22 @@
-"""model_requests wall-clock `ts` column + legacy migration (for the usage time-series)."""
-import sqlite3
-
+"""model_requests: record_usage (wall-clock start/end) + usage_series (bucketed by end_time)."""
 from llm_manager.data.persistence import open_db, record_usage, usage_series
 
 
-def test_record_usage_writes_wallclock_ts(tmp_path):
+def test_record_usage_writes_start_end_tokens(tmp_path):
     db = open_db(tmp_path / "t.db")
-    record_usage(db, "m1", ts=1000.5, start=1.0, end=2.0,
-                 input_tokens=5, output_tokens=10, cache_n=1, prompt_n=4)
-    row = db.conn.execute("SELECT ts, input_tokens FROM model_requests").fetchone()
-    assert row["ts"] == 1000.5
+    record_usage(db, "m1", start=100.0, end=200.0, input_tokens=5, output_tokens=10, cache_n=1, prompt_n=4)
+    row = db.conn.execute("SELECT start_time, end_time, input_tokens FROM model_requests").fetchone()
+    assert row["start_time"] == 100.0
+    assert row["end_time"] == 200.0
     assert row["input_tokens"] == 5
-
-
-def test_open_db_creates_ts_column_and_index(tmp_path):
-    db = open_db(tmp_path / "t.db")
-    cols = {r[1] for r in db.conn.execute("PRAGMA table_info(model_requests)")}
-    assert "ts" in cols
-    indexes = {r[1] for r in db.conn.execute("PRAGMA index_list(model_requests)")}
-    assert any("ts" in i for i in indexes)
-
-
-def test_open_db_migrates_legacy_model_requests_adds_ts(tmp_path):
-    """A DB created before `ts` existed gets the column added on open."""
-    p = tmp_path / "legacy.db"
-    conn = sqlite3.connect(str(p))
-    conn.executescript(
-        "CREATE TABLE models (id INTEGER PRIMARY KEY AUTOINCREMENT, original_name TEXT UNIQUE NOT NULL, "
-        "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);"
-        "CREATE TABLE model_requests (id INTEGER PRIMARY KEY AUTOINCREMENT, model_id INTEGER NOT NULL, "
-        "start_time REAL NOT NULL, end_time REAL NOT NULL, input_tokens INTEGER NOT NULL, "
-        "output_tokens INTEGER NOT NULL, cache_n INTEGER NOT NULL, prompt_n INTEGER NOT NULL, "
-        "FOREIGN KEY (model_id) REFERENCES models(id));"
-    )
-    conn.commit()
-    conn.close()
-
-    db = open_db(p)   # migration runs
-    cols = {r[1] for r in db.conn.execute("PRAGMA table_info(model_requests)")}
-    assert "ts" in cols
 
 
 def test_usage_series_buckets_per_model_and_total(tmp_path):
     db = open_db(tmp_path / "t.db")
-    # bucket=60, range [0,120) → buckets [0, 60]
-    record_usage(db, "m1", ts=10, start=0, end=1, input_tokens=5, output_tokens=5, cache_n=0, prompt_n=5)
-    record_usage(db, "m1", ts=70, start=0, end=1, input_tokens=3, output_tokens=3, cache_n=0, prompt_n=3)
-    record_usage(db, "m2", ts=20, start=0, end=1, input_tokens=2, output_tokens=2, cache_n=0, prompt_n=2)
+    # bucket=60, range [0,120) → buckets [0, 60]; the time key is end_time
+    record_usage(db, "m1", start=9, end=10, input_tokens=5, output_tokens=5, cache_n=0, prompt_n=5)
+    record_usage(db, "m1", start=69, end=70, input_tokens=3, output_tokens=3, cache_n=0, prompt_n=3)
+    record_usage(db, "m2", start=19, end=20, input_tokens=2, output_tokens=2, cache_n=0, prompt_n=2)
     result = usage_series(db, start_ts=0, end_ts=120, bucket_seconds=60)
     assert result.buckets == [0, 60]
     assert result.models["m1"] == [10, 6]   # 5+5 in bucket 0, 3+3 in bucket 1
@@ -61,17 +31,25 @@ def test_usage_series_empty_range_returns_no_buckets(tmp_path):
     assert result.total == []
 
 
-def test_open_db_backfills_legacy_zero_ts(tmp_path):
-    """Legacy rows (ts=0, written before the ts column) get stamped to open time so they
-    remain visible on the chart — their original wall-clock time is unrecoverable."""
-    import time
-    p = tmp_path / "t.db"
-    db = open_db(p)
-    record_usage(db, "m1", ts=0.0, start=0, end=1, input_tokens=1, output_tokens=1, cache_n=0, prompt_n=1)
-    db.conn.close()
+def test_migrate_drops_legacy_ts_column(tmp_path):
+    """A Round-2 DB with a ts column gets it dropped on open (Option A folds the timestamp
+    back into start_time/end_time, now wall-clock as in legacy)."""
+    import sqlite3
+    p = tmp_path / "legacy.db"
+    conn = sqlite3.connect(str(p))
+    conn.executescript(
+        "CREATE TABLE models (id INTEGER PRIMARY KEY AUTOINCREMENT, original_name TEXT UNIQUE NOT NULL, "
+        "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);"
+        "CREATE TABLE model_requests (id INTEGER PRIMARY KEY AUTOINCREMENT, model_id INTEGER NOT NULL, "
+        "ts REAL NOT NULL DEFAULT 0, start_time REAL NOT NULL, end_time REAL NOT NULL, "
+        "input_tokens INTEGER NOT NULL, output_tokens INTEGER NOT NULL, cache_n INTEGER NOT NULL, "
+        "prompt_n INTEGER NOT NULL, FOREIGN KEY (model_id) REFERENCES models(id));"
+        "CREATE INDEX idx_model_requests_ts ON model_requests(ts);"
+    )
+    conn.commit()
+    conn.close()
 
-    before = time.time()
-    db2 = open_db(p)   # migration backfills ts=0 → now
-    after = time.time()
-    ts = db2.conn.execute("SELECT ts FROM model_requests").fetchone()[0]
-    assert before <= ts <= after
+    db = open_db(p)   # migration drops ts
+    cols = {r[1] for r in db.conn.execute("PRAGMA table_info(model_requests)")}
+    assert "ts" not in cols
+    assert "start_time" in cols and "end_time" in cols
