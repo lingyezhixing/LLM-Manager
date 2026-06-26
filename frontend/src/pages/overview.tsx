@@ -5,8 +5,8 @@ import { SessionStats } from "@/components/session-stats";
 
 /**
  * 概览 — read-only cross-cutting overview.
- * Device bar (SSE live) → model status summary (refetch) → token row
- * (curve placeholder [Round 2] + session stats).
+ * Order: device bar (SSE live) → token row (curve placeholder [Round 2] + session stats)
+ * → model status summary (refetch).
  */
 export default function OverviewPage() {
   return (
@@ -18,17 +18,17 @@ export default function OverviewPage() {
         <DeviceBar />
       </section>
 
-      <section className="mb-6">
-        <ModelSummary />
-      </section>
-
-      <section className="grid gap-4 lg:grid-cols-[2.2fr_1fr]">
+      <section className="mb-6 grid gap-4 lg:grid-cols-[minmax(0,1fr)_300px]">
         <div className="rounded-lg border border-dashed border-border p-12 text-center text-sm text-muted-foreground">
           Token 消耗曲线(建设中 · Round 2)
         </div>
         <div className="rounded-lg border border-border p-4">
           <SessionStats />
         </div>
+      </section>
+
+      <section className="mb-6">
+        <ModelSummary />
       </section>
     </>
   );
