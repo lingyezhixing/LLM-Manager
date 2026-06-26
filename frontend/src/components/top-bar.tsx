@@ -24,7 +24,7 @@ export function TopBar({ collapsed, onToggleCollapse }: TopBarProps) {
           title={online ? "后端已连接" : "后端连接中断"}
         >
           <span
-            className={`inline-flex size-4 items-center justify-center rounded-[2px] border-2 ${
+            className={`inline-flex size-3.5 items-center justify-center rounded-[2px] border-2 ${
               online ? "border-success" : "border-destructive"
             }`}
           >
