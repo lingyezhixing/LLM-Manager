@@ -12,12 +12,22 @@ function Stat({ label, value }: { label: string; value: number }) {
   );
 }
 
+/** Idle duration, precise to seconds, largest unit hours: 45s / 2m 5s / 1h 2m 30s. */
+function formatIdle(sec: number): string {
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = sec % 60;
+  if (h > 0) return `${h}h ${m}m ${s}s`;
+  if (m > 0) return `${m}m ${s}s`;
+  return `${s}s`;
+}
+
 /** Per-model trailing status line, with idle ticked locally from last_access. */
 function activityText(m: ModelInfo, nowMs: number): string {
   if (m.pending > 0) return `${m.pending} 请求中`;
   if (m.last_access > 0) {
     const idleSec = Math.max(0, Math.floor((nowMs - m.last_access * 1000) / 1000));
-    return `空闲 ${idleSec}s`;
+    return `空闲 ${formatIdle(idleSec)}`;
   }
   return "";
 }
