@@ -1,24 +1,61 @@
-"""GET /api/usage/session — since-start token totals + process start time.
+"""GET /api/usage/session (since-start totals) + GET /api/usage/series (token time-series).
 
-Reads the module-level session aggregate (fed by the proxy's record path). The frontend
-refetches the totals every 3s and ticks uptime locally from ``started_at`` (constant), so
-the backend never computes a duration. Aggregated data → periodic refetch, not SSE push.
+``session`` = module-level aggregate (proxy-fed), refetched every 3s by the 概览 card.
+``series``  = bucketed per-model + total token consumption, refetched per-preset cadence.
+The frontend ticks uptime locally from ``started_at``; series buckets carry wall-clock
+epochs so the chart's x-axis is displayable.
 """
 from __future__ import annotations
 
-from fastapi import APIRouter
+import datetime
+import time
+
+from fastapi import APIRouter, Request
 from pydantic import BaseModel
 
 from llm_manager.data import session
+from llm_manager.data.persistence import usage_series
 
 
 class SessionUsageResponse(BaseModel):
-    started_at: float        # process start (wall-clock epoch seconds)
+    started_at: float
     input_tokens: int
     output_tokens: int
     cache_hit: int
     cache_miss: int
     hit_rate: float
+
+
+class UsageSeriesResponse(BaseModel):
+    buckets: list[float]            # bucket-start wall-clock epochs (chart x-axis)
+    total: list[int]                # tokens per bucket, summed across models
+    models: dict[str, list[int]]    # model name → tokens per bucket
+
+
+def _bucket_for_span(span: float) -> int:
+    """Auto bucket size for a custom range, chosen by span."""
+    if span <= 3600:
+        return 60          # ≤1h → 1min
+    if span <= 86_400:
+        return 900         # ≤1d → 15min
+    if span <= 604_800:
+        return 10_800      # ≤7d → 3h
+    return 43_200          # → 12h
+
+
+def _resolve_range(preset: str, start: float | None, end: float | None) -> tuple[float, float, int]:
+    """Map a preset or custom (start, end) to (start_ts, end_ts, bucket_seconds)."""
+    now = time.time()
+    if start is not None and end is not None:
+        return start, end, _bucket_for_span(end - start)
+    if preset == "10m":
+        return now - 600, now, 30                 # last 10 min, 30s buckets
+    if preset == "today":
+        midnight = datetime.datetime.now().replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+        return midnight, now, 900                 # since local midnight, 15min buckets
+    if preset == "30d":
+        return now - 2_592_000, now, 43_200       # last 30 days, 12h buckets
+    return now - 604_800, now, 10_800             # default + "7d": last 7 days, 3h buckets
 
 
 def register_usage_routes(router: APIRouter) -> None:
@@ -33,3 +70,15 @@ def register_usage_routes(router: APIRouter) -> None:
             cache_miss=s.cache_miss,
             hit_rate=s.hit_rate,
         )
+
+    @router.get("/usage/series", response_model=UsageSeriesResponse)
+    def usage_series_endpoint(
+        request: Request,
+        range: str = "7d",
+        start: float | None = None,
+        end: float | None = None,
+    ) -> UsageSeriesResponse:
+        db = request.app.state.db
+        start_ts, end_ts, bucket = _resolve_range(range, start, end)
+        result = usage_series(db, start_ts=start_ts, end_ts=end_ts, bucket_seconds=bucket)
+        return UsageSeriesResponse(buckets=result.buckets, total=result.total, models=result.models)
