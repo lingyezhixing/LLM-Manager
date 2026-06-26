@@ -14,12 +14,13 @@ const PRESETS: { key: Exclude<Preset, "custom">; label: string }[] = [
   { key: "30d", label: "30天" },
 ];
 
-/** Refetch cadence per preset (ms); custom = no auto-refresh. */
+/** Refetch cadence: all live presets refresh every 10s (unified); custom (a fixed past
+ *  range) does not auto-refresh. */
 const REFETCH: Record<Preset, number | false> = {
-  "10m": 3000,
-  today: 60_000,
-  "7d": 600_000,
-  "30d": 3_600_000,
+  "10m": 10_000,
+  today: 10_000,
+  "7d": 10_000,
+  "30d": 10_000,
   custom: false,
 };
 

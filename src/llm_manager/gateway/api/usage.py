@@ -33,29 +33,30 @@ class UsageSeriesResponse(BaseModel):
 
 
 def _bucket_for_span(span: float) -> int:
-    """Auto bucket size for a custom range, chosen by span."""
+    """Auto bucket size for a custom range, chosen by span (matches preset granularities)."""
     if span <= 3600:
-        return 60          # ≤1h → 1min
+        return 10           # ≤1h → 10s
     if span <= 86_400:
-        return 900         # ≤1d → 15min
+        return 600          # ≤1d → 10min
     if span <= 604_800:
-        return 10_800      # ≤7d → 3h
-    return 43_200          # → 12h
+        return 3_600        # ≤7d → 1h
+    return 86_400           # → 1 day
 
 
 def _resolve_range(preset: str, start: float | None, end: float | None) -> tuple[float, float, int]:
-    """Map a preset or custom (start, end) to (start_ts, end_ts, bucket_seconds)."""
+    """Map a preset or custom (start, end) to (start_ts, end_ts, bucket_seconds).
+    Buckets align to local clock boundaries (see usage_series TZ offset)."""
     now = time.time()
     if start is not None and end is not None:
         return start, end, _bucket_for_span(end - start)
     if preset == "10m":
-        return now - 600, now, 30                 # last 10 min, 30s buckets
+        return now - 600, now, 10                  # last 10 min, 10s buckets
     if preset == "today":
         midnight = datetime.datetime.now().replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
-        return midnight, now, 900                 # since local midnight, 15min buckets
+        return midnight, now, 600                  # since local midnight, 10min buckets
     if preset == "30d":
-        return now - 2_592_000, now, 43_200       # last 30 days, 12h buckets
-    return now - 604_800, now, 10_800             # default + "7d": last 7 days, 3h buckets
+        return now - 2_592_000, now, 86_400        # last 30 days, 1-day buckets
+    return now - 604_800, now, 3_600               # default + "7d": last 7 days, 1h buckets
 
 
 def register_usage_routes(router: APIRouter) -> None:

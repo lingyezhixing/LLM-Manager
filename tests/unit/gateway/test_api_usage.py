@@ -37,18 +37,20 @@ def test_usage_session_returns_totals() -> None:
 
 
 def test_usage_series_endpoint_custom_range(tmp_path) -> None:
+    # 2h span → _bucket_for_span returns 600s buckets (12 of them)
     db = open_db(tmp_path / "t.db")
-    record_usage(db, "m1", start=9, end=10, input_tokens=5, output_tokens=5, cache_n=0, prompt_n=5)
-    record_usage(db, "m1", start=69, end=70, input_tokens=3, output_tokens=3, cache_n=0, prompt_n=3)
-    record_usage(db, "m2", start=19, end=20, input_tokens=2, output_tokens=2, cache_n=0, prompt_n=2)
+    record_usage(db, "m1", start=99, end=100, input_tokens=5, output_tokens=5, cache_n=0, prompt_n=0)
+    record_usage(db, "m1", start=699, end=700, input_tokens=3, output_tokens=3, cache_n=0, prompt_n=0)
+    record_usage(db, "m2", start=199, end=200, input_tokens=2, output_tokens=2, cache_n=0, prompt_n=0)
     with TestClient(_app(db)) as c:
-        r = c.get("/api/usage/series?start=0&end=120")
+        r = c.get("/api/usage/series?start=0&end=7200")
     assert r.status_code == 200
     j = r.json()
-    assert j["buckets"] == [0, 60]
-    assert j["total"] == [14, 6]
-    assert j["models"]["m1"] == [10, 6]
-    assert j["models"]["m2"] == [4, 0]
+    assert len(j["buckets"]) == 12                       # 7200 / 600
+    assert j["models"]["m1"][0] == 10 and j["models"]["m1"][1] == 6   # end=100→b0, end=700→b600
+    assert j["models"]["m2"][0] == 4                     # end=200→b0
+    assert j["total"][0] == 14 and j["total"][1] == 6
+    assert sum(j["total"]) == 20
 
 
 def test_usage_series_endpoint_preset_returns_aligned_shape() -> None:

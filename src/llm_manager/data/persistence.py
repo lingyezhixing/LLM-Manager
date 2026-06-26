@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 import sqlite3
 import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -115,17 +116,20 @@ def usage_series(db: Db, *, start_ts: float, end_ts: float, bucket_seconds: int)
     if end_ts <= start_ts or bucket_seconds <= 0:
         return UsageSeries(buckets=[], models={}, total=[])
 
-    first = math.floor(start_ts / bucket_seconds) * bucket_seconds   # bucket containing start
+    # Align buckets to LOCAL boundaries (e.g. local midnight for daily) via the TZ offset,
+    # so a 1-day bucket is a calendar day, not an epoch day (which would split at 8am local).
+    offset = (-time.localtime().tm_gmtoff) % bucket_seconds
+    first = float(math.floor((start_ts - offset) / bucket_seconds) * bucket_seconds + offset)
     n = max(1, math.ceil((end_ts - first) / bucket_seconds))
     buckets = [first + i * bucket_seconds for i in range(n)]
     rows = db.conn.execute(
         """SELECT m.original_name AS model,
-                  CAST(r.end_time / :bucket AS INTEGER) * :bucket AS bucket,
+                  CAST((r.end_time - :offset) / :bucket AS INTEGER) * :bucket + :offset AS bucket,
                   SUM(r.input_tokens + r.output_tokens) AS tokens
            FROM model_requests r JOIN models m ON r.model_id = m.id
            WHERE r.end_time >= :start AND r.end_time < :end
            GROUP BY m.original_name, bucket""",
-        {"start": start_ts, "end": end_ts, "bucket": bucket_seconds},
+        {"start": start_ts, "end": end_ts, "bucket": bucket_seconds, "offset": offset},
     ).fetchall()
 
     models: dict[str, list[int]] = {}
