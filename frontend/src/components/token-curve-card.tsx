@@ -32,10 +32,16 @@ function fmtRange(r: DateRange): string {
   return `${fmtDate(r.from)} ~ ${fmtDate(r.to)}`;
 }
 
+/** Initial custom range = last 7 days, so the 自选 pill always shows a date range. */
+function defaultRange(): DateRange {
+  const to = new Date();
+  return { from: new Date(to.getTime() - 7 * 86_400_000), to };
+}
+
 /** Token 消耗 card: preset bar (+ 自选 calendar) in the header, hand-rolled chart below. */
 export function TokenCurveCard() {
   const [preset, setPreset] = useState<Preset>("7d");
-  const [custom, setCustom] = useState<DateRange | null>(null);
+  const [custom, setCustom] = useState<DateRange>(defaultRange);
   const [calOpen, setCalOpen] = useState(false);
 
   const params: UsageSeriesParams =
@@ -71,12 +77,12 @@ export function TokenCurveCard() {
           ))}
           <button
             type="button"
-            onClick={() => setCalOpen((o) => !o)}
-            className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-[11px] ${
-              preset === "custom" ? "border-primary text-primary" : "border-border text-muted-foreground hover:text-foreground"
+            onClick={() => setCalOpen(true)}
+            className={`rounded-full border border-border px-2.5 py-0.5 text-[11px] ${
+              preset === "custom" ? "bg-muted font-medium text-foreground" : "text-muted-foreground hover:text-foreground"
             }`}
           >
-            📅 {custom ? fmtRange(custom) : "自选"} ▾
+            {fmtRange(custom)}
           </button>
           {calOpen && (
             <CalendarRangePicker
