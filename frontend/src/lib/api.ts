@@ -25,6 +25,7 @@ export interface DeviceInfo {
 export interface DevicesResponse { data: DeviceInfo[]; }
 
 export interface SessionUsage {
+  started_at: number;       // process start (wall-clock epoch seconds) — frontend ticks uptime
   input_tokens: number;
   output_tokens: number;
   cache_hit: number;

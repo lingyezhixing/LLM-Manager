@@ -23,6 +23,8 @@ def test_usage_session_returns_totals() -> None:
         r = c.get("/api/usage/session")
     assert r.status_code == 200
     j = r.json()
+    assert isinstance(j["started_at"], (int, float))
+    assert j["started_at"] > 0
     assert j["input_tokens"] == 100
     assert j["output_tokens"] == 50
     assert j["cache_hit"] == 30

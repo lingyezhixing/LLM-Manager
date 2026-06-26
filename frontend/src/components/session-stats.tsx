@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { fetchSessionUsage } from "@/lib/api";
 
@@ -5,6 +6,27 @@ function fmt(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
   return `${n}`;
+}
+
+/** Compact uptime: 45s / 12m / 3h 12m / 2d 5h. */
+function formatUptime(sec: number): string {
+  if (sec < 60) return `${sec}s`;
+  const m = Math.floor(sec / 60);
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ${m % 60}m`;
+  const d = Math.floor(h / 24);
+  return `${d}d ${h % 24}h`;
+}
+
+/** Ticks `now` every interval so time-derived displays update locally (no refetch). */
+function useNowTick(intervalMs = 1000): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), intervalMs);
+    return () => clearInterval(id);
+  }, [intervalMs]);
+  return now;
 }
 
 function Tile({ label, value, valueClass = "" }: { label: string; value: string; valueClass?: string }) {
@@ -16,21 +38,25 @@ function Tile({ label, value, valueClass = "" }: { label: string; value: string;
   );
 }
 
-/** Session stats (since gateway start). Refetches /api/usage/session every 3s. */
+/** Session stats (since gateway start). Totals refetch every 3s; uptime ticks locally. */
 export function SessionStats() {
   const { data, isLoading } = useQuery({
     queryKey: ["usage", "session"],
     queryFn: fetchSessionUsage,
     refetchInterval: 3000,
   });
+  const now = useNowTick(1000);
+
   if (isLoading || !data) return <p className="text-sm text-muted-foreground">加载中…</p>;
 
   const pct = Math.round(data.hit_rate * 1000) / 10;  // 1 decimal place
+  const uptimeSec = Math.max(0, Math.floor((now - data.started_at * 1000) / 1000));
+
   return (
     <div>
       <div className="mb-3 flex items-baseline justify-between">
         <span className="text-sm font-semibold">本次启动</span>
-        <span className="text-xs text-muted-foreground">每 3s</span>
+        <span className="text-xs text-muted-foreground">运行 {formatUptime(uptimeSec)}</span>
       </div>
       <div className="grid grid-cols-2 gap-2">
         <Tile label="输入" value={fmt(data.input_tokens)} />

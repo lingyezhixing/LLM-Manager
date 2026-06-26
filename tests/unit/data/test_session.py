@@ -30,3 +30,12 @@ def test_reset_clears_counters() -> None:
     s = session.snapshot()
     assert s.input_tokens == 0
     assert s.hit_rate == 0.0
+
+
+def test_snapshot_includes_started_at_epoch() -> None:
+    """started_at = process start (wall-clock epoch); stable across snapshots, not a counter."""
+    session._reset()
+    s = session.snapshot()
+    assert isinstance(s.started_at, float)
+    assert s.started_at > 0
+    assert session.snapshot().started_at == s.started_at
