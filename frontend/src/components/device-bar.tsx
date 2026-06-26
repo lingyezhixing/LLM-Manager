@@ -1,12 +1,24 @@
+import { useState } from "react";
 import { useEventStream } from "@/lib/use-event-stream";
 import type { DevicesResponse } from "@/lib/api";
 
-/** Real-time device bar (概览 top). Subscribes to /api/devices/stream (2s push). */
-function mem(mb: number): string {
-  return mb >= 1024 ? `${(mb / 1024).toFixed(1)}G` : `${mb}M`;
+type MemUnit = "GB" | "MB";
+
+/** Real-time device bar (概览 top). Subscribes to /api/devices/stream (2s push).
+ *  Click a card's memory readout to toggle GB ↔ MB (applies to all cards). */
+function mem(mb: number, unit: MemUnit): string {
+  return unit === "MB" ? `${Math.round(mb)} MB` : `${(mb / 1024).toFixed(1)} GB`;
 }
 
-function DeviceCard({ d }: { d: DevicesResponse["data"][number] }) {
+function DeviceCard({
+  d,
+  unit,
+  onToggleUnit,
+}: {
+  d: DevicesResponse["data"][number];
+  unit: MemUnit;
+  onToggleUnit: () => void;
+}) {
   const isCpu = d.device_type === "CPU";
   return (
     <div className="min-w-[150px] flex-1 rounded-lg border border-border bg-card p-3">
@@ -25,7 +37,14 @@ function DeviceCard({ d }: { d: DevicesResponse["data"][number] }) {
         />
       </div>
       <div className="mt-2 flex items-center justify-between text-xs text-muted-foreground">
-        <span>{mem(d.used_memory_mb)} / {mem(d.total_memory_mb)}</span>
+        <button
+          type="button"
+          onClick={onToggleUnit}
+          title="点击切换 GB / MB"
+          className="cursor-pointer rounded transition-colors hover:text-foreground"
+        >
+          {mem(d.used_memory_mb, unit)} / {mem(d.total_memory_mb, unit)}
+        </button>
         <span>{d.temperature_celsius != null ? `${Math.round(d.temperature_celsius)}°C` : "—"}</span>
       </div>
     </div>
@@ -34,13 +53,17 @@ function DeviceCard({ d }: { d: DevicesResponse["data"][number] }) {
 
 export function DeviceBar() {
   const data = useEventStream<DevicesResponse>("/api/devices/stream");
+  const [unit, setUnit] = useState<MemUnit>("GB");
+
   if (!data) return <p className="text-sm text-muted-foreground">设备加载中…</p>;
   const devices = data.data ?? [];
   if (devices.length === 0) return <p className="text-sm text-muted-foreground">未检测到设备</p>;
+
+  const toggle = () => setUnit((u) => (u === "GB" ? "MB" : "GB"));
   return (
     <div className="flex flex-wrap gap-3">
       {devices.map((d) => (
-        <DeviceCard key={d.device_name} d={d} />
+        <DeviceCard key={d.device_name} d={d} unit={unit} onToggleUnit={toggle} />
       ))}
     </div>
   );
