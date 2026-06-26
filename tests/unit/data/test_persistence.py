@@ -31,6 +31,16 @@ def test_usage_series_empty_range_returns_no_buckets(tmp_path):
     assert result.total == []
 
 
+def test_usage_series_buckets_are_clock_aligned_not_start_relative(tmp_path):
+    """Buckets align to the clock (multiples of bucket_seconds), independent of the window
+    start — so a sliding window scrolls the chart rather than reshuffling each request."""
+    db = open_db(tmp_path / "t.db")
+    record_usage(db, "m1", start=69, end=70, input_tokens=1, output_tokens=1, cache_n=0, prompt_n=0)  # end=70 → absolute bucket 60
+    result = usage_series(db, start_ts=10, end_ts=130, bucket_seconds=60)  # unaligned start
+    assert result.buckets == [0, 60, 120]            # first = floor(10/60)*60 = 0
+    assert result.models["m1"] == [0, 2, 0]          # end=70 → bucket 60 → idx 1
+
+
 def test_migrate_drops_legacy_ts_column(tmp_path):
     """A Round-2 DB with a ts column gets it dropped on open (Option A folds the timestamp
     back into start_time/end_time, now wall-clock as in legacy)."""

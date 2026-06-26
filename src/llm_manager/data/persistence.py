@@ -107,17 +107,20 @@ def usage_series(db: Db, *, start_ts: float, end_ts: float, bucket_seconds: int)
     """Aggregate token consumption (input + output) per model + total, bucketed by wall-clock
     end_time (the request's completion timestamp — when usage is recorded).
 
-    Returns the full bucket axis ``[start, start+bucket, …)`` 0-filled, so the chart stays
-    continuous even when a bucket has no requests. ``tokens = input + output``.
+    Buckets are **absolute** (clock-aligned to multiples of ``bucket_seconds``), not relative
+    to the window start — so a request's bucket is fixed and a sliding live window scrolls
+    the chart instead of reshaping it. Returns the full bucket axis 0-filled for continuity.
+    ``tokens = input + output``.
     """
     if end_ts <= start_ts or bucket_seconds <= 0:
         return UsageSeries(buckets=[], models={}, total=[])
 
-    n = max(1, math.ceil((end_ts - start_ts) / bucket_seconds))
-    buckets = [start_ts + i * bucket_seconds for i in range(n)]
+    first = math.floor(start_ts / bucket_seconds) * bucket_seconds   # bucket containing start
+    n = max(1, math.ceil((end_ts - first) / bucket_seconds))
+    buckets = [first + i * bucket_seconds for i in range(n)]
     rows = db.conn.execute(
         """SELECT m.original_name AS model,
-                  :start + CAST((r.end_time - :start) / :bucket AS INTEGER) * :bucket AS bucket,
+                  CAST(r.end_time / :bucket AS INTEGER) * :bucket AS bucket,
                   SUM(r.input_tokens + r.output_tokens) AS tokens
            FROM model_requests r JOIN models m ON r.model_id = m.id
            WHERE r.end_time >= :start AND r.end_time < :end
@@ -128,7 +131,7 @@ def usage_series(db: Db, *, start_ts: float, end_ts: float, bucket_seconds: int)
     models: dict[str, list[int]] = {}
     total = [0] * n
     for row in rows:
-        idx = int((row["bucket"] - start_ts) // bucket_seconds)
+        idx = int((row["bucket"] - first) // bucket_seconds)
         if 0 <= idx < n:
             tokens = int(row["tokens"])
             models.setdefault(row["model"], [0] * n)[idx] = tokens
