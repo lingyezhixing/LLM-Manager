@@ -14,7 +14,7 @@ def test_open_db_sets_pragmas_and_creates_schema(tmp_path):
 
 def test_record_usage_auto_creates_model_and_round_trips(tmp_path):
     db = open_db(tmp_path / "t.db")
-    record_usage(db, "Qwen3-4B", 1.0, 2.0, 100, 50, 20, 80)
+    record_usage(db, "Qwen3-4B", 1.5, 1.0, 2.0, 100, 50, 20, 80)
     rows = fetch_usage(db, "Qwen3-4B", 0.0, 5.0)
     assert len(rows) == 1
     assert (rows[0]["input_tokens"], rows[0]["output_tokens"]) == (100, 50)
@@ -34,7 +34,7 @@ def test_concurrent_writes_serialized_by_lock(tmp_path):
     def write():
         try:
             for _ in range(20):
-                record_usage(db, "M", 0.0, 0.1, 1, 1, 0, 1)
+                record_usage(db, "M", 0.05, 0.0, 0.1, 1, 1, 0, 1)
         except Exception as e:
             errors.append(e)
 
