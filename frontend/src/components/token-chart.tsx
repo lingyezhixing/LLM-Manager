@@ -1,10 +1,10 @@
-import { useState, type MouseEvent } from "react";
+import { useRef, useState, type MouseEvent } from "react";
 
 import type { UsageSeries } from "@/lib/api";
 
 /** Hand-rolled multi-series line chart (no chart lib — offline, minimal, theme-aware).
  *  total = primary line + area; per-model = categorical colors. Legend toggles models;
- *  hover shows a guide + a readout line. Axes/grid use currentColor (muted/primary tokens). */
+ *  hover shows a guide line + a cursor-following floating tooltip (no layout shift). */
 
 const MODEL_COLORS = ["#f97316", "#a855f7", "#22c55e", "#eab308", "#ec4899", "#06b6d4"];
 
@@ -41,8 +41,10 @@ function LegendDot({ color, label }: { color: string; label: string }) {
 }
 
 export function TokenChart({ data, preset }: { data: UsageSeries; preset: string }) {
+  const containerRef = useRef<HTMLDivElement>(null);
   const [hidden, setHidden] = useState<Set<string>>(new Set());
   const [hover, setHover] = useState<number | null>(null);
+  const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
 
   const { buckets, total, models } = data;
   const modelNames = Object.keys(models);
@@ -83,14 +85,23 @@ export function TokenChart({ data, preset }: { data: UsageSeries; preset: string
     });
 
   const onMove = (e: MouseEvent<SVGSVGElement>) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    const xRel = ((e.clientX - rect.left) / rect.width) * W;
+    const svgRect = e.currentTarget.getBoundingClientRect();
+    const xRel = ((e.clientX - svgRect.left) / svgRect.width) * W;
     const i = n === 1 ? 0 : Math.round(((xRel - PAD.l) / PLOT_W) * (n - 1));
     setHover(Math.max(0, Math.min(n - 1, i)));
+    const container = containerRef.current;
+    if (container) {
+      const cr = container.getBoundingClientRect();
+      setPos({ x: e.clientX - cr.left, y: e.clientY - cr.top });
+    }
+  };
+  const onLeave = () => {
+    setHover(null);
+    setPos(null);
   };
 
   return (
-    <div className="text-muted-foreground">
+    <div ref={containerRef} className="relative text-muted-foreground">
       {/* legend */}
       <div className="mb-2 flex flex-wrap gap-x-4 gap-y-1 text-xs">
         <LegendDot color="var(--color-primary)" label="总量" />
@@ -106,12 +117,7 @@ export function TokenChart({ data, preset }: { data: UsageSeries; preset: string
         ))}
       </div>
 
-      <svg
-        viewBox={`0 0 ${W} ${H}`}
-        width="100%"
-        onMouseMove={onMove}
-        onMouseLeave={() => setHover(null)}
-      >
+      <svg viewBox={`0 0 ${W} ${H}`} width="100%" onMouseMove={onMove} onMouseLeave={onLeave}>
         {/* gridlines + y labels */}
         {yTicks.map((t, i) => (
           <g key={i}>
@@ -147,7 +153,7 @@ export function TokenChart({ data, preset }: { data: UsageSeries; preset: string
             />
           );
         })}
-        {/* hover guide */}
+        {/* hover guide + total point */}
         {hover !== null && (
           <line
             x1={xAt(hover)}
@@ -161,19 +167,22 @@ export function TokenChart({ data, preset }: { data: UsageSeries; preset: string
         )}
       </svg>
 
-      {/* readout */}
-      {hover !== null && (
-        <div className="mt-1 flex flex-wrap gap-x-3 text-xs">
-          <span className="text-foreground">{fmtTs(buckets[hover], preset)}</span>
-          <span>
+      {/* cursor-following floating tooltip (absolute → no layout shift) */}
+      {hover !== null && pos !== null && (
+        <div
+          className="pointer-events-none absolute z-10 min-w-[120px] rounded-md border border-border bg-card px-2 py-1 text-xs shadow-sm"
+          style={{ left: pos.x + 14, top: pos.y + 14 }}
+        >
+          <div className="mb-0.5 text-foreground">{fmtTs(buckets[hover], preset)}</div>
+          <div>
             总量 <span className="text-foreground">{fmtTokens(total[hover])}</span>
-          </span>
+          </div>
           {visibleNames.map((m) => {
             const ci = modelNames.indexOf(m);
             return (
-              <span key={m} style={{ color: MODEL_COLORS[ci % MODEL_COLORS.length] }}>
+              <div key={m} style={{ color: MODEL_COLORS[ci % MODEL_COLORS.length] }}>
                 {m} {fmtTokens(models[m][hover])}
-              </span>
+              </div>
             );
           })}
         </div>
