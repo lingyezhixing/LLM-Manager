@@ -1,7 +1,18 @@
-import type { components } from "@/api/types";
-
-export type ModelInfo = components["schemas"]["ModelInfo"];
-export type ModelsResponse = components["schemas"]["ModelsResponse"];
+// Model types hand-defined (codegen regen pending — match gateway/api/models.py ModelInfo;
+// re-run `npm run gen:api` with the backend up to regenerate src/api/types.ts).
+export interface ModelInfo {
+  alias: string;
+  mode: string;
+  port: number;
+  auto_start: boolean;
+  status: string;
+  pid: number | null;
+  pending: number;
+  failure_reason: string | null;
+  started_at: number | null;   // wall-clock epoch when entered ROUTING (null if not routing)
+  last_access: number;         // wall-clock epoch of last activity (0 if never)
+}
+export interface ModelsResponse { data: ModelInfo[]; }
 
 export async function fetchModels(): Promise<ModelsResponse> {
   const res = await fetch("/api/models");
@@ -9,9 +20,7 @@ export async function fetchModels(): Promise<ModelsResponse> {
   return (await res.json()) as ModelsResponse;
 }
 
-// Hand-defined below (codegen regen pending — match the backend Pydantic schemas in
-// gateway/api/devices.py + gateway/api/usage.py). Re-run `npm run gen:api` with the
-// backend up to fold these into src/api/types.ts.
+// Device + session types hand-defined (match gateway/api/devices.py + usage.py).
 export interface DeviceInfo {
   device_name: string;
   device_type: string;

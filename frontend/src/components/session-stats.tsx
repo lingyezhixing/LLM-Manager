@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { fetchSessionUsage } from "@/lib/api";
+import { useNowTick } from "@/lib/use-now";
 
 function fmt(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
@@ -17,16 +17,6 @@ function formatUptime(sec: number): string {
   if (h < 24) return `${h}h ${m % 60}m`;
   const d = Math.floor(h / 24);
   return `${d}d ${h % 24}h`;
-}
-
-/** Ticks `now` every interval so time-derived displays update locally (no refetch). */
-function useNowTick(intervalMs = 1000): number {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), intervalMs);
-    return () => clearInterval(id);
-  }, [intervalMs]);
-  return now;
 }
 
 function Tile({ label, value, valueClass = "" }: { label: string; value: string; valueClass?: string }) {
