@@ -32,17 +32,26 @@ function fmtRange(r: DateRange): string {
   return `${fmtDate(r.from)} ~ ${fmtDate(r.to)}`;
 }
 
-/** Initial custom range = last 7 days, so the 自选 pill always shows a date range. */
-function defaultRange(): DateRange {
-  const to = new Date();
-  return { from: new Date(to.getTime() - 7 * 86_400_000), to };
+function startOfToday(): Date {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+/** Date range a preset corresponds to (day granularity) — drives the 自选 pill display. */
+function rangeForPreset(preset: Preset): DateRange {
+  const today = startOfToday();
+  if (preset === "7d") return { from: new Date(today.getTime() - 7 * 86_400_000), to: today };
+  if (preset === "30d") return { from: new Date(today.getTime() - 30 * 86_400_000), to: today };
+  return { from: today, to: today }; // 10m, today
 }
 
 /** Token 消耗 card: preset bar (+ 自选 calendar) in the header, hand-rolled chart below. */
 export function TokenCurveCard() {
   const [preset, setPreset] = useState<Preset>("7d");
-  const [custom, setCustom] = useState<DateRange>(defaultRange);
+  const [custom, setCustom] = useState<DateRange>(() => rangeForPreset("7d"));
   const [calOpen, setCalOpen] = useState(false);
+  const displayedRange = preset === "custom" ? custom : rangeForPreset(preset);
 
   const params: UsageSeriesParams =
     preset === "custom" && custom
@@ -82,11 +91,11 @@ export function TokenCurveCard() {
               preset === "custom" ? "bg-muted font-medium text-foreground" : "text-muted-foreground hover:text-foreground"
             }`}
           >
-            {fmtRange(custom)}
+            {fmtRange(displayedRange)}
           </button>
           {calOpen && (
             <CalendarRangePicker
-              value={custom}
+              value={displayedRange}
               onChange={(r) => {
                 setCustom(r);
                 setPreset("custom");
