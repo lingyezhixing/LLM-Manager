@@ -47,3 +47,13 @@ export async function fetchSessionUsage(): Promise<SessionUsage> {
   if (!res.ok) throw new Error(`/api/usage/session failed: ${res.status}`);
   return (await res.json()) as SessionUsage;
 }
+
+export interface HealthResponse {
+  status: string;
+}
+
+export async function fetchHealth(): Promise<HealthResponse> {
+  const res = await fetch("/health");
+  if (!res.ok) throw new Error(`/health failed: ${res.status}`);
+  return (await res.json()) as HealthResponse;
+}

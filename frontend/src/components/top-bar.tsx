@@ -1,5 +1,6 @@
 import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { ThemeSwitcher } from "@/components/theme-switcher";
+import { useHealth } from "@/lib/use-health";
 
 interface TopBarProps {
   collapsed: boolean;
@@ -8,14 +9,23 @@ interface TopBarProps {
 
 /**
  * Full-width top bar. Left cluster = logo + collapse toggle (paired app-chrome unit).
- * Right = theme switcher. Deliberately minimal (no status chip, no stop-all).
+ * The logo glyph is a backend-health LED: ▣ (filled, center dot) while /health succeeds,
+ * □ (hollow) when the probe fails. Right = theme switcher.
  */
 export function TopBar({ collapsed, onToggleCollapse }: TopBarProps) {
+  const online = useHealth();
   const ToggleIcon = collapsed ? PanelLeftOpen : PanelLeftClose;
   return (
     <header className="flex h-14 shrink-0 items-center justify-between border-b border-border bg-card px-4">
       <div className="flex items-center gap-1">
-        <span className="px-1 font-semibold tracking-tight">▣ LLM-Manager</span>
+        <span
+          className="px-1 font-semibold tracking-tight"
+          title={online ? "后端已连接" : "后端连接中断"}
+        >
+          <span className={online ? "text-success" : "text-destructive"}>
+            {online ? "▣" : "□"}
+          </span>{" "}LLM-Manager
+        </span>
         <button
           type="button"
           onClick={onToggleCollapse}
