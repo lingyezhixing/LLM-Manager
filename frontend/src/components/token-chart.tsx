@@ -2,17 +2,20 @@ import { useRef, useState, type MouseEvent } from "react";
 
 import type { UsageSeries } from "@/lib/api";
 
-/** Hand-rolled multi-series line chart (no chart lib — offline, minimal, theme-aware).
- *  total = primary line + area; per-model = categorical colors. Legend toggles models;
- *  hover shows a guide line + a cursor-following floating tooltip (no layout shift). */
+/** Hand-rolled token chart (no lib). Smooth (Catmull-Rom) curves. With few models it
+ *  overlays total + per-model lines; with many it switches to a stacked area so series
+ *  don't pile on one axis. Theme-aware via currentColor; cursor-following tooltip. */
 
-const MODEL_COLORS = ["#f97316", "#a855f7", "#22c55e", "#eab308", "#ec4899", "#06b6d4"];
+const MODEL_COLORS = ["#f97316", "#a855f7", "#22c55e", "#eab308", "#ec4899", "#06b6d4", "#3b82f6", "#ef4444"];
+const STACK_THRESHOLD = 3; // > this many visible models → stacked area
 
 const W = 760;
 const H = 260;
 const PAD = { l: 44, r: 16, t: 16, b: 28 };
-const PLOT_W = W - PAD.l - PAD.r;   // 700
-const PLOT_H = H - PAD.t - PAD.b;    // 216
+const PLOT_W = W - PAD.l - PAD.r;
+const PLOT_H = H - PAD.t - PAD.b;
+
+type Pt = [number, number];
 
 function fmtTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -28,7 +31,38 @@ function fmtTs(ts: number, preset: string): string {
   if (preset === "10m") return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
   if (preset === "today") return hm;
   if (preset === "7d") return `${md} ${hm}`;
-  return md; // 30d / custom
+  return md;
+}
+
+/** Catmull-Rom → cubic bezier segments (no leading M). */
+function smoothSegments(pts: Pt[]): string {
+  if (pts.length < 2) return "";
+  let d = "";
+  for (let i = 0; i < pts.length - 1; i++) {
+    const p0 = pts[i - 1] ?? pts[i];
+    const p1 = pts[i];
+    const p2 = pts[i + 1];
+    const p3 = pts[i + 2] ?? p2;
+    const c1x = p1[0] + (p2[0] - p0[0]) / 6;
+    const c1y = p1[1] + (p2[1] - p0[1]) / 6;
+    const c2x = p2[0] - (p3[0] - p1[0]) / 6;
+    const c2y = p2[1] - (p3[1] - p1[1]) / 6;
+    d += ` C${c1x.toFixed(1)},${c1y.toFixed(1)} ${c2x.toFixed(1)},${c2y.toFixed(1)} ${p2[0].toFixed(1)},${p2[1].toFixed(1)}`;
+  }
+  return d;
+}
+
+function smoothPath(pts: Pt[]): string {
+  if (pts.length === 0) return "";
+  return `M${pts[0][0].toFixed(1)},${pts[0][1].toFixed(1)}${smoothSegments(pts)}`;
+}
+
+/** Smooth area between a top and a bottom polyline (top L→R, bottom R→L). */
+function bandArea(topPts: Pt[], botPts: Pt[]): string {
+  const botRev = [...botPts].reverse();
+  const last = botPts[botPts.length - 1];
+  return `M${topPts[0][0].toFixed(1)},${topPts[0][1].toFixed(1)}${smoothSegments(topPts)}`
+    + ` L${last[0].toFixed(1)},${last[1].toFixed(1)}${smoothSegments(botRev)} Z`;
 }
 
 function LegendDot({ color, label }: { color: string; label: string }) {
@@ -51,24 +85,24 @@ export function TokenChart({ data, preset }: { data: UsageSeries; preset: string
   const n = buckets.length;
 
   if (n === 0) {
-    return (
-      <div className="flex h-[200px] items-center justify-center text-sm text-muted-foreground">
-        暂无数据
-      </div>
-    );
+    return <div className="flex h-[200px] items-center justify-center text-sm text-muted-foreground">暂无数据</div>;
   }
 
   const visibleNames = modelNames.filter((m) => !hidden.has(m));
-  const allValues = [...total, ...visibleNames.flatMap((m) => models[m])];
-  const max = Math.max(1, ...allValues);
+  const max = Math.max(1, ...total); // total ≥ any single model, so it's the ceiling
+  const stacked = visibleNames.length > STACK_THRESHOLD;
+  const colorOf = (m: string) => MODEL_COLORS[modelNames.indexOf(m) % MODEL_COLORS.length];
 
   const xAt = (i: number) => (n === 1 ? PAD.l + PLOT_W / 2 : PAD.l + (i / (n - 1)) * PLOT_W);
   const yAt = (v: number) => PAD.t + PLOT_H - (v / max) * PLOT_H;
+  const pts = (series: number[]): Pt[] => series.map((v, i) => [xAt(i), yAt(v)]);
 
-  const line = (series: number[]) =>
-    series.map((v, i) => `${i === 0 ? "M" : "L"}${xAt(i).toFixed(1)},${yAt(v).toFixed(1)}`).join(" ");
-  const area = (series: number[]) =>
-    `${line(series)} L${xAt(n - 1).toFixed(1)},${(PAD.t + PLOT_H).toFixed(1)} L${xAt(0).toFixed(1)},${(PAD.t + PLOT_H).toFixed(1)} Z`;
+  // cumulative stack boundaries (cum[0]=baseline, cum[k+1]=cum[k]+model_k)
+  const cum: number[][] = [new Array<number>(n).fill(0)];
+  for (const m of visibleNames) {
+    const prev = cum[cum.length - 1];
+    cum.push(prev.map((v, i) => v + models[m][i]));
+  }
 
   const yTicks = [1, 0.75, 0.5, 0.25, 0].map((f) => ({ v: max * f, y: yAt(max * f) }));
   const labelCount = Math.min(5, n);
@@ -105,14 +139,9 @@ export function TokenChart({ data, preset }: { data: UsageSeries; preset: string
       {/* legend */}
       <div className="mb-2 flex flex-wrap gap-x-4 gap-y-1 text-xs">
         <LegendDot color="var(--color-primary)" label="总量" />
-        {modelNames.map((m, i) => (
-          <button
-            key={m}
-            type="button"
-            onClick={() => toggle(m)}
-            className={hidden.has(m) ? "opacity-40" : ""}
-          >
-            <LegendDot color={MODEL_COLORS[i % MODEL_COLORS.length]} label={m} />
+        {modelNames.map((m) => (
+          <button key={m} type="button" onClick={() => toggle(m)} className={hidden.has(m) ? "opacity-40" : ""}>
+            <LegendDot color={colorOf(m)} label={m} />
           </button>
         ))}
       </div>
@@ -122,69 +151,62 @@ export function TokenChart({ data, preset }: { data: UsageSeries; preset: string
         {yTicks.map((t, i) => (
           <g key={i}>
             <line x1={PAD.l} y1={t.y} x2={W - PAD.r} y2={t.y} stroke="currentColor" strokeOpacity={i === 4 ? 0.3 : 0.12} />
-            <text x={PAD.l - 6} y={t.y + 3} textAnchor="end" fontSize="10" fill="currentColor">
-              {fmtTokens(t.v)}
-            </text>
+            <text x={PAD.l - 6} y={t.y + 3} textAnchor="end" fontSize="10" fill="currentColor">{fmtTokens(t.v)}</text>
           </g>
         ))}
         {/* x labels */}
         {xLabelIdx.map((i) => (
-          <text key={i} x={xAt(i)} y={H - 8} textAnchor="middle" fontSize="10" fill="currentColor">
-            {fmtTs(buckets[i], preset)}
-          </text>
+          <text key={i} x={xAt(i)} y={H - 8} textAnchor="middle" fontSize="10" fill="currentColor">{fmtTs(buckets[i], preset)}</text>
         ))}
-        {/* total line + area (primary) */}
-        <g className="text-primary">
-          <path d={area(total)} fill="currentColor" fillOpacity={0.12} />
-          <path d={line(total)} fill="none" stroke="currentColor" strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
-        </g>
-        {/* per-model lines */}
-        {visibleNames.map((m) => {
-          const ci = modelNames.indexOf(m);
-          return (
+
+        {stacked ? (
+          /* stacked area bands: each visible model a colored layer, top edge = total */
+          visibleNames.map((m, k) => (
             <path
               key={m}
-              d={line(models[m])}
-              fill="none"
-              stroke={MODEL_COLORS[ci % MODEL_COLORS.length]}
-              strokeWidth={1.6}
+              d={bandArea(pts(cum[k + 1]), pts(cum[k]))}
+              fill={colorOf(m)}
+              fillOpacity={0.85}
+              stroke={colorOf(m)}
+              strokeWidth={1}
               strokeLinejoin="round"
-              strokeLinecap="round"
             />
-          );
-        })}
+          ))
+        ) : (
+          <>
+            {/* total area + line (primary) */}
+            <g className="text-primary">
+              <path d={`${smoothPath(pts(total))} L${xAt(n - 1).toFixed(1)},${yAt(0).toFixed(1)} L${xAt(0).toFixed(1)},${yAt(0).toFixed(1)} Z`} fill="currentColor" fillOpacity={0.12} />
+              <path d={smoothPath(pts(total))} fill="none" stroke="currentColor" strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
+            </g>
+            {/* per-model lines */}
+            {visibleNames.map((m) => (
+              <path key={m} d={smoothPath(pts(models[m]))} fill="none" stroke={colorOf(m)} strokeWidth={1.6} strokeLinejoin="round" strokeLinecap="round" />
+            ))}
+          </>
+        )}
+
         {/* hover guide + total point */}
         {hover !== null && (
-          <line
-            x1={xAt(hover)}
-            y1={PAD.t}
-            x2={xAt(hover)}
-            y2={PAD.t + PLOT_H}
-            stroke="currentColor"
-            strokeOpacity={0.35}
-            strokeDasharray="3 3"
-          />
+          <>
+            <line x1={xAt(hover)} y1={PAD.t} x2={xAt(hover)} y2={PAD.t + PLOT_H} stroke="currentColor" strokeOpacity={0.35} strokeDasharray="3 3" />
+            <circle cx={xAt(hover)} cy={yAt(total[hover])} r={3} fill="var(--color-primary)" />
+          </>
         )}
       </svg>
 
-      {/* cursor-following floating tooltip (absolute → no layout shift) */}
+      {/* cursor-following tooltip */}
       {hover !== null && pos !== null && (
-        <div
-          className="pointer-events-none absolute z-10 min-w-[120px] rounded-md border border-border bg-card px-2 py-1 text-xs shadow-sm"
-          style={{ left: pos.x + 14, top: pos.y + 14 }}
-        >
+        <div className="pointer-events-none absolute z-10 min-w-[120px] rounded-md border border-border bg-card px-2 py-1 text-xs shadow-sm" style={{ left: pos.x + 14, top: pos.y + 14 }}>
           <div className="mb-0.5 text-foreground">{fmtTs(buckets[hover], preset)}</div>
           <div>
             总量 <span className="text-foreground">{fmtTokens(total[hover])}</span>
           </div>
-          {visibleNames.map((m) => {
-            const ci = modelNames.indexOf(m);
-            return (
-              <div key={m} style={{ color: MODEL_COLORS[ci % MODEL_COLORS.length] }}>
-                {m} {fmtTokens(models[m][hover])}
-              </div>
-            );
-          })}
+          {visibleNames.map((m) => (
+            <div key={m} style={{ color: colorOf(m) }}>
+              {m} {fmtTokens(models[m][hover])}
+            </div>
+          ))}
         </div>
       )}
     </div>
