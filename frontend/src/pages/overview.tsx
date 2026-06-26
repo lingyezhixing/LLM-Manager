@@ -2,6 +2,7 @@ import { DeviceBar } from "@/components/device-bar";
 import { ModelSummary } from "@/components/model-summary";
 import { PageHeader } from "@/components/page-header";
 import { SessionStats } from "@/components/session-stats";
+import { TokenCurveCard } from "@/components/token-curve-card";
 
 /**
  * 概览 — read-only cross-cutting overview.
@@ -19,9 +20,7 @@ export default function OverviewPage() {
       </section>
 
       <section className="mb-6 grid gap-4 lg:grid-cols-[minmax(0,4fr)_minmax(0,1fr)]">
-        <div className="rounded-lg border border-dashed border-border p-12 text-center text-sm text-muted-foreground">
-          Token 消耗曲线(建设中 · Round 2)
-        </div>
+        <TokenCurveCard />
         <div className="rounded-lg border border-border p-4">
           <SessionStats />
         </div>

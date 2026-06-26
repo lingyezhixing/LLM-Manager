@@ -1,0 +1,142 @@
+import { useState } from "react";
+
+/** Hand-rolled two-month range picker (no lib — offline, matches the locked mockup).
+ *  Click a start day, then an end day; the range commits and the popover closes. */
+
+export interface DateRange {
+  from: Date;
+  to: Date;
+}
+
+const WEEKDAYS = ["一", "二", "三", "四", "五", "六", "日"];
+
+function startOfMonth(d: Date): Date {
+  return new Date(d.getFullYear(), d.getMonth(), 1);
+}
+function addMonths(d: Date, n: number): Date {
+  return new Date(d.getFullYear(), d.getMonth() + n, 1);
+}
+function daysInMonth(y: number, m: number): number {
+  return new Date(y, m + 1, 0).getDate();
+}
+function isSameDay(a: Date, b: Date): boolean {
+  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+}
+function inRange(d: Date, a: Date, b: Date): boolean {
+  const t = d.getTime();
+  return t >= a.getTime() && t <= b.getTime();
+}
+function monthLabel(d: Date): string {
+  return `${d.getFullYear()}年${d.getMonth() + 1}月`;
+}
+
+function MonthGrid({
+  view,
+  start,
+  end,
+  onPick,
+}: {
+  view: Date;
+  start: Date | null;
+  end: Date | null;
+  onPick: (d: Date) => void;
+}) {
+  const y = view.getFullYear();
+  const m = view.getMonth();
+  const dim = daysInMonth(y, m);
+  const lead = (new Date(y, m, 1).getDay() + 6) % 7; // Mon-start offset
+  const cells: (Date | null)[] = [
+    ...Array<null>(lead).fill(null),
+    ...Array.from({ length: dim }, (_, i) => new Date(y, m, i + 1)),
+  ];
+  return (
+    <div className="w-[168px]">
+      <div className="mb-1 grid grid-cols-7 text-center text-[10px] text-muted-foreground">
+        {WEEKDAYS.map((w) => (
+          <div key={w} className="py-0.5">{w}</div>
+        ))}
+      </div>
+      <div className="grid grid-cols-7 gap-0.5">
+        {cells.map((d, i) => {
+          if (d === null) return <div key={i} />;
+          const isStart = start && isSameDay(d, start);
+          const isEnd = end && isSameDay(d, end);
+          const isMid = start && end && inRange(d, start, end) && !isStart && !isEnd;
+          return (
+            <button
+              key={i}
+              type="button"
+              onClick={() => onPick(d)}
+              className={[
+                "h-6 rounded text-[11px]",
+                isStart || isEnd
+                  ? "bg-primary text-primary-foreground"
+                  : isMid
+                    ? "bg-primary/20"
+                    : "text-foreground hover:bg-muted",
+              ].join(" ")}
+            >
+              {d.getDate()}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+export function CalendarRangePicker({
+  value,
+  onChange,
+  onClose,
+}: {
+  value: DateRange | null;
+  onChange: (r: DateRange) => void;
+  onClose: () => void;
+}) {
+  const [view, setView] = useState(() => startOfMonth(value?.from ?? new Date()));
+  const [start, setStart] = useState<Date | null>(value?.from ?? null);
+  const [end, setEnd] = useState<Date | null>(value?.to ?? null);
+
+  const onPick = (d: Date) => {
+    if (!start || (start && end)) {
+      setStart(d);
+      setEnd(null);
+      return;
+    }
+    if (d.getTime() < start.getTime()) {
+      setStart(d);
+      setEnd(null);
+      return;
+    }
+    setEnd(d);
+    onChange({ from: start, to: d });
+    onClose();
+  };
+
+  return (
+    <>
+      {/* click-outside backdrop */}
+      <button
+        type="button"
+        aria-label="关闭"
+        className="fixed inset-0 z-10 cursor-default"
+        onClick={onClose}
+      />
+      <div className="absolute right-0 top-full z-20 mt-1 flex gap-5 rounded-lg border border-border bg-card p-3 shadow-lg">
+        <div>
+          <div className="mb-1 flex items-center justify-between text-xs font-medium">
+            <button type="button" className="px-1" onClick={() => setView((v) => addMonths(v, -1))}>‹</button>
+            <span>{monthLabel(view)}</span>
+            <button type="button" className="px-1" onClick={() => setView((v) => addMonths(v, 1))}>›</button>
+          </div>
+          <MonthGrid view={view} start={start} end={end} onPick={onPick} />
+        </div>
+        <div>
+          <div className="mb-1 text-center text-xs font-medium">{monthLabel(addMonths(view, 1))}</div>
+          <MonthGrid view={addMonths(view, 1)} start={start} end={end} onPick={onPick} />
+        </div>
+      </div>
+    </>
+  );
+}

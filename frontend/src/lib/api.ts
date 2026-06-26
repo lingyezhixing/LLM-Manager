@@ -57,3 +57,20 @@ export async function fetchHealth(): Promise<HealthResponse> {
   if (!res.ok) throw new Error(`/health failed: ${res.status}`);
   return (await res.json()) as HealthResponse;
 }
+
+export interface UsageSeries {
+  buckets: number[];                       // bucket-start wall-clock epochs (chart x-axis)
+  total: number[];                         // tokens per bucket, summed across models
+  models: Record<string, number[]>;        // model name → tokens per bucket
+}
+
+export type UsageSeriesParams = { range: string } | { start: number; end: number };
+
+export async function fetchUsageSeries(params: UsageSeriesParams): Promise<UsageSeries> {
+  const qs = new URLSearchParams(
+    "range" in params ? { range: params.range } : { start: String(params.start), end: String(params.end) },
+  );
+  const res = await fetch(`/api/usage/series?${qs.toString()}`);
+  if (!res.ok) throw new Error(`/api/usage/series failed: ${res.status}`);
+  return (await res.json()) as UsageSeries;
+}
