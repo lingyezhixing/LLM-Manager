@@ -31,6 +31,7 @@ def open_db(path: Path) -> Db:
         CREATE TABLE IF NOT EXISTS model_requests (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             model_id INTEGER NOT NULL,
+            ts REAL NOT NULL DEFAULT 0,
             start_time REAL NOT NULL,
             end_time REAL NOT NULL,
             input_tokens INTEGER NOT NULL,
@@ -42,8 +43,18 @@ def open_db(path: Path) -> Db:
         CREATE INDEX IF NOT EXISTS idx_model_requests_model_id ON model_requests(model_id);
         CREATE INDEX IF NOT EXISTS idx_model_requests_end ON model_requests(end_time);
     """)
+    _migrate(conn)
     conn.commit()
     return Db(conn=conn, write_lock=threading.Lock())
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Add the wall-clock ``ts`` column + index to legacy model_requests tables
+    (created before the usage time-series needed a displayable timestamp)."""
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(model_requests)")}
+    if "ts" not in cols:
+        conn.execute("ALTER TABLE model_requests ADD COLUMN ts REAL NOT NULL DEFAULT 0")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_model_requests_ts ON model_requests(ts)")
 
 
 def _resolve_model_id_locked(db: Db, model_name: str) -> int:
@@ -64,13 +75,13 @@ def resolve_model_id(db: Db, model_name: str) -> int:
         return _resolve_model_id_locked(db, model_name)
 
 
-def record_usage(db: Db, model_name: str, start: float, end: float,
+def record_usage(db: Db, model_name: str, ts: float, start: float, end: float,
                  input_tokens: int, output_tokens: int, cache_n: int, prompt_n: int) -> None:
     with db.write_lock:
         mid = _resolve_model_id_locked(db, model_name)
         db.conn.execute(
-            "INSERT INTO model_requests (model_id, start_time, end_time, input_tokens, output_tokens, cache_n, prompt_n) VALUES (?,?,?,?,?,?,?)",
-            (mid, start, end, input_tokens, output_tokens, cache_n, prompt_n),
+            "INSERT INTO model_requests (model_id, ts, start_time, end_time, input_tokens, output_tokens, cache_n, prompt_n) VALUES (?,?,?,?,?,?,?,?)",
+            (mid, ts, start, end, input_tokens, output_tokens, cache_n, prompt_n),
         )
         db.conn.commit()
 

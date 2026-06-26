@@ -97,8 +97,9 @@ async def _record_usage(db, model, path, body_bytes, start, end) -> None:
         if not any([usage.input_tokens, usage.output_tokens, usage.cache_tokens, usage.prompt_tokens]):
             return
         _s.add(usage.input_tokens, usage.output_tokens, usage.cache_tokens, usage.prompt_tokens)
+        ts = time.time()
         await asyncio.to_thread(
-            _p.record_usage, db, model, start, end,
+            _p.record_usage, db, model, ts, start, end,
             usage.input_tokens, usage.output_tokens, usage.cache_tokens, usage.prompt_tokens,
         )
     except Exception:
