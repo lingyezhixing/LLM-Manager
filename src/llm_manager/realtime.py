@@ -13,7 +13,7 @@ and live-log SSE endpoints will build on the same ``Broadcaster``. Loop-resident
 from __future__ import annotations
 
 import asyncio
-from typing import Generic, Protocol, TypeVar
+from typing import Callable, Generic, Protocol, TypeVar
 
 from llm_manager.devices import DeviceInfo
 
@@ -103,3 +103,53 @@ class DeviceFeed:
     def _refresh_and_snapshot(self) -> dict[str, DeviceInfo]:
         self._monitor.refresh()
         return self._monitor.snapshot()
+
+
+class ModelFeed(Generic[T]):
+    """Subscriber-gated **change-detect** feed for value snapshots (e.g. model state).
+
+    Polls ``snapshot()`` every ``interval`` and publishes ONLY when the value changes
+    (value-equality), coalescing bursts — so the model stream is event-driven rather than
+    a fixed cadence. The snapshot must exclude time-derived fields (idle/uptime) or it
+    would differ every tick; the frontend ticks those locally from timestamps in the
+    snapshot. First subscriber starts the loop; last unsubscribe stops it and resets the
+    last-seen value so a later resubscribe re-publishes.
+    """
+
+    def __init__(self, snapshot: Callable[[], T], interval: float = 0.5) -> None:
+        self._snapshot = snapshot
+        self._bc: Broadcaster[T] = Broadcaster()
+        self._interval = interval
+        self._task: asyncio.Task[None] | None = None
+        self._last: T | None = None
+
+    def subscribe(self) -> asyncio.Queue[T]:
+        q = self._bc.subscribe()
+        if self._task is None:
+            self._task = asyncio.create_task(self._loop())
+        return q
+
+    def unsubscribe(self, q: asyncio.Queue[T]) -> None:
+        self._bc.unsubscribe(q)
+        if self._bc.subscriber_count == 0 and self._task is not None:
+            self._task.cancel()
+            self._task = None
+            self._last = None   # resubscribe should re-publish the initial snapshot
+
+    @property
+    def subscriber_count(self) -> int:
+        return self._bc.subscriber_count
+
+    def current_snapshot(self) -> T:
+        return self._snapshot()
+
+    async def _loop(self) -> None:
+        try:
+            while self._bc.subscriber_count > 0:
+                snap = self._snapshot()
+                if snap != self._last:
+                    self._last = snap
+                    self._bc.publish(snap)
+                await asyncio.sleep(self._interval)
+        except asyncio.CancelledError:
+            pass

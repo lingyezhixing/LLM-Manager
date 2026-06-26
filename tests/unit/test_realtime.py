@@ -1,14 +1,14 @@
-"""Broadcaster + DeviceFeed: subscriber-gated fan-out + 2s refresh loop for SSE push.
+"""Broadcaster + DeviceFeed + ModelFeed: subscriber-gated fan-out + loops for SSE push.
 
-Broadcaster is reused by device / model / request / live-log streams. DeviceFeed wraps
-a DeviceMonitor: one refresh task feeds all viewers (N viewers = 1 refresh / interval),
-gated so the expensive nvidia-smi/LHM sampling only runs while someone is watching."""
+Broadcaster is reused by all streams. DeviceFeed = periodic refresh loop (N viewers = 1
+refresh). ModelFeed = change-detect loop (publishes only when the snapshot value changes,
+coalescing bursts) — drives the event-driven model stream."""
 from __future__ import annotations
 
 import asyncio
 
 from llm_manager.devices import DeviceInfo
-from llm_manager.realtime import Broadcaster, DeviceFeed
+from llm_manager.realtime import Broadcaster, DeviceFeed, ModelFeed
 
 
 # --------------------------------------------------------------------------- #
@@ -54,7 +54,7 @@ async def test_unsubscribe_unknown_queue_is_safe() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# DeviceFeed
+# DeviceFeed (periodic refresh loop)
 # --------------------------------------------------------------------------- #
 class _FakeMonitor:
     """Structurally matches the refresh+snapshot surface DeviceFeed needs."""
@@ -85,8 +85,7 @@ async def test_devicefeed_second_subscriber_receives_subsequent_tick() -> None:
     q2 = feed.subscribe()
     snap2 = await asyncio.wait_for(q2.get(), timeout=1)   # q2 gets next tick
     assert "GPU0" in snap2
-    # q1 also receives that same subsequent tick (one loop feeds both)
-    snap1b = await asyncio.wait_for(q1.get(), timeout=1)
+    snap1b = await asyncio.wait_for(q1.get(), timeout=1)  # q1 also gets that tick
     assert "GPU0" in snap1b
 
 
@@ -97,10 +96,10 @@ async def test_devicefeed_loop_stops_when_last_subscriber_leaves() -> None:
     await asyncio.wait_for(q.get(), timeout=1)
     feed.unsubscribe(q)
     assert feed.subscriber_count == 0
-    await asyncio.sleep(0.08)                # let any in-flight refresh finish
+    await asyncio.sleep(0.08)
     mid = mon.refresh_calls
-    await asyncio.sleep(0.08)                # ~8 more ticks would fire if still running
-    assert mon.refresh_calls == mid          # no climb → loop truly stopped
+    await asyncio.sleep(0.08)
+    assert mon.refresh_calls == mid
 
 
 async def test_devicefeed_resubscribe_restarts_loop() -> None:
@@ -111,3 +110,63 @@ async def test_devicefeed_resubscribe_restarts_loop() -> None:
     q2 = feed.subscribe()
     snap = await asyncio.wait_for(q2.get(), timeout=1)
     assert "GPU0" in snap
+
+
+# --------------------------------------------------------------------------- #
+# ModelFeed (change-detect loop)
+# --------------------------------------------------------------------------- #
+class _ChangingSnap:
+    """Returns a fresh dict each call so value-equality diff survives in-place mutation."""
+    def __init__(self) -> None:
+        self.v = 0
+
+    def __call__(self) -> dict:
+        return {"v": self.v}
+
+    def set(self, v: int) -> None:
+        self.v = v
+
+
+async def test_modelfeed_publishes_initial_on_subscribe() -> None:
+    snap = _ChangingSnap()
+    feed = ModelFeed(snap, interval=0.01)
+    q = feed.subscribe()
+    first = await asyncio.wait_for(q.get(), timeout=1)
+    assert first == {"v": 0}
+
+
+async def test_modelfeed_silent_when_unchanged() -> None:
+    snap = _ChangingSnap()
+    feed = ModelFeed(snap, interval=0.01)
+    q = feed.subscribe()
+    await asyncio.wait_for(q.get(), timeout=1)   # initial
+    await asyncio.sleep(0.06)                     # several ticks, no change
+    assert q.empty()
+
+
+async def test_modelfeed_publishes_on_change() -> None:
+    snap = _ChangingSnap()
+    feed = ModelFeed(snap, interval=0.01)
+    q = feed.subscribe()
+    await asyncio.wait_for(q.get(), timeout=1)
+    snap.set(7)
+    second = await asyncio.wait_for(q.get(), timeout=1)
+    assert second == {"v": 7}
+
+
+async def test_modelfeed_loop_stops_when_last_subscriber_leaves() -> None:
+    calls = {"n": 0}
+    base = _ChangingSnap()
+
+    def snap() -> dict:
+        calls["n"] += 1
+        return base()
+
+    feed = ModelFeed(snap, interval=0.01)
+    q = feed.subscribe()
+    await asyncio.wait_for(q.get(), timeout=1)
+    feed.unsubscribe(q)
+    await asyncio.sleep(0.06)
+    mid = calls["n"]
+    await asyncio.sleep(0.06)
+    assert calls["n"] == mid   # snapshot fn no longer called → loop stopped
