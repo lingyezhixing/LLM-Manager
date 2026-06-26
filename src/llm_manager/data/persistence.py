@@ -2,6 +2,7 @@
 Single writer connection serialized by lock; reads concurrent under WAL."""
 from __future__ import annotations
 
+import math
 import sqlite3
 import threading
 from dataclasses import dataclass
@@ -92,3 +93,42 @@ def fetch_usage(db: Db, model_name: str, start: float, end: float) -> list[sqlit
            WHERE m.original_name = ? AND r.end_time >= ? AND r.end_time <= ? ORDER BY r.end_time""",
         (model_name, start, end),
     ).fetchall()
+
+
+@dataclass(frozen=True, slots=True)
+class UsageSeries:
+    buckets: list[float]            # bucket-start wall-clock epochs (the time axis)
+    models: dict[str, list[int]]    # model name → tokens per bucket (0-filled)
+    total: list[int]                # tokens per bucket summed across all models
+
+
+def usage_series(db: Db, *, start_ts: float, end_ts: float, bucket_seconds: int) -> UsageSeries:
+    """Aggregate token consumption (input + output) per model + total, bucketed by wall-clock ts.
+
+    Returns the full bucket axis ``[start, start+bucket, …)`` 0-filled, so the chart stays
+    continuous even when a bucket has no requests. ``tokens = input + output``.
+    """
+    if end_ts <= start_ts or bucket_seconds <= 0:
+        return UsageSeries(buckets=[], models={}, total=[])
+
+    n = max(1, math.ceil((end_ts - start_ts) / bucket_seconds))
+    buckets = [start_ts + i * bucket_seconds for i in range(n)]
+    rows = db.conn.execute(
+        """SELECT m.original_name AS model,
+                  :start + CAST((r.ts - :start) / :bucket AS INTEGER) * :bucket AS bucket,
+                  SUM(r.input_tokens + r.output_tokens) AS tokens
+           FROM model_requests r JOIN models m ON r.model_id = m.id
+           WHERE r.ts >= :start AND r.ts < :end
+           GROUP BY m.original_name, bucket""",
+        {"start": start_ts, "end": end_ts, "bucket": bucket_seconds},
+    ).fetchall()
+
+    models: dict[str, list[int]] = {}
+    total = [0] * n
+    for row in rows:
+        idx = int((row["bucket"] - start_ts) // bucket_seconds)
+        if 0 <= idx < n:
+            tokens = int(row["tokens"])
+            models.setdefault(row["model"], [0] * n)[idx] = tokens
+            total[idx] += tokens
+    return UsageSeries(buckets=buckets, models=models, total=total)
