@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 import sqlite3
 import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -56,6 +57,10 @@ def _migrate(conn: sqlite3.Connection) -> None:
     if "ts" not in cols:
         conn.execute("ALTER TABLE model_requests ADD COLUMN ts REAL NOT NULL DEFAULT 0")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_model_requests_ts ON model_requests(ts)")
+    # Legacy rows written before `ts` existed have ts=0; their original wall-clock time is
+    # unrecoverable (start/end were monotonic, process-local). Stamp them to now so they
+    # stay visible on the chart. Runs once per row — ts>0 rows are untouched on later boots.
+    conn.execute("UPDATE model_requests SET ts = ? WHERE ts = 0", (time.time(),))
 
 
 def _resolve_model_id_locked(db: Db, model_name: str) -> int:

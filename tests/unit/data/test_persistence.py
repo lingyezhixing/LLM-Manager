@@ -59,3 +59,19 @@ def test_usage_series_empty_range_returns_no_buckets(tmp_path):
     result = usage_series(db, start_ts=0, end_ts=0, bucket_seconds=60)
     assert result.buckets == []
     assert result.total == []
+
+
+def test_open_db_backfills_legacy_zero_ts(tmp_path):
+    """Legacy rows (ts=0, written before the ts column) get stamped to open time so they
+    remain visible on the chart — their original wall-clock time is unrecoverable."""
+    import time
+    p = tmp_path / "t.db"
+    db = open_db(p)
+    record_usage(db, "m1", ts=0.0, start=0, end=1, input_tokens=1, output_tokens=1, cache_n=0, prompt_n=1)
+    db.conn.close()
+
+    before = time.time()
+    db2 = open_db(p)   # migration backfills ts=0 → now
+    after = time.time()
+    ts = db2.conn.execute("SELECT ts FROM model_requests").fetchone()[0]
+    assert before <= ts <= after
