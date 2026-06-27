@@ -1,5 +1,6 @@
-// Model types hand-defined (codegen regen pending — match gateway/api/models.py ModelInfo;
-// re-run `npm run gen:api` with the backend up to regenerate src/api/types.ts).
+// 概览 API types + fetchers. Types are hand-defined here to match the backend Pydantic
+// response models (gateway/api/{models,devices,usage}.py). The `npm run gen:api` codegen
+// script (→ src/api/types.ts) exists but is not wired in; switch to it only if regenerating.
 export interface ModelInfo {
   alias: string;
   mode: string;
