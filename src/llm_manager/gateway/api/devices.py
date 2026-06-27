@@ -2,8 +2,8 @@
 
 The stream is the device bar's live source: on connect it sends the current snapshot
 immediately, then each refresh from the subscriber-gated ``DeviceFeed`` (2s). The
-one-shot endpoint serves initial load / codegen / tests. Pydantic schemas → OpenAPI →
-frontend codegen (see ``frontend`` gen:api). The SSE generator is extracted
+one-shot endpoint serves initial load / tests. Pydantic schemas → OpenAPI (types
+hand-mirrored in ``frontend/src/lib/api.ts``). The SSE generator is extracted
 (``_device_stream``) so it can be unit-tested directly without the HTTP stack.
 """
 from __future__ import annotations

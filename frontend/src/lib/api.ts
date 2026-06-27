@@ -1,6 +1,5 @@
-// 概览 API types + fetchers. Types are hand-defined here to match the backend Pydantic
-// response models (gateway/api/{models,devices,usage}.py). The `npm run gen:api` codegen
-// script (→ src/api/types.ts) exists but is not wired in; switch to it only if regenerating.
+// 概览 API types + fetchers. Hand-defined here to match the backend Pydantic response
+// models (gateway/api/{models,devices,usage}.py) — the frontend's single source of truth.
 export interface ModelInfo {
   alias: string;
   mode: string;

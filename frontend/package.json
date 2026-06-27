@@ -6,7 +6,6 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "gen:api": "openapi-typescript http://127.0.0.1:8080/openapi.json -o src/api/types.ts",
     "lint": "oxlint",
     "preview": "vite preview"
   },
@@ -23,7 +22,6 @@
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.2",
-    "openapi-typescript": "^7.13.0",
     "oxlint": "^1.69.0",
     "tailwindcss": "^4.3.1",
     "typescript": "~6.0.2",
