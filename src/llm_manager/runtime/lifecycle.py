@@ -16,6 +16,7 @@ from collections.abc import Callable
 
 from llm_manager import state
 from llm_manager.config import AppConfig, ModelConfig, Scheme, resolve_alias, select_adaptive
+from llm_manager.data import logs as _logs
 from llm_manager.probes import ProbeResult
 from llm_manager.runtime import scheduling
 from llm_manager.state import ModelStatus
@@ -92,6 +93,7 @@ class Lifecycle:
         fut = state.pop_inflight(alias)
         if fut is not None and not fut.done():
             fut.set_result(ModelStatus.STOPPED)
+        _logs.end_session(alias)   # 结束内存会话日志:下次 start 起新会话(id 从 1)
         return state.get_status(alias)
 
     async def unload_all(self) -> list[str]:
@@ -137,7 +139,8 @@ class Lifecycle:
                 return ModelStatus.STOPPED
 
             cmd = [str(scheme.script_path)]
-            rec = await self._supervisor.spawn(cmd)
+            rec = await self._supervisor.spawn(
+                cmd, on_output=lambda line, stream: _logs.capture(alias, line, stream))
             logger.info("spawn %s pid=%d", alias, rec.pid)
 
             # === post-spawn critical section (no await) === invariant 3

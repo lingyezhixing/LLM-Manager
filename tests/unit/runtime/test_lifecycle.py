@@ -1,11 +1,13 @@
 import asyncio
 import time as _time
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 
 from llm_manager import state
 from llm_manager.config import AppConfig, ModelConfig, ProgramConfig, Scheme
+from llm_manager.data import logs
 from llm_manager.devices import DeviceInfo
 from llm_manager.probes import ProbeResult
 from llm_manager.runtime.lifecycle import Lifecycle
@@ -459,3 +461,47 @@ async def test_ensure_running_inc_pending_skips_when_not_routing():
     status = await life.ensure_running("m1", inc_pending=True)
     assert status == ModelStatus.FAILED
     assert state.pending_count("m1") == 0
+
+
+# ---------- Task 3 (Plan): wire on_output to logs.capture + stop ends session ----------
+
+
+class _CapturingSupervisor(FakeSupervisor):
+    """FakeSupervisor that records the on_output callback lifecycle passes to spawn."""
+    on_output: Callable[[str, str], None] | None
+
+    def __init__(self):
+        super().__init__()
+        self.on_output = None
+
+    async def spawn(self, cmd, *, shell=True, on_output=None):
+        self.on_output = on_output
+        return await super().spawn(cmd, shell=shell, on_output=on_output)
+
+
+def test_pipeline_wires_on_output_to_logs_capture():
+    logs.reset()
+    cap = _CapturingSupervisor()
+    lc, sup, dev, cfg = _make(sup=cap)
+    asyncio.run(lc.ensure_running("m1"))
+    assert cap.on_output is not None
+    # 模拟 supervisor 读线程 marshal 出来的行(capture 同步,可直接调)
+    cap.on_output("server listening on :8000", "out")
+    cap.on_output("error: boom", "err")
+    bf = logs.backfill("m1", 10)
+    assert [line.text for line in bf] == ["server listening on :8000", "error: boom"]
+    assert [line.level for line in bf] == ["ok", "error"]
+
+
+def test_stop_ends_log_session():
+    logs.reset()
+    cap = _CapturingSupervisor()
+    lc, sup, dev, cfg = _make(sup=cap)
+    asyncio.run(lc.ensure_running("m1"))
+    assert cap.on_output is not None
+    cap.on_output("old session line", "out")
+    asyncio.run(lc.stop("m1"))
+    # stop 后会话结束;新 capture 开启全新会话(id 从 1 起)
+    logs.capture("m1", "new session", "out")
+    bf = logs.backfill("m1", 10)
+    assert len(bf) == 1 and bf[0].id == 1 and bf[0].text == "new session"
