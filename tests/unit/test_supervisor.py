@@ -59,3 +59,19 @@ def test_kill_tree_clears_process_tables():
         assert rec.pid not in sup._wait_tasks
 
     asyncio.run(main())
+
+
+def test_spawn_captures_stdout_and_stderr_via_on_output():
+    received = []
+    async def go():
+        sup = Supervisor()
+        def on_output(line, stream):
+            received.append((line, stream))
+        # 用 chr(10) 生成换行,避免不同 shell (MSYS/Git Bash/POSIX) 对 \n 转义的解析差异。
+        cmd = 'python -c "import sys; print(\\"out-line\\"); sys.stderr.write(\\"err-line\\" + chr(10)); sys.stderr.flush()"'
+        rec = await sup.spawn(cmd, on_output=on_output)
+        await sup._wait_tasks[rec.pid]   # wait for process exit → reader EOF
+        await asyncio.sleep(0.05)        # let call_soon_threadsafe callbacks land
+    asyncio.run(go())
+    assert ("out-line", "out") in received
+    assert ("err-line", "err") in received
