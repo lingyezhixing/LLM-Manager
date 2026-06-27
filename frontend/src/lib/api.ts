@@ -74,3 +74,20 @@ export async function fetchUsageSeries(params: UsageSeriesParams): Promise<Usage
   if (!res.ok) throw new Error(`/api/usage/series failed: ${res.status}`);
   return (await res.json()) as UsageSeries;
 }
+
+// 模型管理 — per-model control + structured log stream. LogLine matches the SSE frame the
+// backend emits on /api/models/{alias}/logs/stream (LogLineResponse in gateway/api/models.py;
+// captured/leveled in data/logs.py).
+export interface LogLine {
+  id: number; ts: number; stream: "out" | "err";
+  level: "info" | "ok" | "warn" | "error"; text: string;
+}
+
+export async function startModel(alias: string): Promise<void> {
+  const res = await fetch(`/api/models/${encodeURIComponent(alias)}/start`, { method: "POST" });
+  if (!res.ok && res.status !== 409) throw new Error(`/start failed: ${res.status}`);
+}
+export async function stopModel(alias: string): Promise<void> {
+  const res = await fetch(`/api/models/${encodeURIComponent(alias)}/stop`, { method: "POST" });
+  if (!res.ok) throw new Error(`/stop failed: ${res.status}`);
+}
