@@ -30,6 +30,9 @@ testpaths = ["tests"]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+# _legacy/ is the archived predecessor kept for behavior reference (e.g. wall-clock
+# time.time() verification) — not maintained, so don't lint it.
+extend-exclude = ["_legacy"]
 
 [tool.pyright]
 include = ["src/llm_manager"]

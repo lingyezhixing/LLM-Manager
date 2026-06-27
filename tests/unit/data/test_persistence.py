@@ -1,5 +1,25 @@
-"""model_requests: record_usage (wall-clock start/end) + usage_series (bucketed by end_time)."""
-from llm_manager.data.persistence import open_db, record_usage, usage_series
+"""model_requests persistence: open_db (PRAGMAs + schema), record_usage (wall-clock
+start/end), resolve_model_id, lock-serialized concurrency, fetch_usage, usage_series
+(bucketed by end_time), and the legacy ``ts`` migration. Consolidated here to mirror the
+src layout (src/llm_manager/data/persistence.py)."""
+import threading
+
+from llm_manager.data.persistence import (
+    fetch_usage,
+    open_db,
+    record_usage,
+    resolve_model_id,
+    usage_series,
+)
+
+
+def test_open_db_sets_pragmas_and_creates_schema(tmp_path):
+    db = open_db(tmp_path / "t.db")
+    mode = db.conn.execute("PRAGMA journal_mode").fetchone()[0]
+    assert mode.lower() == "wal"
+    tables = {r[0] for r in db.conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    assert "models" in tables
+    assert "model_requests" in tables
 
 
 def test_record_usage_writes_start_end_tokens(tmp_path):
@@ -9,6 +29,41 @@ def test_record_usage_writes_start_end_tokens(tmp_path):
     assert row["start_time"] == 100.0
     assert row["end_time"] == 200.0
     assert row["input_tokens"] == 5
+
+
+def test_record_usage_auto_creates_model_and_fetch_round_trips(tmp_path):
+    db = open_db(tmp_path / "t.db")
+    record_usage(db, "Qwen3-4B", start=1.0, end=2.0, input_tokens=100, output_tokens=50, cache_n=20, prompt_n=80)
+    rows = fetch_usage(db, "Qwen3-4B", 0.0, 5.0)
+    assert len(rows) == 1
+    assert (rows[0]["input_tokens"], rows[0]["output_tokens"]) == (100, 50)
+
+
+def test_resolve_model_id_is_stable(tmp_path):
+    db = open_db(tmp_path / "t.db")
+    a = resolve_model_id(db, "M")
+    b = resolve_model_id(db, "M")
+    assert a == b
+
+
+def test_concurrent_writes_serialized_by_lock(tmp_path):
+    db = open_db(tmp_path / "t.db")
+    errors = []
+
+    def write():
+        try:
+            for _ in range(20):
+                record_usage(db, "M", start=0.0, end=0.1, input_tokens=1, output_tokens=1, cache_n=0, prompt_n=1)
+        except Exception as e:
+            errors.append(e)
+
+    threads = [threading.Thread(target=write) for _ in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert not errors
+    assert len(fetch_usage(db, "M", 0.0, 5.0)) == 80
 
 
 def test_usage_series_buckets_per_model_and_total(tmp_path):

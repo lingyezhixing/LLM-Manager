@@ -1,4 +1,4 @@
-from llm_manager.devices import _parse_smi, _aggregate_sensors, DeviceMonitor, DeviceInfo
+from llm_manager.devices import _parse_smi, _aggregate_sensors
 
 
 def test_parse_smi_extracts_fields():
