@@ -8,10 +8,11 @@ in frontend/src/lib/api.ts).
 """
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 
-from fastapi import APIRouter, Request
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 
 from llm_manager import config, state
@@ -72,7 +73,15 @@ async def _models_stream(feed: ModelFeed[ModelsResponse]) -> AsyncIterator[str]:
         feed.unsubscribe(q)
 
 
-def register_models_routes(router: APIRouter, cfg: config.AppConfig) -> None:
+def _resolve_alias(alias: str, cfg: config.AppConfig) -> str:
+    """URL 收到的是 alias(对外身份),state 以 primary_name(内部键)索引,这里先解析。"""
+    try:
+        return config.resolve_alias(cfg, alias)
+    except KeyError:
+        raise HTTPException(404, f"模型别名 '{alias}' 未在配置中找到")
+
+
+def register_models_routes(router: APIRouter, cfg: config.AppConfig, lifecycle) -> None:
     @router.get("/models", response_model=ModelsResponse)
     def list_models_status() -> ModelsResponse:
         return build_models_response(cfg)
@@ -81,3 +90,17 @@ def register_models_routes(router: APIRouter, cfg: config.AppConfig) -> None:
     async def stream_models(request: Request) -> StreamingResponse:
         feed: ModelFeed[ModelsResponse] = request.app.state.model_feed
         return StreamingResponse(_models_stream(feed), media_type="text/event-stream")
+
+    @router.post("/models/{alias}/start", status_code=202)
+    async def start_model(alias: str) -> Response:
+        primary = _resolve_alias(alias, cfg)
+        if state.is_runnable(primary):
+            raise HTTPException(409, f"model '{alias}' already routing")
+        asyncio.create_task(lifecycle.ensure_running(primary))   # fire-and-forget;状态走 /api/models/stream SSE
+        return Response(status_code=202)
+
+    @router.post("/models/{alias}/stop", status_code=202)
+    async def stop_model(alias: str) -> Response:
+        primary = _resolve_alias(alias, cfg)
+        asyncio.create_task(lifecycle.stop(primary))             # 运行=停止 / 启动中=中断(协作 stop_event)
+        return Response(status_code=202)

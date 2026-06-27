@@ -9,9 +9,9 @@ from llm_manager.gateway.api.models import register_models_routes
 from llm_manager.gateway.api.usage import register_usage_routes
 
 
-def build_api_router(cfg: config.AppConfig) -> APIRouter:
+def build_api_router(cfg: config.AppConfig, lifecycle) -> APIRouter:
     api = APIRouter(prefix="/api")
-    register_models_routes(api, cfg)
+    register_models_routes(api, cfg, lifecycle)
     register_devices_routes(api)
     register_usage_routes(api)
     return api

@@ -1,4 +1,5 @@
 import asyncio
+import time
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -26,8 +27,17 @@ Local-Models:
 
 
 class _FakeLife:
+    def __init__(self):
+        self.started: list[str] = []
+        self.stopped: list[str] = []
+
     async def ensure_running(self, alias, *, inc_pending=False):
+        self.started.append(alias)
         return ModelStatus.ROUTING
+
+    async def stop(self, alias):
+        self.stopped.append(alias)
+        return state.get_status(alias)
 
 
 def _cfg(tmp_path):
@@ -36,9 +46,10 @@ def _cfg(tmp_path):
     return config.load(p)
 
 
-def _app(tmp_path):
+def _app(tmp_path, life=None):
+    life = _FakeLife() if life is None else life
     app = FastAPI()
-    register_routes(app, _FakeLife(), _cfg(tmp_path), open_db(Path(":memory:")), {})
+    register_routes(app, life, _cfg(tmp_path), open_db(Path(":memory:")), {})
     return app
 
 
@@ -93,4 +104,53 @@ async def test_models_stream_yields_initial_then_on_change(tmp_path):
 
     await gen.aclose()   # finally → unsubscribe → loop stops
     assert feed.subscriber_count == 0
+    state._reset()
+
+
+def test_start_unknown_alias_404(tmp_path):
+    state._reset()
+    app = _app(tmp_path)
+    with TestClient(app) as c:
+        r = c.post("/api/models/nope/start")
+    assert r.status_code == 404
+    state._reset()
+
+
+def test_start_when_routing_409(tmp_path):
+    state._reset()
+    app = _app(tmp_path)
+    state.set_status("internal-qwen-key", ModelStatus.ROUTING, force=True)   # keyed by primary_name
+    with TestClient(app) as c:
+        r = c.post("/api/models/qwen2.5-32b/start")                          # URL uses alias
+    assert r.status_code == 409
+    state._reset()
+
+
+def test_start_accepted_202_and_fires_ensure_running(tmp_path):
+    state._reset()
+    life = _FakeLife()
+    app = _app(tmp_path, life)
+    with TestClient(app) as c:
+        r = c.post("/api/models/qwen2.5-32b/start")
+        assert r.status_code == 202
+        for _ in range(50):                  # 让后台 create_task 在 portal loop 上跑完
+            if life.started:
+                break
+            time.sleep(0.02)
+    assert life.started == ["internal-qwen-key"]     # ensure_running 收到 primary_name
+    state._reset()
+
+
+def test_stop_accepted_202_and_fires_stop(tmp_path):
+    state._reset()
+    life = _FakeLife()
+    app = _app(tmp_path, life)
+    with TestClient(app) as c:
+        r = c.post("/api/models/qwen2.5-32b/stop")
+        assert r.status_code == 202
+        for _ in range(50):
+            if life.stopped:
+                break
+            time.sleep(0.02)
+    assert life.stopped == ["internal-qwen-key"]
     state._reset()
