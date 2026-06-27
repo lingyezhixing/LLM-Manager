@@ -14,6 +14,7 @@
   --accent: #21262d;            --accent-foreground: #e6edf3;
   --destructive: #f85149;       --destructive-foreground: #ffffff;
   --success: #3fb950;           --success-foreground: #0d1117;
+  --warning: #d29922;           --warning-foreground: #0d1117;
   --border: #262c36;            --input: #262c36;        --ring: #6b8cff;
   --radius: 0.625rem;
 }
@@ -28,6 +29,7 @@
   --accent: #eef0f3;            --accent-foreground: #16181d;
   --destructive: #dc2626;       --destructive-foreground: #ffffff;
   --success: #16a34a;           --success-foreground: #ffffff;
+  --warning: #b45309;           --warning-foreground: #ffffff;
   --border: #e7e8ec;            --input: #e7e8ec;        --ring: #4f46e5;
   --radius: 0.75rem;
 }
@@ -42,6 +44,7 @@
   --accent: #ece4d6;            --accent-foreground: #3b352b;
   --destructive: #b5462f;       --destructive-foreground: #ffffff;
   --success: #6f8f5a;           --success-foreground: #ffffff;
+  --warning: #a47a3b;           --warning-foreground: #ffffff;
   --border: #e8e0d3;            --input: #e8e0d3;        --ring: #8a6d52;
   --radius: 0.75rem;
 }
@@ -56,6 +59,7 @@
   --color-accent: var(--accent);                  --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);        --color-destructive-foreground: var(--destructive-foreground);
   --color-success: var(--success);                --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);                --color-warning-foreground: var(--warning-foreground);
   --color-border: var(--border);                  --color-input: var(--input);    --color-ring: var(--ring);
   --radius-lg: var(--radius);                     --radius-md: calc(var(--radius) - 2px);
   --radius-sm: calc(var(--radius) - 4px);
@@ -67,3 +71,16 @@ body {
   color: var(--color-foreground);
   font-family: system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
 }
+
+/* ===== Thin themed scrollbars (replaces the chunky OS default across the app) ===== */
+* {
+  scrollbar-width: thin;                        /* Firefox */
+  scrollbar-color: var(--border) transparent;
+}
+*::-webkit-scrollbar { width: 8px; height: 8px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 9999px;
+}
+*::-webkit-scrollbar-thumb:hover { background: var(--color-muted-foreground); }
