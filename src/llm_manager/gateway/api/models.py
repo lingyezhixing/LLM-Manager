@@ -45,6 +45,11 @@ class LogLineResponse(BaseModel):
     text: str
 
 
+class LogSearchResponse(BaseModel):
+    matches: list[int]   # 匹配行 id(升序)
+    total: int
+
+
 def build_models_response(cfg: config.AppConfig) -> ModelsResponse:
     """Current model snapshot from module-level state + cfg. Shared by GET + ModelFeed.
 
@@ -82,9 +87,12 @@ async def _models_stream(feed: ModelFeed[ModelsResponse]) -> AsyncIterator[str]:
         feed.unsubscribe(q)
 
 
+def _to_log_response(line: _logs.LogLine) -> LogLineResponse:
+    return LogLineResponse(id=line.id, ts=line.ts, stream=line.stream, level=line.level, text=line.text)
+
+
 def _log_event(line: _logs.LogLine) -> str:
-    payload = LogLineResponse(id=line.id, ts=line.ts, stream=line.stream, level=line.level, text=line.text)
-    return f"data: {payload.model_dump_json()}\n\n"
+    return f"data: {_to_log_response(line).model_dump_json()}\n\n"
 
 
 async def _logs_stream(alias: str, limit: int = 2048, level: str | None = None) -> AsyncIterator[str]:
@@ -105,6 +113,15 @@ def _resolve_alias(alias: str, cfg: config.AppConfig) -> str:
         return config.resolve_alias(cfg, alias)
     except KeyError:
         raise HTTPException(404, f"模型别名 '{alias}' 未在配置中找到")
+
+
+_LOG_LEVELS = ("info", "ok", "warn", "error")
+
+
+def _level_param(request: Request) -> str | None:
+    """?level= 白名单:非 info/ok/warn/error 一律视为不过滤。"""
+    lv = request.query_params.get("level")
+    return lv if lv in _LOG_LEVELS else None
 
 
 def register_models_routes(router: APIRouter, cfg: config.AppConfig, lifecycle) -> None:
@@ -134,7 +151,23 @@ def register_models_routes(router: APIRouter, cfg: config.AppConfig, lifecycle) 
     @router.get("/models/{alias}/logs/stream")
     async def stream_logs(alias: str, request: Request) -> StreamingResponse:
         primary = _resolve_alias(alias, cfg)                     # 404 on unknown alias
-        level = request.query_params.get("level")
-        level = level if level in ("info", "ok", "warn", "error") else None
         # logs 以 primary_name 为键(生命周期 capture 用的就是 primary_name),故传 primary 而非 URL alias
-        return StreamingResponse(_logs_stream(primary, level=level), media_type="text/event-stream")
+        return StreamingResponse(_logs_stream(primary, level=_level_param(request)),
+                                  media_type="text/event-stream")
+
+    @router.get("/models/{alias}/logs/search", response_model=LogSearchResponse)
+    def search_logs(alias: str, request: Request) -> LogSearchResponse:
+        primary = _resolve_alias(alias, cfg)
+        q = request.query_params.get("q", "")
+        res = _logs.search(primary, q, _level_param(request))   # 全量检索本次会话日志(可叠加 level)
+        return LogSearchResponse(matches=res.matches, total=res.total)
+
+    @router.get("/models/{alias}/logs", response_model=list[LogLineResponse])
+    def list_logs(alias: str, request: Request) -> list[LogLineResponse]:
+        primary = _resolve_alias(alias, cfg)
+        before = request.query_params.get("before")
+        limit = max(1, min(5000, int(request.query_params.get("limit", "1500"))))   # 钳制 1..5000
+        level = _level_param(request)
+        lines = (_logs.before(primary, int(before), limit, level) if before is not None
+                 else _logs.backfill(primary, limit, level))
+        return [_to_log_response(ll) for ll in lines]

@@ -34,8 +34,15 @@ class LogLine:
     text: str
 
 
+@dataclass(frozen=True, slots=True)
+class LogSearch:
+    matches: list[int]   # 匹配行 id(升序)
+    total: int
+
+
 class SessionLog:
-    """单模型本次会话的内存日志。append O(1) 摊销;backfill 返回最近 limit 行(可按 level 过滤)。"""
+    """单模型本次会话的内存日志。append O(1) 摊销;backfill 返回最近 limit 行;
+    before 返回 id < line_id 的最近 limit 行(往前翻页);search 全文检索(可按 level)。"""
 
     def __init__(self, cap: int = 100_000) -> None:
         self._lines: list[LogLine] = []
@@ -55,6 +62,18 @@ class SessionLog:
     def backfill(self, limit: int, level: str | None = None) -> list[LogLine]:
         sel = self._lines if level is None else [ll for ll in self._lines if ll.level == level]
         return sel[-limit:]
+
+    def before(self, line_id: int, limit: int, level: str | None = None) -> list[LogLine]:
+        """id < line_id 的最近 limit 行(升序)——往前翻页 / 搜索跳转时载入历史窗口。"""
+        sel = [ll for ll in self._lines if ll.id < line_id and (level is None or ll.level == level)]
+        return sel[-limit:]
+
+    def search(self, q: str, level: str | None = None) -> LogSearch:
+        """全文子串检索(大小写不敏感),可叠加 level 过滤。返回升序匹配行 id + 总数。"""
+        needle = q.lower()
+        matches = [ll.id for ll in self._lines
+                   if needle in ll.text.lower() and (level is None or ll.level == level)]
+        return LogSearch(matches=matches, total=len(matches))
 
     def subscribe(self): return self._bc.subscribe()
     def unsubscribe(self, q): self._bc.unsubscribe(q)
@@ -78,6 +97,14 @@ def capture(alias: str, line: str, stream: str) -> LogLine:
 
 def backfill(alias: str, limit: int, level: str | None = None) -> list[LogLine]:
     return _get(alias).backfill(limit, level)
+
+
+def before(alias: str, before: int, limit: int, level: str | None = None) -> list[LogLine]:
+    return _get(alias).before(before, limit, level)
+
+
+def search(alias: str, q: str, level: str | None = None) -> LogSearch:
+    return _get(alias).search(q, level)
 
 
 def subscribe(alias: str):
