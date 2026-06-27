@@ -16,6 +16,7 @@ from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 
 from llm_manager import config, state
+from llm_manager.data import logs as _logs
 from llm_manager.realtime import ModelFeed
 
 
@@ -34,6 +35,14 @@ class ModelInfo(BaseModel):
 
 class ModelsResponse(BaseModel):
     data: list[ModelInfo]
+
+
+class LogLineResponse(BaseModel):
+    id: int
+    ts: float
+    stream: str
+    level: str
+    text: str
 
 
 def build_models_response(cfg: config.AppConfig) -> ModelsResponse:
@@ -73,6 +82,23 @@ async def _models_stream(feed: ModelFeed[ModelsResponse]) -> AsyncIterator[str]:
         feed.unsubscribe(q)
 
 
+def _log_event(line: _logs.LogLine) -> str:
+    payload = LogLineResponse(id=line.id, ts=line.ts, stream=line.stream, level=line.level, text=line.text)
+    return f"data: {payload.model_dump_json()}\n\n"
+
+
+async def _logs_stream(alias: str, limit: int = 2048, level: str | None = None) -> AsyncIterator[str]:
+    """无限 SSE:先回填最近 limit 行(可 level 过滤),再实时推新行。alias 是 primary_name。"""
+    q = _logs.subscribe(alias)
+    try:
+        for line in _logs.backfill(alias, limit, level):
+            yield _log_event(line)
+        while True:
+            yield _log_event(await q.get())
+    finally:
+        _logs.unsubscribe(alias, q)
+
+
 def _resolve_alias(alias: str, cfg: config.AppConfig) -> str:
     """URL 收到的是 alias(对外身份),state 以 primary_name(内部键)索引,这里先解析。"""
     try:
@@ -104,3 +130,11 @@ def register_models_routes(router: APIRouter, cfg: config.AppConfig, lifecycle) 
         primary = _resolve_alias(alias, cfg)
         asyncio.create_task(lifecycle.stop(primary))             # 运行=停止 / 启动中=中断(协作 stop_event)
         return Response(status_code=202)
+
+    @router.get("/models/{alias}/logs/stream")
+    async def stream_logs(alias: str, request: Request) -> StreamingResponse:
+        primary = _resolve_alias(alias, cfg)                     # 404 on unknown alias
+        level = request.query_params.get("level")
+        level = level if level in ("info", "ok", "warn", "error") else None
+        # logs 以 primary_name 为键(生命周期 capture 用的就是 primary_name),故传 primary 而非 URL alias
+        return StreamingResponse(_logs_stream(primary, level=level), media_type="text/event-stream")
