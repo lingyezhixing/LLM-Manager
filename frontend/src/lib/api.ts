@@ -91,3 +91,24 @@ export async function stopModel(alias: string): Promise<void> {
   const res = await fetch(`/api/models/${encodeURIComponent(alias)}/stop`, { method: "POST" });
   if (!res.ok) throw new Error(`/stop failed: ${res.status}`);
 }
+
+// 日志搜索 / 翻页(本次会话全量在后端,前端按需取一页)。
+export interface LogSearch { matches: number[]; total: number; }
+
+export async function fetchLogPage(
+  alias: string, before: number, limit = 1500, level?: string,
+): Promise<LogLine[]> {
+  const qs = new URLSearchParams({ before: String(before), limit: String(limit) });
+  if (level) qs.set("level", level);
+  const res = await fetch(`/api/models/${encodeURIComponent(alias)}/logs?${qs}`);
+  if (!res.ok) throw new Error(`/logs failed: ${res.status}`);
+  return (await res.json()) as LogLine[];
+}
+
+export async function searchLogs(alias: string, q: string, level?: string): Promise<LogSearch> {
+  const qs = new URLSearchParams({ q });
+  if (level) qs.set("level", level);
+  const res = await fetch(`/api/models/${encodeURIComponent(alias)}/logs/search?${qs}`);
+  if (!res.ok) throw new Error(`/logs/search failed: ${res.status}`);
+  return (await res.json()) as LogSearch;
+}
