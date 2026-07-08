@@ -141,3 +141,39 @@ def usage_series(db: Db, *, start_ts: float, end_ts: float, bucket_seconds: int)
             models.setdefault(row["model"], [0] * n)[idx] = tokens
             total[idx] += tokens
     return UsageSeries(buckets=buckets, models=models, total=total)
+
+
+@dataclass(frozen=True, slots=True)
+class UsageSummary:
+    input_tokens: int
+    output_tokens: int
+    cache_hit: int       # SUM(cache_n)
+    cache_miss: int      # SUM(prompt_n)
+    hit_rate: float
+    request_count: int
+
+
+def usage_summary(db: Db, *, start_ts: float, end_ts: float) -> UsageSummary:
+    """Aggregate token usage over the half-open window [start_ts, end_ts) by wall-clock
+    end_time. Empty window → zeros (hit_rate 0.0)."""
+    row = db.conn.execute(
+        """SELECT COALESCE(SUM(input_tokens), 0) AS s_in,
+                  COALESCE(SUM(output_tokens), 0) AS s_out,
+                  COALESCE(SUM(cache_n), 0) AS s_cache,
+                  COALESCE(SUM(prompt_n), 0) AS s_miss,
+                  COUNT(*) AS n
+           FROM model_requests
+           WHERE end_time >= ? AND end_time < ?""",
+        (start_ts, end_ts),
+    ).fetchone()
+    cache_hit = int(row["s_cache"])
+    cache_miss = int(row["s_miss"])
+    denom = cache_hit + cache_miss
+    return UsageSummary(
+        input_tokens=int(row["s_in"]),
+        output_tokens=int(row["s_out"]),
+        cache_hit=cache_hit,
+        cache_miss=cache_miss,
+        hit_rate=cache_hit / denom if denom else 0.0,
+        request_count=int(row["n"]),
+    )

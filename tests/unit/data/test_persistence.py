@@ -10,6 +10,7 @@ from llm_manager.data.persistence import (
     record_usage,
     resolve_model_id,
     usage_series,
+    usage_summary,
 )
 
 
@@ -118,3 +119,27 @@ def test_migrate_drops_legacy_ts_column(tmp_path):
     cols = {r[1] for r in db.conn.execute("PRAGMA table_info(model_requests)")}
     assert "ts" not in cols
     assert "start_time" in cols and "end_time" in cols
+
+
+def test_usage_summary_aggregates_half_open_range(tmp_path):
+    db = open_db(tmp_path / "t.db")
+    record_usage(db, "m1", start=5.0, end=10.0, input_tokens=100, output_tokens=20, cache_n=60, prompt_n=40)
+    record_usage(db, "m1", start=15.0, end=20.0, input_tokens=50, output_tokens=10, cache_n=0, prompt_n=50)
+    record_usage(db, "m2", start=25.0, end=30.0, input_tokens=10, output_tokens=5, cache_n=10, prompt_n=0)
+    # half-open [0, 25): includes end=10,20; excludes end=30
+    s = usage_summary(db, start_ts=0.0, end_ts=25.0)
+    assert s.request_count == 2
+    assert s.input_tokens == 150
+    assert s.output_tokens == 30
+    assert s.cache_hit == 60
+    assert s.cache_miss == 90
+    assert s.hit_rate == 60 / 150
+
+
+def test_usage_summary_empty_range_returns_zeros(tmp_path):
+    db = open_db(tmp_path / "t.db")
+    s = usage_summary(db, start_ts=0.0, end_ts=10.0)
+    assert s.request_count == 0
+    assert s.input_tokens == 0
+    assert s.cache_hit == 0
+    assert s.hit_rate == 0.0
