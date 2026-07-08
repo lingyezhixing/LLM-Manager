@@ -145,6 +145,15 @@ def create_app(config_path: Path) -> FastAPI:
     return app
 
 
+def create_dev_app() -> FastAPI:
+    """No-arg factory for ``uvicorn --factory --reload`` (development mode)."""
+    import types
+    app = create_app(Path("config.yaml"))
+    # uvicorn --reload 不暴露 Server 实例，设一个桩让托盘能初始化
+    app.state.uvicorn_server = types.SimpleNamespace(should_exit=False)
+    return app
+
+
 def main() -> None:
     import uvicorn
 
