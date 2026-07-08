@@ -17,8 +17,11 @@ const MAX_PREFIX = 5000;      // historyPrefix 上限(防卡顿;超过丢最旧)
  * hasSearched 跟踪「是否真的执行过搜索」(runSearch 调用过),而非「输入框是否有字」——
  * 输入未按 Enter 时不显示「无匹配」,避免误导。
  * level 为后端查询参数(SSE/搜索/翻页/向上加载均带),变更时重订阅 + 清搜索。
+ * runKey 为运行实例标识(传入模型 pid):停止(null)或重启(新进程)时变化 → 重订阅并清空,
+ * 使同一 alias 的停止/重启能正确清旧日志、加载新日志(否则 alias/level 不变,旧缓冲残留、
+ * EventSource 不重连、重启后新日志进不来,须手动切换模型才重置)。
  */
-export function useModelLogs(alias: string, level: string) {
+export function useModelLogs(alias: string, level: string, runKey: number | null) {
   const levelParam = level || undefined;
   const [liveLines, setLiveLines] = useState<LogLine[]>([]);
   const [historyPrefix, setHistoryPrefix] = useState<LogLine[]>([]);     // live 模式顶部加载的历史(旧→新)
@@ -44,7 +47,8 @@ export function useModelLogs(alias: string, level: string) {
   const displayed = historyPage ?? liveView;
   const mode: "live" | "history" = historyPage ? "history" : "live";
 
-  // SSE 实时尾(随 alias/level 重订阅,重置视图 + 搜索)。新行不在「实时+跟进」态则记 newCount。
+  // SSE 实时尾(随 alias/level/runKey 重订阅,重置视图 + 搜索)。新行不在「实时+跟进」态则记 newCount。
+  // runKey(pid)随模型停止/重启变化 → 重连到新进程流并清空旧日志(否则同一 alias 重启后新日志进不来)。
   useEffect(() => {
     setLiveLines([]); setHistoryPrefix([]); setHistoryPage(null); setFollowing(true); setNewCount(0);
     setMatches([]); setMatchIdx(-1); setHasSearched(false); setAtOldest(false);
@@ -61,7 +65,7 @@ export function useModelLogs(alias: string, level: string) {
       } catch { /* 帧异常忽略 */ }
     };
     return () => es.close();
-  }, [alias, levelParam]);
+  }, [alias, levelParam, runKey]);
 
   // 跟进:live + following → 新行贴底。
   useEffect(() => {

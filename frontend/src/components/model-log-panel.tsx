@@ -13,7 +13,7 @@ const COLOR: Record<string, string> = {
 export function ModelLogPanel({ m }: { m: ModelInfo }) {
   const [level, setLevel] = useState<string>("");
   const [input, setInput] = useState("");
-  const h = useModelLogs(m.alias, level);
+  const h = useModelLogs(m.alias, level, m.pid);   // pid 作 runKey:停止/重启时重连并清空
   const dotColor = m.status === "routing" ? "var(--color-success)" : "var(--color-muted-foreground)";
   const showJump = h.mode === "history" || h.newCount > 0;
   const jumpLabel = h.mode === "history"
