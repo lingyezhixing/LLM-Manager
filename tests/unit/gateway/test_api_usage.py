@@ -86,3 +86,26 @@ def test_usage_summary_endpoint_empty_returns_zeros(tmp_path) -> None:
     j = r.json()
     assert j["request_count"] == 0
     assert j["hit_rate"] == 0.0
+
+
+def test_usage_by_model_endpoint_groups_and_shares(tmp_path) -> None:
+    db = open_db(tmp_path / "t.db")
+    record_usage(db, "m1", start=5.0, end=10.0, input_tokens=100, output_tokens=20, cache_n=60, prompt_n=40)
+    record_usage(db, "m2", start=15.0, end=20.0, input_tokens=50, output_tokens=10, cache_n=0, prompt_n=50)
+    with TestClient(_app(db)) as c:
+        r = c.get("/api/usage/by-model?start=0&end=100")
+    assert r.status_code == 200
+    j = r.json()
+    assert len(j) == 2
+    assert j[0]["model"] == "m1"
+    assert j[0]["share"] == 100 / 150
+    assert j[0]["hit_rate"] == 0.6
+    assert j[1]["model"] == "m2"
+
+
+def test_usage_by_model_endpoint_empty_returns_empty_list(tmp_path) -> None:
+    db = open_db(tmp_path / "t.db")
+    with TestClient(_app(db)) as c:
+        r = c.get("/api/usage/by-model?start=0&end=100")
+    assert r.status_code == 200
+    assert r.json() == []

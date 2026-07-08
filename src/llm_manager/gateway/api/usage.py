@@ -14,7 +14,7 @@ from fastapi import APIRouter, Request
 from pydantic import BaseModel
 
 from llm_manager.data import session
-from llm_manager.data.persistence import usage_series, usage_summary
+from llm_manager.data.persistence import usage_by_model, usage_series, usage_summary
 
 
 class SessionUsageResponse(BaseModel):
@@ -39,6 +39,16 @@ class UsageSummaryResponse(BaseModel):
     cache_miss: int
     hit_rate: float
     request_count: int
+
+
+class ByModelEntryResponse(BaseModel):
+    model: str
+    input_tokens: int
+    output_tokens: int
+    cache_n: int
+    request_count: int
+    hit_rate: float
+    share: float
 
 
 def _bucket_for_span(span: float) -> int:
@@ -118,3 +128,26 @@ def register_usage_routes(router: APIRouter) -> None:
             hit_rate=s.hit_rate,
             request_count=s.request_count,
         )
+
+    @router.get("/usage/by-model", response_model=list[ByModelEntryResponse])
+    def usage_by_model_endpoint(
+        request: Request,
+        range: str = "7d",
+        start: float | None = None,
+        end: float | None = None,
+    ) -> list[ByModelEntryResponse]:
+        db = request.app.state.db
+        s_ts, e_ts = _resolve_window(range, start, end)
+        rows = usage_by_model(db, start_ts=s_ts, end_ts=e_ts)
+        return [
+            ByModelEntryResponse(
+                model=r.model,
+                input_tokens=r.input_tokens,
+                output_tokens=r.output_tokens,
+                cache_n=r.cache_n,
+                request_count=r.request_count,
+                hit_rate=r.hit_rate,
+                share=r.share,
+            )
+            for r in rows
+        ]
