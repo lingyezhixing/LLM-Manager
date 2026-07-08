@@ -61,3 +61,28 @@ def test_usage_series_endpoint_preset_returns_aligned_shape() -> None:
     assert len(j["buckets"]) == len(j["total"]) >= 1
     for series in j["models"].values():
         assert len(series) == len(j["buckets"])
+
+
+def test_usage_summary_endpoint_aggregates_range(tmp_path) -> None:
+    db = open_db(tmp_path / "t.db")
+    record_usage(db, "m1", start=5.0, end=10.0, input_tokens=100, output_tokens=20, cache_n=60, prompt_n=40)
+    with TestClient(_app(db)) as c:
+        r = c.get("/api/usage/summary?start=0&end=100")
+    assert r.status_code == 200
+    j = r.json()
+    assert j["request_count"] == 1
+    assert j["input_tokens"] == 100
+    assert j["output_tokens"] == 20
+    assert j["cache_hit"] == 60
+    assert j["cache_miss"] == 40
+    assert j["hit_rate"] == 0.6
+
+
+def test_usage_summary_endpoint_empty_returns_zeros(tmp_path) -> None:
+    db = open_db(tmp_path / "t.db")
+    with TestClient(_app(db)) as c:
+        r = c.get("/api/usage/summary?start=0&end=100")
+    assert r.status_code == 200
+    j = r.json()
+    assert j["request_count"] == 0
+    assert j["hit_rate"] == 0.0
