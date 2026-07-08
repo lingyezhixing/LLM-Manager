@@ -5,6 +5,7 @@ src layout (src/llm_manager/data/persistence.py)."""
 import threading
 
 from llm_manager.data.persistence import (
+    fetch_requests,
     fetch_usage,
     open_db,
     record_usage,
@@ -164,3 +165,32 @@ def test_usage_by_model_groups_orders_and_shares(tmp_path):
 def test_usage_by_model_empty_returns_empty_list(tmp_path):
     db = open_db(tmp_path / "t.db")
     assert usage_by_model(db, start_ts=0.0, end_ts=10.0) == []
+
+
+def test_fetch_requests_orders_newest_first_and_paginates(tmp_path):
+    db = open_db(tmp_path / "t.db")
+    for i in range(5):
+        record_usage(db, "m1", start=float(i), end=float(i + 1),
+                     input_tokens=i + 1, output_tokens=0, cache_n=0, prompt_n=0)
+    page1 = fetch_requests(db, start_ts=0.0, end_ts=10.0, limit=2)
+    assert page1.total == 5
+    assert [r.id for r in page1.rows] == [5, 4]    # id DESC = newest first
+    assert page1.has_more is True
+    assert page1.rows[0].latency_ms == 1000.0       # (end-start)*1000
+
+    page2 = fetch_requests(db, start_ts=0.0, end_ts=10.0, limit=2, before=page1.rows[-1].id)
+    assert [r.id for r in page2.rows] == [3, 2]
+    assert page2.has_more is True
+
+    page3 = fetch_requests(db, start_ts=0.0, end_ts=10.0, limit=2, before=page2.rows[-1].id)
+    assert [r.id for r in page3.rows] == [1]
+    assert page3.has_more is False
+
+
+def test_fetch_requests_filters_by_model(tmp_path):
+    db = open_db(tmp_path / "t.db")
+    record_usage(db, "m1", start=1.0, end=2.0, input_tokens=1, output_tokens=0, cache_n=0, prompt_n=0)
+    record_usage(db, "m2", start=3.0, end=4.0, input_tokens=1, output_tokens=0, cache_n=0, prompt_n=0)
+    res = fetch_requests(db, start_ts=0.0, end_ts=10.0, model_name="m1")
+    assert res.total == 1
+    assert res.rows[0].model == "m1"

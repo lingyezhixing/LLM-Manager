@@ -222,3 +222,68 @@ def usage_by_model(db: Db, *, start_ts: float, end_ts: float) -> list[ByModelRow
             share=int(r["s_in"]) / total_in if total_in else 0.0,
         ))
     return out
+
+
+@dataclass(frozen=True, slots=True)
+class RequestRow:
+    id: int
+    model: str
+    start_time: float
+    end_time: float
+    input_tokens: int
+    output_tokens: int
+    cache_n: int
+    latency_ms: float
+
+
+@dataclass(frozen=True, slots=True)
+class FetchRequestsResult:
+    rows: list[RequestRow]
+    has_more: bool
+    total: int
+
+
+def fetch_requests(
+    db: Db, *, start_ts: float, end_ts: float,
+    model_name: str | None = None, limit: int = 50, before: int | None = None,
+) -> FetchRequestsResult:
+    """Paginated raw request rows over [start_ts, end_ts), newest first (id DESC).
+    Cursor: ``before`` = return rows with id < before. has_more via fetch limit+1.
+    total = COUNT with same WHERE (incl. model filter) for pager math."""
+    where = "r.end_time >= ? AND r.end_time < ?"
+    params: list = [start_ts, end_ts]
+    if model_name is not None:
+        where += " AND m.original_name = ?"
+        params.append(model_name)
+    if before is not None:
+        where += " AND r.id < ?"
+        params.append(before)
+
+    total = db.conn.execute(
+        f"""SELECT COUNT(*) FROM model_requests r JOIN models m ON r.model_id = m.id
+            WHERE {where}""",
+        params,
+    ).fetchone()[0]
+
+    fetch_n = max(1, limit) + 1
+    raw = db.conn.execute(
+        f"""SELECT r.id, m.original_name AS model, r.start_time, r.end_time,
+                   r.input_tokens, r.output_tokens, r.cache_n
+            FROM model_requests r JOIN models m ON r.model_id = m.id
+            WHERE {where}
+            ORDER BY r.id DESC
+            LIMIT ?""",
+        [*params, fetch_n],
+    ).fetchall()
+    has_more = len(raw) > limit
+    rows = [
+        RequestRow(
+            id=int(r["id"]), model=r["model"],
+            start_time=float(r["start_time"]), end_time=float(r["end_time"]),
+            input_tokens=int(r["input_tokens"]), output_tokens=int(r["output_tokens"]),
+            cache_n=int(r["cache_n"]),
+            latency_ms=(float(r["end_time"]) - float(r["start_time"])) * 1000,
+        )
+        for r in raw[:limit]
+    ]
+    return FetchRequestsResult(rows=rows, has_more=has_more, total=total)
