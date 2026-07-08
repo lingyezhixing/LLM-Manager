@@ -59,8 +59,8 @@ export function ModelCard({ m, selected, nowMs, onSelect }: {
       <button onClick={(e) => { e.stopPropagation(); btn.fn(); }}
         className={`shrink-0 rounded-md border px-3 py-1.5 text-[10.5px] font-medium transition-colors ${
           btn.cls === "go" ? "border-primary bg-primary text-primary-foreground hover:opacity-90"
-          : btn.cls === "stop" ? "border-destructive/60 bg-destructive/10 text-destructive hover:bg-destructive/20"
-          : "border-warning/60 bg-warning/10 text-warning hover:bg-warning/20"}`}>
+          : btn.cls === "stop" ? "border-destructive bg-destructive text-destructive-foreground hover:opacity-90"
+          : "border-warning bg-warning text-warning-foreground hover:opacity-90"}`}>
         {btn.label}
       </button>
     </div>
