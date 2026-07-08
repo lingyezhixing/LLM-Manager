@@ -109,3 +109,36 @@ def test_usage_by_model_endpoint_empty_returns_empty_list(tmp_path) -> None:
         r = c.get("/api/usage/by-model?start=0&end=100")
     assert r.status_code == 200
     assert r.json() == []
+
+
+def test_usage_requests_endpoint_paginates_newest_first(tmp_path) -> None:
+    db = open_db(tmp_path / "t.db")
+    for i in range(5):
+        record_usage(db, "m1", start=float(i), end=float(i + 1),
+                     input_tokens=i + 1, output_tokens=0, cache_n=0, prompt_n=0)
+    with TestClient(_app(db)) as c:
+        r = c.get("/api/usage/requests?start=0&end=10&limit=2")
+    assert r.status_code == 200
+    j = r.json()
+    assert j["total"] == 5
+    assert len(j["rows"]) == 2
+    assert j["has_more"] is True
+    assert j["rows"][0]["id"] == 5
+    assert j["rows"][0]["latency_ms"] == 1000.0
+    assert j["rows"][0]["model"] == "m1"
+
+    with TestClient(_app(db)) as c:
+        r2 = c.get("/api/usage/requests?start=0&end=10&limit=2&before=4")
+    j2 = r2.json()
+    assert [row["id"] for row in j2["rows"]] == [3, 2]
+
+
+def test_usage_requests_endpoint_filters_by_model(tmp_path) -> None:
+    db = open_db(tmp_path / "t.db")
+    record_usage(db, "m1", start=1.0, end=2.0, input_tokens=1, output_tokens=0, cache_n=0, prompt_n=0)
+    record_usage(db, "m2", start=3.0, end=4.0, input_tokens=1, output_tokens=0, cache_n=0, prompt_n=0)
+    with TestClient(_app(db)) as c:
+        r = c.get("/api/usage/requests?start=0&end=10&model=m1")
+    j = r.json()
+    assert j["total"] == 1
+    assert j["rows"][0]["model"] == "m1"
