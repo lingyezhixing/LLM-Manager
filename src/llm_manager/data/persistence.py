@@ -177,3 +177,48 @@ def usage_summary(db: Db, *, start_ts: float, end_ts: float) -> UsageSummary:
         hit_rate=cache_hit / denom if denom else 0.0,
         request_count=int(row["n"]),
     )
+
+
+@dataclass(frozen=True, slots=True)
+class ByModelRow:
+    model: str
+    input_tokens: int
+    output_tokens: int
+    cache_n: int
+    request_count: int
+    hit_rate: float
+    share: float
+
+
+def usage_by_model(db: Db, *, start_ts: float, end_ts: float) -> list[ByModelRow]:
+    """Per-model aggregates over [start_ts, end_ts), ordered by input_tokens desc.
+    share = model input / total input (0.0 when no input)."""
+    rows = db.conn.execute(
+        """SELECT m.original_name AS model,
+                  SUM(r.input_tokens) AS s_in,
+                  SUM(r.output_tokens) AS s_out,
+                  SUM(r.cache_n) AS s_cache,
+                  SUM(r.prompt_n) AS s_miss,
+                  COUNT(*) AS n
+           FROM model_requests r JOIN models m ON r.model_id = m.id
+           WHERE r.end_time >= ? AND r.end_time < ?
+           GROUP BY m.original_name
+           ORDER BY s_in DESC""",
+        (start_ts, end_ts),
+    ).fetchall()
+    total_in = sum(int(r["s_in"]) for r in rows)
+    out: list[ByModelRow] = []
+    for r in rows:
+        cache_hit = int(r["s_cache"])
+        cache_miss = int(r["s_miss"])
+        denom = cache_hit + cache_miss
+        out.append(ByModelRow(
+            model=r["model"],
+            input_tokens=int(r["s_in"]),
+            output_tokens=int(r["s_out"]),
+            cache_n=cache_hit,
+            request_count=int(r["n"]),
+            hit_rate=cache_hit / denom if denom else 0.0,
+            share=int(r["s_in"]) / total_in if total_in else 0.0,
+        ))
+    return out

@@ -9,6 +9,7 @@ from llm_manager.data.persistence import (
     open_db,
     record_usage,
     resolve_model_id,
+    usage_by_model,
     usage_series,
     usage_summary,
 )
@@ -143,3 +144,23 @@ def test_usage_summary_empty_range_returns_zeros(tmp_path):
     assert s.input_tokens == 0
     assert s.cache_hit == 0
     assert s.hit_rate == 0.0
+
+
+def test_usage_by_model_groups_orders_and_shares(tmp_path):
+    db = open_db(tmp_path / "t.db")
+    record_usage(db, "m1", start=5.0, end=10.0, input_tokens=100, output_tokens=20, cache_n=60, prompt_n=40)
+    record_usage(db, "m2", start=15.0, end=20.0, input_tokens=50, output_tokens=10, cache_n=0, prompt_n=50)
+    rows = usage_by_model(db, start_ts=0.0, end_ts=25.0)
+    assert [r.model for r in rows] == ["m1", "m2"]   # ordered by input desc
+    assert rows[0].input_tokens == 100
+    assert rows[0].request_count == 1
+    assert rows[0].cache_n == 60
+    assert rows[0].share == 100 / 150
+    assert rows[1].share == 50 / 150
+    assert rows[0].hit_rate == 60 / 100
+    assert rows[1].hit_rate == 0.0
+
+
+def test_usage_by_model_empty_returns_empty_list(tmp_path):
+    db = open_db(tmp_path / "t.db")
+    assert usage_by_model(db, start_ts=0.0, end_ts=10.0) == []
