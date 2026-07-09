@@ -14,7 +14,7 @@ from fastapi import APIRouter, Request
 from pydantic import BaseModel
 
 from llm_manager.data import session
-from llm_manager.data.persistence import fetch_requests, usage_by_model, usage_series, usage_summary
+from llm_manager.data.persistence import usage_by_model, usage_series, usage_summary
 
 
 class SessionUsageResponse(BaseModel):
@@ -49,23 +49,7 @@ class ByModelEntryResponse(BaseModel):
     request_count: int
     hit_rate: float
     share: float
-
-
-class RequestRowResponse(BaseModel):
-    id: int
-    model: str
-    start_time: float
-    end_time: float
-    input_tokens: int
-    output_tokens: int
-    cache_n: int
     latency_ms: float
-
-
-class RequestsResponse(BaseModel):
-    rows: list[RequestRowResponse]
-    has_more: bool
-    total: int
 
 
 def _bucket_for_span(span: float) -> int:
@@ -165,37 +149,7 @@ def register_usage_routes(router: APIRouter) -> None:
                 request_count=r.request_count,
                 hit_rate=r.hit_rate,
                 share=r.share,
+                latency_ms=r.latency_ms,
             )
             for r in rows
         ]
-
-    @router.get("/usage/requests", response_model=RequestsResponse)
-    def usage_requests_endpoint(
-        request: Request,
-        range: str = "7d",
-        start: float | None = None,
-        end: float | None = None,
-        model: str | None = None,
-        limit: int = 50,
-        before: int | None = None,
-    ) -> RequestsResponse:
-        db = request.app.state.db
-        s_ts, e_ts = _resolve_window(range, start, end)
-        limit = max(1, min(limit, 500))
-        result = fetch_requests(
-            db, start_ts=s_ts, end_ts=e_ts,
-            model_name=model, limit=limit, before=before,
-        )
-        return RequestsResponse(
-            rows=[
-                RequestRowResponse(
-                    id=r.id, model=r.model,
-                    start_time=r.start_time, end_time=r.end_time,
-                    input_tokens=r.input_tokens, output_tokens=r.output_tokens,
-                    cache_n=r.cache_n, latency_ms=r.latency_ms,
-                )
-                for r in result.rows
-            ],
-            has_more=result.has_more,
-            total=result.total,
-        )
