@@ -2,12 +2,11 @@ import { useRef, useState, type MouseEvent } from "react";
 
 import type { UsageSeries } from "@/lib/api";
 
-/** Hand-rolled token chart (no lib). Smooth (monotone-cubic) curves. With few models it
- *  overlays total + per-model lines; with many it switches to a stacked area so series
- *  don't pile on one axis. Theme-aware via currentColor; cursor-following tooltip. */
+/** Hand-rolled token chart (no lib). Smooth (monotone-cubic) curves. Overlays a total
+ *  area+line (primary) with thin per-model lines; legend toggles series. Theme-aware via
+ *  currentColor; cursor-following tooltip. */
 
 const MODEL_COLORS = ["#f97316", "#a855f7", "#22c55e", "#eab308", "#ec4899", "#06b6d4", "#3b82f6", "#ef4444"];
-const STACK_THRESHOLD = 3; // > this many visible models → stacked area
 
 const W = 760;
 const H = 240;
@@ -83,14 +82,6 @@ function smoothPath(pts: Pt[]): string {
   return `M${pts[0][0].toFixed(1)},${pts[0][1].toFixed(1)}${smoothSegments(pts)}`;
 }
 
-/** Smooth area between a top and a bottom polyline (top L→R, bottom R→L). */
-function bandArea(topPts: Pt[], botPts: Pt[]): string {
-  const botRev = [...botPts].reverse();
-  const last = botPts[botPts.length - 1];
-  return `M${topPts[0][0].toFixed(1)},${topPts[0][1].toFixed(1)}${smoothSegments(topPts)}`
-    + ` L${last[0].toFixed(1)},${last[1].toFixed(1)}${smoothSegments(botRev)} Z`;
-}
-
 function LegendDot({ color, label }: { color: string; label: string }) {
   return (
     <span className="inline-flex items-center gap-1">
@@ -116,19 +107,11 @@ export function TokenChart({ data, preset }: { data: UsageSeries; preset: string
 
   const visibleNames = modelNames.filter((m) => !hidden.has(m));
   const max = Math.max(1, ...total); // total ≥ any single model, so it's the ceiling
-  const stacked = visibleNames.length > STACK_THRESHOLD;
   const colorOf = (m: string) => MODEL_COLORS[modelNames.indexOf(m) % MODEL_COLORS.length];
 
   const xAt = (i: number) => (n === 1 ? PAD.l + PLOT_W / 2 : PAD.l + (i / (n - 1)) * PLOT_W);
   const yAt = (v: number) => PAD.t + PLOT_H - (v / max) * PLOT_H;
   const pts = (series: number[]): Pt[] => series.map((v, i) => [xAt(i), yAt(v)]);
-
-  // cumulative stack boundaries (cum[0]=baseline, cum[k+1]=cum[k]+model_k)
-  const cum: number[][] = [new Array<number>(n).fill(0)];
-  for (const m of visibleNames) {
-    const prev = cum[cum.length - 1];
-    cum.push(prev.map((v, i) => v + models[m][i]));
-  }
 
   const yTicks = [1, 0.75, 0.5, 0.25, 0].map((f) => ({ v: max * f, y: yAt(max * f) }));
   const labelCount = Math.min(5, n);
@@ -185,32 +168,15 @@ export function TokenChart({ data, preset }: { data: UsageSeries; preset: string
           <text key={i} x={xAt(i)} y={H - 8} textAnchor="middle" fontSize="10" fill="currentColor">{fmtTs(buckets[i], preset)}</text>
         ))}
 
-        {stacked ? (
-          /* stacked area bands: each visible model a colored layer, top edge = total */
-          visibleNames.map((m, k) => (
-            <path
-              key={m}
-              d={bandArea(pts(cum[k + 1]), pts(cum[k]))}
-              fill={colorOf(m)}
-              fillOpacity={0.85}
-              stroke={colorOf(m)}
-              strokeWidth={1}
-              strokeLinejoin="round"
-            />
-          ))
-        ) : (
-          <>
-            {/* total area + line (primary) */}
-            <g className="text-primary">
-              <path d={`${smoothPath(pts(total))} L${xAt(n - 1).toFixed(1)},${yAt(0).toFixed(1)} L${xAt(0).toFixed(1)},${yAt(0).toFixed(1)} Z`} fill="currentColor" fillOpacity={0.12} />
-              <path d={smoothPath(pts(total))} fill="none" stroke="currentColor" strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
-            </g>
-            {/* per-model lines */}
-            {visibleNames.map((m) => (
-              <path key={m} d={smoothPath(pts(models[m]))} fill="none" stroke={colorOf(m)} strokeWidth={1.6} strokeLinejoin="round" strokeLinecap="round" />
-            ))}
-          </>
-        )}
+        {/* total area + line (primary) */}
+        <g className="text-primary">
+          <path d={`${smoothPath(pts(total))} L${xAt(n - 1).toFixed(1)},${yAt(0).toFixed(1)} L${xAt(0).toFixed(1)},${yAt(0).toFixed(1)} Z`} fill="currentColor" fillOpacity={0.12} />
+          <path d={smoothPath(pts(total))} fill="none" stroke="currentColor" strokeWidth={1.5} vectorEffect="non-scaling-stroke" strokeLinejoin="round" strokeLinecap="round" />
+        </g>
+        {/* per-model lines */}
+        {visibleNames.map((m) => (
+          <path key={m} d={smoothPath(pts(models[m]))} fill="none" stroke={colorOf(m)} strokeWidth={1.25} vectorEffect="non-scaling-stroke" strokeLinejoin="round" strokeLinecap="round" />
+        ))}
 
         {/* hover guide + total point */}
         {hover !== null && (
