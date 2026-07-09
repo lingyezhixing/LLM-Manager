@@ -101,6 +101,7 @@ export interface ByModelEntry {
   request_count: number;
   hit_rate: number;
   share: number;
+  latency_ms: number;
 }
 
 export async function fetchUsageByModel(params: UsageSeriesParams): Promise<ByModelEntry[]> {
@@ -110,47 +111,6 @@ export async function fetchUsageByModel(params: UsageSeriesParams): Promise<ByMo
   const res = await fetch(`/api/usage/by-model?${qs.toString()}`);
   if (!res.ok) throw new Error(`/api/usage/by-model failed: ${res.status}`);
   return (await res.json()) as ByModelEntry[];
-}
-
-export interface RequestRow {
-  id: number;
-  model: string;
-  start_time: number;
-  end_time: number;
-  input_tokens: number;
-  output_tokens: number;
-  cache_n: number;
-  latency_ms: number;
-}
-
-export interface RequestsPage {
-  rows: RequestRow[];
-  has_more: boolean;
-  total: number;
-}
-
-export interface RequestsParams {
-  range?: string;
-  start?: number;
-  end?: number;
-  model?: string;
-  limit?: number;
-  before?: number;
-}
-
-export async function fetchUsageRequests(params: RequestsParams): Promise<RequestsPage> {
-  const qs = new URLSearchParams();
-  if (params.range) qs.set("range", params.range);
-  else if (params.start !== undefined && params.end !== undefined) {
-    qs.set("start", String(params.start));
-    qs.set("end", String(params.end));
-  }
-  if (params.model) qs.set("model", params.model);
-  if (params.limit !== undefined) qs.set("limit", String(params.limit));
-  if (params.before !== undefined) qs.set("before", String(params.before));
-  const res = await fetch(`/api/usage/requests?${qs.toString()}`);
-  if (!res.ok) throw new Error(`/api/usage/requests failed: ${res.status}`);
-  return (await res.json()) as RequestsPage;
 }
 
 // 模型管理 — per-model control + structured log stream. LogLine matches the SSE frame the

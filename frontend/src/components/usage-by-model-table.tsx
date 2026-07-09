@@ -3,9 +3,9 @@ import { useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 
 import { fetchUsageByModel, type UsageSeriesParams } from "@/lib/api";
-import { formatCount, formatHitRate, formatPercent, formatTokens } from "@/lib/format";
+import { formatCount, formatHitRate, formatLatency, formatPercent, formatTokens } from "@/lib/format";
 
-type SortKey = "input_tokens" | "output_tokens" | "cache_n" | "request_count" | "hit_rate";
+type SortKey = "input_tokens" | "output_tokens" | "cache_n" | "request_count" | "hit_rate" | "latency_ms";
 
 export function UsageByModelTable({
   params,
@@ -49,6 +49,7 @@ export function UsageByModelTable({
             <ThNum label="请求数" k="request_count" sortKey={sortKey} desc={desc} onSort={onSort} />
             <th className="p-2 text-left text-xs font-medium text-muted-foreground">占比</th>
             <ThNum label="命中率" k="hit_rate" sortKey={sortKey} desc={desc} onSort={onSort} />
+            <ThNum label="平均延迟" k="latency_ms" sortKey={sortKey} desc={desc} onSort={onSort} />
           </tr>
         </thead>
         <tbody>
@@ -68,6 +69,7 @@ export function UsageByModelTable({
                 </div>
               </td>
               <td className="p-2 text-right tabular-nums">{formatHitRate(r.hit_rate)}</td>
+              <td className="p-2 text-right tabular-nums">{formatLatency(r.latency_ms)}</td>
             </tr>
           ))}
         </tbody>

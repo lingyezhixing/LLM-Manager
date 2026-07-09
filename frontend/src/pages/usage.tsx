@@ -10,9 +10,8 @@ import {
   paramsForState,
   type UsageRangeState,
 } from "@/components/usage-range-picker";
-import { UsageRequestTable } from "@/components/usage-request-table";
 
-/** 用量统计 — token analytics (KPI + time-series + per-model + per-request). */
+/** 用量统计 — token analytics (KPI + time-series + per-model). */
 export default function UsagePage() {
   const [range, setRange] = useState<UsageRangeState>({ preset: "7d", custom: null });
   const params = paramsForState(range);
@@ -33,9 +32,6 @@ export default function UsagePage() {
       </section>
       <section className="mb-6">
         <UsageByModelTable params={params} refetch={refetch} />
-      </section>
-      <section className="mb-6">
-        <UsageRequestTable params={params} />
       </section>
     </>
   );
