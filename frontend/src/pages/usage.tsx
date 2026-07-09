@@ -4,12 +4,8 @@ import { PageHeader } from "@/components/page-header";
 import { UsageByModelTable } from "@/components/usage-by-model-table";
 import { UsageChartCard } from "@/components/usage-chart-card";
 import { UsageKpiRow } from "@/components/usage-kpi-row";
-import {
-  USAGE_REFETCH,
-  UsageRangePicker,
-  paramsForState,
-  type UsageRangeState,
-} from "@/components/usage-range-picker";
+import { UsageRangePicker } from "@/components/usage-range-picker";
+import { USAGE_REFETCH, paramsForState, type UsageRangeState } from "@/lib/usage-range";
 
 /** 用量统计 — token analytics (KPI + time-series + per-model). */
 export default function UsagePage() {

@@ -1,32 +1,9 @@
 import { useState } from "react";
 
 import { CalendarRangePicker, type DateRange } from "@/components/calendar-range-picker";
-import type { UsageSeriesParams } from "@/lib/api";
+import { USAGE_PRESETS, type UsageRangeState } from "@/lib/usage-range";
 
-export type UsagePreset = "10m" | "today" | "7d" | "30d" | "custom";
-
-export interface UsageRangeState {
-  preset: UsagePreset;
-  custom: DateRange | null;
-}
-
-export const USAGE_PRESETS: { key: Exclude<UsagePreset, "custom">; label: string }[] = [
-  { key: "10m", label: "十分钟内" },
-  { key: "today", label: "今日" },
-  { key: "7d", label: "7天" },
-  { key: "30d", label: "30天" },
-];
-
-/** Refetch cadence for auto-refresh modules (KPI/chart/by-model). Custom = manual. */
-export const USAGE_REFETCH: Record<UsagePreset, number | false> = {
-  "10m": 10_000,
-  today: 30_000,
-  "7d": 60_000,
-  "30d": 60_000,
-  custom: false,
-};
-
-function rangeForPreset(preset: Exclude<UsagePreset, "custom">): DateRange {
+function rangeForPreset(preset: "10m" | "today" | "7d" | "30d"): DateRange {
   const to = new Date();
   const from = new Date();
   if (preset === "10m") from.setMinutes(from.getMinutes() - 10);
@@ -36,19 +13,9 @@ function rangeForPreset(preset: Exclude<UsagePreset, "custom">): DateRange {
   return { from, to };
 }
 
-export function rangeForState(state: UsageRangeState): DateRange {
+function rangeForState(state: UsageRangeState): DateRange {
   if (state.preset === "custom" && state.custom) return state.custom;
-  return rangeForPreset(state.preset as Exclude<UsagePreset, "custom">);
-}
-
-export function paramsForState(state: UsageRangeState): UsageSeriesParams {
-  if (state.preset === "custom" && state.custom) {
-    return {
-      start: Math.floor(state.custom.from.getTime() / 1000),
-      end: Math.floor(state.custom.to.getTime() / 1000),
-    };
-  }
-  return { range: state.preset };
+  return rangeForPreset(state.preset as "10m" | "today" | "7d" | "30d");
 }
 
 function fmtRange(r: DateRange): string {
@@ -57,6 +24,7 @@ function fmtRange(r: DateRange): string {
   return `${f} ~ ${t}`;
 }
 
+/** Preset capsules + custom calendar range picker. Drives the whole usage page. */
 export function UsageRangePicker({
   value,
   onChange,

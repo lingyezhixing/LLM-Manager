@@ -1,4 +1,4 @@
-import { useTheme, type Theme } from "@/lib/theme";
+import { useTheme, type Theme } from "@/lib/theme-context";
 import { Button } from "@/components/ui/button";
 
 const THEMES: ReadonlyArray<[Theme, string]> = [

@@ -1,25 +1,16 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
-export type Theme = "dark" | "light" | "warm";
-const STORE_KEY = "lhm-theme";
-const DEFAULT: Theme = "dark";
-const THEME_VALUES: ReadonlySet<Theme> = new Set(["dark", "light", "warm"]);
+import { THEME_DEFAULT, THEME_STORE_KEY, THEME_VALUES, ThemeContext, type Theme } from "@/lib/theme-context";
 
-type Ctx = { theme: Theme; setTheme: (t: Theme) => void };
-const ThemeContext = createContext<Ctx>({ theme: DEFAULT, setTheme: () => {} });
-
+/** Applies the active theme to <html data-theme> and persists it to localStorage. */
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setTheme] = useState<Theme>(() => {
-    const saved = localStorage.getItem(STORE_KEY);
-    return saved && THEME_VALUES.has(saved as Theme) ? (saved as Theme) : DEFAULT;
+    const saved = localStorage.getItem(THEME_STORE_KEY);
+    return saved && THEME_VALUES.has(saved as Theme) ? (saved as Theme) : THEME_DEFAULT;
   });
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
-    localStorage.setItem(STORE_KEY, theme);
+    localStorage.setItem(THEME_STORE_KEY, theme);
   }, [theme]);
   return <ThemeContext.Provider value={{ theme, setTheme }}>{children}</ThemeContext.Provider>;
-}
-
-export function useTheme() {
-  return useContext(ThemeContext);
 }
