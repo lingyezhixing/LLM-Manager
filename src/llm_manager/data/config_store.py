@@ -121,6 +121,16 @@ def _safe_name(name: str) -> str:
     return _SAFE.sub("_", name)
 
 
+def _needs_write(target: Path, content_hash: str) -> bool:
+    """True if target 缺失/不可读/损坏 或 hash 不匹配 → (重)写。"""
+    if not target.exists():
+        return True
+    try:
+        return _sha256(target.read_text(encoding="utf-8")) != content_hash
+    except (OSError, UnicodeDecodeError):
+        return True
+
+
 def _materialize(model_name: str, scheme_source: str, content: str, content_hash: str,
                  fallback_path: Path, scripts_dir: Path) -> Path:
     """content 非空 → 物化到 scripts_dir/<model>/<scheme>.<ext>(hash 变更才重写);content 空 → 回退 path。"""
@@ -128,7 +138,7 @@ def _materialize(model_name: str, scheme_source: str, content: str, content_hash
         return fallback_path
     ext = ".bat" if os.name == "nt" else ".sh"
     target = scripts_dir / _safe_name(model_name) / f"{_safe_name(scheme_source)}{ext}"
-    if not target.exists() or _sha256(target.read_text(encoding="utf-8")) != content_hash:
+    if _needs_write(target, content_hash):
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content, encoding="utf-8")
     return target

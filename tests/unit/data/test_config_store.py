@@ -147,3 +147,19 @@ def test_read_appconfig_empty_db_returns_defaults(tmp_path):
     assert out.wol is None
     assert out.claude_configs == {}
     assert out.program.host == "0.0.0.0" and out.program.port == 8080
+
+
+def test_materialize_overwrites_corrupt_target(tmp_path):
+    db = open_db(tmp_path / "t.db")
+    script = tmp_path / "q.bat"
+    script.write_text("echo hi", encoding="utf-8")
+    write_appconfig(db, _sample_cfg(script))
+    scripts_dir = tmp_path / "scripts"
+    # 预置一个损坏的(截断多字节)物化目标——read_text 会 UnicodeDecodeError
+    target = scripts_dir / "Qwen3-4B" / "RTX4060.bat"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(b"h\xc3")
+    # 修复前:read_appconfig 在此崩溃(UnicodeDecodeError 传播);修复后:识别为损坏→重写
+    out = read_appconfig(db, scripts_dir=scripts_dir)
+    assert target.read_text(encoding="utf-8") == "echo hi"
+    assert out.models["Qwen3-4B"].schemes["RTX4060"].script_path == target
