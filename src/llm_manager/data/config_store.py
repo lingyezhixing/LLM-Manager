@@ -8,6 +8,7 @@ import os
 import re
 from pathlib import Path
 
+from llm_manager import config
 from llm_manager.config import AppConfig, ModelConfig, ProgramConfig, Scheme, WakeOnLanConfig
 from llm_manager.data.persistence import Db
 
@@ -204,3 +205,63 @@ class ConfigStore:
     def reload(self) -> AppConfig:
         self._snapshot = read_appconfig(self._db, scripts_dir=self._scripts_dir)
         return self._snapshot
+
+
+ENV_MAP: dict[str, str] = {
+    "LLM_MANAGER_HOST": "host",
+    "LLM_MANAGER_PORT": "port",
+    "LLM_MANAGER_ALIVE_TIME": "alive_time",
+    "LLM_MANAGER_LOG_LEVEL": "log_level",
+    "LLM_MANAGER_LOG_DIR": "log_dir",
+    "LLM_MANAGER_DB_PATH": "db_path",
+}
+
+DEFAULTS: dict[str, str] = {
+    "host": "0.0.0.0",
+    "port": "8080",
+    "alive_time": "60",
+    "log_level": "INFO",
+    "log_dir": "logs",
+    "db_path": "data/llm_manager.db",
+    "log_retention_time_enabled": "0",
+    "log_retention_days": "30",
+    "log_retention_count_enabled": "0",
+    "log_retention_count": "10",
+    "claude_configs": "{}",
+}
+
+
+def is_initialized(db: Db) -> bool:
+    row = db.conn.execute("SELECT COUNT(*) AS n FROM system_settings").fetchone()
+    return int(row["n"]) > 0
+
+
+def seed_defaults(db: Db) -> None:
+    with db.write_lock:
+        for k, v in DEFAULTS.items():
+            _upsert_locked(db, k, v)
+        db.conn.commit()
+
+
+def apply_env_overrides(db: Db) -> None:
+    """对每个已设置的 LLM_MANAGER_* upsert 写库(env 不直接覆盖运行变量;运行时只读 DB)。"""
+    with db.write_lock:
+        for env_key, setting_key in ENV_MAP.items():
+            val = os.environ.get(env_key)
+            if val is not None:
+                _upsert_locked(db, setting_key, val)
+        db.conn.commit()
+
+
+def initialize(db: Db, legacy_yaml: Path | None) -> None:
+    """启动期 provision:空库 → 导入 legacy_yaml(校验失败即抛,不落脏数据)或种子默认;然后 env 写库。"""
+    if not is_initialized(db):
+        if legacy_yaml is not None and legacy_yaml.exists():
+            cfg = config.load(legacy_yaml)
+            errors = config.validate(cfg)
+            if errors:
+                raise ValueError("Invalid legacy config:\n" + "\n".join(f"  - {e}" for e in errors))
+            write_appconfig(db, cfg)
+        else:
+            seed_defaults(db)
+    apply_env_overrides(db)

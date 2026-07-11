@@ -5,7 +5,18 @@ from pathlib import Path
 import pytest
 
 from llm_manager.config import AppConfig, ModelConfig, ProgramConfig, Scheme, WakeOnLanConfig
-from llm_manager.data.config_store import ConfigStore, get_all_settings, get_setting, read_appconfig, set_setting, write_appconfig
+from llm_manager.data.config_store import (
+    ConfigStore,
+    apply_env_overrides,
+    get_all_settings,
+    get_setting,
+    initialize,
+    is_initialized,
+    read_appconfig,
+    seed_defaults,
+    set_setting,
+    write_appconfig,
+)
 from llm_manager.data.persistence import open_db
 
 
@@ -177,3 +188,80 @@ def test_config_store_snapshot_and_reload(tmp_path):
     set_setting(db, "port", "9999")
     snap = store.reload()
     assert snap.program.port == 9999
+
+
+def test_is_initialized_false_on_fresh_db(tmp_path):
+    assert is_initialized(open_db(tmp_path / "t.db")) is False
+
+
+def test_seed_defaults_marks_initialized(tmp_path):
+    db = open_db(tmp_path / "t.db")
+    seed_defaults(db)
+    assert is_initialized(db) is True
+    assert get_setting(db, "host") == "0.0.0.0"
+    assert get_setting(db, "log_retention_time_enabled") == "0"
+
+
+def test_initialize_imports_legacy_yaml_when_db_empty(tmp_path):
+    yaml_path = tmp_path / "config.yaml"
+    yaml_path.write_text(
+        "program: {host: 0.0.0.0, port: 8080, alive_time: 60, log_level: INFO}\n"
+        "Local-Models:\n"
+        "  Qwen3-4B:\n"
+        "    aliases: [\"Qwen3-4B\"]\n"
+        "    mode: Chat\n"
+        "    port: 10001\n"
+        "    RTX4060:\n"
+        "      required_devices: [\"rtx 4060\"]\n"
+        "      script_path: \"q.bat\"\n"
+        "      memory_mb: {\"rtx 4060\": 5120}\n",
+        encoding="utf-8")
+    db = open_db(tmp_path / "t.db")
+    initialize(db, legacy_yaml=yaml_path)
+    out = read_appconfig(db, scripts_dir=tmp_path / "scripts")
+    assert "Qwen3-4B" in out.models
+    assert out.models["Qwen3-4B"].schemes["RTX4060"].required_devices == frozenset({"rtx 4060"})
+
+
+def test_initialize_skips_import_when_already_initialized(tmp_path):
+    yaml_path = tmp_path / "config.yaml"
+    yaml_path.write_text(
+        "program: {host: 0.0.0.0, port: 8080, alive_time: 60, log_level: INFO}\n"
+        "Local-Models:\n  X: {aliases: [x], mode: Chat, port: 1, S: {required_devices: [gpu], script_path: a.bat, memory_mb: {gpu: 1}}}\n",
+        encoding="utf-8")
+    db = open_db(tmp_path / "t.db")
+    initialize(db, legacy_yaml=yaml_path)           # 第一次:导入 X
+    # 把模型世界清空(模拟后续手动 DB 状态),再 initialize → 不应重新导入
+    with db.write_lock:
+        db.conn.execute("DELETE FROM model_defs")
+        db.conn.commit()
+    initialize(db, legacy_yaml=yaml_path)           # 已 initialized(system_settings 非空)→ 跳过
+    assert read_appconfig(db, scripts_dir=tmp_path / "scripts").models == {}
+
+
+def test_apply_env_overrides_writes_set_env(monkeypatch, tmp_path):
+    db = open_db(tmp_path / "t.db")
+    seed_defaults(db)
+    monkeypatch.setenv("LLM_MANAGER_PORT", "7000")
+    monkeypatch.setenv("LLM_MANAGER_HOST", "127.0.0.1")
+    apply_env_overrides(db)
+    assert get_setting(db, "port") == "7000"
+    assert get_setting(db, "host") == "127.0.0.1"
+
+
+def test_apply_env_overrides_ignores_unset_env(monkeypatch, tmp_path):
+    db = open_db(tmp_path / "t.db")
+    seed_defaults(db)
+    monkeypatch.delenv("LLM_MANAGER_PORT", raising=False)
+    apply_env_overrides(db)
+    assert get_setting(db, "port") == "8080"        # 默认值不动
+
+
+def test_initialize_applies_env_after_import(monkeypatch, tmp_path):
+    yaml_path = tmp_path / "config.yaml"
+    yaml_path.write_text("program: {host: 0.0.0.0, port: 8080, alive_time: 60, log_level: INFO}\n",
+                         encoding="utf-8")
+    monkeypatch.setenv("LLM_MANAGER_PORT", "7000")
+    db = open_db(tmp_path / "t.db")
+    initialize(db, legacy_yaml=yaml_path)
+    assert get_setting(db, "port") == "7000"        # env 覆盖导入值
