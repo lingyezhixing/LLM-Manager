@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from llm_manager.config import AppConfig, ModelConfig, ProgramConfig, Scheme, WakeOnLanConfig
-from llm_manager.data.config_store import get_all_settings, get_setting, set_setting, write_appconfig
+from llm_manager.data.config_store import get_all_settings, get_setting, read_appconfig, set_setting, write_appconfig
 from llm_manager.data.persistence import open_db
 
 
@@ -92,3 +92,58 @@ def test_write_appconfig_rolls_back_on_mid_write_failure(tmp_path):
     db.conn.commit()
     names = [r["name"] for r in db.conn.execute("SELECT name FROM model_defs")]
     assert names == ["keep"]   # rollback 生效:原模型世界完好,无 partial 残留
+
+
+def test_read_appconfig_round_trips_back(tmp_path):
+    db = open_db(tmp_path / "t.db")
+    script = tmp_path / "q.bat"
+    script.write_text("echo hi", encoding="utf-8")
+    original = _sample_cfg(script)
+    write_appconfig(db, original)
+
+    out = read_appconfig(db, scripts_dir=tmp_path / "scripts")
+    assert out.program.host == "0.0.0.0"
+    assert out.program.port == 8080
+    assert out.wol == WakeOnLanConfig("192.168.1.255", "aa:bb:cc:dd:ee:ff")
+    assert out.claude_configs == {"GLM": {"ANTHROPIC_BASE_URL": "http://x"}}
+    m = out.models["Qwen3-4B"]
+    assert m.aliases == ("Qwen3-4B", "q4")
+    assert m.mode == "Chat" and m.port == 10001
+    scheme = m.schemes["RTX4060"]
+    assert scheme.required_devices == frozenset({"rtx 4060"})
+    assert scheme.memory_mb == {"rtx 4060": 5120}
+
+
+def test_read_appconfig_materializes_script_content(tmp_path):
+    db = open_db(tmp_path / "t.db")
+    script = tmp_path / "q.bat"
+    script.write_text("echo hi", encoding="utf-8")
+    write_appconfig(db, _sample_cfg(script))
+
+    out = read_appconfig(db, scripts_dir=tmp_path / "scripts")
+    materialized = out.models["Qwen3-4B"].schemes["RTX4060"].script_path
+    assert materialized != script                       # 指向物化文件,非原 path
+    assert materialized.parent == (tmp_path / "scripts" / "Qwen3-4B")
+    assert materialized.read_text(encoding="utf-8") == "echo hi"
+
+
+def test_read_appconfig_falls_back_to_path_when_content_empty(tmp_path):
+    """脚本文件导入时不可读(如测试里的 nonexistent.cmd)→ content 空 → 回退原 path。"""
+    db = open_db(tmp_path / "t.db")
+    scheme = Scheme(config_source="S", required_devices=frozenset({"gpu"}),
+                    script_path=Path("nonexistent.cmd"), memory_mb={"gpu": 1})
+    cfg = AppConfig(program=ProgramConfig("0.0.0.0", 8080, 60, "INFO"),
+                    models={"M": ModelConfig("M", ("M",), "Chat", 1, False, {"S": scheme})},
+                    wol=None, claude_configs={})
+    write_appconfig(db, cfg)                            # read_scripts 读不到 → content ""
+    out = read_appconfig(db, scripts_dir=tmp_path / "scripts")
+    assert out.models["M"].schemes["S"].script_path == Path("nonexistent.cmd")
+
+
+def test_read_appconfig_empty_db_returns_defaults(tmp_path):
+    db = open_db(tmp_path / "t.db")
+    out = read_appconfig(db, scripts_dir=tmp_path / "scripts")
+    assert out.models == {}
+    assert out.wol is None
+    assert out.claude_configs == {}
+    assert out.program.host == "0.0.0.0" and out.program.port == 8080

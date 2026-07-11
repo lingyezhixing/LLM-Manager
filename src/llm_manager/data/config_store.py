@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import re
 from pathlib import Path
 
-from llm_manager.config import AppConfig
+from llm_manager.config import AppConfig, ModelConfig, ProgramConfig, Scheme, WakeOnLanConfig
 from llm_manager.data.persistence import Db
 
 
@@ -110,3 +112,68 @@ def write_appconfig(db: Db, cfg: AppConfig, *, read_scripts: bool = True) -> Non
         except Exception:
             db.conn.rollback()
             raise
+
+
+_SAFE = re.compile(r"[^A-Za-z0-9._-]")
+
+
+def _safe_name(name: str) -> str:
+    return _SAFE.sub("_", name)
+
+
+def _materialize(model_name: str, scheme_source: str, content: str, content_hash: str,
+                 fallback_path: Path, scripts_dir: Path) -> Path:
+    """content 非空 → 物化到 scripts_dir/<model>/<scheme>.<ext>(hash 变更才重写);content 空 → 回退 path。"""
+    if not content:
+        return fallback_path
+    ext = ".bat" if os.name == "nt" else ".sh"
+    target = scripts_dir / _safe_name(model_name) / f"{_safe_name(scheme_source)}{ext}"
+    if not target.exists() or _sha256(target.read_text(encoding="utf-8")) != content_hash:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+    return target
+
+
+def read_appconfig(db: Db, *, scripts_dir: Path = Path("data/scripts")) -> AppConfig:
+    s = get_all_settings(db)
+    program = ProgramConfig(
+        host=s.get("host", "0.0.0.0"),
+        port=int(s.get("port", "8080")),
+        alive_time=int(s.get("alive_time", "60")),
+        log_level=s.get("log_level", "INFO"),
+        log_dir=s.get("log_dir", "logs"),
+        db_path=s.get("db_path", "data/llm_manager.db"),
+        claude_settings_path=s.get("claude_settings_path"),
+    )
+    wol = None
+    if "wol_broadcast" in s and "wol_mac" in s:
+        wol = WakeOnLanConfig(s["wol_broadcast"], s["wol_mac"])
+    claude_configs: dict = json.loads(s.get("claude_configs", "{}"))
+
+    models: dict[str, ModelConfig] = {}
+    for row in db.conn.execute("SELECT id, name, mode, port, auto_start FROM model_defs ORDER BY ord"):
+        mid = row["id"]
+        aliases = tuple(r["alias"] for r in db.conn.execute(
+            "SELECT alias FROM model_aliases WHERE model_id = ? ORDER BY ord", (mid,)))
+        schemes: dict[str, Scheme] = {}
+        for srow in db.conn.execute(
+                "SELECT id, config_source, required_devices, memory_mb "
+                "FROM model_schemes WHERE model_id = ? ORDER BY ord", (mid,)):
+            sid = srow["id"]
+            script_row = db.conn.execute(
+                "SELECT path, content, content_hash FROM model_scripts WHERE scheme_id = ?", (sid,)).fetchone()
+            fallback = Path(script_row["path"]) if script_row else Path("")
+            content = script_row["content"] if script_row else ""
+            chash = script_row["content_hash"] if script_row else ""
+            script_path = _materialize(row["name"], srow["config_source"], content, chash, fallback, scripts_dir)
+            schemes[srow["config_source"]] = Scheme(
+                config_source=srow["config_source"],
+                required_devices=frozenset(json.loads(srow["required_devices"])),
+                script_path=script_path,
+                memory_mb=dict(json.loads(srow["memory_mb"])),
+            )
+        models[row["name"]] = ModelConfig(
+            primary_name=row["name"], aliases=aliases, mode=row["mode"],
+            port=row["port"], auto_start=bool(row["auto_start"]), schemes=schemes,
+        )
+    return AppConfig(program=program, models=models, wol=wol, claude_configs=claude_configs)
