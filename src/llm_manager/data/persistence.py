@@ -62,7 +62,7 @@ def open_db(path: Path) -> Db:
             alias TEXT NOT NULL,
             ord INTEGER NOT NULL,
             FOREIGN KEY (model_id) REFERENCES model_defs(id) ON DELETE CASCADE,
-            UNIQUE(model_id, ord)
+            UNIQUE(alias)
         );
         CREATE TABLE IF NOT EXISTS model_schemes (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -71,7 +71,8 @@ def open_db(path: Path) -> Db:
             required_devices TEXT NOT NULL DEFAULT '[]',
             memory_mb TEXT NOT NULL DEFAULT '{}',
             ord INTEGER NOT NULL DEFAULT 0,
-            FOREIGN KEY (model_id) REFERENCES model_defs(id) ON DELETE CASCADE
+            FOREIGN KEY (model_id) REFERENCES model_defs(id) ON DELETE CASCADE,
+            UNIQUE(model_id, config_source)
         );
         CREATE TABLE IF NOT EXISTS model_scripts (
             scheme_id INTEGER PRIMARY KEY,
@@ -95,7 +96,8 @@ def open_db(path: Path) -> Db:
             input_price REAL, output_price REAL,
             support_cache INTEGER NOT NULL DEFAULT 0,
             cache_write_price REAL, cache_read_price REAL,
-            FOREIGN KEY (pricing_id) REFERENCES model_pricing(model_id) ON DELETE CASCADE
+            FOREIGN KEY (pricing_id) REFERENCES model_pricing(model_id) ON DELETE CASCADE,
+            PRIMARY KEY (pricing_id, tier_index)
         );
     """)
     _migrate(conn)
