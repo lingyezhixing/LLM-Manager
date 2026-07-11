@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from llm_manager.config import AppConfig, ModelConfig, ProgramConfig, Scheme, WakeOnLanConfig
-from llm_manager.data.config_store import get_all_settings, get_setting, read_appconfig, set_setting, write_appconfig
+from llm_manager.data.config_store import ConfigStore, get_all_settings, get_setting, read_appconfig, set_setting, write_appconfig
 from llm_manager.data.persistence import open_db
 
 
@@ -163,3 +163,17 @@ def test_materialize_overwrites_corrupt_target(tmp_path):
     out = read_appconfig(db, scripts_dir=scripts_dir)
     assert target.read_text(encoding="utf-8") == "echo hi"
     assert out.models["Qwen3-4B"].schemes["RTX4060"].script_path == target
+
+
+def test_config_store_snapshot_and_reload(tmp_path):
+    db = open_db(tmp_path / "t.db")
+    write_appconfig(db, AppConfig(
+        program=ProgramConfig("0.0.0.0", 8080, 60, "INFO"),
+        models={"M": ModelConfig("M", ("M",), "Chat", 1)}, wol=None, claude_configs={}))
+    store = ConfigStore(db, scripts_dir=tmp_path / "scripts")
+    assert "M" in store.snapshot().models
+
+    # 直接改 DB,reload 后看到新值(P1 写回将走同一路径)
+    set_setting(db, "port", "9999")
+    snap = store.reload()
+    assert snap.program.port == 9999

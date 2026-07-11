@@ -187,3 +187,20 @@ def read_appconfig(db: Db, *, scripts_dir: Path = Path("data/scripts")) -> AppCo
             port=row["port"], auto_start=bool(row["auto_start"]), schemes=schemes,
         )
     return AppConfig(program=program, models=models, wol=wol, claude_configs=claude_configs)
+
+
+class ConfigStore:
+    """DB-backed config holder。frozen snapshot() 是消费方接口(缓存,不每次读库);
+    reload() 重读 DB(P1 写回后调用)。"""
+
+    def __init__(self, db: Db, *, scripts_dir: Path = Path("data/scripts")) -> None:
+        self._db = db
+        self._scripts_dir = scripts_dir
+        self._snapshot = read_appconfig(db, scripts_dir=scripts_dir)
+
+    def snapshot(self) -> AppConfig:
+        return self._snapshot
+
+    def reload(self) -> AppConfig:
+        self._snapshot = read_appconfig(self._db, scripts_dir=self._scripts_dir)
+        return self._snapshot
