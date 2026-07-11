@@ -28,7 +28,7 @@ def test_lifespan_starts_and_stops_background(tmp_path, monkeypatch):
     monkeypatch.setattr("llm_manager.devices.is_lhm_available", lambda: False)
     cfg_path = tmp_path / "config.yaml"
     cfg_path.write_text(_CFG_BODY, encoding="utf-8")
-    app = create_app(cfg_path)
+    app = create_app(db_path=tmp_path / "t.db", legacy_yaml=cfg_path)
     with TestClient(app) as c:
         assert c.get("/health").status_code == 200   # fire-and-forget:就绪不等 auto_start
         # 轮询:auto_start 后台真跑(spawn nonexistent.cmd → 不起服务 → probe 重试 startup_timeout=60s → FAILED)。

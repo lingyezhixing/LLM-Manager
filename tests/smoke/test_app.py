@@ -22,7 +22,7 @@ Local-Models:
 def test_app_boots_and_health_ok(tmp_path):
     cfg_path = tmp_path / "config.yaml"
     cfg_path.write_text(_CFG, encoding="utf-8")
-    app = create_app(cfg_path)
+    app = create_app(db_path=tmp_path / "t.db", legacy_yaml=cfg_path)
     with TestClient(app) as client:
         resp = client.get("/health")
     assert resp.status_code == 200
@@ -38,4 +38,4 @@ def test_create_app_validates_and_fails_fast_on_bad_config(tmp_path):
         encoding="utf-8",
     )
     with pytest.raises(ValueError):
-        create_app(cfg_path)
+        create_app(db_path=tmp_path / "t.db", legacy_yaml=cfg_path)

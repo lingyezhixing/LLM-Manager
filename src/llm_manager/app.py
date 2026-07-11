@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 import datetime
 import logging
+import os
 import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -72,15 +73,19 @@ def setup_logging(level: str = "INFO", log_dir: str = "logs") -> None:
     _logging_configured = True
 
 
-def create_app(config_path: Path) -> FastAPI:
+def create_app(db_path: Path | None = None, *, legacy_yaml: Path | None = None) -> FastAPI:
     setup_logging()
-    cfg = config.load(config_path)
+    resolved_db = Path(db_path or os.environ.get("LLM_MANAGER_DB_PATH", "data/llm_manager.db"))
+    db = open_db(resolved_db)
+    from llm_manager.data.config_store import ConfigStore, initialize
+    initialize(db, legacy_yaml)
+    store = ConfigStore(db)
+    cfg = store.snapshot()
     errors = config.validate(cfg)
     if errors:
         raise ValueError("Invalid config:\n" + "\n".join(f"  - {e}" for e in errors))
-    logger.info("config loaded: %d models, %s:%d, alive %dmin",
-                len(cfg.models), cfg.program.host, cfg.program.port, cfg.program.alive_time)
-    db = open_db(Path(cfg.program.db_path))
+    logger.info("config loaded (DB %s): %d models, %s:%d, alive %dmin",
+                resolved_db, len(cfg.models), cfg.program.host, cfg.program.port, cfg.program.alive_time)
     monitor = DeviceMonitor(ENUMERATORS, config.referenced_devices(cfg))
     supervisor = Supervisor()
     lifecycle = Lifecycle(cfg=cfg, supervisor=supervisor, devices=monitor, probes=probe_registry)
@@ -142,26 +147,23 @@ def create_app(config_path: Path) -> FastAPI:
 
     app = FastAPI(title="LLM-Manager", lifespan=lifespan)
     register_routes(app, lifecycle, cfg, db, clients)
+    app.state.cfg = cfg
+    app.state.config_store = store
     return app
 
 
 def create_dev_app() -> FastAPI:
     """No-arg factory for ``uvicorn --factory --reload`` (development mode)."""
     import types
-    app = create_app(Path("config.yaml"))
-    # uvicorn --reload 不暴露 Server 实例，设一个桩让托盘能初始化
+    app = create_app(legacy_yaml=Path("config.yaml"))
     app.state.uvicorn_server = types.SimpleNamespace(should_exit=False)
     return app
 
 
 def main() -> None:
     import uvicorn
-
-    cfg_path = Path("config.yaml")
-    app = create_app(cfg_path)
-    cfg = config.load(cfg_path)
-    # 编程式 uvicorn:持 Server 句柄供系统托盘「退出」优雅关停
-    # (server.should_exit=True → uvicorn 关停 → lifespan finally:unload_all + 关 clients/db)
+    app = create_app(legacy_yaml=Path("config.yaml"))
+    cfg = app.state.cfg
     server = uvicorn.Server(
         uvicorn.Config(app, host=cfg.program.host, port=cfg.program.port, lifespan="on"))
     app.state.uvicorn_server = server
