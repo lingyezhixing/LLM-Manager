@@ -2,6 +2,8 @@ import hashlib
 import json
 from pathlib import Path
 
+import pytest
+
 from llm_manager.config import AppConfig, ModelConfig, ProgramConfig, Scheme, WakeOnLanConfig
 from llm_manager.data.config_store import get_all_settings, get_setting, set_setting, write_appconfig
 from llm_manager.data.persistence import open_db
@@ -70,3 +72,23 @@ def test_write_appconfig_replaces_model_world(tmp_path):
     write_appconfig(db, cfg2)
     names = [r["name"] for r in db.conn.execute("SELECT name FROM model_defs")]
     assert names == ["M2"]
+
+
+def test_write_appconfig_rolls_back_on_mid_write_failure(tmp_path):
+    db = open_db(tmp_path / "t.db")
+    # 先写入一个干净配置(已 commit)
+    write_appconfig(db, AppConfig(
+        program=ProgramConfig("0.0.0.0", 8080, 60, "INFO"),
+        models={"keep": ModelConfig("keep", ("keep",), "Chat", 1)}, wol=None, claude_configs={}))
+    # 再写一个中途必失败的配置:两模型共用 alias "x" → UNIQUE(alias) 触发 IntegrityError
+    bad = AppConfig(
+        program=ProgramConfig("0.0.0.0", 8080, 60, "INFO"),
+        models={"A": ModelConfig("A", ("x",), "Chat", 1), "B": ModelConfig("B", ("x",), "Chat", 2)},
+        wol=None, claude_configs={})
+    with pytest.raises(Exception):
+        write_appconfig(db, bad)
+    # 模拟"后续无关 writer 的 commit"——若无 rollback,这里会冲刷孤儿 DELETE+partial(A),
+    # 使 model_defs 变成 ["A"] 而非 ["keep"]。
+    db.conn.commit()
+    names = [r["name"] for r in db.conn.execute("SELECT name FROM model_defs")]
+    assert names == ["keep"]   # rollback 生效:原模型世界完好,无 partial 残留
