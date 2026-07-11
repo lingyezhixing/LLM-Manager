@@ -169,3 +169,11 @@ def test_usage_by_model_groups_orders_shares_and_latency(tmp_path):
 def test_usage_by_model_empty_returns_empty_list(tmp_path):
     db = open_db(tmp_path / "t.db")
     assert usage_by_model(db, start_ts=0.0, end_ts=10.0) == []
+
+
+def test_open_db_creates_config_tables(tmp_path):
+    db = open_db(tmp_path / "t.db")
+    tables = {r[0] for r in db.conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    for t in ("system_settings", "model_defs", "model_aliases", "model_schemes",
+              "model_scripts", "model_pricing", "pricing_tiers"):
+        assert t in tables

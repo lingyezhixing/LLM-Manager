@@ -43,6 +43,60 @@ def open_db(path: Path) -> Db:
         );
         CREATE INDEX IF NOT EXISTS idx_model_requests_model_id ON model_requests(model_id);
         CREATE INDEX IF NOT EXISTS idx_model_requests_end ON model_requests(end_time);
+        CREATE TABLE IF NOT EXISTS system_settings (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS model_defs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT UNIQUE NOT NULL,
+            mode TEXT NOT NULL,
+            port INTEGER NOT NULL,
+            auto_start INTEGER NOT NULL DEFAULT 0,
+            ord INTEGER NOT NULL DEFAULT 0,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS model_aliases (
+            model_id INTEGER NOT NULL,
+            alias TEXT NOT NULL,
+            ord INTEGER NOT NULL,
+            FOREIGN KEY (model_id) REFERENCES model_defs(id) ON DELETE CASCADE,
+            UNIQUE(model_id, ord)
+        );
+        CREATE TABLE IF NOT EXISTS model_schemes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            model_id INTEGER NOT NULL,
+            config_source TEXT NOT NULL,
+            required_devices TEXT NOT NULL DEFAULT '[]',
+            memory_mb TEXT NOT NULL DEFAULT '{}',
+            ord INTEGER NOT NULL DEFAULT 0,
+            FOREIGN KEY (model_id) REFERENCES model_defs(id) ON DELETE CASCADE
+        );
+        CREATE TABLE IF NOT EXISTS model_scripts (
+            scheme_id INTEGER PRIMARY KEY,
+            path TEXT NOT NULL,
+            content TEXT NOT NULL DEFAULT '',
+            content_hash TEXT NOT NULL DEFAULT '',
+            lang TEXT,
+            FOREIGN KEY (scheme_id) REFERENCES model_schemes(id) ON DELETE CASCADE
+        );
+        CREATE TABLE IF NOT EXISTS model_pricing (
+            model_id INTEGER PRIMARY KEY,
+            pricing_type TEXT NOT NULL DEFAULT 'tier',
+            hourly_price REAL NOT NULL DEFAULT 0,
+            FOREIGN KEY (model_id) REFERENCES model_defs(id) ON DELETE CASCADE
+        );
+        CREATE TABLE IF NOT EXISTS pricing_tiers (
+            pricing_id INTEGER NOT NULL,
+            tier_index INTEGER NOT NULL,
+            min_input INTEGER, max_input INTEGER,
+            min_output INTEGER, max_output INTEGER,
+            input_price REAL, output_price REAL,
+            support_cache INTEGER NOT NULL DEFAULT 0,
+            cache_write_price REAL, cache_read_price REAL,
+            FOREIGN KEY (pricing_id) REFERENCES model_pricing(model_id) ON DELETE CASCADE
+        );
     """)
     _migrate(conn)
     conn.commit()
