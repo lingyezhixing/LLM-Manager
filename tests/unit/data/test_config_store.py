@@ -313,3 +313,22 @@ def test_initialize_failed_import_keeps_gate_open_for_recovery(tmp_path, monkeyp
     initialize(db, legacy_yaml=yaml_path)
     assert is_initialized(db) is True
     assert "M" in read_appconfig(db, scripts_dir=tmp_path / "scripts").models
+
+
+def test_apply_env_overrides_rejects_non_int_port_without_poisoning_db(monkeypatch, tmp_path):
+    db = open_db(tmp_path / "t.db")
+    seed_defaults(db)
+    monkeypatch.setenv("LLM_MANAGER_PORT", "abc")
+    with pytest.raises(ValueError):
+        apply_env_overrides(db)
+    # 坏 env 在写库前被拒 → DB 未被污染(port 保持默认,不会形成持续 boot-loop)
+    assert get_setting(db, "port") == "8080"
+
+
+def test_apply_env_overrides_rejects_non_int_alive_time(monkeypatch, tmp_path):
+    db = open_db(tmp_path / "t.db")
+    seed_defaults(db)
+    monkeypatch.setenv("LLM_MANAGER_ALIVE_TIME", "soon")
+    with pytest.raises(ValueError):
+        apply_env_overrides(db)
+    assert get_setting(db, "alive_time") == "60"

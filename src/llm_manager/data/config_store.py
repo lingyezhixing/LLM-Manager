@@ -243,14 +243,31 @@ def seed_defaults(db: Db) -> None:
         db.conn.commit()
 
 
+_INT_ENV_KEYS = {"LLM_MANAGER_PORT", "LLM_MANAGER_ALIVE_TIME"}
+
+
 def apply_env_overrides(db: Db) -> None:
-    """对每个已设置的 LLM_MANAGER_* upsert 写库(env 不直接覆盖运行变量;运行时只读 DB)。"""
+    """对每个已设置的 LLM_MANAGER_* upsert 写库(env 不直接覆盖运行变量;运行时只读 DB)。
+
+    整型 env(LLM_MANAGER_PORT / ALIVE_TIME)在写库前校验,坏值直接抛 ValueError——
+    否则坏值会持久化进 DB,导致 read_appconfig 的 int() 崩溃且形成持续 boot-loop。"""
+    for env_key in _INT_ENV_KEYS:
+        val = os.environ.get(env_key)
+        if val is not None:
+            try:
+                int(val)
+            except ValueError:
+                raise ValueError(f"{env_key}={val!r} must be an integer")
     with db.write_lock:
-        for env_key, setting_key in ENV_MAP.items():
-            val = os.environ.get(env_key)
-            if val is not None:
-                _upsert_locked(db, setting_key, val)
-        db.conn.commit()
+        try:
+            for env_key, setting_key in ENV_MAP.items():
+                val = os.environ.get(env_key)
+                if val is not None:
+                    _upsert_locked(db, setting_key, val)
+            db.conn.commit()
+        except Exception:
+            db.conn.rollback()
+            raise
 
 
 def initialize(db: Db, legacy_yaml: Path | None) -> None:
