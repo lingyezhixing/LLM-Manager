@@ -265,3 +265,51 @@ def test_initialize_applies_env_after_import(monkeypatch, tmp_path):
     db = open_db(tmp_path / "t.db")
     initialize(db, legacy_yaml=yaml_path)
     assert get_setting(db, "port") == "7000"        # env 覆盖导入值
+
+
+def test_initialize_rejects_invalid_yaml_and_leaves_db_clean(tmp_path):
+    yaml_path = tmp_path / "config.yaml"
+    # 模型 M 缺 aliases → config.validate 报 "has no aliases" → initialize 抛 ValueError,不写库
+    yaml_path.write_text(
+        "program: {host: 0.0.0.0, port: 8080, alive_time: 60, log_level: INFO}\n"
+        "Local-Models:\n"
+        "  M:\n"
+        "    mode: Chat\n"
+        "    port: 1\n"
+        "    S:\n"
+        "      required_devices: [gpu]\n"
+        "      script_path: a.bat\n"
+        "      memory_mb: {gpu: 1}\n",
+        encoding="utf-8")
+    db = open_db(tmp_path / "t.db")
+    with pytest.raises(ValueError):
+        initialize(db, legacy_yaml=yaml_path)
+    # validate 在 write_appconfig 之前 → DB 干净,gate 未翻
+    assert is_initialized(db) is False
+    assert read_appconfig(db, scripts_dir=tmp_path / "scripts").models == {}
+
+
+def test_initialize_failed_import_keeps_gate_open_for_recovery(tmp_path, monkeypatch):
+    yaml_path = tmp_path / "config.yaml"
+    yaml_path.write_text(
+        "program: {host: 0.0.0.0, port: 8080, alive_time: 60, log_level: INFO}\n"
+        "Local-Models:\n"
+        "  M: {aliases: [m], mode: Chat, port: 1, S: {required_devices: [gpu], script_path: a.bat, memory_mb: {gpu: 1}}}\n",
+        encoding="utf-8")
+    db = open_db(tmp_path / "t.db")
+
+    # 模拟导入期 DB 失败(如磁盘满):write_appconfig 抛 → initialize 不吞错,gate 保持开
+    def boom(db, cfg, **kw):
+        raise RuntimeError("disk full")
+
+    import llm_manager.data.config_store as cs
+    monkeypatch.setattr(cs, "write_appconfig", boom)
+    with pytest.raises(RuntimeError):
+        initialize(db, legacy_yaml=yaml_path)
+    assert is_initialized(db) is False
+
+    # 恢复真实 write_appconfig,第二次 initialize 正常导入
+    monkeypatch.undo()
+    initialize(db, legacy_yaml=yaml_path)
+    assert is_initialized(db) is True
+    assert "M" in read_appconfig(db, scripts_dir=tmp_path / "scripts").models
