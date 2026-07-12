@@ -11,6 +11,8 @@ from pathlib import Path
 
 from fastapi import APIRouter, Request
 
+from llm_manager.data.config_store import get_setting
+
 try:
     from importlib.metadata import PackageNotFoundError, version as _pkg_version
     try:
@@ -25,6 +27,10 @@ _RESTART_FIELDS = ("host", "port", "db_path", "log_dir")
 
 def _store(request: Request):
     return request.app.state.config_store
+
+
+def _db(request: Request):
+    return request.app.state.db
 
 
 def _boot(request: Request) -> dict:
@@ -50,4 +56,27 @@ def register_config_routes(api: APIRouter) -> None:
             "db_path": str(db_path),
             "db_size_bytes": db_path.stat().st_size if db_path.exists() else None,
             "log_dir": boot.get("log_dir", cfg.program.log_dir),
+        }
+
+    @api.get("/config")
+    def get_config(request: Request) -> dict:
+        cfg = _store(request).snapshot()
+        boot = _boot(request)
+        p = cfg.program
+        return {
+            "program": {
+                "host": p.host, "port": p.port, "alive_time": p.alive_time,
+                "log_level": p.log_level, "log_dir": p.log_dir, "db_path": p.db_path,
+                "claude_settings_path": p.claude_settings_path,
+            },
+            "wol": ({"broadcast_address": cfg.wol.broadcast_address,
+                     "mac_address": cfg.wol.mac_address} if cfg.wol is not None else None),
+            "claude": cfg.claude_configs,
+            "logs": {
+                "time_enabled": get_setting(_db(request), "log_retention_time_enabled") == "1",
+                "days": int(get_setting(_db(request), "log_retention_days") or 30),
+                "count_enabled": get_setting(_db(request), "log_retention_count_enabled") == "1",
+                "count": int(get_setting(_db(request), "log_retention_count") or 10),
+            },
+            "restart_fields": _restart_fields(cfg, boot),
         }

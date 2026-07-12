@@ -34,3 +34,20 @@ def test_system_info_returns_db_logdir_version(tmp_path):
     assert isinstance(j["started_at"], (int, float))
     assert j["log_dir"] == "logs"
     assert "db_path" in j
+
+
+def test_get_config_returns_current_program_wol_claude_logs(tmp_path):
+    with TestClient(_app(tmp_path)) as c:
+        r = c.get("/api/config")
+    assert r.status_code == 200
+    j = r.json()
+    assert j["program"]["host"] == "0.0.0.0"
+    assert j["program"]["port"] == 8080
+    assert j["program"]["log_level"] == "INFO"
+    assert j["program"]["alive_time"] == 60
+    assert j["wol"] is None
+    assert j["claude"] == {}
+    assert j["logs"] == {
+        "time_enabled": False, "days": 30, "count_enabled": False, "count": 10,
+    }
+    assert j["restart_fields"] == []                # boot == snapshot → 无差异
