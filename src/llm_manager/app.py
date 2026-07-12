@@ -9,6 +9,7 @@ import datetime
 import logging
 import os
 import sys
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -149,6 +150,8 @@ def create_app(db_path: Path | None = None, *, legacy_yaml: Path | None = None) 
     register_routes(app, lifecycle, cfg, db, clients)
     app.state.cfg = cfg
     app.state.config_store = store
+    app.state.boot_program = {f: str(getattr(cfg.program, f)) for f in ("host", "port", "db_path", "log_dir")}
+    app.state.started_at = time.time()
     return app
 
 
