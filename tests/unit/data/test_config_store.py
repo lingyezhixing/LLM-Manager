@@ -15,6 +15,7 @@ from llm_manager.data.config_store import (
     read_appconfig,
     seed_defaults,
     set_setting,
+    set_settings,
     write_appconfig,
 )
 from llm_manager.data.persistence import open_db
@@ -332,3 +333,32 @@ def test_apply_env_overrides_rejects_non_int_alive_time(monkeypatch, tmp_path):
     with pytest.raises(ValueError):
         apply_env_overrides(db)
     assert get_setting(db, "alive_time") == "60"
+
+
+def test_set_settings_atomic_multi_key_write(tmp_path):
+    db = open_db(tmp_path / "t.db")
+    set_settings(db, {"host": "127.0.0.1", "port": "9000"})
+    assert get_setting(db, "host") == "127.0.0.1"
+    assert get_setting(db, "port") == "9000"
+
+
+def test_set_settings_rolls_back_on_failure(tmp_path):
+    db = open_db(tmp_path / "t.db")
+    set_setting(db, "port", "8080")
+    # 让写入中途失败:monkeypatch _upsert_locked 第二次调用抛
+    import llm_manager.data.config_store as cs
+    orig = cs._upsert_locked
+    calls = {"n": 0}
+    def boom(db, k, v):
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise RuntimeError("disk full")
+        return orig(db, k, v)
+    cs._upsert_locked = boom
+    try:
+        with pytest.raises(RuntimeError):
+            set_settings(db, {"host": "1.1.1.1", "port": "9999"})
+    finally:
+        cs._upsert_locked = orig
+    # rollback:host 未写;port 仍是原值(8080),非 9999
+    assert get_setting(db, "port") == "8080"

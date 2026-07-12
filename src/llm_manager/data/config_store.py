@@ -28,6 +28,18 @@ def set_setting(db: Db, key: str, value: str) -> None:
         db.conn.commit()
 
 
+def set_settings(db: Db, updates: dict[str, str]) -> None:
+    """多键原子写:单锁单 commit,失败 rollback(防 partial 被后续 commit 冲刷)。"""
+    with db.write_lock:
+        try:
+            for k, v in updates.items():
+                _upsert_locked(db, k, v)
+            db.conn.commit()
+        except Exception:
+            db.conn.rollback()
+            raise
+
+
 def get_setting(db: Db, key: str) -> str | None:
     row = db.conn.execute("SELECT value FROM system_settings WHERE key = ?", (key,)).fetchone()
     return row["value"] if row else None
