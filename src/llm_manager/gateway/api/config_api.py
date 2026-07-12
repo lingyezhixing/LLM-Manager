@@ -10,8 +10,9 @@ import time
 from pathlib import Path
 
 from fastapi import APIRouter, Request
+from pydantic import BaseModel, Field
 
-from llm_manager.data.config_store import get_setting
+from llm_manager.data.config_store import get_setting, set_settings
 
 try:
     from importlib.metadata import PackageNotFoundError, version as _pkg_version
@@ -23,6 +24,16 @@ except Exception:
     _VERSION = "unknown"
 
 _RESTART_FIELDS = ("host", "port", "db_path", "log_dir")
+
+
+class ProgramUpdate(BaseModel):
+    host: str | None = None
+    port: int | None = Field(default=None, ge=1, le=65535)
+    alive_time: int | None = Field(default=None, ge=0)
+    log_level: str | None = None
+    log_dir: str | None = None
+    db_path: str | None = None
+    claude_settings_path: str | None = None
 
 
 def _store(request: Request):
@@ -39,6 +50,12 @@ def _boot(request: Request) -> dict:
 
 def _restart_fields(snapshot, boot: dict) -> list[str]:
     return [f for f in _RESTART_FIELDS if str(getattr(snapshot.program, f)) != str(boot.get(f))]
+
+
+def _serving() -> list[str]:
+    """当前正在服务(ROUTING 且 pending>0)的模型——restart 会中断它们。"""
+    from llm_manager import state
+    return [n for n in state.routing_names() if state.pending_count(n) > 0]
 
 
 def register_config_routes(api: APIRouter) -> None:
@@ -80,3 +97,20 @@ def register_config_routes(api: APIRouter) -> None:
             },
             "restart_fields": _restart_fields(cfg, boot),
         }
+
+    @api.put("/config/program")
+    def put_program(request: Request, body: ProgramUpdate) -> dict:
+        updates: dict[str, str] = {}
+        for f in ("host", "log_level", "log_dir", "db_path", "claude_settings_path"):
+            v = getattr(body, f)
+            if v is not None:
+                updates[f] = v
+        for f in ("port", "alive_time"):
+            v = getattr(body, f)
+            if v is not None:
+                updates[f] = str(v)
+        if updates:
+            set_settings(_db(request), updates)
+        cfg = _store(request).reload()
+        rf = _restart_fields(cfg, _boot(request))
+        return {"needs_restart": bool(rf), "restart_fields": rf, "serving": _serving()}

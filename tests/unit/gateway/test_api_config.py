@@ -1,17 +1,17 @@
 import time
-from pathlib import Path
 
 from fastapi import APIRouter, FastAPI
 from fastapi.testclient import TestClient
 
-from llm_manager.data.config_store import ConfigStore, seed_defaults
+from llm_manager.data.config_store import ConfigStore, is_initialized, seed_defaults
 from llm_manager.data.persistence import open_db
 from llm_manager.gateway.api.config_api import register_config_routes
 
 
 def _app(tmp_path):
     db = open_db(tmp_path / "t.db")
-    seed_defaults(db)                       # host 0.0.0.0 / port 8080 / log_dir logs / db_path ...
+    if not is_initialized(db):              # warm-start(已初始化)跳过 seed,保留既有写入
+        seed_defaults(db)
     store = ConfigStore(db, scripts_dir=tmp_path / "scripts")
     app = FastAPI()
     api = APIRouter(prefix="/api")
@@ -51,3 +51,29 @@ def test_get_config_returns_current_program_wol_claude_logs(tmp_path):
         "time_enabled": False, "days": 30, "count_enabled": False, "count": 10,
     }
     assert j["restart_fields"] == []                # boot == snapshot → 无差异
+
+
+def test_put_program_writes_and_reports_restart_on_port_change(tmp_path):
+    with TestClient(_app(tmp_path)) as c:
+        r = c.put("/api/config/program", json={"port": 9000})
+    assert r.status_code == 200
+    j = r.json()
+    assert set(j["restart_fields"]) == {"port"}        # port 改了 → 需重启
+    assert j["needs_restart"] is True
+    # 写入已生效:同库二次启动(warm-start,_app 跳过 seed)→ 读到 9000
+    with TestClient(_app(tmp_path)) as c:
+        assert c.get("/api/config").json()["program"]["port"] == 9000
+
+
+def test_put_program_hot_field_no_restart(tmp_path):
+    with TestClient(_app(tmp_path)) as c:
+        r = c.put("/api/config/program", json={"alive_time": 5})
+    assert r.status_code == 200
+    assert r.json()["needs_restart"] is False          # alive_time 热字段
+    assert r.json()["restart_fields"] == []
+
+
+def test_put_program_rejects_bad_port(tmp_path):
+    with TestClient(_app(tmp_path)) as c:
+        r = c.put("/api/config/program", json={"port": 99999})   # >65535
+    assert r.status_code == 422                          # Pydantic Field(le=65535)
