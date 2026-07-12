@@ -360,5 +360,6 @@ def test_set_settings_rolls_back_on_failure(tmp_path):
             set_settings(db, {"host": "1.1.1.1", "port": "9999"})
     finally:
         cs._upsert_locked = orig
-    # rollback:host 未写;port 仍是原值(8080),非 9999
+    # rollback:host(失败前已 stage)被回滚 → None;port(失败处)未写,仍是原值 8080
+    assert get_setting(db, "host") is None
     assert get_setting(db, "port") == "8080"
