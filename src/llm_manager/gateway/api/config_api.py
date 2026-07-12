@@ -38,8 +38,8 @@ class ProgramUpdate(BaseModel):
 
 
 class WolUpdate(BaseModel):
-    broadcast_address: str | None = None
-    mac_address: str | None = None
+    broadcast_address: str
+    mac_address: str
 
 class ClaudeConfigsUpdate(BaseModel):
     configs: dict[str, dict[str, str]]

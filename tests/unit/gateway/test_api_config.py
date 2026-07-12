@@ -87,6 +87,13 @@ def test_put_wol_writes_both_keys(tmp_path):
     assert wol == {"broadcast_address": "10.0.0.255", "mac_address": "aa:bb:cc:dd:ee:ff"}
 
 
+def test_put_wol_rejects_partial_update(tmp_path):
+    # WOL 是一对:只发一个字段 → 422(防 read_appconfig 的 wol 双键门槛造成静默孤儿)
+    with TestClient(_app(tmp_path)) as c:
+        r = c.put("/api/config/wol", json={"broadcast_address": "10.0.0.255"})
+    assert r.status_code == 422
+
+
 def test_put_claude_replaces_configs(tmp_path):
     with TestClient(_app(tmp_path)) as c:
         r = c.put("/api/config/claude", json={"configs": {"GLM": {"ANTHROPIC_BASE_URL": "http://x"}}})
