@@ -77,3 +77,27 @@ def test_put_program_rejects_bad_port(tmp_path):
     with TestClient(_app(tmp_path)) as c:
         r = c.put("/api/config/program", json={"port": 99999})   # >65535
     assert r.status_code == 422                          # Pydantic Field(le=65535)
+
+
+def test_put_wol_writes_both_keys(tmp_path):
+    with TestClient(_app(tmp_path)) as c:
+        r = c.put("/api/config/wol", json={"broadcast_address": "10.0.0.255", "mac_address": "aa:bb:cc:dd:ee:ff"})
+    assert r.status_code == 200
+    wol = c.get("/api/config").json()["wol"]
+    assert wol == {"broadcast_address": "10.0.0.255", "mac_address": "aa:bb:cc:dd:ee:ff"}
+
+
+def test_put_claude_replaces_configs(tmp_path):
+    with TestClient(_app(tmp_path)) as c:
+        r = c.put("/api/config/claude", json={"configs": {"GLM": {"ANTHROPIC_BASE_URL": "http://x"}}})
+    assert r.status_code == 200
+    assert c.get("/api/config").json()["claude"] == {"GLM": {"ANTHROPIC_BASE_URL": "http://x"}}
+
+
+def test_put_logs_updates_retention_rules(tmp_path):
+    with TestClient(_app(tmp_path)) as c:
+        r = c.put("/api/config/logs", json={"time_enabled": True, "days": 14, "count_enabled": False, "count": 10})
+    assert r.status_code == 200
+    assert c.get("/api/config").json()["logs"] == {
+        "time_enabled": True, "days": 14, "count_enabled": False, "count": 10,
+    }

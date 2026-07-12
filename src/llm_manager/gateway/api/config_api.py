@@ -6,6 +6,7 @@ restart 检测:对比 snapshot.program 的 host/port/db_path/log_dir 与 app.sta
 """
 from __future__ import annotations
 
+import json
 import time
 from pathlib import Path
 
@@ -34,6 +35,20 @@ class ProgramUpdate(BaseModel):
     log_dir: str | None = None
     db_path: str | None = None
     claude_settings_path: str | None = None
+
+
+class WolUpdate(BaseModel):
+    broadcast_address: str | None = None
+    mac_address: str | None = None
+
+class ClaudeConfigsUpdate(BaseModel):
+    configs: dict[str, dict[str, str]]
+
+class LogRetentionUpdate(BaseModel):
+    time_enabled: bool | None = None
+    days: int | None = Field(default=None, ge=1)
+    count_enabled: bool | None = None
+    count: int | None = Field(default=None, ge=1)
 
 
 def _store(request: Request):
@@ -114,3 +129,39 @@ def register_config_routes(api: APIRouter) -> None:
         cfg = _store(request).reload()
         rf = _restart_fields(cfg, _boot(request))
         return {"needs_restart": bool(rf), "restart_fields": rf, "serving": _serving()}
+
+    @api.put("/config/wol")
+    def put_wol(request: Request, body: WolUpdate) -> dict:
+        updates: dict[str, str] = {}
+        if body.broadcast_address is not None:
+            updates["wol_broadcast"] = body.broadcast_address
+        if body.mac_address is not None:
+            updates["wol_mac"] = body.mac_address
+        if updates:
+            set_settings(_db(request), updates)
+        cfg = _store(request).reload()
+        rf = _restart_fields(cfg, _boot(request))
+        return {"needs_restart": bool(rf), "restart_fields": rf, "serving": _serving()}
+
+    @api.put("/config/claude")
+    def put_claude(request: Request, body: ClaudeConfigsUpdate) -> dict:
+        set_settings(_db(request), {"claude_configs": json.dumps(body.configs, ensure_ascii=False)})
+        cfg = _store(request).reload()
+        rf = _restart_fields(cfg, _boot(request))
+        return {"needs_restart": bool(rf), "restart_fields": rf, "serving": _serving()}
+
+    @api.put("/config/logs")
+    def put_logs(request: Request, body: LogRetentionUpdate) -> dict:
+        updates: dict[str, str] = {}
+        if body.time_enabled is not None:
+            updates["log_retention_time_enabled"] = "1" if body.time_enabled else "0"
+        if body.days is not None:
+            updates["log_retention_days"] = str(body.days)
+        if body.count_enabled is not None:
+            updates["log_retention_count_enabled"] = "1" if body.count_enabled else "0"
+        if body.count is not None:
+            updates["log_retention_count"] = str(body.count)
+        if updates:
+            set_settings(_db(request), updates)
+        _store(request).reload()                  # 日志规则不进 AppConfig 快照,但 reload 保持新鲜
+        return {"needs_restart": False, "restart_fields": [], "serving": _serving()}
