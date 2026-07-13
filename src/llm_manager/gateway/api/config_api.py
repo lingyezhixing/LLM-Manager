@@ -24,7 +24,7 @@ try:
 except Exception:
     _VERSION = "unknown"
 
-_RESTART_FIELDS = ("host", "port", "db_path", "log_dir")
+_RESTART_FIELDS = ("host", "port", "db_path", "log_dir", "claude_settings_path")
 
 
 class ProgramUpdate(BaseModel):

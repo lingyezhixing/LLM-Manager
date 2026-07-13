@@ -149,3 +149,13 @@ def test_restart_status_reports_changed_fields_and_serving(tmp_path):
         assert j["serving"] == ["m1"]
     finally:
         state._reset()
+
+
+def test_put_program_claude_settings_path_is_restart_classified(tmp_path):
+    # claude_settings_path 改动需重启(tray 构造时捕获 _settings_path,不经 get_cfg)
+    with TestClient(_app(tmp_path)) as c:
+        r = c.put("/api/config/program", json={"claude_settings_path": "/new/settings.json"})
+    assert r.status_code == 200
+    j = r.json()
+    assert "claude_settings_path" in j["restart_fields"]
+    assert j["needs_restart"] is True
