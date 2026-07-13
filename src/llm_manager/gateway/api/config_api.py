@@ -174,3 +174,9 @@ def register_config_routes(api: APIRouter) -> None:
         setup_logging(cfg.program.log_level, cfg.program.log_dir)
         rf = _restart_fields(cfg, _boot(request))
         return {"needs_restart": bool(rf), "restart_fields": rf, "serving": _serving()}
+
+    @api.get("/config/restart-status")
+    def restart_status(request: Request) -> dict:
+        cfg = _store(request).snapshot()
+        rf = _restart_fields(cfg, _boot(request))
+        return {"needs_restart": bool(rf), "restart_fields": rf, "serving": _serving()}

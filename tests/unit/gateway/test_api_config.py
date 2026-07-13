@@ -121,3 +121,31 @@ def test_reload_reapplies_hot_log_level(tmp_path, monkeypatch):
         r = c.post("/api/config/reload")
     assert r.status_code == 200
     assert captured["level"] == "DEBUG"
+
+
+def test_restart_status_no_change_no_serving(tmp_path):
+    with TestClient(_app(tmp_path)) as c:
+        r = c.get("/api/config/restart-status")
+    assert r.status_code == 200
+    j = r.json()
+    assert j["needs_restart"] is False
+    assert j["restart_fields"] == []
+    assert j["serving"] == []
+
+
+def test_restart_status_reports_changed_fields_and_serving(tmp_path):
+    from llm_manager import state
+    from llm_manager.state import ModelStatus
+    state._reset()
+    state.set_status("m1", ModelStatus.ROUTING, force=True)
+    state.inc_pending("m1")
+    try:
+        with TestClient(_app(tmp_path)) as c:
+            c.put("/api/config/program", json={"port": 9000})     # 改重启字段
+            r = c.get("/api/config/restart-status")
+        j = r.json()
+        assert j["needs_restart"] is True
+        assert set(j["restart_fields"]) == {"port"}
+        assert j["serving"] == ["m1"]
+    finally:
+        state._reset()
