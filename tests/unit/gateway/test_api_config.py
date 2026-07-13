@@ -108,3 +108,16 @@ def test_put_logs_updates_retention_rules(tmp_path):
     assert c.get("/api/config").json()["logs"] == {
         "time_enabled": True, "days": 14, "count_enabled": False, "count": 10,
     }
+
+
+def test_reload_reapplies_hot_log_level(tmp_path, monkeypatch):
+    import llm_manager.app as appmod
+    captured = {}
+    def fake_setup(level="INFO", log_dir="logs"):
+        captured["level"] = level
+    monkeypatch.setattr(appmod, "setup_logging", fake_setup)
+    with TestClient(_app(tmp_path)) as c:
+        c.put("/api/config/program", json={"log_level": "DEBUG"})
+        r = c.post("/api/config/reload")
+    assert r.status_code == 200
+    assert captured["level"] == "DEBUG"

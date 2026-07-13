@@ -28,7 +28,6 @@ from llm_manager.runtime import background
 from llm_manager.supervisor import Supervisor
 from llm_manager.tray import host as tray_host
 
-_logging_configured = False
 logger = logging.getLogger(__name__)
 
 
@@ -46,9 +45,6 @@ def _cleanup_old_logs(log_dir: str, keep: int = 10) -> None:
 def setup_logging(level: str = "INFO", log_dir: str = "logs") -> None:
     """配置 root logger(一次性):控制台 + 每次启动一个时间戳文件(留 10 个)。
     每次启动 = 新文件 logs/llm-manager_{ts}.log(非按天轮换,避免长期堆一个文件)。"""
-    global _logging_configured
-    if _logging_configured:
-        return
     numeric = getattr(logging, level.upper(), logging.INFO)
     root = logging.getLogger()
     root.setLevel(numeric)
@@ -71,7 +67,6 @@ def setup_logging(level: str = "INFO", log_dir: str = "logs") -> None:
     except OSError:
         pass
     logging.getLogger("httpx").setLevel(logging.WARNING)  # 降噪:每请求一行太吵,REQ/RESP 已覆盖
-    _logging_configured = True
 
 
 def create_app(db_path: Path | None = None, *, legacy_yaml: Path | None = None) -> FastAPI:
