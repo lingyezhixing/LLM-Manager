@@ -114,7 +114,7 @@ def create_app(db_path: Path | None = None, *, legacy_yaml: Path | None = None) 
         if (tray_host.is_tray_available() and server is not None
                 and cfg.program.claude_settings_path):
             tray = tray_host.SystemTray(
-                lifecycle=lifecycle, cfg=cfg, monitor=monitor,
+                lifecycle=lifecycle, get_cfg=store.snapshot, monitor=monitor,
                 loop=app.state.loop, server=server,
                 settings_path=cfg.program.claude_settings_path,
                 startup_timeout=lifecycle.startup_timeout,

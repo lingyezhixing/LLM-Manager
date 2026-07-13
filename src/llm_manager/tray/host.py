@@ -57,7 +57,7 @@ class SystemTray:
         self,
         *,
         lifecycle,
-        cfg,
+        get_cfg,
         monitor,
         loop: asyncio.AbstractEventLoop,
         server,
@@ -66,7 +66,7 @@ class SystemTray:
         auto_start_margin: float,
     ) -> None:
         self._lifecycle = lifecycle
-        self._cfg = cfg
+        self._get_cfg = get_cfg
         self._monitor = monitor
         self._loop = loop
         self._server = server
@@ -111,13 +111,14 @@ class SystemTray:
         return Image.new("RGB", (64, 64), "black")
 
     def _build_icon(self):
+        cfg = self._get_cfg()
         items = [
             pystray.MenuItem("🌐 打开 WebUI", self.open_webui, default=True),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("🔔 网络唤醒飞牛", self.send_wol),
         ]
-        if self._cfg.claude_configs:
-            submenu = pystray.Menu(*[self._preset_menuitem(n) for n in self._cfg.claude_configs])
+        if cfg.claude_configs:
+            submenu = pystray.Menu(*[self._preset_menuitem(n) for n in cfg.claude_configs])
             items.append(pystray.MenuItem("🔄 Claude 配置", submenu))  # action=Menu 即子菜单(本版无 submenu kwarg)
         items += [
             pystray.MenuItem("▶ 重启自启模型", self.restart_auto_start),
@@ -139,15 +140,16 @@ class SystemTray:
         return pystray.MenuItem(name, action, checked=checked)
 
     def _current_preset(self) -> str:
-        return claude.detect_current_preset(self._settings_path, dict(self._cfg.claude_configs))
+        return claude.detect_current_preset(self._settings_path, dict(self._get_cfg().claude_configs))
 
     # ---------- actions (unit-testable; no pystray objects) ----------
     def open_webui(self, icon=None, item=None) -> None:
-        host = "localhost" if self._cfg.program.host == "0.0.0.0" else self._cfg.program.host
-        webbrowser.open(f"http://{host}:{self._cfg.program.port}")
+        cfg = self._get_cfg()
+        host = "localhost" if cfg.program.host == "0.0.0.0" else cfg.program.host
+        webbrowser.open(f"http://{host}:{cfg.program.port}")
 
     def send_wol(self, icon=None, item=None) -> None:
-        wol_cfg = self._cfg.wol
+        wol_cfg = self._get_cfg().wol
         if not wol_cfg:
             logger.warning("未配置网络唤醒(wake_on_lan)")
             return
@@ -158,7 +160,7 @@ class SystemTray:
             logger.error("发送网络唤醒包失败: %s", e)
 
     def apply_claude(self, preset_name: str) -> None:
-        preset = (self._cfg.claude_configs or {}).get(preset_name)
+        preset = (self._get_cfg().claude_configs or {}).get(preset_name)
         if not preset:
             logger.error("未知 Claude 配置: %s", preset_name)
             return
@@ -192,10 +194,11 @@ class SystemTray:
     async def _restart(self) -> None:
         logger.info("重启自启模型...")
         await self._lifecycle.unload_all()
-        auto_models = [n for n, m in self._cfg.models.items() if m.auto_start]
+        cfg = self._get_cfg()
+        auto_models = [n for n, m in cfg.models.items() if m.auto_start]
         stop_event = asyncio.Event()
         await background.auto_start(
-            self._lifecycle, auto_models, self._cfg, self._monitor,
+            self._lifecycle, auto_models, cfg, self._monitor,
             timeout=self._startup_timeout + self._auto_start_margin,
             stop_event=stop_event,
         )
