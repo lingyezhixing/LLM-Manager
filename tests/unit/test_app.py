@@ -1,5 +1,6 @@
 import time
 
+import pytest
 from fastapi.testclient import TestClient
 
 from llm_manager import state
@@ -39,3 +40,28 @@ def test_lifespan_starts_and_stops_background(tmp_path, monkeypatch):
             time.sleep(0.1)
         assert state.get_status("m1") == ModelStatus.FAILED
     # with 退出 → lifespan finally:stop_event.set() + unload_all + cancel+gather,干净关闭无异常
+
+
+def test_create_app_warm_start_skips_import(tmp_path):
+    """同库二次 create_app(无 legacy_yaml)→ 已 initialized → 跳过导入,保留 DB 状态。"""
+    cfg_path = tmp_path / "config.yaml"
+    cfg_path.write_text(_CFG_BODY, encoding="utf-8")
+    create_app(db_path=tmp_path / "t.db", legacy_yaml=cfg_path)          # 首次:导入
+    # 二次:不带 legacy_yaml,库已 initialized → seed/import 都跳过,仅 env 写库
+    app2 = create_app(db_path=tmp_path / "t.db")
+    assert "m1" in app2.state.cfg.models                                 # 保留首次导入的模型
+
+
+def test_create_app_closes_db_on_bootstrap_error(tmp_path):
+    cfg_path = tmp_path / "config.yaml"
+    cfg_path.write_text(
+        "program: {host: 0.0.0.0, port: 8080, alive_time: 60, log_level: INFO}\n"
+        "Local-Models:\n  A: {aliases: [x], mode: Chat, port: 1}\n"      # 无 scheme → validate 报错
+        "  B: {aliases: [x], mode: Chat, port: 1}\n",                    # alias/port 冲突
+        encoding="utf-8")
+    db_path = tmp_path / "t.db"
+    with pytest.raises(ValueError):
+        create_app(db_path=db_path, legacy_yaml=cfg_path)
+    # db.conn 应已关闭:可重新打开(Windows 上未关会锁文件)
+    from llm_manager.data.persistence import open_db
+    open_db(db_path).conn.execute("SELECT 1").fetchone()                 # 不抛

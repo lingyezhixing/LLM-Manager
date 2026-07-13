@@ -43,7 +43,7 @@ def _cleanup_old_logs(log_dir: str, keep: int = 10) -> None:
 
 
 def setup_logging(level: str = "INFO", log_dir: str = "logs") -> None:
-    """配置 root logger(一次性):控制台 + 每次启动一个时间戳文件(留 10 个)。
+    """配置 root logger(可重配):控制台 + 每次启动一个时间戳文件(留 10 个)。
     每次启动 = 新文件 logs/llm-manager_{ts}.log(非按天轮换,避免长期堆一个文件)。"""
     numeric = getattr(logging, level.upper(), logging.INFO)
     root = logging.getLogger()
@@ -73,13 +73,17 @@ def create_app(db_path: Path | None = None, *, legacy_yaml: Path | None = None) 
     setup_logging()
     resolved_db = Path(db_path or os.environ.get("LLM_MANAGER_DB_PATH", "data/llm_manager.db"))
     db = open_db(resolved_db)
-    from llm_manager.data.config_store import ConfigStore, initialize
-    initialize(db, legacy_yaml)
-    store = ConfigStore(db)
-    cfg = store.snapshot()
-    errors = config.validate(cfg)
-    if errors:
-        raise ValueError("Invalid config:\n" + "\n".join(f"  - {e}" for e in errors))
+    try:
+        from llm_manager.data.config_store import ConfigStore, initialize
+        initialize(db, legacy_yaml)
+        store = ConfigStore(db)
+        cfg = store.snapshot()
+        errors = config.validate(cfg)
+        if errors:
+            raise ValueError("Invalid config:\n" + "\n".join(f"  - {e}" for e in errors))
+    except Exception:
+        db.conn.close()
+        raise
     logger.info("config loaded (DB %s): %d models, %s:%d, alive %dmin",
                 resolved_db, len(cfg.models), cfg.program.host, cfg.program.port, cfg.program.alive_time)
     monitor = DeviceMonitor(ENUMERATORS, config.referenced_devices(cfg))
