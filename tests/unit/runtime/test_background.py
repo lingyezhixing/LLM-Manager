@@ -5,6 +5,7 @@ import time
 import pytest
 
 from llm_manager import state
+from llm_manager.config import AppConfig, ProgramConfig
 from llm_manager.runtime import background
 from llm_manager.state import ModelStatus
 
@@ -33,6 +34,11 @@ class _FakeLife:
                 r = await r
             return r
         return ModelStatus.ROUTING
+
+
+def _alive_cfg(alive: int) -> AppConfig:
+    return AppConfig(program=ProgramConfig(host="x", port=1, alive_time=alive, log_level="INFO"),
+                     models={}, wol=None, claude_configs={})
 
 
 @pytest.fixture(autouse=True)
@@ -74,7 +80,7 @@ async def test_idle_loop_reclaims_stale_routing():
     state._set_last_access("m", time.monotonic() - 120)
     life = _FakeLife()
     ev = asyncio.Event()
-    task = asyncio.create_task(background.idle_reclamation_loop(life, 60, ev, period=0.01))
+    task = asyncio.create_task(background.idle_reclamation_loop(life, lambda: _alive_cfg(1), ev, period=0.01))
     await asyncio.sleep(0.05)
     ev.set()
     await task
@@ -87,7 +93,7 @@ async def test_idle_loop_skips_when_pending_at_scan():
     state.inc_pending("m")
     life = _FakeLife()
     ev = asyncio.Event()
-    task = asyncio.create_task(background.idle_reclamation_loop(life, 60, ev, period=0.01))
+    task = asyncio.create_task(background.idle_reclamation_loop(life, lambda: _alive_cfg(1), ev, period=0.01))
     await asyncio.sleep(0.05)
     ev.set()
     await task
@@ -107,7 +113,7 @@ async def test_idle_loop_double_check_skips_new_pending():
 
     life = _FakeLife(stop=stop_during_a)
     ev = asyncio.Event()
-    task = asyncio.create_task(background.idle_reclamation_loop(life, 60, ev, period=0.01))
+    task = asyncio.create_task(background.idle_reclamation_loop(life, lambda: _alive_cfg(1), ev, period=0.01))
     await asyncio.sleep(0.05)
     ev.set()
     await task
@@ -120,7 +126,10 @@ async def test_idle_loop_disabled_when_alive_sec_le_zero():
     state._set_last_access("m", time.monotonic() - 120)
     life = _FakeLife()
     ev = asyncio.Event()
-    await background.idle_reclamation_loop(life, 0, ev, period=0.01)
+    task = asyncio.create_task(background.idle_reclamation_loop(life, lambda: _alive_cfg(0), ev, period=0.01))
+    await asyncio.sleep(0.05)
+    ev.set()
+    await task
     assert life.stopped == []
 
 
@@ -133,11 +142,29 @@ async def test_idle_loop_survives_stop_exception(caplog):
 
     life = _FakeLife(stop=boom)
     ev = asyncio.Event()
-    task = asyncio.create_task(background.idle_reclamation_loop(life, 60, ev, period=0.01))
+    task = asyncio.create_task(background.idle_reclamation_loop(life, lambda: _alive_cfg(1), ev, period=0.01))
     await asyncio.sleep(0.05)
     ev.set()
     await task  # 不崩
     assert life.stopped == ["m"]
+
+
+async def test_idle_loop_reads_fresh_alive_time_each_tick():
+    # alive_time 从 0(禁用)变 1(1min=60s):get_cfg 返回值变化 → loop 行为随之变(P1 写回即时生效)
+    state.set_status("m", ModelStatus.ROUTING, force=True)
+    state._set_last_access("m", time.monotonic() - 120)
+    cur = {"alive": 0}
+    life = _FakeLife()
+    ev = asyncio.Event()
+    task = asyncio.create_task(
+        background.idle_reclamation_loop(life, lambda: _alive_cfg(cur["alive"]), ev, period=0.01))
+    await asyncio.sleep(0.02)
+    assert life.stopped == []                       # alive=0 → 禁用,不回收
+    cur["alive"] = 1                                # 模拟「写回 alive_time」(1min=60s,120s idle 超时)
+    await asyncio.sleep(0.05)
+    ev.set()
+    await task
+    assert life.stopped == ["m"]                    # 现在 alive=1 → 回收
 
 
 # ---------- auto_start ----------

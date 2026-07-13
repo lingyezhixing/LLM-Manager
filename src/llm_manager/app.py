@@ -102,13 +102,12 @@ def create_app(db_path: Path | None = None, *, legacy_yaml: Path | None = None) 
         app.state.model_feed = ModelFeed(lambda: build_models_response(cfg))  # 模型 SSE 源(变更检测推送)
         stop_event = asyncio.Event()
         auto_models = [n for n, m in cfg.models.items() if m.auto_start]
-        alive_sec = cfg.program.alive_time * 60.0
         auto_task = asyncio.create_task(
             background.auto_start(lifecycle, auto_models, cfg, monitor,
                                   timeout=lifecycle.startup_timeout + background.AUTO_START_MARGIN,
                                   stop_event=stop_event))
         idle_task = asyncio.create_task(
-            background.idle_reclamation_loop(lifecycle, alive_sec, stop_event))
+            background.idle_reclamation_loop(lifecycle, store.snapshot, stop_event))
         # 系统托盘(守卫:pystray 可用 + 需 uvicorn server 句柄做优雅退出 + claude_settings_path)
         tray = None
         server = getattr(app.state, "uvicorn_server", None)

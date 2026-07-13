@@ -34,23 +34,25 @@ def select_idle_candidates(alive_sec: float, now: float) -> list[str]:
             if state.pending_count(n) == 0 and (now - state.get_last_access(n)) > alive_sec]
 
 
-async def idle_reclamation_loop(lifecycle, alive_sec: float, stop_event: asyncio.Event, *, period: float = 30.0) -> None:
-    if alive_sec <= 0:
-        logger.info("idle reclamation disabled (alive_time<=0)")
-        return
+async def idle_reclamation_loop(lifecycle, get_cfg, stop_event: asyncio.Event, *, period: float = 30.0) -> None:
+    """每轮从 get_cfg() 取 fresh alive_time(P1 写回后即时生效)。alive_time<=0 禁用。"""
     while not stop_event.is_set():
         try:
-            now = time.monotonic()
-            for name in select_idle_candidates(alive_sec, now):
-                # 二次确认(0-await 间隙防护):临界段内 logger 走同步 handler 不 yield
-                if state.pending_count(name) > 0:
-                    logger.info("skip reclaim %s: new request in flight", name)
-                    continue
-                logger.info("idle reclaim %s (idle %.0fs)", name, now - state.get_last_access(name))
-                try:
-                    await lifecycle.stop(name)
-                except Exception as e:
-                    logger.error("idle reclaim stop failed %s: %s", name, e)
+            alive_sec = get_cfg().program.alive_time * 60.0
+            if alive_sec <= 0:
+                logger.info("idle reclamation disabled (alive_time<=0)")
+            else:
+                now = time.monotonic()
+                for name in select_idle_candidates(alive_sec, now):
+                    # 二次确认(0-await 间隙防护):临界段内 logger 走同步 handler 不 yield
+                    if state.pending_count(name) > 0:
+                        logger.info("skip reclaim %s: new request in flight", name)
+                        continue
+                    logger.info("idle reclaim %s (idle %.0fs)", name, now - state.get_last_access(name))
+                    try:
+                        await lifecycle.stop(name)
+                    except Exception as e:
+                        logger.error("idle reclaim stop failed %s: %s", name, e)
         except Exception as e:
             logger.error("idle reclamation iteration error: %s", e)
         try:
