@@ -16,11 +16,21 @@ class ModelMode(str, Enum):
 
 
 @dataclass(frozen=True, slots=True)
+class Command:
+    exe: str
+    args: tuple[str, ...] = ()
+    env: dict[str, str] = field(default_factory=dict)
+    cwd: str | None = None
+    conda_env: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class Scheme:
     config_source: str
     required_devices: frozenset[str]
     script_path: Path
     memory_mb: dict[str, int]
+    command: Command | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,11 +91,22 @@ def load(path: Path) -> AppConfig:
         for key, val in m.items():
             if key in reserved or not isinstance(val, dict):
                 continue
+            cmd_raw = val.get("command")
+            command: Command | None = None
+            if cmd_raw is not None:
+                command = Command(
+                    exe=cmd_raw["exe"],
+                    args=tuple(cmd_raw.get("args", [])),
+                    env=dict(cmd_raw.get("env", {})),
+                    cwd=cmd_raw.get("cwd"),
+                    conda_env=cmd_raw.get("conda_env"),
+                )
             schemes[key] = Scheme(
                 config_source=key,
                 required_devices=frozenset(_norm_device(d) for d in val.get("required_devices", [])),
                 script_path=Path(val["script_path"]),
                 memory_mb={_norm_device(k): int(v) for k, v in val.get("memory_mb", {}).items()},
+                command=command,
             )
         models[name] = ModelConfig(
             primary_name=name,

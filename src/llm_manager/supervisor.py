@@ -32,6 +32,8 @@ class ProcessRunner(Protocol):
         *,
         shell: bool = True,
         on_output: Callable[[str, str], None] | None = None,
+        env: dict[str, str] | None = None,
+        cwd: str | None = None,
     ) -> ProcessRecord: ...
     async def terminate(self, pid: int, timeout: float = 10.0) -> bool: ...
     async def kill_tree(self, pid: int) -> bool: ...
@@ -62,12 +64,15 @@ class Supervisor:
         *,
         shell: bool = True,
         on_output: Callable[[str, str], None] | None = None,
+        env: dict[str, str] | None = None,
+        cwd: str | None = None,
     ) -> ProcessRecord:
         loop = asyncio.get_running_loop()
         popen = await asyncio.to_thread(
             subprocess.Popen, cmd, shell=shell,
             stdout=(subprocess.PIPE if on_output is not None else None),
             stderr=(subprocess.PIPE if on_output is not None else None),
+            env=env, cwd=cwd,
             **_popen_kwargs())
         self._procs[popen.pid] = popen
         self._wait_tasks[popen.pid] = asyncio.create_task(self._wait(popen.pid))

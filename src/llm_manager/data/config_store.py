@@ -9,7 +9,7 @@ import re
 from pathlib import Path
 
 from llm_manager import config
-from llm_manager.config import AppConfig, ModelConfig, ProgramConfig, Scheme, WakeOnLanConfig
+from llm_manager.config import AppConfig, Command, ModelConfig, ProgramConfig, Scheme, WakeOnLanConfig
 from llm_manager.data.persistence import Db
 
 
@@ -117,9 +117,15 @@ def write_appconfig(db: Db, cfg: AppConfig, *, read_scripts: bool = True) -> Non
                             chash = _sha256(content)
                         except OSError:
                             content, chash = "", ""
+                    command_json = (
+                        json.dumps({"exe": scheme.command.exe, "args": list(scheme.command.args),
+                                    "env": scheme.command.env, "cwd": scheme.command.cwd,
+                                    "conda_env": scheme.command.conda_env})
+                        if scheme.command is not None else None
+                    )
                     db.conn.execute(
-                        "INSERT INTO model_scripts (scheme_id, path, content, content_hash, lang) VALUES (?,?,?,?,?)",
-                        (sid, str(scheme.script_path), content, chash, _lang_for(scheme.script_path)),
+                        "INSERT INTO model_scripts (scheme_id, path, content, content_hash, lang, command) VALUES (?,?,?,?,?,?)",
+                        (sid, str(scheme.script_path), content, chash, _lang_for(scheme.script_path), command_json),
                     )
             db.conn.commit()
         except Exception:
@@ -184,16 +190,22 @@ def read_appconfig(db: Db, *, scripts_dir: Path = Path("data/scripts")) -> AppCo
                 "FROM model_schemes WHERE model_id = ? ORDER BY ord", (mid,)):
             sid = srow["id"]
             script_row = db.conn.execute(
-                "SELECT path, content, content_hash FROM model_scripts WHERE scheme_id = ?", (sid,)).fetchone()
+                "SELECT path, content, content_hash, command FROM model_scripts WHERE scheme_id = ?", (sid,)).fetchone()
             fallback = Path(script_row["path"]) if script_row else Path("")
             content = script_row["content"] if script_row else ""
             chash = script_row["content_hash"] if script_row else ""
             script_path = _materialize(row["name"], srow["config_source"], content, chash, fallback, scripts_dir)
+            command: Command | None = None
+            if script_row is not None and script_row["command"]:
+                d = json.loads(script_row["command"])
+                command = Command(exe=d["exe"], args=tuple(d.get("args", [])), env=dict(d.get("env", {})),
+                                  cwd=d.get("cwd"), conda_env=d.get("conda_env"))
             schemes[srow["config_source"]] = Scheme(
                 config_source=srow["config_source"],
                 required_devices=frozenset(json.loads(srow["required_devices"])),
                 script_path=script_path,
                 memory_mb=dict(json.loads(srow["memory_mb"])),
+                command=command,
             )
         models[row["name"]] = ModelConfig(
             primary_name=row["name"], aliases=aliases, mode=row["mode"],

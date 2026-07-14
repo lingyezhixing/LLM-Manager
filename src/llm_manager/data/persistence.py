@@ -80,6 +80,7 @@ def open_db(path: Path) -> Db:
             content TEXT NOT NULL DEFAULT '',
             content_hash TEXT NOT NULL DEFAULT '',
             lang TEXT,
+            command TEXT,
             FOREIGN KEY (scheme_id) REFERENCES model_schemes(id) ON DELETE CASCADE
         );
         CREATE TABLE IF NOT EXISTS model_pricing (

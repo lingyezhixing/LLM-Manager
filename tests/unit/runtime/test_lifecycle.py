@@ -24,7 +24,7 @@ class FakeSupervisor:
         self.exit_cbs: dict[int, object] = {}
         self.spawn_raises: Exception | None = None
 
-    async def spawn(self, cmd, *, shell=True, on_output=None):
+    async def spawn(self, cmd, *, shell=True, on_output=None, env=None, cwd=None):
         if self.spawn_raises:
             exc, self.spawn_raises = self.spawn_raises, None
             raise exc
@@ -474,7 +474,7 @@ class _CapturingSupervisor(FakeSupervisor):
         super().__init__()
         self.on_output = None
 
-    async def spawn(self, cmd, *, shell=True, on_output=None):
+    async def spawn(self, cmd, *, shell=True, on_output=None, env=None, cwd=None):
         self.on_output = on_output
         return await super().spawn(cmd, shell=shell, on_output=on_output)
 
