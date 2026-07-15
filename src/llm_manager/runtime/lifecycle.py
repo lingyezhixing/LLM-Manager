@@ -140,18 +140,16 @@ class Lifecycle:
                 return ModelStatus.STOPPED
 
             c = scheme.command
-            if c is not None:
-                argv = [c.exe, *c.args]
-                if c.conda_env:
-                    argv = ["conda", "run", "-n", c.conda_env, "--no-capture-output", c.exe, *c.args]
-                env = {**os.environ, **c.env}
-                rec = await self._supervisor.spawn(
-                    argv, shell=False, env=env, cwd=c.cwd,
-                    on_output=lambda line, stream: _logs.capture(alias, line, stream))
+            if c.conda_env:
+                conda_prefix = ["conda", "run", "-n", c.conda_env, "--no-capture-output"]
+                argv = (["cmd", "/c", *conda_prefix, c.exe, *c.args] if os.name == "nt"
+                        else [*conda_prefix, c.exe, *c.args])
             else:
-                cmd = [str(scheme.script_path)]
-                rec = await self._supervisor.spawn(
-                    cmd, on_output=lambda line, stream: _logs.capture(alias, line, stream))
+                argv = [c.exe, *c.args]
+            env = {**os.environ, **c.env}
+            rec = await self._supervisor.spawn(
+                argv, env=env, cwd=c.cwd,
+                on_output=lambda line, stream: _logs.capture(alias, line, stream))
             logger.info("spawn %s pid=%d", alias, rec.pid)
 
             # === post-spawn critical section (no await) === invariant 3

@@ -12,7 +12,7 @@ def _app(tmp_path):
     db = open_db(tmp_path / "t.db")
     if not is_initialized(db):              # warm-start(已初始化)跳过 seed,保留既有写入
         seed_defaults(db)
-    store = ConfigStore(db, scripts_dir=tmp_path / "scripts")
+    store = ConfigStore(db)
     app = FastAPI()
     api = APIRouter(prefix="/api")
     register_config_routes(api)

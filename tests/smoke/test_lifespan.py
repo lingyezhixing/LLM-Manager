@@ -12,7 +12,7 @@ Local-Models:
     port: 10001
     RTX4060:
       required_devices: ["rtx 4060"]
-      script_path: "q.bat"
+      command: {exe: "q.bat"}
       memory_mb: {"rtx 4060": 5120}
 """
 

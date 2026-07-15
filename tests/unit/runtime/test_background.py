@@ -170,10 +170,9 @@ async def test_idle_loop_reads_fresh_alive_time_each_tick():
 # ---------- auto_start ----------
 def _auto_cfg(models_devs):
     """构造 AppConfig:每模型单 scheme(required dev)。对抗验证 #4:auto_start 显式接收 cfg(避免 lifecycle.cfg 依赖)。"""
-    from llm_manager.config import Scheme, AppConfig, ModelConfig, ProgramConfig
-    from pathlib import Path
+    from llm_manager.config import Scheme, AppConfig, ModelConfig, ProgramConfig, Command
     models = {name: ModelConfig(name, (name,), "Chat", i + 1, False,
-                                {"S": Scheme("S", frozenset({dev}), Path("a.bat"), {dev: 1024})})
+                                {"S": Scheme("S", frozenset({dev}), Command(exe="a.bat"), {dev: 1024})})
               for i, (name, dev) in enumerate(models_devs)}
     return AppConfig(program=ProgramConfig(host="x", port=1, alive_time=60, log_level="INFO"),
                      models=models, wol=None, claude_configs={})
@@ -248,10 +247,9 @@ async def test_auto_start_device_isolation_batches():
 # ---------- _plan_batches (Task 1) ----------
 def test_plan_batches_device_isolation():
     from llm_manager.runtime.background import _plan_batches
-    from llm_manager.config import Scheme
-    from pathlib import Path
-    s_rtx = Scheme("RTX", frozenset({"rtx 4060"}), Path("a.bat"), {"rtx 4060": 5120})
-    s_v100_780 = Scheme("V100-780M", frozenset({"v100", "780m"}), Path("c.bat"), {"v100": 0, "780m": 2048})
+    from llm_manager.config import Scheme, Command
+    s_rtx = Scheme("RTX", frozenset({"rtx 4060"}), Command(exe="a.bat"), {"rtx 4060": 5120})
+    s_v100_780 = Scheme("V100-780M", frozenset({"v100", "780m"}), Command(exe="c.bat"), {"v100": 0, "780m": 2048})
     planned = [("qwen4b", s_rtx), ("qwen2b", s_v100_780), ("reranker", s_rtx)]
     parallel, serial = _plan_batches(planned)
     assert parallel == ["qwen4b", "qwen2b"]
@@ -260,9 +258,8 @@ def test_plan_batches_device_isolation():
 
 def test_plan_batches_all_same_device_only_first_parallel():
     from llm_manager.runtime.background import _plan_batches
-    from llm_manager.config import Scheme
-    from pathlib import Path
-    s = Scheme("S", frozenset({"rtx 4060"}), Path("a.bat"), {"rtx 4060": 5120})
+    from llm_manager.config import Scheme, Command
+    s = Scheme("S", frozenset({"rtx 4060"}), Command(exe="a.bat"), {"rtx 4060": 5120})
     assert _plan_batches([("a", s), ("b", s), ("c", s)]) == (["a"], ["b", "c"])
 
 

@@ -17,7 +17,7 @@ Local-Models:
     auto_start: true
     RTX4060:
       required_devices: ["rtx 4060"]
-      script_path: "nonexistent.cmd"
+      command: {exe: "nonexistent.cmd"}
       memory_mb: {"rtx 4060": 2048}
 """
 

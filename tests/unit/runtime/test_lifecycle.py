@@ -1,12 +1,11 @@
 import asyncio
 import time as _time
 from collections.abc import Callable
-from pathlib import Path
 
 import pytest
 
 from llm_manager import state
-from llm_manager.config import AppConfig, ModelConfig, ProgramConfig, Scheme
+from llm_manager.config import AppConfig, Command, ModelConfig, ProgramConfig, Scheme
 from llm_manager.data import logs
 from llm_manager.devices import DeviceInfo
 from llm_manager.probes import ProbeResult
@@ -89,7 +88,7 @@ def _model(name="m1", mode="Chat", port=8000, dev="rtx 4060", mem=2048):
     return ModelConfig(
         primary_name=name, aliases=(name,), mode=mode, port=port,
         schemes={"s": Scheme(config_source="s", required_devices=frozenset({dev}),
-                             script_path=Path("run.cmd"), memory_mb={dev: mem})},
+                             command=Command(exe="run.cmd"), memory_mb={dev: mem})},
     )
 
 
@@ -246,7 +245,7 @@ async def test_slow_probe_then_concurrent_restart_not_clobbered():
 async def test_post_spawn_stop_kills_orphan_no_leak():
     life, sup, dev, cfg = _make()
     orig_spawn = sup.spawn
-    async def spy_spawn(cmd, *, shell=True, on_output=None):
+    async def spy_spawn(cmd, *, shell=False, on_output=None, env=None, cwd=None):
         rec = await orig_spawn(cmd, shell=shell, on_output=on_output)
         life._stop_events["m1"].set()                      # 恰在 spawn 返回、临界段前
         return rec
@@ -406,7 +405,7 @@ async def test_spawn_lock_serializes_concurrent_spawns():
     spawn_log: list = []
     _real_spawn = sup.spawn
 
-    async def logged_spawn(cmd, *, shell=True, on_output=None):
+    async def logged_spawn(cmd, *, shell=False, on_output=None, env=None, cwd=None):
         spawn_log.append(("start", _t.monotonic()))
         await asyncio.sleep(0.05)  # 模拟 spawn 耗时:无锁则 a/b spawn 并行交错,有锁则串行
         rec = await _real_spawn(cmd, shell=shell, on_output=on_output)
@@ -505,3 +504,21 @@ def test_stop_ends_log_session():
     logs.capture("m1", "new session", "out")
     bf = logs.backfill("m1", 10)
     assert len(bf) == 1 and bf[0].id == 1 and bf[0].text == "new session"
+
+
+# ---------- conda_env argv wrapping (Windows cmd /c) ----------
+async def test_pipeline_conda_env_wraps_with_cmd_on_windows():
+    import os as _os
+    m = ModelConfig("m1", ("m1",), "Chat", 8000, False,
+                    {"s": Scheme("s", frozenset({"rtx 4060"}),
+                                 Command(exe="lmdeploy", args=("serve", "x"), conda_env="lmdeploy"),
+                                 {"rtx 4060": 2048})})
+    life, sup, dev, cfg = _make(models=[m])
+    await life.ensure_running("m1")
+    spawned = sup.spawned[0]
+    if _os.name == "nt":
+        assert spawned[:3] == ["cmd", "/c", "conda"]
+    else:
+        assert spawned[:1] == ["conda"]
+    assert spawned[-2:] == ["serve", "x"]            # exe args tail
+    assert "-n" in spawned and "lmdeploy" in spawned  # conda env passed

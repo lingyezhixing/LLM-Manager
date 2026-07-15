@@ -1,10 +1,8 @@
-import hashlib
 import json
-from pathlib import Path
 
 import pytest
 
-from llm_manager.config import AppConfig, ModelConfig, ProgramConfig, Scheme, WakeOnLanConfig
+from llm_manager.config import AppConfig, Command, ModelConfig, ProgramConfig, Scheme, WakeOnLanConfig
 from llm_manager.data.config_store import (
     ConfigStore,
     apply_env_overrides,
@@ -31,9 +29,9 @@ def test_set_get_setting_round_trip_and_upsert(tmp_path):
     assert get_all_settings(db) == {"host": "127.0.0.1"}
 
 
-def _sample_cfg(script_path: Path) -> AppConfig:
+def _sample_cfg() -> AppConfig:
     scheme = Scheme(config_source="RTX4060", required_devices=frozenset({"rtx 4060"}),
-                    script_path=script_path, memory_mb={"rtx 4060": 5120})
+                    command=Command(exe="q", args=("echo", "hi")), memory_mb={"rtx 4060": 5120})
     return AppConfig(
         program=ProgramConfig(host="0.0.0.0", port=8080, alive_time=60, log_level="INFO"),
         models={"Qwen3-4B": ModelConfig(primary_name="Qwen3-4B", aliases=("Qwen3-4B", "q4"),
@@ -46,9 +44,7 @@ def _sample_cfg(script_path: Path) -> AppConfig:
 
 def test_write_appconfig_persists_program_wol_claude_and_model_world(tmp_path):
     db = open_db(tmp_path / "t.db")
-    script = tmp_path / "q.bat"
-    script.write_text("echo hi", encoding="utf-8")
-    write_appconfig(db, _sample_cfg(script))
+    write_appconfig(db, _sample_cfg())
 
     assert get_setting(db, "host") == "0.0.0.0"
     assert get_setting(db, "port") == "8080"
@@ -66,19 +62,21 @@ def test_write_appconfig_persists_program_wol_claude_and_model_world(tmp_path):
     assert sc["config_source"] == "RTX4060"
     assert json.loads(sc["required_devices"]) == ["rtx 4060"]
     assert json.loads(sc["memory_mb"]) == {"rtx 4060": 5120}
-    srow = db.conn.execute("SELECT path, content, content_hash FROM model_scripts").fetchone()
-    assert srow["path"] == str(script)
-    assert srow["content"] == "echo hi"
-    assert srow["content_hash"] == hashlib.sha256(b"echo hi").hexdigest()
+    row = db.conn.execute("SELECT command FROM model_scripts").fetchone()
+    cmd = json.loads(row["command"])
+    assert cmd["exe"] == "q"
+    assert cmd["args"] == ["echo", "hi"]
 
 
 def test_write_appconfig_replaces_model_world(tmp_path):
     db = open_db(tmp_path / "t.db")
-    write_appconfig(db, _sample_cfg(tmp_path / "a.bat"))
+    write_appconfig(db, _sample_cfg())
     # 再写一个不同模型世界 → 旧的应被 CASCADE 清掉
     cfg2 = AppConfig(
         program=ProgramConfig(host="0.0.0.0", port=8080, alive_time=60, log_level="INFO"),
-        models={"M2": ModelConfig(primary_name="M2", aliases=("M2",), mode="Chat", port=2)},
+        models={"M2": ModelConfig(primary_name="M2", aliases=("M2",), mode="Chat", port=2,
+                                  schemes={"S": Scheme("S", frozenset({"gpu"}),
+                                                       Command(exe="m2"), {"gpu": 1})})},
         wol=None, claude_configs={},
     )
     write_appconfig(db, cfg2)
@@ -108,12 +106,10 @@ def test_write_appconfig_rolls_back_on_mid_write_failure(tmp_path):
 
 def test_read_appconfig_round_trips_back(tmp_path):
     db = open_db(tmp_path / "t.db")
-    script = tmp_path / "q.bat"
-    script.write_text("echo hi", encoding="utf-8")
-    original = _sample_cfg(script)
+    original = _sample_cfg()
     write_appconfig(db, original)
 
-    out = read_appconfig(db, scripts_dir=tmp_path / "scripts")
+    out = read_appconfig(db)
     assert out.program.host == "0.0.0.0"
     assert out.program.port == 8080
     assert out.wol == WakeOnLanConfig("192.168.1.255", "aa:bb:cc:dd:ee:ff")
@@ -124,57 +120,17 @@ def test_read_appconfig_round_trips_back(tmp_path):
     scheme = m.schemes["RTX4060"]
     assert scheme.required_devices == frozenset({"rtx 4060"})
     assert scheme.memory_mb == {"rtx 4060": 5120}
-
-
-def test_read_appconfig_materializes_script_content(tmp_path):
-    db = open_db(tmp_path / "t.db")
-    script = tmp_path / "q.bat"
-    script.write_text("echo hi", encoding="utf-8")
-    write_appconfig(db, _sample_cfg(script))
-
-    out = read_appconfig(db, scripts_dir=tmp_path / "scripts")
-    materialized = out.models["Qwen3-4B"].schemes["RTX4060"].script_path
-    assert materialized != script                       # 指向物化文件,非原 path
-    assert materialized.parent == (tmp_path / "scripts" / "Qwen3-4B")
-    assert materialized.read_text(encoding="utf-8") == "echo hi"
-
-
-def test_read_appconfig_falls_back_to_path_when_content_empty(tmp_path):
-    """脚本文件导入时不可读(如测试里的 nonexistent.cmd)→ content 空 → 回退原 path。"""
-    db = open_db(tmp_path / "t.db")
-    scheme = Scheme(config_source="S", required_devices=frozenset({"gpu"}),
-                    script_path=Path("nonexistent.cmd"), memory_mb={"gpu": 1})
-    cfg = AppConfig(program=ProgramConfig("0.0.0.0", 8080, 60, "INFO"),
-                    models={"M": ModelConfig("M", ("M",), "Chat", 1, False, {"S": scheme})},
-                    wol=None, claude_configs={})
-    write_appconfig(db, cfg)                            # read_scripts 读不到 → content ""
-    out = read_appconfig(db, scripts_dir=tmp_path / "scripts")
-    assert out.models["M"].schemes["S"].script_path == Path("nonexistent.cmd")
+    assert scheme.command.exe == "q"
+    assert scheme.command.args == ("echo", "hi")
 
 
 def test_read_appconfig_empty_db_returns_defaults(tmp_path):
     db = open_db(tmp_path / "t.db")
-    out = read_appconfig(db, scripts_dir=tmp_path / "scripts")
+    out = read_appconfig(db)
     assert out.models == {}
     assert out.wol is None
     assert out.claude_configs == {}
     assert out.program.host == "0.0.0.0" and out.program.port == 8080
-
-
-def test_materialize_overwrites_corrupt_target(tmp_path):
-    db = open_db(tmp_path / "t.db")
-    script = tmp_path / "q.bat"
-    script.write_text("echo hi", encoding="utf-8")
-    write_appconfig(db, _sample_cfg(script))
-    scripts_dir = tmp_path / "scripts"
-    # 预置一个损坏的(截断多字节)物化目标——read_text 会 UnicodeDecodeError
-    target = scripts_dir / "Qwen3-4B" / "RTX4060.bat"
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_bytes(b"h\xc3")
-    # 修复前:read_appconfig 在此崩溃(UnicodeDecodeError 传播);修复后:识别为损坏→重写
-    out = read_appconfig(db, scripts_dir=scripts_dir)
-    assert target.read_text(encoding="utf-8") == "echo hi"
-    assert out.models["Qwen3-4B"].schemes["RTX4060"].script_path == target
 
 
 def test_config_store_snapshot_and_reload(tmp_path):
@@ -182,7 +138,7 @@ def test_config_store_snapshot_and_reload(tmp_path):
     write_appconfig(db, AppConfig(
         program=ProgramConfig("0.0.0.0", 8080, 60, "INFO"),
         models={"M": ModelConfig("M", ("M",), "Chat", 1)}, wol=None, claude_configs={}))
-    store = ConfigStore(db, scripts_dir=tmp_path / "scripts")
+    store = ConfigStore(db)
     assert "M" in store.snapshot().models
 
     # 直接改 DB,reload 后看到新值(P1 写回将走同一路径)
@@ -214,12 +170,12 @@ def test_initialize_imports_legacy_yaml_when_db_empty(tmp_path):
         "    port: 10001\n"
         "    RTX4060:\n"
         "      required_devices: [\"rtx 4060\"]\n"
-        "      script_path: \"q.bat\"\n"
+        "      command: {exe: \"q.bat\"}\n"
         "      memory_mb: {\"rtx 4060\": 5120}\n",
         encoding="utf-8")
     db = open_db(tmp_path / "t.db")
     initialize(db, legacy_yaml=yaml_path)
-    out = read_appconfig(db, scripts_dir=tmp_path / "scripts")
+    out = read_appconfig(db)
     assert "Qwen3-4B" in out.models
     assert out.models["Qwen3-4B"].schemes["RTX4060"].required_devices == frozenset({"rtx 4060"})
 
@@ -228,7 +184,7 @@ def test_initialize_skips_import_when_already_initialized(tmp_path):
     yaml_path = tmp_path / "config.yaml"
     yaml_path.write_text(
         "program: {host: 0.0.0.0, port: 8080, alive_time: 60, log_level: INFO}\n"
-        "Local-Models:\n  X: {aliases: [x], mode: Chat, port: 1, S: {required_devices: [gpu], script_path: a.bat, memory_mb: {gpu: 1}}}\n",
+        "Local-Models:\n  X: {aliases: [x], mode: Chat, port: 1, S: {required_devices: [gpu], command: {exe: a.bat}, memory_mb: {gpu: 1}}}\n",
         encoding="utf-8")
     db = open_db(tmp_path / "t.db")
     initialize(db, legacy_yaml=yaml_path)           # 第一次:导入 X
@@ -237,7 +193,7 @@ def test_initialize_skips_import_when_already_initialized(tmp_path):
         db.conn.execute("DELETE FROM model_defs")
         db.conn.commit()
     initialize(db, legacy_yaml=yaml_path)           # 已 initialized(system_settings 非空)→ 跳过
-    assert read_appconfig(db, scripts_dir=tmp_path / "scripts").models == {}
+    assert read_appconfig(db).models == {}
 
 
 def test_apply_env_overrides_writes_set_env(monkeypatch, tmp_path):
@@ -279,7 +235,7 @@ def test_initialize_rejects_invalid_yaml_and_leaves_db_clean(tmp_path):
         "    port: 1\n"
         "    S:\n"
         "      required_devices: [gpu]\n"
-        "      script_path: a.bat\n"
+        "      command: {exe: a.bat}\n"
         "      memory_mb: {gpu: 1}\n",
         encoding="utf-8")
     db = open_db(tmp_path / "t.db")
@@ -287,7 +243,7 @@ def test_initialize_rejects_invalid_yaml_and_leaves_db_clean(tmp_path):
         initialize(db, legacy_yaml=yaml_path)
     # validate 在 write_appconfig 之前 → DB 干净,gate 未翻
     assert is_initialized(db) is False
-    assert read_appconfig(db, scripts_dir=tmp_path / "scripts").models == {}
+    assert read_appconfig(db).models == {}
 
 
 def test_initialize_failed_import_keeps_gate_open_for_recovery(tmp_path, monkeypatch):
@@ -295,7 +251,7 @@ def test_initialize_failed_import_keeps_gate_open_for_recovery(tmp_path, monkeyp
     yaml_path.write_text(
         "program: {host: 0.0.0.0, port: 8080, alive_time: 60, log_level: INFO}\n"
         "Local-Models:\n"
-        "  M: {aliases: [m], mode: Chat, port: 1, S: {required_devices: [gpu], script_path: a.bat, memory_mb: {gpu: 1}}}\n",
+        "  M: {aliases: [m], mode: Chat, port: 1, S: {required_devices: [gpu], command: {exe: a.bat}, memory_mb: {gpu: 1}}}\n",
         encoding="utf-8")
     db = open_db(tmp_path / "t.db")
 
@@ -313,7 +269,7 @@ def test_initialize_failed_import_keeps_gate_open_for_recovery(tmp_path, monkeyp
     monkeypatch.undo()
     initialize(db, legacy_yaml=yaml_path)
     assert is_initialized(db) is True
-    assert "M" in read_appconfig(db, scripts_dir=tmp_path / "scripts").models
+    assert "M" in read_appconfig(db).models
 
 
 def test_apply_env_overrides_rejects_non_int_port_without_poisoning_db(monkeypatch, tmp_path):

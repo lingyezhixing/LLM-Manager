@@ -76,11 +76,7 @@ def open_db(path: Path) -> Db:
         );
         CREATE TABLE IF NOT EXISTS model_scripts (
             scheme_id INTEGER PRIMARY KEY,
-            path TEXT NOT NULL,
-            content TEXT NOT NULL DEFAULT '',
-            content_hash TEXT NOT NULL DEFAULT '',
-            lang TEXT,
-            command TEXT,
+            command TEXT NOT NULL,
             FOREIGN KEY (scheme_id) REFERENCES model_schemes(id) ON DELETE CASCADE
         );
         CREATE TABLE IF NOT EXISTS model_pricing (

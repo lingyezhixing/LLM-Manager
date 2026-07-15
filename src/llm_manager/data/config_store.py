@@ -1,11 +1,9 @@
 """DB-backed config store. 单一源 = 数据库(spec D4)。本模块逐步填充:settings KV → 模型世界读写
-→ 脚本物化 → ConfigStore → bootstrap。config.py 的 load() 被复用为 YAML→DB 一次性导入器。"""
+→ ConfigStore → bootstrap。config.py 的 load() 被复用为 YAML→DB 一次性导入器。"""
 from __future__ import annotations
 
-import hashlib
 import json
 import os
-import re
 from pathlib import Path
 
 from llm_manager import config
@@ -49,26 +47,13 @@ def get_all_settings(db: Db) -> dict[str, str]:
     return {row["key"]: row["value"] for row in db.conn.execute("SELECT key, value FROM system_settings")}
 
 
-def _sha256(text: str) -> str:
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
-
-
-def _lang_for(path: Path) -> str:
-    suffix = path.suffix.lower()
-    if suffix in (".bat", ".cmd"):
-        return "bat"
-    if suffix == ".sh":
-        return "sh"
-    return suffix.lstrip(".") or "bat"
-
-
 def _delete_model_world_locked(db: Db) -> None:
     """清空模型世界(model_defs CASCADE 级联清 aliases/schemes/scripts/pricing/tiers)。caller 持锁。"""
     db.conn.execute("DELETE FROM model_defs")
 
 
-def write_appconfig(db: Db, cfg: AppConfig, *, read_scripts: bool = True) -> None:
-    """全量替换模型世界 + upsert program/wol/claude。脚本:read_scripts 时读取 script_path 文件内容。
+def write_appconfig(db: Db, cfg: AppConfig) -> None:
+    """全量替换模型世界 + upsert program/wol/claude。
     失败显式 rollback——共享写连接上,未回滚的 partial 事务会被后续无关 commit 冲刷为脏数据。"""
     with db.write_lock:
         try:
@@ -103,29 +88,17 @@ def write_appconfig(db: Db, cfg: AppConfig, *, read_scripts: bool = True) -> Non
                     scur = db.conn.execute(
                         "INSERT INTO model_schemes (model_id, config_source, required_devices, memory_mb, ord) "
                         "VALUES (?,?,?,?,?)",
-                        (mid, src,
-                         json.dumps(sorted(scheme.required_devices)),
-                         json.dumps(scheme.memory_mb),
-                         s_ord),
+                        (mid, src, json.dumps(sorted(scheme.required_devices)),
+                         json.dumps(scheme.memory_mb), s_ord),
                     )
                     sid = scur.lastrowid
                     assert sid is not None
-                    content, chash = "", ""
-                    if read_scripts:
-                        try:
-                            content = Path(scheme.script_path).read_text(encoding="utf-8")
-                            chash = _sha256(content)
-                        except OSError:
-                            content, chash = "", ""
-                    command_json = (
-                        json.dumps({"exe": scheme.command.exe, "args": list(scheme.command.args),
-                                    "env": scheme.command.env, "cwd": scheme.command.cwd,
-                                    "conda_env": scheme.command.conda_env})
-                        if scheme.command is not None else None
-                    )
+                    c = scheme.command
+                    command_json = json.dumps({"exe": c.exe, "args": list(c.args), "env": c.env,
+                                               "cwd": c.cwd, "conda_env": c.conda_env})
                     db.conn.execute(
-                        "INSERT INTO model_scripts (scheme_id, path, content, content_hash, lang, command) VALUES (?,?,?,?,?,?)",
-                        (sid, str(scheme.script_path), content, chash, _lang_for(scheme.script_path), command_json),
+                        "INSERT INTO model_scripts (scheme_id, command) VALUES (?,?)",
+                        (sid, command_json),
                     )
             db.conn.commit()
         except Exception:
@@ -133,37 +106,7 @@ def write_appconfig(db: Db, cfg: AppConfig, *, read_scripts: bool = True) -> Non
             raise
 
 
-_SAFE = re.compile(r"[^A-Za-z0-9._-]")
-
-
-def _safe_name(name: str) -> str:
-    return _SAFE.sub("_", name)
-
-
-def _needs_write(target: Path, content_hash: str) -> bool:
-    """True if target 缺失/不可读/损坏 或 hash 不匹配 → (重)写。"""
-    if not target.exists():
-        return True
-    try:
-        return _sha256(target.read_text(encoding="utf-8")) != content_hash
-    except (OSError, UnicodeDecodeError):
-        return True
-
-
-def _materialize(model_name: str, scheme_source: str, content: str, content_hash: str,
-                 fallback_path: Path, scripts_dir: Path) -> Path:
-    """content 非空 → 物化到 scripts_dir/<model>/<scheme>.<ext>(hash 变更才重写);content 空 → 回退 path。"""
-    if not content:
-        return fallback_path
-    ext = ".bat" if os.name == "nt" else ".sh"
-    target = scripts_dir / _safe_name(model_name) / f"{_safe_name(scheme_source)}{ext}"
-    if _needs_write(target, content_hash):
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(content, encoding="utf-8")
-    return target
-
-
-def read_appconfig(db: Db, *, scripts_dir: Path = Path("data/scripts")) -> AppConfig:
+def read_appconfig(db: Db) -> AppConfig:
     s = get_all_settings(db)
     program = ProgramConfig(
         host=s.get("host", "0.0.0.0"),
@@ -190,22 +133,15 @@ def read_appconfig(db: Db, *, scripts_dir: Path = Path("data/scripts")) -> AppCo
                 "FROM model_schemes WHERE model_id = ? ORDER BY ord", (mid,)):
             sid = srow["id"]
             script_row = db.conn.execute(
-                "SELECT path, content, content_hash, command FROM model_scripts WHERE scheme_id = ?", (sid,)).fetchone()
-            fallback = Path(script_row["path"]) if script_row else Path("")
-            content = script_row["content"] if script_row else ""
-            chash = script_row["content_hash"] if script_row else ""
-            script_path = _materialize(row["name"], srow["config_source"], content, chash, fallback, scripts_dir)
-            command: Command | None = None
-            if script_row is not None and script_row["command"]:
-                d = json.loads(script_row["command"])
-                command = Command(exe=d["exe"], args=tuple(d.get("args", [])), env=dict(d.get("env", {})),
-                                  cwd=d.get("cwd"), conda_env=d.get("conda_env"))
+                "SELECT command FROM model_scripts WHERE scheme_id = ?", (sid,)).fetchone()
+            d = json.loads(script_row["command"]) if (script_row and script_row["command"]) else {}
+            command = Command(exe=d.get("exe", ""), args=tuple(d.get("args", [])),
+                              env=dict(d.get("env", {})), cwd=d.get("cwd"), conda_env=d.get("conda_env"))
             schemes[srow["config_source"]] = Scheme(
                 config_source=srow["config_source"],
                 required_devices=frozenset(json.loads(srow["required_devices"])),
-                script_path=script_path,
-                memory_mb=dict(json.loads(srow["memory_mb"])),
                 command=command,
+                memory_mb=dict(json.loads(srow["memory_mb"])),
             )
         models[row["name"]] = ModelConfig(
             primary_name=row["name"], aliases=aliases, mode=row["mode"],
@@ -218,16 +154,15 @@ class ConfigStore:
     """DB-backed config holder。frozen snapshot() 是消费方接口(缓存,不每次读库);
     reload() 重读 DB(P1 写回后调用)。"""
 
-    def __init__(self, db: Db, *, scripts_dir: Path = Path("data/scripts")) -> None:
+    def __init__(self, db: Db) -> None:
         self._db = db
-        self._scripts_dir = scripts_dir
-        self._snapshot = read_appconfig(db, scripts_dir=scripts_dir)
+        self._snapshot = read_appconfig(db)
 
     def snapshot(self) -> AppConfig:
         return self._snapshot
 
     def reload(self) -> AppConfig:
-        self._snapshot = read_appconfig(self._db, scripts_dir=self._scripts_dir)
+        self._snapshot = read_appconfig(self._db)
         return self._snapshot
 
 

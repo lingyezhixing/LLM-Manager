@@ -28,9 +28,8 @@ class Command:
 class Scheme:
     config_source: str
     required_devices: frozenset[str]
-    script_path: Path
+    command: Command
     memory_mb: dict[str, int]
-    command: Command | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,22 +90,14 @@ def load(path: Path) -> AppConfig:
         for key, val in m.items():
             if key in reserved or not isinstance(val, dict):
                 continue
-            cmd_raw = val.get("command")
-            command: Command | None = None
-            if cmd_raw is not None:
-                command = Command(
-                    exe=cmd_raw["exe"],
-                    args=tuple(cmd_raw.get("args", [])),
-                    env=dict(cmd_raw.get("env", {})),
-                    cwd=cmd_raw.get("cwd"),
-                    conda_env=cmd_raw.get("conda_env"),
-                )
+            c = val["command"]
             schemes[key] = Scheme(
                 config_source=key,
                 required_devices=frozenset(_norm_device(d) for d in val.get("required_devices", [])),
-                script_path=Path(val["script_path"]),
+                command=Command(
+                    exe=c["exe"], args=tuple(c.get("args", [])), env=dict(c.get("env", {})),
+                    cwd=c.get("cwd"), conda_env=c.get("conda_env")),
                 memory_mb={_norm_device(k): int(v) for k, v in val.get("memory_mb", {}).items()},
-                command=command,
             )
         models[name] = ModelConfig(
             primary_name=name,
@@ -142,6 +133,9 @@ def validate(cfg: AppConfig) -> list[str]:
             errors.append(f"Model '{name}' mode '{m.mode}' not supported (supported: {sorted(valid_modes)})")
         if not m.schemes:
             errors.append(f"Model '{name}' has no device scheme")
+        for sname, scheme in m.schemes.items():
+            if not scheme.command.exe:
+                errors.append(f"Model '{name}' scheme '{sname}' has empty command.exe")
     return errors
 
 

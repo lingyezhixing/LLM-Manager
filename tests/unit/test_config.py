@@ -1,6 +1,7 @@
 from pathlib import Path
 
-from llm_manager.config import load, ModelMode, Scheme, validate, select_adaptive, resolve_alias, ModelConfig, AppConfig, ProgramConfig
+from llm_manager.config import (Command, AppConfig, ModelConfig, ProgramConfig, Scheme,
+                                load, ModelMode, resolve_alias, select_adaptive, validate)
 
 
 def _write_cfg(tmp_path: Path, body: str) -> Path:
@@ -19,7 +20,7 @@ Local-Models:
     port: 10001
     RTX4060:
       required_devices: ["RTX 4060"]
-      script_path: "Model_startup_script/q.bat"
+      command: {exe: "q.bat"}
       memory_mb: {"RTX 4060": 5120}
 """)
     cfg = load(cfg_path)
@@ -31,7 +32,7 @@ Local-Models:
     assert isinstance(scheme, Scheme)
     assert scheme.required_devices == frozenset({"rtx 4060"})
     assert scheme.memory_mb == {"rtx 4060": 5120}
-    assert scheme.script_path == Path("Model_startup_script/q.bat")
+    assert scheme.command.exe == "q.bat"
 
 
 def test_model_mode_values():
@@ -59,15 +60,15 @@ def test_validate_flags_port_and_alias_clash_and_bad_mode():
 def test_validate_passes_clean_config():
     cfg = AppConfig(
         program=ProgramConfig(host="0.0.0.0", port=8080, alive_time=60, log_level="INFO"),
-        models={"A": ModelConfig("A", ("a",), "Chat", 1, False, {"S": Scheme("S", frozenset({"gpu"}), Path("a.bat"), {"gpu": 1})})},
+        models={"A": ModelConfig("A", ("a",), "Chat", 1, False, {"S": Scheme("S", frozenset({"gpu"}), Command(exe="a.bat"), {"gpu": 1})})},
         wol=None, claude_configs={},
     )
     assert validate(cfg) == []
 
 
 def test_select_adaptive_first_subset_wins():
-    s_gpu = Scheme("GPU", frozenset({"gpu"}), Path("g.bat"), {"gpu": 1})
-    s_apu = Scheme("APU", frozenset({"apu"}), Path("a.bat"), {"apu": 1})
+    s_gpu = Scheme("GPU", frozenset({"gpu"}), Command(exe="g.bat"), {"gpu": 1})
+    s_apu = Scheme("APU", frozenset({"apu"}), Command(exe="a.bat"), {"apu": 1})
     m = ModelConfig("M", ("M",), "Chat", 1, False, {"GPU": s_gpu, "APU": s_apu})
     assert select_adaptive(m, {"gpu"}).config_source == "GPU"
     assert select_adaptive(m, {"apu"}).config_source == "APU"
@@ -90,14 +91,13 @@ def test_resolve_alias_to_primary():
 
 
 def test_referenced_devices_unions_required_and_memory_keys():
-    from pathlib import Path
     from llm_manager.config import (
-        referenced_devices, AppConfig, ProgramConfig, ModelConfig, Scheme,
+        referenced_devices, AppConfig, ProgramConfig, ModelConfig, Scheme, Command,
     )
     s1 = Scheme(config_source="S1", required_devices=frozenset({"rtx 4060", "v100"}),
-                script_path=Path("a.bat"), memory_mb={"rtx 4060": 5120})
+                command=Command(exe="a.bat"), memory_mb={"rtx 4060": 5120})
     s2 = Scheme(config_source="S2", required_devices=frozenset({"780m"}),
-                script_path=Path("b.bat"), memory_mb={"780m": 2048, "v100": 0})
+                command=Command(exe="b.bat"), memory_mb={"780m": 2048, "v100": 0})
     m = ModelConfig(primary_name="M", aliases=("m",), mode="Chat", port=1000,
                     schemes={"S1": s1, "S2": s2})
     cfg = AppConfig(program=ProgramConfig("0.0.0.0", 8080, 60, "INFO"),

@@ -7,7 +7,7 @@ import pytest
 from fastapi import HTTPException
 
 from llm_manager import state
-from llm_manager.config import AppConfig, ModelConfig, ProgramConfig, Scheme
+from llm_manager.config import AppConfig, Command, ModelConfig, ProgramConfig, Scheme
 from llm_manager.data.persistence import fetch_usage, open_db
 from llm_manager.gateway import proxy
 from llm_manager.state import ModelStatus
@@ -16,7 +16,7 @@ from llm_manager.state import ModelStatus
 def _cfg():
     m = ModelConfig(primary_name="m1", aliases=("m1", "alias1"), mode="Chat",
                     port=8000,
-                    schemes={"s": Scheme("s", frozenset({"rtx 4060"}), Path("r.cmd"), {"rtx 4060": 2048})})
+                    schemes={"s": Scheme("s", frozenset({"rtx 4060"}), Command(exe="r.cmd"), {"rtx 4060": 2048})})
     return AppConfig(program=ProgramConfig(host="127.0.0.1", port=8080, alive_time=60, log_level="INFO"),
                      models={"m1": m}, wol=None, claude_configs={})
 
