@@ -5,6 +5,7 @@ import pytest
 from llm_manager.config import AppConfig, Command, ModelConfig, ProgramConfig, Scheme, WakeOnLanConfig
 from llm_manager.data.config_store import (
     ConfigStore,
+    ConfigValidationFailed,
     _read_appconfig_locked,
     _write_appconfig_locked,
     apply_env_overrides,
@@ -12,6 +13,7 @@ from llm_manager.data.config_store import (
     get_setting,
     initialize,
     is_initialized,
+    mutate_appconfig,
     read_appconfig,
     seed_defaults,
     set_setting,
@@ -337,3 +339,32 @@ def test_write_appconfig_locked_callable_under_held_lock(tmp_path):
     with db.write_lock:                       # caller 持锁
         _write_appconfig_locked(db, _sample_cfg())
     assert "Qwen3-4B" in read_appconfig(db).models
+
+
+def test_mutate_appconfig_applies_fn_and_returns_new_cfg(tmp_path):
+    from dataclasses import replace
+    db = open_db(tmp_path / "t.db")
+    write_appconfig(db, _sample_cfg())                       # 有 Qwen3-4B
+    def add(cfg):
+        m = ModelConfig("New", ("new",), "Chat", 7000,
+                        schemes={"s": Scheme("s", frozenset({"gpu"}), Command(exe="x"), {})})
+        return replace(cfg, models={**cfg.models, "New": m})
+    new_cfg = mutate_appconfig(db, add)
+    assert "New" in new_cfg.models
+    assert "New" in read_appconfig(db).models
+
+
+def test_mutate_appconfig_rolls_back_on_validation_failure(tmp_path):
+    from dataclasses import replace
+    db = open_db(tmp_path / "t.db")
+    write_appconfig(db, _sample_cfg())                       # Qwen3-4B aliases 含 "q4"
+    # fn 加一个模型,其 alias "q4" 与既有冲突 → validate 失败 → 必须回滚
+    def clash(cfg):
+        dup = ModelConfig("Dup", ("q4",), "Chat", 7000,
+                          schemes={"s": Scheme("s", frozenset({"gpu"}), Command(exe="x"), {})})
+        return replace(cfg, models={**cfg.models, "Dup": dup})
+    with pytest.raises(ConfigValidationFailed):
+        mutate_appconfig(db, clash)
+    out = read_appconfig(db)
+    assert "Qwen3-4B" in out.models            # 原配置完好
+    assert "Dup" not in out.models             # 回滚:未落 partial

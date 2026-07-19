@@ -157,6 +157,42 @@ def _read_appconfig_locked(db: Db) -> AppConfig:
     return AppConfig(program=program, models=models, wol=wol, claude_configs=claude_configs)
 
 
+class ModelNotFound(KeyError):
+    """CRUD: 指定 name 不存在(→ 404)。"""
+
+
+class ModelExists(Exception):
+    """CRUD: 指定 name 已存在(→ 409)。"""
+
+
+class ConfigValidationFailed(Exception):
+    """CRUD: mutate 后 config.validate 失败(→ 422)。携带 errors 列表。"""
+
+    def __init__(self, errors: list[str]) -> None:
+        super().__init__("; ".join(errors))
+        self.errors = errors
+
+
+def mutate_appconfig(db: Db, fn) -> AppConfig:
+    """锁内原子读-改-写:read → fn(cfg)→cfg' → validate → write。
+
+    fn: ``AppConfig -> AppConfig``,用 dataclasses.replace 在 frozen 快照上构造新实例;
+    可 raise ModelNotFound / ModelExists(存在性检查,404/409 语义)。
+    validate 失败 raise ConfigValidationFailed(不落库)。
+    成功返新快照(caller 负责 store.reload() 刷缓存)。
+
+    用锁-free 的 _read/_write_appconfig_locked(非重入 Lock:不能在此调公共 read/write_appconfig)。
+    """
+    with db.write_lock:
+        cfg = _read_appconfig_locked(db)
+        new_cfg = fn(cfg)
+        errors = config.validate(new_cfg)
+        if errors:
+            raise ConfigValidationFailed(errors)
+        _write_appconfig_locked(db, new_cfg)
+        return new_cfg
+
+
 def read_appconfig(db: Db) -> AppConfig:
     """加锁读(串行化 writer → 多 SELECT 一致;避免单共享连接并发事务冲突)。read_appconfig 低频
     (仅 ConfigStore reload/init),锁竞争可忽略。"""
