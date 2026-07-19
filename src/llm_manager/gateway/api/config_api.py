@@ -13,6 +13,7 @@ from pathlib import Path
 from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
 
+from llm_manager.config import Command, ModelConfig, Scheme, _norm_device
 from llm_manager.data.config_store import get_setting, set_settings
 
 try:
@@ -49,6 +50,54 @@ class LogRetentionUpdate(BaseModel):
     days: int | None = Field(default=None, ge=1)
     count_enabled: bool | None = None
     count: int | None = Field(default=None, ge=1)
+
+
+class CommandInput(BaseModel):
+    exe: str
+    args: list[str] = []
+    env: dict[str, str] = {}
+    cwd: str | None = None
+    conda_env: str | None = None
+
+
+class SchemeInput(BaseModel):
+    config_source: str
+    required_devices: list[str] = []
+    command: CommandInput
+    memory_mb: dict[str, int] = {}
+
+
+class ModelDefInput(BaseModel):
+    name: str
+    mode: str                              # config.validate 校验 Chat/Embedding/Reranker
+    port: int = Field(ge=1, le=65535)
+    auto_start: bool = False
+    aliases: list[str]                     # 非空(validate)
+    schemes: list[SchemeInput]             # 非空(validate)
+
+
+def _to_model_config(body: ModelDefInput) -> ModelConfig:
+    """Pydantic 输入 → frozen ModelConfig。设备名 _norm_device(小写+strip)归一化,
+    与 YAML 导入一致(否则对不上 DeviceMonitor)。重复 config_source → ValueError(→ 422)。"""
+    schemes: dict[str, Scheme] = {}
+    for s in body.schemes:
+        if s.config_source in schemes:
+            raise ValueError(f"duplicate scheme config_source '{s.config_source}'")
+        schemes[s.config_source] = Scheme(
+            config_source=s.config_source,
+            required_devices=frozenset(_norm_device(d) for d in s.required_devices),
+            command=Command(exe=s.command.exe, args=tuple(s.command.args),
+                            env=dict(s.command.env), cwd=s.command.cwd, conda_env=s.command.conda_env),
+            memory_mb={_norm_device(k): v for k, v in s.memory_mb.items()},
+        )
+    return ModelConfig(
+        primary_name=body.name,
+        aliases=tuple(body.aliases),
+        mode=body.mode,
+        port=body.port,
+        auto_start=body.auto_start,
+        schemes=schemes,
+    )
 
 
 def _store(request: Request):

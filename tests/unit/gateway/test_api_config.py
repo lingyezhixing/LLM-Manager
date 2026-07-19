@@ -159,3 +159,29 @@ def test_put_program_claude_settings_path_is_restart_classified(tmp_path):
     j = r.json()
     assert "claude_settings_path" in j["restart_fields"]
     assert j["needs_restart"] is True
+
+
+def test_to_model_config_normalizes_device_names():
+    from llm_manager.gateway.api.config_api import CommandInput, ModelDefInput, SchemeInput, _to_model_config
+    body = ModelDefInput(name="M", mode="Chat", port=8000, aliases=["M"],
+                         schemes=[SchemeInput(config_source="RTX4060",
+                                              required_devices=["RTX 4060"],
+                                              command=CommandInput(exe="run"),
+                                              memory_mb={"RTX 4060": 5120})])
+    mc = _to_model_config(body)
+    assert mc.primary_name == "M"
+    assert mc.aliases == ("M",)
+    scheme = mc.schemes["RTX4060"]
+    assert scheme.required_devices == frozenset({"rtx 4060"})     # 归一化(小写+strip)
+    assert scheme.memory_mb == {"rtx 4060": 5120}
+    assert scheme.command.exe == "run" and scheme.command.args == ()
+
+
+def test_to_model_config_rejects_duplicate_scheme_config_source():
+    from llm_manager.gateway.api.config_api import CommandInput, ModelDefInput, SchemeInput, _to_model_config
+    import pytest
+    body = ModelDefInput(name="M", mode="Chat", port=8000, aliases=["M"],
+                         schemes=[SchemeInput(config_source="S", required_devices=[], command=CommandInput(exe="a")),
+                                  SchemeInput(config_source="S", required_devices=[], command=CommandInput(exe="b"))])
+    with pytest.raises(ValueError):
+        _to_model_config(body)
