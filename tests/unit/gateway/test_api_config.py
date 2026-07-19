@@ -185,3 +185,69 @@ def test_to_model_config_rejects_duplicate_scheme_config_source():
                                   SchemeInput(config_source="S", required_devices=[], command=CommandInput(exe="b"))])
     with pytest.raises(ValueError):
         _to_model_config(body)
+
+
+def _empty_cfg():
+    from llm_manager.config import AppConfig, ProgramConfig
+    return AppConfig(program=ProgramConfig("0.0.0.0", 8080, 60, "INFO"),
+                     models={}, wol=None, claude_configs={})
+
+
+def _body(name="M", port=8000, aliases=None):
+    from llm_manager.gateway.api.config_api import CommandInput, ModelDefInput, SchemeInput
+    return ModelDefInput(name=name, mode="Chat", port=port, aliases=aliases or [name],
+                         schemes=[SchemeInput(config_source="S", required_devices=["gpu"],
+                                              command=CommandInput(exe="run"), memory_mb={"gpu": 1})])
+
+
+def test_create_model_fn_adds_model():
+    from llm_manager.gateway.api.config_api import _create_model
+    cfg = _create_model(_empty_cfg(), _body("M"))
+    assert "M" in cfg.models and cfg.models["M"].port == 8000
+
+
+def test_create_model_fn_raises_model_exists():
+    from llm_manager.data.config_store import ModelExists
+    from llm_manager.gateway.api.config_api import _create_model
+    cfg = _create_model(_empty_cfg(), _body("M"))
+    import pytest
+    with pytest.raises(ModelExists):
+        _create_model(cfg, _body("M"))
+
+
+def test_update_model_fn_replaces():
+    from llm_manager.gateway.api.config_api import _create_model, _update_model
+    cfg = _create_model(_empty_cfg(), _body("M", port=8000))
+    cfg2 = _update_model(cfg, "M", _body("M", port=9000))
+    assert cfg2.models["M"].port == 9000
+
+
+def test_update_model_fn_rejects_rename():
+    from llm_manager.gateway.api.config_api import _create_model, _update_model
+    cfg = _create_model(_empty_cfg(), _body("M"))
+    import pytest
+    with pytest.raises(ValueError):
+        _update_model(cfg, "M", _body("Other"))        # body.name != path name
+
+
+def test_update_model_fn_raises_not_found():
+    from llm_manager.data.config_store import ModelNotFound
+    from llm_manager.gateway.api.config_api import _update_model
+    import pytest
+    with pytest.raises(ModelNotFound):
+        _update_model(_empty_cfg(), "nope", _body("nope"))
+
+
+def test_delete_model_fn_removes():
+    from llm_manager.gateway.api.config_api import _create_model, _delete_model
+    cfg = _create_model(_empty_cfg(), _body("M"))
+    cfg2 = _delete_model(cfg, "M")
+    assert cfg2.models == {}
+
+
+def test_delete_model_fn_raises_not_found():
+    from llm_manager.data.config_store import ModelNotFound
+    from llm_manager.gateway.api.config_api import _delete_model
+    import pytest
+    with pytest.raises(ModelNotFound):
+        _delete_model(_empty_cfg(), "nope")

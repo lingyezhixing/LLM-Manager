@@ -8,13 +8,19 @@ from __future__ import annotations
 
 import json
 import time
+from dataclasses import replace
 from pathlib import Path
 
 from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
 
 from llm_manager.config import Command, ModelConfig, Scheme, _norm_device
-from llm_manager.data.config_store import get_setting, set_settings
+from llm_manager.data.config_store import (
+    ModelExists,
+    ModelNotFound,
+    get_setting,
+    set_settings,
+)
 
 try:
     from importlib.metadata import PackageNotFoundError, version as _pkg_version
@@ -98,6 +104,29 @@ def _to_model_config(body: ModelDefInput) -> ModelConfig:
         auto_start=body.auto_start,
         schemes=schemes,
     )
+
+
+def _create_model(cfg, body: ModelDefInput):
+    """fn: AppConfig→AppConfig。name 已存在 → ModelExists(→ 409)。"""
+    if body.name in cfg.models:
+        raise ModelExists(body.name)
+    return replace(cfg, models={**cfg.models, body.name: _to_model_config(body)})
+
+
+def _update_model(cfg, name: str, body: ModelDefInput):
+    """fn: 全量替换 name 处定义。不存在 → ModelNotFound(→ 404);body.name≠name → ValueError(改名,→ 422)。"""
+    if name not in cfg.models:
+        raise ModelNotFound(name)
+    if body.name != name:
+        raise ValueError(f"rename not supported (path '{name}' != body '{body.name}'); delete + create instead")
+    return replace(cfg, models={**cfg.models, name: _to_model_config(body)})
+
+
+def _delete_model(cfg, name: str):
+    """fn: 删 name。不存在 → ModelNotFound(→ 404)。"""
+    if name not in cfg.models:
+        raise ModelNotFound(name)
+    return replace(cfg, models={k: v for k, v in cfg.models.items() if k != name})
 
 
 def _store(request: Request):
