@@ -106,13 +106,14 @@ def _write_appconfig_locked(db: Db, cfg: AppConfig) -> None:
 
 
 def write_appconfig(db: Db, cfg: AppConfig) -> None:
-    """信任的内部/导入写路径(导入前已 validate,故不校验)。"""
+    """信任的内部/导入写路径(导入前已 validate,故不校验)。
+    失败原子回滚——见 `_write_appconfig_locked`。"""
     with db.write_lock:
         _write_appconfig_locked(db, cfg)
 
 
 def _read_appconfig_locked(db: Db) -> AppConfig:
-    """caller 持 db.write_lock 时调用(与 _write_appconfig_locked 共用一把锁 → 多 SELECT 天然一致)。"""
+    """caller MUST hold db.write_lock(与 _write_appconfig_locked 共用一把锁 → 多 SELECT 天然一致)。"""
     s = get_all_settings(db)
     program = ProgramConfig(
         host=s.get("host", "0.0.0.0"),
