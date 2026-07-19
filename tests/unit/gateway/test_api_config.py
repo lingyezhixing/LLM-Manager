@@ -251,3 +251,63 @@ def test_delete_model_fn_raises_not_found():
     import pytest
     with pytest.raises(ModelNotFound):
         _delete_model(_empty_cfg(), "nope")
+
+
+def _def_body(name="M", port=8000, aliases=None, exe="run"):
+    from llm_manager.gateway.api.config_api import CommandInput, ModelDefInput, SchemeInput
+    return {"name": name, "mode": "Chat", "port": port, "auto_start": False,
+            "aliases": aliases or [name],
+            "schemes": [{"config_source": "RTX4060", "required_devices": ["rtx 4060"],
+                         "command": {"exe": exe, "args": ["--port", str(port)]},
+                         "memory_mb": {"rtx 4060": 5120}}]}
+
+
+def test_post_model_def_creates_and_appears_in_list(tmp_path):
+    with TestClient(_app(tmp_path)) as c:
+        r = c.post("/api/config/models", json=_def_body("M", 8000))
+        assert r.status_code == 201
+        assert r.json()["affected_routing"] == []          # 新模型未路由
+        listed = c.get("/api/config/models").json()
+        assert [m["name"] for m in listed] == ["M"]
+        one = c.get("/api/config/models/M").json()
+        assert one["name"] == "M" and one["port"] == 8000
+        assert one["schemes"][0]["command"]["exe"] == "run"
+
+
+def test_post_model_def_duplicate_name_409(tmp_path):
+    with TestClient(_app(tmp_path)) as c:
+        c.post("/api/config/models", json=_def_body("M"))
+        r = c.post("/api/config/models", json=_def_body("M"))
+    assert r.status_code == 409
+
+
+def test_post_model_def_alias_clash_422(tmp_path):
+    with TestClient(_app(tmp_path)) as c:
+        c.post("/api/config/models", json=_def_body("M", 8000, aliases=["M"]))
+        r = c.post("/api/config/models", json=_def_body("N", 8001, aliases=["M"]))  # alias "M" 冲突
+    assert r.status_code == 422
+
+
+def test_post_model_def_bad_mode_422(tmp_path):
+    with TestClient(_app(tmp_path)) as c:
+        body = _def_body("M")
+        body["mode"] = "Bogus"
+        r = c.post("/api/config/models", json=body)
+    assert r.status_code == 422                            # config.validate 拒非法 mode
+
+
+def test_get_model_def_unknown_404(tmp_path):
+    with TestClient(_app(tmp_path)) as c:
+        r = c.get("/api/config/models/nope")
+    assert r.status_code == 404
+
+
+def test_post_model_def_normalizes_devices(tmp_path):
+    with TestClient(_app(tmp_path)) as c:
+        body = _def_body("M")
+        body["schemes"][0]["required_devices"] = ["RTX 4060"]
+        body["schemes"][0]["memory_mb"] = {"RTX 4060": 5120}
+        c.post("/api/config/models", json=body)
+        one = c.get("/api/config/models/M").json()
+    assert one["schemes"][0]["required_devices"] == ["rtx 4060"]   # 归一化
+    assert list(one["schemes"][0]["memory_mb"].keys()) == ["rtx 4060"]

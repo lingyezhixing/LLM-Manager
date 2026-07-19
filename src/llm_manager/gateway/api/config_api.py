@@ -11,14 +11,16 @@ import time
 from dataclasses import replace
 from pathlib import Path
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from llm_manager.config import AppConfig, Command, ModelConfig, Scheme, _norm_device
 from llm_manager.data.config_store import (
+    ConfigValidationFailed,
     ModelExists,
     ModelNotFound,
     get_setting,
+    mutate_appconfig,
     set_settings,
 )
 
@@ -258,3 +260,41 @@ def register_config_routes(api: APIRouter) -> None:
         cfg = _store(request).snapshot()
         rf = _restart_fields(cfg, _boot(request))
         return {"needs_restart": bool(rf), "restart_fields": rf, "serving": _serving()}
+
+    @api.get("/config/models")
+    def list_model_defs(request: Request) -> list[dict]:
+        cfg = _store(request).snapshot()
+        return [{"name": name, "mode": m.mode, "port": m.port, "auto_start": m.auto_start,
+                 "aliases": list(m.aliases), "schemes": list(m.schemes)}
+                for name, m in cfg.models.items()]
+
+    @api.post("/config/models", status_code=201)
+    def create_model_def(request: Request, body: ModelDefInput) -> dict:
+        db = _db(request)
+        store = _store(request)
+        try:
+            mutate_appconfig(db, lambda c: _create_model(c, body))
+        except ModelExists:
+            raise HTTPException(409, f"model '{body.name}' already exists")
+        except ConfigValidationFailed as e:
+            raise HTTPException(422, detail=e.errors)
+        except ValueError as e:
+            raise HTTPException(422, detail=str(e))
+        store.reload()
+        return {"affected_routing": [], "hint": None}      # 新模型必未路由
+
+    @api.get("/config/models/{name}")
+    def get_model_def(name: str, request: Request) -> dict:
+        cfg = _store(request).snapshot()
+        if name not in cfg.models:
+            raise HTTPException(404, f"model '{name}' not found")
+        m = cfg.models[name]
+        return {"name": name, "mode": m.mode, "port": m.port, "auto_start": m.auto_start,
+                "aliases": list(m.aliases),
+                "schemes": [{"config_source": s.config_source,
+                             "required_devices": sorted(s.required_devices),
+                             "command": {"exe": s.command.exe, "args": list(s.command.args),
+                                         "env": s.command.env, "cwd": s.command.cwd,
+                                         "conda_env": s.command.conda_env},
+                             "memory_mb": dict(s.memory_mb)}
+                            for s in m.schemes.values()]}
