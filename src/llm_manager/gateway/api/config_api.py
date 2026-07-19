@@ -153,6 +153,16 @@ def _serving() -> list[str]:
     return [n for n in state.routing_names() if state.pending_count(n) > 0]
 
 
+def _routing_served(primary: str, cfg) -> list[str]:
+    """操作触及的模型若当前 ROUTING,返回其 served name(aliases[0]);用于 PUT 的 restart 提示。
+    DELETE 的 ROUTING 拦截在端点处(404/409 之前)。"""
+    from llm_manager import state
+    from llm_manager.state import ModelStatus
+    if state.get_status(primary) == ModelStatus.ROUTING:
+        return [cfg.models[primary].aliases[0]]
+    return []
+
+
 def register_config_routes(api: APIRouter) -> None:
 
     @api.get("/system/info")
@@ -298,3 +308,36 @@ def register_config_routes(api: APIRouter) -> None:
                                          "conda_env": s.command.conda_env},
                              "memory_mb": dict(s.memory_mb)}
                             for s in m.schemes.values()]}
+
+    @api.put("/config/models/{name}")
+    def put_model_def(name: str, request: Request, body: ModelDefInput) -> dict:
+        db = _db(request)
+        store = _store(request)
+        try:
+            new_cfg = mutate_appconfig(db, lambda c: _update_model(c, name, body))
+        except ModelNotFound:
+            raise HTTPException(404, f"model '{name}' not found")
+        except ConfigValidationFailed as e:
+            raise HTTPException(422, detail=e.errors)
+        except ValueError as e:
+            raise HTTPException(422, detail=str(e))
+        store.reload()
+        affected = _routing_served(name, new_cfg)
+        return {"affected_routing": affected, "hint": "restart_model" if affected else None}
+
+    @api.delete("/config/models/{name}")
+    def delete_model_def(name: str, request: Request) -> dict:
+        store = _store(request)
+        cfg = store.snapshot()
+        if name not in cfg.models:
+            raise HTTPException(404, f"model '{name}' not found")
+        from llm_manager import state
+        from llm_manager.state import ModelStatus
+        if state.get_status(name) == ModelStatus.ROUTING:
+            raise HTTPException(409, f"model '{name}' is routing; stop it before deleting")
+        try:
+            mutate_appconfig(_db(request), lambda c: _delete_model(c, name))
+        except ModelNotFound:
+            raise HTTPException(404, f"model '{name}' not found")
+        store.reload()
+        return {"affected_routing": [], "hint": None}

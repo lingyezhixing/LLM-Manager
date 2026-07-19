@@ -254,7 +254,6 @@ def test_delete_model_fn_raises_not_found():
 
 
 def _def_body(name="M", port=8000, aliases=None, exe="run"):
-    from llm_manager.gateway.api.config_api import CommandInput, ModelDefInput, SchemeInput
     return {"name": name, "mode": "Chat", "port": port, "auto_start": False,
             "aliases": aliases or [name],
             "schemes": [{"config_source": "RTX4060", "required_devices": ["rtx 4060"],
@@ -311,3 +310,65 @@ def test_post_model_def_normalizes_devices(tmp_path):
         one = c.get("/api/config/models/M").json()
     assert one["schemes"][0]["required_devices"] == ["rtx 4060"]   # 归一化
     assert list(one["schemes"][0]["memory_mb"].keys()) == ["rtx 4060"]
+
+
+def test_put_model_def_replaces(tmp_path):
+    with TestClient(_app(tmp_path)) as c:
+        c.post("/api/config/models", json=_def_body("M", 8000))
+        r = c.put("/api/config/models/M", json=_def_body("M", 9000))
+        assert r.status_code == 200
+        assert c.get("/api/config/models/M").json()["port"] == 9000
+
+
+def test_put_model_def_unknown_404(tmp_path):
+    with TestClient(_app(tmp_path)) as c:
+        r = c.put("/api/config/models/nope", json=_def_body("nope"))
+    assert r.status_code == 404
+
+
+def test_put_model_def_rename_422(tmp_path):
+    with TestClient(_app(tmp_path)) as c:
+        c.post("/api/config/models", json=_def_body("M"))
+        r = c.put("/api/config/models/M", json=_def_body("Other"))   # body.name≠path
+    assert r.status_code == 422
+
+
+def test_put_model_def_routing_returns_hint(tmp_path):
+    from llm_manager import state
+    from llm_manager.state import ModelStatus
+    state._reset()
+    with TestClient(_app(tmp_path)) as c:
+        c.post("/api/config/models", json=_def_body("M", 8000, aliases=["m-served"]))
+        state.set_status("M", ModelStatus.ROUTING, force=True)       # 按 primary_name 置 ROUTING
+        r = c.put("/api/config/models/M", json=_def_body("M", 9000, aliases=["m-served"]))
+    assert r.status_code == 200
+    j = r.json()
+    assert j["affected_routing"] == ["m-served"]                     # served name(aliases[0])
+    assert j["hint"] == "restart_model"
+    state._reset()
+
+
+def test_delete_model_def_removes(tmp_path):
+    with TestClient(_app(tmp_path)) as c:
+        c.post("/api/config/models", json=_def_body("M"))
+        r = c.delete("/api/config/models/M")
+        assert r.status_code == 200
+        assert c.get("/api/config/models").json() == []
+
+
+def test_delete_model_def_unknown_404(tmp_path):
+    with TestClient(_app(tmp_path)) as c:
+        r = c.delete("/api/config/models/nope")
+    assert r.status_code == 404
+
+
+def test_delete_model_def_routing_409(tmp_path):
+    from llm_manager import state
+    from llm_manager.state import ModelStatus
+    state._reset()
+    with TestClient(_app(tmp_path)) as c:
+        c.post("/api/config/models", json=_def_body("M", 8000))
+        state.set_status("M", ModelStatus.ROUTING, force=True)
+        r = c.delete("/api/config/models/M")
+    assert r.status_code == 409                                      # 避免 delete 留孤儿进程
+    state._reset()
