@@ -14,7 +14,7 @@ from pathlib import Path
 from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
 
-from llm_manager.config import Command, ModelConfig, Scheme, _norm_device
+from llm_manager.config import AppConfig, Command, ModelConfig, Scheme, _norm_device
 from llm_manager.data.config_store import (
     ModelExists,
     ModelNotFound,
@@ -106,14 +106,14 @@ def _to_model_config(body: ModelDefInput) -> ModelConfig:
     )
 
 
-def _create_model(cfg, body: ModelDefInput):
+def _create_model(cfg: AppConfig, body: ModelDefInput) -> AppConfig:
     """fn: AppConfig→AppConfig。name 已存在 → ModelExists(→ 409)。"""
     if body.name in cfg.models:
         raise ModelExists(body.name)
     return replace(cfg, models={**cfg.models, body.name: _to_model_config(body)})
 
 
-def _update_model(cfg, name: str, body: ModelDefInput):
+def _update_model(cfg: AppConfig, name: str, body: ModelDefInput) -> AppConfig:
     """fn: 全量替换 name 处定义。不存在 → ModelNotFound(→ 404);body.name≠name → ValueError(改名,→ 422)。"""
     if name not in cfg.models:
         raise ModelNotFound(name)
@@ -122,7 +122,7 @@ def _update_model(cfg, name: str, body: ModelDefInput):
     return replace(cfg, models={**cfg.models, name: _to_model_config(body)})
 
 
-def _delete_model(cfg, name: str):
+def _delete_model(cfg: AppConfig, name: str) -> AppConfig:
     """fn: 删 name。不存在 → ModelNotFound(→ 404)。"""
     if name not in cfg.models:
         raise ModelNotFound(name)
