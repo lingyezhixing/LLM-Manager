@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Callable
 from pathlib import Path
 
 from llm_manager import config
@@ -173,7 +174,7 @@ class ConfigValidationFailed(Exception):
         self.errors = errors
 
 
-def mutate_appconfig(db: Db, fn) -> AppConfig:
+def mutate_appconfig(db: Db, fn: Callable[[AppConfig], AppConfig]) -> AppConfig:
     """锁内原子读-改-写:read → fn(cfg)→cfg' → validate → write。
 
     fn: ``AppConfig -> AppConfig``,用 dataclasses.replace 在 frozen 快照上构造新实例;
