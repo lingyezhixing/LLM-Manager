@@ -5,6 +5,8 @@ import pytest
 from llm_manager.config import AppConfig, Command, ModelConfig, ProgramConfig, Scheme, WakeOnLanConfig
 from llm_manager.data.config_store import (
     ConfigStore,
+    _read_appconfig_locked,
+    _write_appconfig_locked,
     apply_env_overrides,
     get_all_settings,
     get_setting,
@@ -319,3 +321,19 @@ def test_set_settings_rolls_back_on_failure(tmp_path):
     # rollback:host(失败前已 stage)被回滚 → None;port(失败处)未写,仍是原值 8080
     assert get_setting(db, "host") is None
     assert get_setting(db, "port") == "8080"
+
+
+def test_read_appconfig_locked_callable_under_held_lock(tmp_path):
+    """_read_appconfig_locked 不取锁 → caller 持 write_lock 调用不死锁(mutate_appconfig 依赖)。"""
+    db = open_db(tmp_path / "t.db")
+    write_appconfig(db, _sample_cfg())
+    with db.write_lock:                       # caller 持锁
+        cfg = _read_appconfig_locked(db)      # 不应取锁/不应抛
+    assert "Qwen3-4B" in cfg.models
+
+
+def test_write_appconfig_locked_callable_under_held_lock(tmp_path):
+    db = open_db(tmp_path / "t.db")
+    with db.write_lock:                       # caller 持锁
+        _write_appconfig_locked(db, _sample_cfg())
+    assert "Qwen3-4B" in read_appconfig(db).models
