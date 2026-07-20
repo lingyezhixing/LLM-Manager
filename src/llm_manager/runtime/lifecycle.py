@@ -29,14 +29,14 @@ class Lifecycle:
     def __init__(
         self,
         *,
-        cfg: AppConfig,
+        get_cfg: Callable[[], AppConfig],
         supervisor,
         devices,
         probes: dict[str, Callable],
         scheme_select=select_adaptive,
         startup_timeout: float = 60.0,
     ) -> None:
-        self._cfg = cfg
+        self._get_cfg = get_cfg
         self._supervisor = supervisor
         self._devices = devices
         self._probes = probes
@@ -98,8 +98,9 @@ class Lifecycle:
         return state.get_status(alias)
 
     async def unload_all(self) -> list[str]:
+        cfg = self._get_cfg()
         names = [
-            n for n in self._cfg.models
+            n for n in cfg.models
             if state.get_status(n) not in (ModelStatus.STOPPED, ModelStatus.FAILED)
         ]
         results = await asyncio.gather(*[self.stop(n) for n in names], return_exceptions=True)
@@ -230,11 +231,13 @@ class Lifecycle:
 
     def _cfg_model(self, alias: str) -> ModelConfig:
         # 委托 config.resolve_alias,避免与它重复实现别名解析循环
-        return self._cfg.models[resolve_alias(self._cfg, alias)]
+        cfg = self._get_cfg()
+        return cfg.models[resolve_alias(cfg, alias)]
 
     def _runnable(self, exclude: str) -> dict[str, scheduling.RunnableInfo]:
+        cfg = self._get_cfg()
         out: dict[str, scheduling.RunnableInfo] = {}
-        for name in self._cfg.models:
+        for name in cfg.models:
             if name == exclude or not state.is_runnable(name):
                 continue
             scheme = self._active_schemes.get(name)

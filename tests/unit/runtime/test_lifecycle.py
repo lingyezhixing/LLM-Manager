@@ -108,7 +108,7 @@ def _make(sup=None, dev=None, probes=None, models=None):
     dev = dev or FakeDevices()
     probes = probes if probes is not None else {"Chat": _ok_probe}
     cfg = _cfg(*(models if models is not None else [_model()]))
-    return Lifecycle(cfg=cfg, supervisor=sup, devices=dev, probes=probes), sup, dev, cfg
+    return Lifecycle(get_cfg=lambda: cfg, supervisor=sup, devices=dev, probes=probes), sup, dev, cfg
 
 
 @pytest.fixture(autouse=True)
@@ -522,3 +522,20 @@ async def test_pipeline_conda_env_wraps_with_cmd_on_windows():
         assert spawned[:1] == ["conda"]
     assert spawned[-2:] == ["serve", "x"]            # exe args tail
     assert "-n" in spawned and "lmdeploy" in spawned  # conda env passed
+
+
+# ---------- P2: get_cfg read-through ----------
+async def test_lifecycle_reads_fresh_cfg_each_call():
+    """get_cfg 返回值变化后,_cfg_model/_runnable/unload_all 反映新模型集(P2 读穿)。"""
+    current = {"cfg": _cfg(_model("m1", port=8000))}
+    life = Lifecycle(get_cfg=lambda: current["cfg"], supervisor=FakeSupervisor(),
+                     devices=FakeDevices(), probes={"Chat": _ok_probe})
+    assert "m1" in life._get_cfg().models
+    # 模拟 CRUD 加模型 m2 → lifecycle 立即看见(无需重建)
+    current["cfg"] = _cfg(_model("m1", port=8000), _model("m2", port=8001))
+    assert set(life._get_cfg().models) == {"m1", "m2"}
+    # _runnable 走新模型集:m2 可被纳入(虽未 routing)
+    state.set_status("m2", ModelStatus.ROUTING, force=True)
+    state.record_pid("m2", 42)
+    runnable = life._runnable(exclude="m1")
+    assert "m2" in runnable
