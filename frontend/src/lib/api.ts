@@ -150,3 +150,68 @@ export async function searchLogs(alias: string, q: string, level?: string): Prom
   if (!res.ok) throw new Error(`/logs/search failed: ${res.status}`);
   return (await res.json()) as LogSearch;
 }
+
+// 系统配置 — config 写回 + system info. Types hand-defined to match
+// gateway/api/config_api.py (ProgramUpdate / GET /api/config / GET /api/system/info).
+export interface SystemInfo {
+  version: string;
+  started_at: number;        // epoch seconds (time.time())
+  uptime_s: number;
+  db_path: string;
+  db_size_bytes: number | null;
+  log_dir: string;
+}
+
+export interface ProgramConfig {
+  host: string;
+  port: number;
+  alive_time: number;
+  log_level: string;
+  log_dir: string;
+  db_path: string;
+  claude_settings_path: string;
+}
+
+export interface ConfigResponse {
+  program: ProgramConfig;
+  wol: { broadcast_address: string; mac_address: string } | null;
+  claude: Record<string, Record<string, string>>;
+  logs: { time_enabled: boolean; days: number; count_enabled: boolean; count: number };
+  restart_fields: string[];
+}
+
+export interface ConfigWriteResult {
+  needs_restart: boolean;
+  restart_fields: string[];
+  serving: string[];
+}
+
+export type ProgramUpdate = Partial<ProgramConfig>;
+
+export async function fetchSystemInfo(): Promise<SystemInfo> {
+  const res = await fetch("/api/system/info");
+  if (!res.ok) throw new Error(`/api/system/info failed: ${res.status}`);
+  return (await res.json()) as SystemInfo;
+}
+
+export async function fetchConfig(): Promise<ConfigResponse> {
+  const res = await fetch("/api/config");
+  if (!res.ok) throw new Error(`/api/config failed: ${res.status}`);
+  return (await res.json()) as ConfigResponse;
+}
+
+export async function fetchRestartStatus(): Promise<ConfigWriteResult> {
+  const res = await fetch("/api/config/restart-status");
+  if (!res.ok) throw new Error(`/api/config/restart-status failed: ${res.status}`);
+  return (await res.json()) as ConfigWriteResult;
+}
+
+export async function updateProgram(body: ProgramUpdate): Promise<ConfigWriteResult> {
+  const res = await fetch("/api/config/program", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`/api/config/program failed: ${res.status}`);
+  return (await res.json()) as ConfigWriteResult;
+}
