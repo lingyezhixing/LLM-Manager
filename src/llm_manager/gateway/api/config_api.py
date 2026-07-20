@@ -33,7 +33,7 @@ try:
 except Exception:
     _VERSION = "unknown"
 
-_RESTART_FIELDS = ("host", "port", "db_path", "log_dir", "claude_settings_path")
+_RESTART_FIELDS = ("host", "port", "db_path", "log_dir", "claude_settings_path", "log_level")
 
 
 class ProgramUpdate(BaseModel):
@@ -258,10 +258,8 @@ def register_config_routes(api: APIRouter) -> None:
 
     @api.post("/config/reload")
     def reload_config(request: Request) -> dict:
+        # log_level 已归重启类(L1):reload 仅刷快照,不再热重配 logging。
         cfg = _store(request).reload()
-        # 热字段:log_level 即时重配 logging
-        from llm_manager.app import setup_logging
-        setup_logging(cfg.program.log_level, cfg.program.log_dir)
         rf = _restart_fields(cfg, _boot(request))
         return {"needs_restart": bool(rf), "restart_fields": rf, "serving": _serving()}
 

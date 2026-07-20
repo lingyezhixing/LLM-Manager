@@ -20,7 +20,7 @@ def _app(tmp_path):
     app.state.db = db
     app.state.config_store = store
     app.state.boot_program = {"host": "0.0.0.0", "port": "8080",
-                              "db_path": "data/llm_manager.db", "log_dir": "logs"}
+                              "db_path": "data/llm_manager.db", "log_dir": "logs", "log_level": "INFO"}
     app.state.started_at = time.time()
     return app
 
@@ -110,17 +110,19 @@ def test_put_logs_updates_retention_rules(tmp_path):
     }
 
 
-def test_reload_reapplies_hot_log_level(tmp_path, monkeypatch):
+def test_reload_no_longer_hot_applies_log_level(tmp_path, monkeypatch):
+    """L1: log_level 归重启类,reload 不再调 setup_logging(消除 handler 重复/log_dir 矛盾 bug 面)。"""
     import llm_manager.app as appmod
-    captured = {}
-    def fake_setup(level="INFO", log_dir="logs"):
-        captured["level"] = level
+    captured: dict = {}
+    def fake_setup(*a, **k):
+        captured["called"] = True
     monkeypatch.setattr(appmod, "setup_logging", fake_setup)
     with TestClient(_app(tmp_path)) as c:
         c.put("/api/config/program", json={"log_level": "DEBUG"})
         r = c.post("/api/config/reload")
     assert r.status_code == 200
-    assert captured["level"] == "DEBUG"
+    assert captured.get("called") is not True          # reload 不再触发热重配
+    assert "log_level" in c.get("/api/config/restart-status").json()["restart_fields"]
 
 
 def test_restart_status_no_change_no_serving(tmp_path):
@@ -372,3 +374,14 @@ def test_delete_model_def_routing_409(tmp_path):
         r = c.delete("/api/config/models/M")
     assert r.status_code == 409                                      # 避免 delete 留孤儿进程
     state._reset()
+
+
+def test_put_program_log_level_is_restart_class(tmp_path):
+    """L1: log_level 降级为重启字段——改之须出现在 restart_fields。
+    (现状:PUT 不热生效 + log_level 不在 _RESTART_FIELDS → 静默丢失到下次重启。)"""
+    with TestClient(_app(tmp_path)) as c:
+        r = c.put("/api/config/program", json={"log_level": "DEBUG"})
+    assert r.status_code == 200
+    j = r.json()
+    assert "log_level" in j["restart_fields"]
+    assert j["needs_restart"] is True
