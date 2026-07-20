@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from llm_manager import config
+from llm_manager.data.config_store import ConfigStore, write_appconfig
 from llm_manager.data.persistence import open_db
 from llm_manager.gateway.routes import register_routes
 from llm_manager.state import ModelStatus
@@ -48,7 +49,12 @@ class _FakeLife:
 
 
 def _register(app, cfg, client_pool=None):
-    register_routes(app, _FakeLife(), cfg, open_db(Path(":memory:")), client_pool or {})
+    db = open_db(Path(":memory:"))
+    write_appconfig(db, cfg)
+    store = ConfigStore(db)
+    register_routes(app, _FakeLife(), db, client_pool or {})
+    app.state.config_store = store
+    app.state.db = db
 
 
 def test_health_returns_200(tmp_path):
@@ -154,3 +160,20 @@ def test_spa_boots_when_dist_lacks_assets(tmp_path, monkeypatch):
     with TestClient(app) as c:
         assert c.get("/").status_code == 200
         assert c.get("/health").status_code == 200
+
+
+def test_v1_models_reflects_store_reload(tmp_path):
+    """读穿:store.reload() 后 /v1/models 反映新模型,无需重启/重注册。"""
+    from dataclasses import replace
+    app = FastAPI()
+    _register(app, _cfg(tmp_path))
+    with TestClient(app) as c:
+        m2 = config.ModelConfig("m2", ("m2",), "Chat", 8002,
+                                schemes={"s": config.Scheme("s", frozenset({"rtx 4060"}),
+                                                            config.Command(exe="q.bat"), {})})
+        cur = app.state.config_store.snapshot()
+        write_appconfig(app.state.db, replace(cur, models={**cur.models, "m2": m2}))
+        app.state.config_store.reload()
+        r = c.get("/v1/models")
+    ids = {m["id"] for m in r.json()["data"]}
+    assert "m1" in ids and "m2" in ids

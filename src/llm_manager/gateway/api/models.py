@@ -124,10 +124,15 @@ def _level_param(request: Request) -> str | None:
     return lv if lv in _LOG_LEVELS else None
 
 
-def register_models_routes(router: APIRouter, cfg: config.AppConfig, lifecycle) -> None:
+def _cfg(request: Request) -> config.AppConfig:
+    """读穿:每请求从 ConfigStore 取 fresh 快照(P2 模型 CRUD 后不重启即见)。"""
+    return request.app.state.config_store.snapshot()
+
+
+def register_models_routes(router: APIRouter, lifecycle) -> None:
     @router.get("/models", response_model=ModelsResponse)
-    def list_models_status() -> ModelsResponse:
-        return build_models_response(cfg)
+    def list_models_status(request: Request) -> ModelsResponse:
+        return build_models_response(_cfg(request))
 
     @router.get("/models/stream")
     async def stream_models(request: Request) -> StreamingResponse:
@@ -135,36 +140,36 @@ def register_models_routes(router: APIRouter, cfg: config.AppConfig, lifecycle) 
         return StreamingResponse(_models_stream(feed), media_type="text/event-stream")
 
     @router.post("/models/{alias}/start", status_code=202)
-    async def start_model(alias: str) -> Response:
-        primary = _resolve_alias(alias, cfg)
+    async def start_model(alias: str, request: Request) -> Response:
+        primary = _resolve_alias(alias, _cfg(request))
         if state.is_runnable(primary):
             raise HTTPException(409, f"model '{alias}' already routing")
         asyncio.create_task(lifecycle.ensure_running(primary))   # fire-and-forget;状态走 /api/models/stream SSE
         return Response(status_code=202)
 
     @router.post("/models/{alias}/stop", status_code=202)
-    async def stop_model(alias: str) -> Response:
-        primary = _resolve_alias(alias, cfg)
+    async def stop_model(alias: str, request: Request) -> Response:
+        primary = _resolve_alias(alias, _cfg(request))
         asyncio.create_task(lifecycle.stop(primary))             # 运行=停止 / 启动中=中断(协作 stop_event)
         return Response(status_code=202)
 
     @router.get("/models/{alias}/logs/stream")
     async def stream_logs(alias: str, request: Request) -> StreamingResponse:
-        primary = _resolve_alias(alias, cfg)                     # 404 on unknown alias
+        primary = _resolve_alias(alias, _cfg(request))           # 404 on unknown alias
         # logs 以 primary_name 为键(生命周期 capture 用的就是 primary_name),故传 primary 而非 URL alias
         return StreamingResponse(_logs_stream(primary, level=_level_param(request)),
                                   media_type="text/event-stream")
 
     @router.get("/models/{alias}/logs/search", response_model=LogSearchResponse)
     def search_logs(alias: str, request: Request) -> LogSearchResponse:
-        primary = _resolve_alias(alias, cfg)
+        primary = _resolve_alias(alias, _cfg(request))
         q = request.query_params.get("q", "")
         res = _logs.search(primary, q, _level_param(request))   # 全量检索本次会话日志(可叠加 level)
         return LogSearchResponse(matches=res.matches, total=res.total)
 
     @router.get("/models/{alias}/logs", response_model=list[LogLineResponse])
     def list_logs(alias: str, request: Request) -> list[LogLineResponse]:
-        primary = _resolve_alias(alias, cfg)
+        primary = _resolve_alias(alias, _cfg(request))
         before = request.query_params.get("before")
         limit = max(1, min(5000, int(request.query_params.get("limit", "1500"))))   # 钳制 1..5000
         level = _level_param(request)

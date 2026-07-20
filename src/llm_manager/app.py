@@ -103,7 +103,7 @@ def create_app(db_path: Path | None = None, *, legacy_yaml: Path | None = None) 
         online = sorted(monitor.online_devices())
         logger.info("devices online: %s", ", ".join(online) if online else "(none)")
         app.state.device_feed = DeviceFeed(monitor)  # 概览设备栏 SSE 源(订阅门控 2s 刷新)
-        app.state.model_feed = ModelFeed(lambda: build_models_response(cfg))  # 模型 SSE 源(变更检测推送)
+        app.state.model_feed = ModelFeed(lambda: build_models_response(store.snapshot()))  # 模型 SSE 源(读穿:变更检测推送)
         stop_event = asyncio.Event()
         auto_models = [n for n, m in cfg.models.items() if m.auto_start]
         auto_task = asyncio.create_task(
@@ -145,7 +145,7 @@ def create_app(db_path: Path | None = None, *, legacy_yaml: Path | None = None) 
             db.conn.close()
 
     app = FastAPI(title="LLM-Manager", lifespan=lifespan)
-    register_routes(app, lifecycle, cfg, db, clients)
+    register_routes(app, lifecycle, db, clients)
     app.state.cfg = cfg
     app.state.config_store = store
     app.state.boot_program = {f: str(getattr(cfg.program, f)) for f in ("host", "port", "db_path", "log_dir", "claude_settings_path")}

@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from llm_manager import config, state
+from llm_manager.data.config_store import ConfigStore, write_appconfig
 from llm_manager.data.persistence import open_db
 from llm_manager.gateway.api.models import _models_stream, build_models_response
 from llm_manager.gateway.routes import register_routes
@@ -48,8 +49,14 @@ def _cfg(tmp_path):
 
 def _app(tmp_path, life=None):
     life = _FakeLife() if life is None else life
+    db = open_db(Path(":memory:"))
+    cfg = _cfg(tmp_path)
+    write_appconfig(db, cfg)
+    store = ConfigStore(db)
     app = FastAPI()
-    register_routes(app, life, _cfg(tmp_path), open_db(Path(":memory:")), {})
+    register_routes(app, life, db, {})
+    app.state.config_store = store
+    app.state.db = db
     return app
 
 
@@ -153,4 +160,22 @@ def test_stop_accepted_202_and_fires_stop(tmp_path):
                 break
             time.sleep(0.02)
     assert life.stopped == ["internal-qwen-key"]
+    state._reset()
+
+
+def test_api_models_reflects_store_reload(tmp_path):
+    """读穿:store.reload() 后 /api/models 反映新模型,无需重启/重注册。"""
+    state._reset()
+    app = _app(tmp_path)
+    with TestClient(app) as c:
+        from dataclasses import replace
+        m2 = config.ModelConfig("m2-key", ("m2-served",), "Chat", 8002,
+                                schemes={"s": config.Scheme("s", frozenset({"rtx 4060"}),
+                                                            config.Command(exe="q.bat"), {})})
+        cur = app.state.config_store.snapshot()
+        write_appconfig(app.state.db, replace(cur, models={**cur.models, "m2-key": m2}))
+        app.state.config_store.reload()
+        r = c.get("/api/models")
+    aliases = {m["alias"] for m in r.json()["data"]}
+    assert "qwen2.5-32b" in aliases and "m2-served" in aliases
     state._reset()
