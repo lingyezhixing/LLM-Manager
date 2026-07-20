@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 
 from llm_manager import config
 from llm_manager.data import logs
+from llm_manager.data.config_store import ConfigStore, write_appconfig
 from llm_manager.data.persistence import open_db
 from llm_manager.gateway.api.models import _logs_stream
 from llm_manager.gateway.routes import register_routes
@@ -36,8 +37,13 @@ Local-Models:
 def _app(tmp_path):
     p = tmp_path / "config.yaml"
     p.write_text(_CFG, encoding="utf-8")
+    db = open_db(Path(":memory:"))
+    write_appconfig(db, config.load(p))
+    store = ConfigStore(db)
     app = FastAPI()
-    register_routes(app, _NoLife(), config.load(p), open_db(Path(":memory:")), {})
+    register_routes(app, _NoLife(), db, {})
+    app.state.config_store = store
+    app.state.db = db
     return app
 
 
