@@ -129,6 +129,13 @@ def _cfg(request: Request) -> config.AppConfig:
     return request.app.state.config_store.snapshot()
 
 
+async def _do_restart(lifecycle, primary: str) -> None:
+    """restart = stop → ensure_running。lifecycle 已读穿 → ensure_running 拿最新配置
+    (改 port/command/aliases 后 restart 即生效)。"""
+    await lifecycle.stop(primary)
+    await lifecycle.ensure_running(primary)
+
+
 def register_models_routes(router: APIRouter, lifecycle) -> None:
     @router.get("/models", response_model=ModelsResponse)
     def list_models_status(request: Request) -> ModelsResponse:
@@ -151,6 +158,12 @@ def register_models_routes(router: APIRouter, lifecycle) -> None:
     async def stop_model(alias: str, request: Request) -> Response:
         primary = _resolve_alias(alias, _cfg(request))
         asyncio.create_task(lifecycle.stop(primary))             # 运行=停止 / 启动中=中断(协作 stop_event)
+        return Response(status_code=202)
+
+    @router.post("/models/{alias}/restart", status_code=202)
+    async def restart_model(alias: str, request: Request) -> Response:
+        primary = _resolve_alias(alias, _cfg(request))
+        asyncio.create_task(_do_restart(lifecycle, primary))     # 读穿:lifecycle 取新配置;状态走 SSE
         return Response(status_code=202)
 
     @router.get("/models/{alias}/logs/stream")

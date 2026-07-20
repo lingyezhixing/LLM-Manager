@@ -179,3 +179,29 @@ def test_api_models_reflects_store_reload(tmp_path):
     aliases = {m["alias"] for m in r.json()["data"]}
     assert "qwen2.5-32b" in aliases and "m2-served" in aliases
     state._reset()
+
+
+def test_restart_accepted_202_and_fires_stop_then_start(tmp_path):
+    state._reset()
+    life = _FakeLife()
+    app = _app(tmp_path, life)
+    with TestClient(app) as c:
+        r = c.post("/api/models/qwen2.5-32b/restart")
+        assert r.status_code == 202
+        for _ in range(50):                 # 让后台 create_task 在 portal loop 上跑完
+            if life.stopped and life.started:
+                break
+            time.sleep(0.02)
+    # stop 先于 start(序)
+    assert life.stopped == ["internal-qwen-key"]
+    assert life.started == ["internal-qwen-key"]
+    state._reset()
+
+
+def test_restart_unknown_alias_404(tmp_path):
+    state._reset()
+    app = _app(tmp_path)
+    with TestClient(app) as c:
+        r = c.post("/api/models/nope/restart")
+    assert r.status_code == 404
+    state._reset()
