@@ -153,7 +153,7 @@ def _serving() -> list[str]:
     return [n for n in state.routing_names() if state.pending_count(n) > 0]
 
 
-def _routing_served(primary: str, cfg) -> list[str]:
+def _routing_served(primary: str, cfg: AppConfig) -> list[str]:
     """操作触及的模型若当前 ROUTING,返回其 served name(aliases[0]);用于 PUT 的 restart 提示。
     DELETE 的 ROUTING 拦截在端点处(404/409 之前)。"""
     from llm_manager import state
