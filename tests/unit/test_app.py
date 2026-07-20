@@ -65,3 +65,32 @@ def test_create_app_closes_db_on_bootstrap_error(tmp_path):
     # db.conn 应已关闭:可重新打开(Windows 上未关会锁文件)
     from llm_manager.data.persistence import open_db
     open_db(db_path).conn.execute("SELECT 1").fetchone()                 # 不抛
+
+
+def test_crud_then_catalog_reflects_without_restart(tmp_path, monkeypatch):
+    """P2 核心契约:POST /api/config/models 后,不重启即见 /v1/models + /api/models(读穿)。"""
+    monkeypatch.setattr("llm_manager.devices.is_lhm_available", lambda: False)  # 隔离 LHM 慢枚举
+    cfg_path = tmp_path / "config.yaml"
+    cfg_path.write_text(
+        "program: {host: 0.0.0.0, port: 8080, alive_time: 60, log_level: INFO}\n"
+        "Local-Models:\n  A: {aliases: [a], mode: Chat, port: 9001,"
+        "    S: {required_devices: [gpu], command: {exe: a.bat}, memory_mb: {gpu: 1}}}\n",
+        encoding="utf-8")
+    app = create_app(db_path=tmp_path / "t.db", legacy_yaml=cfg_path)
+    with TestClient(app) as c:
+        # 初始:A 在册
+        assert "a" in {m["id"] for m in c.get("/v1/models").json()["data"]}
+        # CRUD 加 B
+        r = c.post("/api/config/models", json={
+            "name": "B", "mode": "Chat", "port": 9002, "auto_start": False, "aliases": ["b"],
+            "schemes": [{"config_source": "S", "required_devices": ["gpu"],
+                         "command": {"exe": "b.bat"}, "memory_mb": {"gpu": 1}}]})
+        assert r.status_code == 201
+        # 不重启即见 B(读穿:/v1/models 与 /api/models 都走 config_store.snapshot)
+        v1 = {m["id"] for m in c.get("/v1/models").json()["data"]}
+        api = {m["alias"] for m in c.get("/api/models").json()["data"]}
+        assert "b" in v1 and "b" in api
+        # CRUD 删 A → 反映
+        c.delete("/api/config/models/A")
+        v1b = {m["id"] for m in c.get("/v1/models").json()["data"]}
+        assert "a" not in v1b and "b" in v1b
