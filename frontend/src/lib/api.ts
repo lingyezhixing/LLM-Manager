@@ -215,3 +215,107 @@ export async function updateProgram(body: ProgramUpdate): Promise<ConfigWriteRes
   if (!res.ok) throw new Error(`/api/config/program failed: ${res.status}`);
   return (await res.json()) as ConfigWriteResult;
 }
+
+// 模型定义 CRUD — types + fetchers. Match gateway/api/config_api.py
+// (ModelDefInput / GET /api/config/models[/{name}]) + models.py 的 /restart。
+// 读(GET 详情)与写(ModelDefInput)同形,前端用单一 ModelDef 表达两者。
+export interface CommandDef {
+  exe: string;
+  args: string[];
+  env: Record<string, string>;
+  cwd: string | null;
+  conda_env: string | null;
+}
+export interface SchemeDef {
+  config_source: string;
+  required_devices: string[];
+  command: CommandDef;
+  memory_mb: Record<string, number>;
+}
+export interface ModelDef {
+  name: string;
+  mode: string;
+  port: number;
+  auto_start: boolean;
+  aliases: string[];
+  schemes: SchemeDef[];
+}
+
+// 列表端点摘要:schemes 仅回 config_source 键(list(m.schemes)),非全量对象。
+export interface ModelDefSummary {
+  name: string;
+  mode: string;
+  port: number;
+  auto_start: boolean;
+  aliases: string[];
+  schemes: string[];
+}
+
+export interface ModelWriteResult {
+  affected_routing: string[];
+  hint: string | null;
+}
+
+// 模型 CRUD 422 有三种 detail 形态:config.validate 的 list[str]、ValueError 的 str、
+// Pydantic 字段错的 list[{loc,msg,...}];409 detail 为 str。统一解析为一句可读消息。
+export async function parseApiError(res: Response): Promise<Error> {
+  let msg = `请求失败: ${res.status}`;
+  try {
+    const body = await res.json() as { detail?: unknown };
+    const d = body?.detail;
+    if (Array.isArray(d)) {
+      msg = d
+        .map((x) => (typeof x === "string" ? x : (x as { msg?: string })?.msg ?? JSON.stringify(x)))
+        .join("; ");
+    } else if (typeof d === "string") {
+      msg = d;
+    } else if (typeof body === "string") {
+      msg = body;
+    }
+  } catch {
+    // 非 JSON 响应:保留 status
+  }
+  return new Error(msg);
+}
+
+export async function fetchModelDefs(): Promise<ModelDefSummary[]> {
+  const res = await fetch("/api/config/models");
+  if (!res.ok) throw await parseApiError(res);
+  return (await res.json()) as ModelDefSummary[];
+}
+
+export async function fetchModelDef(name: string): Promise<ModelDef> {
+  const res = await fetch(`/api/config/models/${encodeURIComponent(name)}`);
+  if (!res.ok) throw await parseApiError(res);
+  return (await res.json()) as ModelDef;
+}
+
+export async function createModelDef(body: ModelDef): Promise<void> {
+  const res = await fetch("/api/config/models", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw await parseApiError(res);
+}
+
+export async function updateModelDef(name: string, body: ModelDef): Promise<ModelWriteResult> {
+  const res = await fetch(`/api/config/models/${encodeURIComponent(name)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw await parseApiError(res);
+  return (await res.json()) as ModelWriteResult;
+}
+
+export async function deleteModelDef(name: string): Promise<void> {
+  const res = await fetch(`/api/config/models/${encodeURIComponent(name)}`, { method: "DELETE" });
+  if (!res.ok) throw await parseApiError(res);
+}
+
+// restart = stop→ensure_running(读穿取新配置)。202 异步;运行态经 SSE 反映,无需失效查询键。
+export async function restartModel(alias: string): Promise<void> {
+  const res = await fetch(`/api/models/${encodeURIComponent(alias)}/restart`, { method: "POST" });
+  if (!res.ok) throw await parseApiError(res);
+}
