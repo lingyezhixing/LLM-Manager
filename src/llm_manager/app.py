@@ -115,6 +115,13 @@ def create_app(db_path: Path | None = None, *, legacy_yaml: Path | None = None) 
         # 系统托盘(守卫:pystray 可用 + 需 uvicorn server 句柄做优雅退出 + claude_settings_path)
         tray = None
         server = getattr(app.state, "uvicorn_server", None)
+
+        def _request_restart() -> None:
+            # tray 线程调用:置 flag(主线程 main() 末尾读)+ 线程安全翻 should_exit(立即,
+            # 无需延迟——tray 是本地动作,无 HTTP 响应要冲刷)。
+            app.state.restart_requested = True
+            app.state.loop.call_soon_threadsafe(setattr, server, "should_exit", True)
+
         if (tray_host.is_tray_available() and server is not None
                 and cfg.program.claude_settings_path):
             tray = tray_host.SystemTray(
@@ -123,6 +130,7 @@ def create_app(db_path: Path | None = None, *, legacy_yaml: Path | None = None) 
                 settings_path=cfg.program.claude_settings_path,
                 startup_timeout=lifecycle.startup_timeout,
                 auto_start_margin=background.AUTO_START_MARGIN,
+                request_restart=_request_restart,
             )
             tray.start()
             app.state.tray = tray
