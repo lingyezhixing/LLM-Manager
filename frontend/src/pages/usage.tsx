@@ -1,6 +1,5 @@
 import { useState } from "react";
 
-import { PageHeader } from "@/components/page-header";
 import { UsageByModelTable } from "@/components/usage-by-model-table";
 import { UsageChartCard } from "@/components/usage-chart-card";
 import { UsageKpiRow } from "@/components/usage-kpi-row";
@@ -15,11 +14,9 @@ export default function UsagePage() {
 
   return (
     <>
-      <PageHeader
-        title="用量统计"
-        subtitle="token 用量分析 · 按模型 · 时间序列"
-        action={<UsageRangePicker value={range} onChange={setRange} />}
-      />
+      <div className="mb-6 flex justify-end">
+        <UsageRangePicker value={range} onChange={setRange} />
+      </div>
       <section className="mb-6">
         <UsageKpiRow params={params} refetch={refetch} />
       </section>

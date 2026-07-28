@@ -1,6 +1,5 @@
 import { DeviceBar } from "@/components/device-bar";
 import { ModelSummary } from "@/components/model-summary";
-import { PageHeader } from "@/components/page-header";
 import { SessionStats } from "@/components/session-stats";
 import { TokenCurveCard } from "@/components/token-curve-card";
 
@@ -12,8 +11,6 @@ import { TokenCurveCard } from "@/components/token-curve-card";
 export default function OverviewPage() {
   return (
     <>
-      <PageHeader title="概览" subtitle="模型状态总览 · 设备与用量快照" />
-
       <section className="mb-6">
         <h2 className="mb-2 text-xs uppercase tracking-wide text-muted-foreground">设备</h2>
         <DeviceBar />

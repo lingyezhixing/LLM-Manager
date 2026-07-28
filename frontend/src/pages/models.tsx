@@ -3,7 +3,6 @@ import { useEventStream } from "@/lib/use-event-stream";
 import { useNowTick } from "@/lib/use-now";
 import { ModelCard } from "@/components/model-card";
 import { ModelLogPanel } from "@/components/model-log-panel";
-import { PageHeader } from "@/components/page-header";
 import type { ModelsResponse } from "@/lib/api";
 
 /**
@@ -20,8 +19,7 @@ export default function ModelsPage() {
 
   return (
     <>
-      <PageHeader title="模型管理" subtitle="模型列表 · 启停控制 · 实时日志" />
-      <div className="grid h-[calc(100vh-180px)] gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,4fr)]">
+      <div className="grid h-[calc(100vh-104px)] gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,4fr)]">
         <div className="flex flex-col gap-2 overflow-auto">
           {models.length === 0
             ? <p className="text-sm text-muted-foreground">加载中…</p>

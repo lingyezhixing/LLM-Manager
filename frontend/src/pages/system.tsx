@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { PageHeader } from "@/components/page-header";
 import { GeneralPanel } from "@/components/system/general-panel";
 import { ModelDefPanel } from "@/components/system/model-def-panel";
 import { RestartBanner } from "@/components/system/restart-banner";
@@ -23,7 +22,6 @@ export default function SystemPage() {
 
   return (
     <>
-      <PageHeader title="系统配置" subtitle="程序 · 模型 · 日志 · 网络 · 系统" />
       {showBanner && rs && (
         <RestartBanner
           restartFields={rs.restart_fields}
