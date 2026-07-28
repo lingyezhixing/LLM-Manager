@@ -1,14 +1,14 @@
 import { useState } from "react";
 import { PageHeader } from "@/components/page-header";
 import { GeneralPanel } from "@/components/system/general-panel";
+import { ModelDefPanel } from "@/components/system/model-def-panel";
 import { RestartBanner } from "@/components/system/restart-banner";
 import { SystemInfoPanel } from "@/components/system/system-info-panel";
 import { SystemNav, type SystemZone } from "@/components/system/system-nav";
 import { ZonePlaceholder } from "@/components/system/zone-placeholder";
 import { useRestartStatus } from "@/lib/use-config";
 
-const PLACEHOLDER_LABEL: Record<Exclude<SystemZone, "general" | "info">, string> = {
-  models: "模型",
+const PLACEHOLDER_LABEL: Record<Exclude<SystemZone, "general" | "models" | "info">, string> = {
   network: "网络",
   claude: "Claude",
   logs: "日志",
@@ -35,8 +35,9 @@ export default function SystemPage() {
         <SystemNav active={zone} onSelect={setZone} />
         <div>
           {zone === "general" && <GeneralPanel />}
+          {zone === "models" && <ModelDefPanel />}
           {zone === "info" && <SystemInfoPanel />}
-          {zone !== "general" && zone !== "info" && (
+          {zone !== "general" && zone !== "models" && zone !== "info" && (
             <ZonePlaceholder label={PLACEHOLDER_LABEL[zone]} />
           )}
         </div>
