@@ -1,11 +1,14 @@
-// needs_restart 非阻塞横幅(L2:改 spec 的模态为横幅)。onRestart 预留给 P1c 自重启。
+import { Button } from "@/components/ui/button";
+
+// needs_restart 横幅。onRestart 触发自重启(P1c),restarting 反映重连中态。
 export function RestartBanner({
-  restartFields, serving, onDismiss, onRestart,
+  restartFields, serving, onDismiss, onRestart, restarting,
 }: {
   restartFields: string[];
   serving: string[];
   onDismiss: () => void;
-  onRestart?: () => void;
+  onRestart: () => void;
+  restarting?: boolean;
 }) {
   return (
     <div className="mb-4 rounded-lg border border-warning/40 bg-warning/10 p-3 text-sm text-foreground">
@@ -18,15 +21,13 @@ export function RestartBanner({
           当前正在服务的模型：{serving.join(", ")}（重启将中断）。
         </div>
       )}
-      <div className="mt-2 flex gap-3">
-        {onRestart && (
-          <button type="button" onClick={onRestart} className="text-xs underline text-primary">
-            立即重启
-          </button>
-        )}
-        <button type="button" onClick={onDismiss} className="text-xs underline text-muted-foreground">
+      <div className="mt-2 flex gap-2">
+        <Button size="sm" onClick={onRestart} disabled={restarting}>
+          {restarting ? "重启中…" : "立即重启"}
+        </Button>
+        <Button size="sm" variant="ghost" onClick={onDismiss} disabled={restarting}>
           知道了
-        </button>
+        </Button>
       </div>
     </div>
   );
