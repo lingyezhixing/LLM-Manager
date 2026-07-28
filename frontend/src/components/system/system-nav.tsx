@@ -16,7 +16,7 @@ export function SystemNav({
   onSelect: (zone: SystemZone) => void;
 }) {
   return (
-    <nav className="flex flex-col gap-0.5">
+    <nav className="flex flex-wrap gap-2 border-b border-border pb-3">
       {ZONES.map((z) => {
         const isActive = z.key === active;
         return (
@@ -25,7 +25,7 @@ export function SystemNav({
             type="button"
             onClick={() => onSelect(z.key)}
             className={
-              "rounded-md px-3 py-2 text-left text-sm transition-colors " +
+              "rounded-md px-3 py-2 text-sm transition-colors " +
               (isActive
                 ? "bg-muted font-medium text-foreground"
                 : "text-muted-foreground hover:bg-muted hover:text-foreground")

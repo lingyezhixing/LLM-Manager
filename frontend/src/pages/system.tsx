@@ -42,9 +42,9 @@ export default function SystemPage() {
           正在重启,页面将在恢复后自动刷新…
         </div>
       )}
-      <div className="mt-4 grid gap-6 lg:grid-cols-[minmax(0,180px)_minmax(0,1fr)]">
+      <div className="mt-4">
         <SystemNav active={zone} onSelect={setZone} />
-        <div>
+        <div className="mt-6">
           {zone === "general" && <GeneralPanel />}
           {zone === "models" && <ModelDefPanel />}
           {zone === "info" && <SystemInfoPanel />}

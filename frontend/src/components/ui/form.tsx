@@ -1,8 +1,10 @@
-import type { InputHTMLAttributes, ReactNode, SelectHTMLAttributes } from "react";
+import type { InputHTMLAttributes, ReactNode, SelectHTMLAttributes, TextareaHTMLAttributes } from "react";
 
 // 项目首套表单原子。语义 token + --ring focus,三主题自适应。后续 wol/claude/logs/model-def 复用。
-const inputBase =
-  "w-full bg-input border border-border rounded-md px-3 h-9 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50";
+// 共享框样式(不含高度):input 原子加 h-9,TextArea 加 min-h + py。
+const fieldBase =
+  "w-full bg-input border border-border rounded-md px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50";
+const inputBase = `${fieldBase} h-9`;
 
 export function Field({
   label, hint, error, htmlFor, children,
@@ -39,4 +41,8 @@ export function Select({ children, ...props }: SelectHTMLAttributes<HTMLSelectEl
       {children}
     </select>
   );
+}
+
+export function TextArea(props: TextareaHTMLAttributes<HTMLTextAreaElement>) {
+  return <textarea {...props} className={`${fieldBase} min-h-24 py-2 font-mono ${props.className ?? ""}`} />;
 }

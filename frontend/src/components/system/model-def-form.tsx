@@ -142,9 +142,10 @@ export function ModelDefForm({ model, onSaved, onDirtyChange }: ModelDefFormProp
 
   return (
     <div>
+      <div className="mb-1 text-sm font-medium text-foreground">基本</div>
       <Field
-        label="name(模型标识)"
-        hint={isCreate ? "新建:唯一键" : "🔴 不可改(改名=删除+新建)"}
+        label="名称"
+        hint={isCreate ? "唯一标识;新建后不可改名" : "🔴 不可改(改名=删除后新建)"}
         htmlFor="mdf-name"
       >
         <TextInput
@@ -154,17 +155,17 @@ export function ModelDefForm({ model, onSaved, onDirtyChange }: ModelDefFormProp
           onChange={(e) => set("name", e.target.value)}
         />
       </Field>
-      <Field label="mode" htmlFor="mdf-mode">
+      <Field label="模式" hint="选择健康探测方式" htmlFor="mdf-mode">
         <Select id="mdf-mode" value={form.mode} onChange={(e) => set("mode", e.target.value)}>
           {MODES.map((m) => (
             <option key={m} value={m}>{m}</option>
           ))}
         </Select>
       </Field>
-      <Field label="port" hint="1–65535" htmlFor="mdf-port" error={!portValid ? "端口须在 1–65535" : null}>
+      <Field label="端口" hint="模型服务监听端口" htmlFor="mdf-port" error={!portValid ? "端口须在 1–65535" : null}>
         <NumberInput id="mdf-port" value={form.port} onChange={(e) => set("port", num(e.target.value))} />
       </Field>
-      <Field label="auto_start(启动时自动拉起)" htmlFor="mdf-auto">
+      <Field label="自启动" hint="程序启动时自动拉起该模型" htmlFor="mdf-auto">
         <input
           id="mdf-auto"
           type="checkbox"
@@ -173,7 +174,7 @@ export function ModelDefForm({ model, onSaved, onDirtyChange }: ModelDefFormProp
           className="h-4 w-4"
         />
       </Field>
-      <Field label="aliases(别名,有序)" hint="第一个 = 下游服务名(lmdeploy --model-name / llama.cpp -a)">
+      <Field label="对外别名" hint="客户端请求用的名字;第一个 = 下游服务名(lmdeploy --model-name / llama.cpp -a)">
         <StringListEditor
           values={form.aliases}
           onChange={(aliases) => set("aliases", aliases)}
@@ -181,10 +182,13 @@ export function ModelDefForm({ model, onSaved, onDirtyChange }: ModelDefFormProp
         />
       </Field>
 
-      <div className="mb-2 mt-4 flex items-center justify-between">
-        <span className="text-xs font-medium text-muted-foreground">方案(schemes)</span>
+      <div className="mb-1 mt-4 flex items-center justify-between">
+        <span className="text-sm font-medium text-foreground">启动方案</span>
         <Button type="button" size="sm" variant="ghost" onClick={addScheme}>+ 添加方案</Button>
       </div>
+      <p className="mb-3 text-xs text-muted-foreground">
+        每个方案 = 一套启动配置;运行时按在线设备自动选匹配的方案(多 GPU 或备用配置时才需多套,一般一套即可)。
+      </p>
       <div className="flex flex-col gap-3">
         {form.schemes.map((s, i) => (
           <SchemeEditor
@@ -208,7 +212,7 @@ export function ModelDefForm({ model, onSaved, onDirtyChange }: ModelDefFormProp
           />
           {!canSave && (
             <p className="mt-2 text-xs text-warning">
-              需:name、≥1 别名、≥1 方案(每方案 config_source 与 command.exe 非空)、port 1–65535
+              需:名称、≥1 别名、≥1 方案(每方案:标识与命令行非空)、端口 1–65535
             </p>
           )}
         </div>

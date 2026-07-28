@@ -107,73 +107,82 @@ export function ModelDefPanel() {
   }
 
   return (
-    <div>
-      {/* 选择带 */}
-      <div className="mb-4 flex flex-wrap items-center gap-2">
-        <span className="mr-1 text-xs font-medium text-muted-foreground">模型</span>
-        {list.isLoading && <span className="text-sm text-muted-foreground">加载中…</span>}
-        {items.map((m) => (
-          <button
-            key={m.name}
-            type="button"
-            onClick={() => selectModel(m.name)}
-            className={
-              "rounded-md px-3 py-1.5 text-sm transition-colors " +
-              (m.name === effSelected
-                ? "bg-primary text-primary-foreground"
-                : "bg-muted text-muted-foreground hover:text-foreground")
-            }
-          >
-            {m.name}
-          </button>
-        ))}
-        <Button type="button" size="sm" variant="ghost" onClick={startCreate}>+ 新增</Button>
+    <div className="grid gap-6 lg:grid-cols-[minmax(0,280px)_minmax(0,1fr)]">
+      {/* 左栏:模型列表 + 操作(新增顶部 / 删除底部)*/}
+      <div className="flex flex-col gap-1">
+        <Button type="button" size="sm" variant="ghost" onClick={startCreate} className="w-full justify-start">
+          + 新增
+        </Button>
+        {list.isLoading && (
+          <span className="px-3 py-2 text-sm text-muted-foreground">加载中…</span>
+        )}
+        <div className="flex flex-col gap-0.5">
+          {items.map((m) => (
+            <button
+              key={m.name}
+              type="button"
+              onClick={() => selectModel(m.name)}
+              className={
+                "rounded-md px-3 py-2 text-left text-sm transition-colors " +
+                (m.name === effSelected
+                  ? "bg-muted font-medium text-foreground"
+                  : "text-muted-foreground hover:bg-muted hover:text-foreground")
+              }
+            >
+              {m.name}
+            </button>
+          ))}
+        </div>
         {typeof effSelected === "string" && (
-          <Button
-            type="button"
-            size="sm"
-            variant="ghost"
-            onClick={onDelete}
-            className="text-destructive"
-            disabled={del.isPending}
-          >
-            删除模型
-          </Button>
+          <>
+            <div className="my-1 border-t border-border" />
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              onClick={onDelete}
+              className="w-full justify-start text-destructive"
+              disabled={del.isPending}
+            >
+              删除模型
+            </Button>
+            {del.error && (
+              <div className="px-3 text-xs text-destructive">
+                删除失败:{(del.error as Error).message}
+              </div>
+            )}
+          </>
         )}
       </div>
 
-      {/* 编辑后重启提示(M7) */}
-      {hint && (
-        <div className="mb-4 flex items-center gap-3 rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-sm">
-          <span className="text-foreground">
-            配置已保存 · 运行中实例(<span className="font-medium">{hint.served}</span>)需重启生效
-          </span>
-          <Button
-            size="sm"
-            onClick={() =>
-              restart.mutate(hint.served, { onSuccess: () => setHint(null) })
-            }
-            disabled={restart.isPending}
-          >
-            {restart.isPending ? "重启中…" : "重启"}
-          </Button>
-          <button
-            type="button"
-            className="text-xs text-muted-foreground hover:text-foreground"
-            onClick={() => setHint(null)}
-          >
-            忽略
-          </button>
-        </div>
-      )}
+      {/* 右栏:重启提示 + 详情表单 */}
+      <div>
+        {hint && (
+          <div className="mb-4 flex flex-wrap items-center gap-3 rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-sm">
+            <span className="text-foreground">
+              配置已保存 · 运行中实例(<span className="font-medium">{hint.served}</span>)需重启生效
+            </span>
+            <Button
+              size="sm"
+              onClick={() =>
+                restart.mutate(hint.served, { onSuccess: () => setHint(null) })
+              }
+              disabled={restart.isPending}
+            >
+              {restart.isPending ? "重启中…" : "重启"}
+            </Button>
+            <button
+              type="button"
+              className="text-xs text-muted-foreground hover:text-foreground"
+              onClick={() => setHint(null)}
+            >
+              忽略
+            </button>
+          </div>
+        )}
 
-      {del.error && (
-        <div className="mb-3 text-sm text-destructive">
-          删除失败:{(del.error as Error).message}
-        </div>
-      )}
-
-      {formArea}
+        {formArea}
+      </div>
     </div>
   );
 }

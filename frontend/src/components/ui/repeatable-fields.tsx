@@ -52,11 +52,13 @@ export function KeyValueEditor({
   onChange,
   valuePlaceholder,
   numeric,
+  keyPlaceholder = "键",
 }: {
   entries: Record<string, string | number>;
   onChange: (next: Record<string, string | number>) => void;
   valuePlaceholder?: string;
   numeric?: boolean;
+  keyPlaceholder?: string;
 }) {
   const pairs = Object.entries(entries);
 
@@ -80,7 +82,7 @@ export function KeyValueEditor({
     <div className="flex flex-col gap-2">
       {pairs.map(([k, v], i) => (
         <div key={i} className="flex items-center gap-2">
-          <TextInput value={k} placeholder="键" onChange={(e) => setKey(i, e.target.value)} />
+          <TextInput value={k} placeholder={keyPlaceholder} onChange={(e) => setKey(i, e.target.value)} />
           {numeric ? (
             <NumberInput
               value={Number(v)}
