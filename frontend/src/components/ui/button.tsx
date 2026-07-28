@@ -1,11 +1,12 @@
 import { type ButtonHTMLAttributes, forwardRef } from "react";
 
-type Variant = "default" | "ghost";
+type Variant = "default" | "ghost" | "destructive";
 type Size = "sm" | "md";
 
 const VARIANTS: Record<Variant, string> = {
   default: "bg-primary text-primary-foreground hover:opacity-90",
   ghost: "bg-transparent text-muted-foreground hover:bg-muted",
+  destructive: "bg-destructive text-destructive-foreground hover:opacity-90",
 };
 const SIZES: Record<Size, string> = { sm: "h-8 px-3 text-xs", md: "h-9 px-4 text-sm" };
 
