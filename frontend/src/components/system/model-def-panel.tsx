@@ -15,7 +15,7 @@ export function ModelDefPanel() {
   const dirtyRef = useRef(false);
   const confirm = useConfirm();
 
-  const items = list.data ?? [];
+  const items = [...(list.data ?? [])].sort((a, b) => a.port - b.port);
   const effSelected = selected === undefined ? (items[0]?.name ?? null) : selected;
   const detail = useModelDef(effSelected);
   const del = useDeleteModelDef();
@@ -108,11 +108,8 @@ export function ModelDefPanel() {
 
   return (
     <div className="grid gap-6 lg:grid-cols-[minmax(0,280px)_minmax(0,1fr)]">
-      {/* 左栏:模型列表 + 操作(新增顶部 / 删除底部)*/}
+      {/* 左栏:模型列表(按 port 升序)+ 底部操作(新增 / 删除)*/}
       <div className="flex flex-col gap-1">
-        <Button type="button" size="sm" variant="ghost" onClick={startCreate} className="w-full justify-start">
-          + 新增
-        </Button>
         {list.isLoading && (
           <span className="px-3 py-2 text-sm text-muted-foreground">加载中…</span>
         )}
@@ -133,9 +130,11 @@ export function ModelDefPanel() {
             </button>
           ))}
         </div>
-        {typeof effSelected === "string" && (
-          <>
-            <div className="my-1 border-t border-border" />
+        <div className="flex flex-col gap-1 border-t border-border pt-2">
+          <Button type="button" size="sm" variant="ghost" onClick={startCreate} className="w-full justify-start">
+            + 新增
+          </Button>
+          {typeof effSelected === "string" && (
             <Button
               type="button"
               size="sm"
@@ -146,13 +145,13 @@ export function ModelDefPanel() {
             >
               删除模型
             </Button>
-            {del.error && (
-              <div className="px-3 text-xs text-destructive">
-                删除失败:{(del.error as Error).message}
-              </div>
-            )}
-          </>
-        )}
+          )}
+          {del.error && (
+            <div className="px-3 text-xs text-destructive">
+              删除失败:{(del.error as Error).message}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* 右栏:重启提示 + 详情表单 */}
