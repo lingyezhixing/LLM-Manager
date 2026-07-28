@@ -17,4 +17,9 @@ set PYTHONUTF8=1
 
 :: 激活conda环境并运行（日志管理由Python程序自动处理）
 call conda activate LLM-Manager
+:run_loop
 python -m llm_manager
+if %ERRORLEVEL% EQU 81 (
+    echo LLM-Manager 请求重启^(exit 81^),重新启动...
+    goto run_loop
+)

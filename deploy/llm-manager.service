@@ -1,0 +1,15 @@
+[Unit]
+Description=LLM-Manager
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/llm-manager
+ExecStart=/opt/llm-manager/deploy/llm-manager.sh
+# 81 由 llm-manager.sh 内部循环处理,不冒泡到 systemd;
+# Restart=on-failure 仅兜底 .sh 自身异常退出(如被杀)。
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

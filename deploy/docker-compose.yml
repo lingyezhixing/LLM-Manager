@@ -1,0 +1,24 @@
+# 模板:LLM-Manager 容器编排。image/卷/GPU 按实际环境填(本仓库不构建镜像)。
+# 重启语义:docker-entrypoint.sh 精确处理退出码 81(应用请求重启);
+# restart: unless-stopped 仅作容器/进程崩溃兜底。tray 正常退出(0)不会被 entrypoint 重启。
+services:
+  llm-manager:
+    image: llm-manager:latest          # 自行构建或填写镜像地址
+    container_name: llm-manager
+    restart: unless-stopped
+    entrypoint: ["/usr/local/bin/docker-entrypoint.sh"]
+    ports:
+      - "8080:8080"
+    environment:
+      - PYTHONUTF8=1
+    volumes:
+      - ./data:/app/data               # DB + 运行时数据
+      - ./logs:/app/logs
+    # GPU 直通(需 NVIDIA Container Toolkit):
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
