@@ -206,6 +206,12 @@ export async function fetchRestartStatus(): Promise<ConfigWriteResult> {
   return (await res.json()) as ConfigWriteResult;
 }
 
+// 自重启:后端优雅关闭 + sys.exit(81)→ 监督器重启。202;失败抛 parseApiError。
+export async function restartApp(): Promise<void> {
+  const res = await fetch("/api/config/restart", { method: "POST" });
+  if (!res.ok) throw await parseApiError(res);
+}
+
 export async function updateProgram(body: ProgramUpdate): Promise<ConfigWriteResult> {
   const res = await fetch("/api/config/program", {
     method: "PUT",
