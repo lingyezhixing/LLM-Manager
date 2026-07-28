@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { ConfigSaveBar } from "@/components/config-save-bar";
 import { Button } from "@/components/ui/button";
-import { Field, NumberInput, Select, TextInput } from "@/components/ui/form";
+import { Field, NumberInput, Select, Switch, TextInput } from "@/components/ui/form";
 import { StringListEditor } from "@/components/ui/repeatable-fields";
 import { SchemeEditor } from "@/components/system/scheme-editor";
 import { type ModelDef, type ModelWriteResult, type SchemeDef } from "@/lib/api";
@@ -143,44 +143,47 @@ export function ModelDefForm({ model, onSaved, onDirtyChange }: ModelDefFormProp
   return (
     <div>
       <div className="mb-1 text-sm font-medium text-foreground">基本</div>
-      <Field
-        label="名称"
-        hint={isCreate ? "唯一标识;新建后不可改名" : "🔴 不可改(改名=删除后新建)"}
-        htmlFor="mdf-name"
-      >
-        <TextInput
-          id="mdf-name"
-          value={form.name}
-          disabled={!isCreate}
-          onChange={(e) => set("name", e.target.value)}
-        />
-      </Field>
-      <Field label="模式" hint="选择健康探测方式" htmlFor="mdf-mode">
-        <Select id="mdf-mode" value={form.mode} onChange={(e) => set("mode", e.target.value)}>
-          {MODES.map((m) => (
-            <option key={m} value={m}>{m}</option>
-          ))}
-        </Select>
-      </Field>
-      <Field label="端口" hint="模型服务监听端口" htmlFor="mdf-port" error={!portValid ? "端口须在 1–65535" : null}>
-        <NumberInput id="mdf-port" value={form.port} onChange={(e) => set("port", num(e.target.value))} />
-      </Field>
-      <Field label="自启动" hint="程序启动时自动拉起该模型" htmlFor="mdf-auto">
-        <input
-          id="mdf-auto"
-          type="checkbox"
-          checked={form.auto_start}
-          onChange={(e) => set("auto_start", e.target.checked)}
-          className="h-4 w-4"
-        />
-      </Field>
-      <Field label="对外别名" hint="客户端请求用的名字;第一个 = 下游服务名(lmdeploy --model-name / llama.cpp -a)">
-        <StringListEditor
-          values={form.aliases}
-          onChange={(aliases) => set("aliases", aliases)}
-          placeholder="glm-4.6"
-        />
-      </Field>
+      <div className="grid grid-cols-1 gap-x-6 sm:grid-cols-2">
+        <Field
+          label="名称"
+          hint={isCreate ? "唯一标识;新建后不可改名" : "🔴 不可改(改名=删除后新建)"}
+          htmlFor="mdf-name"
+        >
+          <TextInput
+            id="mdf-name"
+            value={form.name}
+            disabled={!isCreate}
+            onChange={(e) => set("name", e.target.value)}
+          />
+        </Field>
+        <Field label="模式" hint="选择健康探测方式" htmlFor="mdf-mode">
+          <Select id="mdf-mode" value={form.mode} onChange={(e) => set("mode", e.target.value)}>
+            {MODES.map((m) => (
+              <option key={m} value={m}>{m}</option>
+            ))}
+          </Select>
+        </Field>
+        <Field label="端口" hint="模型服务监听端口" htmlFor="mdf-port" error={!portValid ? "端口须在 1–65535" : null}>
+          <NumberInput id="mdf-port" value={form.port} onChange={(e) => set("port", num(e.target.value))} />
+        </Field>
+        <Field label="自启动" hint="程序启动时自动拉起该模型" htmlFor="mdf-auto">
+          <div className="flex items-center gap-2">
+            <Switch id="mdf-auto" checked={form.auto_start} onChange={(v) => set("auto_start", v)} />
+            <span className="text-xs text-muted-foreground">{form.auto_start ? "开" : "关"}</span>
+          </div>
+        </Field>
+        <Field
+          className="sm:col-span-2"
+          label="对外别名"
+          hint="客户端请求用的名字;第一个 = 下游服务名(lmdeploy --model-name / llama.cpp -a)"
+        >
+          <StringListEditor
+            values={form.aliases}
+            onChange={(aliases) => set("aliases", aliases)}
+            placeholder="glm-4.6"
+          />
+        </Field>
+      </div>
 
       <div className="mb-1 mt-4 flex items-center justify-between">
         <span className="text-sm font-medium text-foreground">启动方案</span>

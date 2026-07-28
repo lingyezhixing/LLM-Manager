@@ -218,7 +218,7 @@ export async function updateProgram(body: ProgramUpdate): Promise<ConfigWriteRes
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
-  if (!res.ok) throw new Error(`/api/config/program failed: ${res.status}`);
+  if (!res.ok) throw await parseApiError(res);
   return (await res.json()) as ConfigWriteResult;
 }
 

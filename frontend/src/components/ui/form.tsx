@@ -7,16 +7,17 @@ const fieldBase =
 const inputBase = `${fieldBase} h-9`;
 
 export function Field({
-  label, hint, error, htmlFor, children,
+  label, hint, error, htmlFor, className, children,
 }: {
   label: string;
   hint?: string;
   error?: string | null;
   htmlFor?: string;
+  className?: string;
   children: ReactNode;
 }) {
   return (
-    <div className="mb-4">
+    <div className={`mb-4 ${className ?? ""}`}>
       <label htmlFor={htmlFor} className="mb-1 block text-xs font-medium text-muted-foreground">
         {label}
       </label>
@@ -45,4 +46,40 @@ export function Select({ children, ...props }: SelectHTMLAttributes<HTMLSelectEl
 
 export function TextArea(props: TextareaHTMLAttributes<HTMLTextAreaElement>) {
   return <textarea {...props} className={`${fieldBase} min-h-24 py-2 font-mono ${props.className ?? ""}`} />;
+}
+
+// 开关(自启动等布尔项):track + 滑块。开=primary,关=muted;滑块色随态切换保三主题对比。
+// role=switch + aria-checked;label 经 htmlFor 关联(点标签即切换)。
+export function Switch({
+  checked,
+  onChange,
+  id,
+  disabled,
+  className,
+}: {
+  checked: boolean;
+  onChange: (next: boolean) => void;
+  id?: string;
+  disabled?: boolean;
+  className?: string;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      id={id}
+      disabled={disabled}
+      onClick={() => onChange(!checked)}
+      className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50 ${
+        checked ? "bg-primary" : "bg-muted"
+      } ${className ?? ""}`}
+    >
+      <span
+        className={`inline-block h-5 w-5 rounded-full transition ${
+          checked ? "translate-x-5 bg-primary-foreground" : "translate-x-0.5 bg-foreground"
+        }`}
+      />
+    </button>
+  );
 }

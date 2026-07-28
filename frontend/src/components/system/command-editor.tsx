@@ -5,9 +5,9 @@ import { KeyValueEditor, StringListEditor } from "@/components/ui/repeatable-fie
 import { joinCommandLine, previewCommand, splitCommandLine } from "@/lib/split-command";
 import type { CommandDef } from "@/lib/api";
 
-// 命令编辑:主输入=单行「命令行」(粘贴整条命令 → 程序拆 argv 直跑,无 shell);
-// conda_env 独立(程序负责 conda run 包装);env/cwd 收进「高级」;args 列表作解析
-// 歧义的手改回退。下方实时预览最终将执行的命令。
+// 命令编辑:顺序=环境变量 → conda 环境 → 命令行 → 预览 → 高级(折叠 exe/args/cwd)。
+// 主输入=「命令行」(粘贴整条命令 → 程序拆 argv 直跑,无 shell);env 提到前面更直觉;
+// args 列表作命令行解析歧义(带空格路径等)的手改回退。
 export function CommandEditor({
   value,
   onChange,
@@ -48,12 +48,12 @@ export function CommandEditor({
 
   return (
     <div className="rounded-md border border-border p-3">
-      <Field label="命令行" hint="粘贴整条命令(可多行,换行当空格);含空格的路径用引号括起。程序拆成 argv 直跑(无 shell 特性:| > && $ 等不生效)">
-        <TextArea
-          value={line}
-          onChange={(e) => onLine(e.target.value)}
-          placeholder="lmdeploy serve /models/glm --model-name glm-4 --port 8000"
-          rows={4}
+      <Field label="环境变量" hint="键 = 值;程序会与系统环境合并后传入">
+        <KeyValueEditor
+          entries={value.env}
+          onChange={(env) => set("env", env as Record<string, string>)}
+          keyPlaceholder="CUDA_VISIBLE_DEVICES"
+          valuePlaceholder="0"
         />
       </Field>
       <Field
@@ -68,6 +68,14 @@ export function CommandEditor({
           placeholder="lmdeploy"
         />
       </Field>
+      <Field label="命令行" hint="粘贴整条命令(可多行,换行当空格);含空格的路径用引号括起。程序拆成 argv 直跑(无 shell 特性:| > && $ 等不生效)">
+        <TextArea
+          value={line}
+          onChange={(e) => onLine(e.target.value)}
+          placeholder="lmdeploy serve /models/glm --model-name glm-4 --port 8000"
+          rows={4}
+        />
+      </Field>
 
       {preview && (
         <div className="mb-3 rounded-md bg-muted px-3 py-2">
@@ -77,7 +85,7 @@ export function CommandEditor({
       )}
 
       <Button type="button" size="sm" variant="ghost" onClick={() => setShowAdvanced((v) => !v)}>
-        {showAdvanced ? "▾ 高级(exe / args / env / cwd)" : "▸ 高级(exe / args / env / cwd)"}
+        {showAdvanced ? "▾ 高级(exe / args / cwd)" : "▸ 高级(exe / args / cwd)"}
       </Button>
       {showAdvanced && (
         <div className="mt-3 flex flex-col gap-3 border-t border-border pt-3">
@@ -89,13 +97,6 @@ export function CommandEditor({
               values={value.args}
               onChange={(args) => set("args", args)}
               placeholder="--port 8000"
-            />
-          </Field>
-          <Field label="env(环境变量)" hint="键 = 值;程序会与系统环境合并后传入">
-            <KeyValueEditor
-              entries={value.env}
-              onChange={(env) => set("env", env as Record<string, string>)}
-              valuePlaceholder="0"
             />
           </Field>
           <Field label="cwd(工作目录,可空)" htmlFor="cmd-cwd">

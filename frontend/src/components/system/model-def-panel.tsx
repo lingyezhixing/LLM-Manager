@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ui/dialog";
+import { useToast } from "@/components/ui/toast";
 import { ModelDefForm } from "@/components/system/model-def-form";
 import { useDeleteModelDef, useModelDef, useModelDefs, useRestartModel } from "@/lib/use-model-defs";
 import type { ModelWriteResult } from "@/lib/api";
@@ -14,6 +15,7 @@ export function ModelDefPanel() {
   const [hint, setHint] = useState<{ name: string; served: string } | null>(null);
   const dirtyRef = useRef(false);
   const confirm = useConfirm();
+  const toast = useToast();
 
   const items = [...(list.data ?? [])].sort((a, b) => a.port - b.port);
   const effSelected = selected === undefined ? (items[0]?.name ?? null) : selected;
@@ -47,30 +49,34 @@ export function ModelDefPanel() {
   };
   const onDelete = async () => {
     if (typeof effSelected !== "string") return;
+    const name = effSelected;
     const ok = await confirm({
-      title: `删除模型 ${effSelected}?`,
+      title: `删除模型 ${name}?`,
       description: "此操作不可撤销。",
       confirmText: "删除",
       cancelText: "取消",
       danger: true,
     });
     if (!ok) return;
-    del.mutate(effSelected, {
+    del.mutate(name, {
       onSuccess: () => {
         setHint(null);
         setSelected(undefined);
         dirtyRef.current = false;
+        toast.success(`已删除模型「${name}」`);
       },
     });
   };
   const onSaved = (result: ModelWriteResult, name: string) => {
     dirtyRef.current = false;
+    const wasCreate = selected === null;
     if (result.hint === "restart_model" && result.affected_routing.length > 0) {
       setHint({ name, served: result.affected_routing[0] });
     } else {
       setHint(null);
     }
-    if (selected === null) setSelected(name); // 新建成功 → 切该模型编辑态
+    if (wasCreate) setSelected(name); // 新建成功 → 切该模型编辑态
+    toast.success(wasCreate ? `已创建模型「${name}」` : "已保存");
   };
 
   const formKey = typeof effSelected === "string" ? effSelected : `new-${createNonce}`;
@@ -164,7 +170,13 @@ export function ModelDefPanel() {
             <Button
               size="sm"
               onClick={() =>
-                restart.mutate(hint.served, { onSuccess: () => setHint(null) })
+                restart.mutate(hint.served, {
+                  onSuccess: () => {
+                    setHint(null);
+                    toast.success(`已重启 ${hint.served}`);
+                  },
+                  onError: (e: unknown) => toast.error((e as Error).message),
+                })
               }
               disabled={restart.isPending}
             >
