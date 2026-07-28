@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { useConfirm } from "@/components/ui/dialog";
 import { ModelDefForm } from "@/components/system/model-def-form";
 import { useDeleteModelDef, useModelDef, useModelDefs, useRestartModel } from "@/lib/use-model-defs";
 import type { ModelWriteResult } from "@/lib/api";
@@ -12,6 +13,7 @@ export function ModelDefPanel() {
   const [createNonce, setCreateNonce] = useState(0);
   const [hint, setHint] = useState<{ name: string; served: string } | null>(null);
   const dirtyRef = useRef(false);
+  const confirm = useConfirm();
 
   const items = list.data ?? [];
   const effSelected = selected === undefined ? (items[0]?.name ?? null) : selected;
@@ -20,25 +22,39 @@ export function ModelDefPanel() {
   const restart = useRestartModel();
 
   // 切换前 dirty 守卫(M9):dirty 则确认。
-  const guard = (): boolean =>
-    !dirtyRef.current || window.confirm("当前模型有未保存修改,放弃?");
+  const guard = async (): Promise<boolean> =>
+    !dirtyRef.current
+    || await confirm({
+      title: "放弃未保存的修改?",
+      description: "当前模型有未保存修改,切换将丢弃。",
+      confirmText: "放弃",
+      cancelText: "继续编辑",
+      danger: true,
+    });
 
-  const selectModel = (name: string) => {
+  const selectModel = async (name: string) => {
     if (name === effSelected) return;
-    if (!guard()) return;
+    if (!(await guard())) return;
     setHint(null);
     setSelected(name);
   };
-  const startCreate = () => {
+  const startCreate = async () => {
     if (selected === null) return;
-    if (!guard()) return;
+    if (!(await guard())) return;
     setHint(null);
     setSelected(null);
     setCreateNonce((n) => n + 1);
   };
-  const onDelete = () => {
+  const onDelete = async () => {
     if (typeof effSelected !== "string") return;
-    if (!window.confirm(`删除模型 ${effSelected}? 此操作不可撤销。`)) return;
+    const ok = await confirm({
+      title: `删除模型 ${effSelected}?`,
+      description: "此操作不可撤销。",
+      confirmText: "删除",
+      cancelText: "取消",
+      danger: true,
+    });
+    if (!ok) return;
     del.mutate(effSelected, {
       onSuccess: () => {
         setHint(null);
