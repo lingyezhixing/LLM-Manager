@@ -161,6 +161,14 @@ def create_dev_app() -> FastAPI:
     return app
 
 
+RESTART_EXIT_CODE = 81
+
+
+def exit_code_for(restart_requested: bool) -> int:
+    """main() 退出码:restart_requested → 哨兵码(监督器在其上重启),否则 0(正常退出)。"""
+    return RESTART_EXIT_CODE if restart_requested else 0
+
+
 def main() -> None:
     import uvicorn
     app = create_app(legacy_yaml=Path("config.yaml"))
@@ -169,3 +177,4 @@ def main() -> None:
         uvicorn.Config(app, host=cfg.program.host, port=cfg.program.port, lifespan="on"))
     app.state.uvicorn_server = server
     server.run()
+    sys.exit(exit_code_for(getattr(app.state, "restart_requested", False)))

@@ -6,6 +6,7 @@ restart 检测:对比 snapshot.program 的 host/port/db_path/log_dir 与 app.sta
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 from dataclasses import replace
@@ -268,6 +269,20 @@ def register_config_routes(api: APIRouter) -> None:
         cfg = _store(request).snapshot()
         rf = _restart_fields(cfg, _boot(request))
         return {"needs_restart": bool(rf), "restart_fields": rf, "serving": _serving()}
+
+    @api.post("/config/restart", status_code=202)
+    async def restart_app(request: Request) -> dict:
+        """请求优雅重启:置 app.state.restart_requested;若有 uvicorn server,后台延迟翻
+        should_exit(让 202 响应先冲刷)→ lifespan finally 跑 unload_all/关 DB/停 tray →
+        main() 末尾按 restart_requested 以 RESTART_EXIT_CODE 退出,监督器在其上重启。"""
+        request.app.state.restart_requested = True
+        server = getattr(request.app.state, "uvicorn_server", None)
+        if server is not None:
+            async def _delayed_exit() -> None:
+                await asyncio.sleep(0.5)
+                server.should_exit = True
+            asyncio.create_task(_delayed_exit())
+        return {}
 
     @api.get("/config/models")
     def list_model_defs(request: Request) -> list[dict]:

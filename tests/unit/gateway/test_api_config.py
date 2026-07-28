@@ -1,4 +1,5 @@
 import time
+import types
 
 from fastapi import APIRouter, FastAPI
 from fastapi.testclient import TestClient
@@ -385,3 +386,22 @@ def test_put_program_log_level_is_restart_class(tmp_path):
     j = r.json()
     assert "log_level" in j["restart_fields"]
     assert j["needs_restart"] is True
+
+
+def test_restart_app_sets_flag_and_returns_202(tmp_path):
+    with TestClient(_app(tmp_path)) as c:
+        r = c.post("/api/config/restart")
+        assert r.status_code == 202
+        assert c.app.state.restart_requested is True
+
+
+def test_restart_app_flips_should_exit_when_server_present(tmp_path):
+    # 模拟生产:app.state.uvicorn_server 存在 → 端点延迟(0.5s)翻 should_exit
+    server = types.SimpleNamespace(should_exit=False)
+    with TestClient(_app(tmp_path)) as c:
+        c.app.state.uvicorn_server = server
+        c.post("/api/config/restart")
+        deadline = time.monotonic() + 2          # 内部 0.5s 延迟,2s 余量
+        while time.monotonic() < deadline and not server.should_exit:
+            time.sleep(0.05)
+        assert server.should_exit is True

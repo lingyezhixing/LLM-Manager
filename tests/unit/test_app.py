@@ -94,3 +94,9 @@ def test_crud_then_catalog_reflects_without_restart(tmp_path, monkeypatch):
         c.delete("/api/config/models/A")
         v1b = {m["id"] for m in c.get("/v1/models").json()["data"]}
         assert "a" not in v1b and "b" in v1b
+
+
+def test_exit_code_for_returns_sentinel_only_when_requested():
+    from llm_manager.app import RESTART_EXIT_CODE, exit_code_for
+    assert exit_code_for(False) == 0
+    assert exit_code_for(True) == RESTART_EXIT_CODE == 81
