@@ -18,8 +18,9 @@ import logging
 import os
 import threading
 import webbrowser
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from llm_manager.runtime import background
 from llm_manager.tray import claude, wol

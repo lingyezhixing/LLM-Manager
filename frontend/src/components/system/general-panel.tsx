@@ -1,5 +1,6 @@
-import { type ReactNode, useEffect, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { ConfigSaveBar } from "@/components/config-save-bar";
+import { Button } from "@/components/ui/button";
 import { Field, NumberInput, Select, TextInput } from "@/components/ui/form";
 import { useToast } from "@/components/ui/toast";
 import { type ProgramConfig } from "@/lib/api";
@@ -27,16 +28,34 @@ function FieldGrid({ children }: { children: ReactNode }) {
 }
 
 export function GeneralPanel() {
-  const { data, isLoading } = useConfig();
+  const { data, isLoading, isError, error, refetch } = useConfig();
   const update = useUpdateProgram();
   const toast = useToast();
   const [form, setForm] = useState<ProgramConfig | null>(data?.program ?? null);
+  // 上一次采纳进表单的服务端值;区分「未编辑(form 仍 == 该值)→ 跟随外部刷新」vs「编辑中 → 保留」。
+  const syncedRef = useRef<ProgramConfig | null>(data?.program ?? null);
 
-  // 初值就绪时填表单(仅一次;后续 data 刷新由 dirty 比较处理,不打断编辑)。
+  // 初值就绪填表单;后续 data 外部刷新时,若用户未编辑则跟随(避免 stale-form),编辑中则保留。
+  // 用函数式更新读最新 form,避免把 form 列入依赖(编辑中不打断)。
   useEffect(() => {
-    if (data?.program && form === null) setForm(data.program);
-  }, [data, form]);
+    const incoming = data?.program;
+    if (!incoming) return;
+    setForm((prev) => {
+      const base = syncedRef.current;
+      if (prev !== null && base !== null && !shallowEqual(prev, base)) return prev; // 编辑中,保留
+      syncedRef.current = incoming;
+      return incoming;
+    });
+  }, [data?.program]);
 
+  if (isError) {
+    return (
+      <div className="flex items-center gap-2 text-sm text-destructive">
+        加载失败:{(error as Error).message}
+        <Button size="sm" variant="ghost" onClick={() => refetch()}>重试</Button>
+      </div>
+    );
+  }
   if (isLoading || !form) {
     return <div className="text-sm text-muted-foreground">加载中…</div>;
   }
@@ -62,7 +81,7 @@ export function GeneralPanel() {
           <TextInput id="cfg-host" value={form.host} onChange={(e) => set("host", e.target.value)} />
         </Field>
         <Field label="监听端口 (port)" htmlFor="cfg-port"
-          error={!portValid ? "端口须在 1–65535" : null}>
+          error={!portValid && form.port !== 0 ? "端口须在 1–65535" : null}>
           <NumberInput id="cfg-port" value={form.port} onChange={(e) => set("port", num(e.target.value))} />
         </Field>
         <Field label="空闲检测 (alive_time)" hint="秒 · 🟢 改完即时生效" htmlFor="cfg-alive"
@@ -100,7 +119,12 @@ export function GeneralPanel() {
           saving={update.isPending}
           error={update.error ? (update.error as Error).message : null}
           onSave={() =>
-            update.mutate(form, { onSuccess: () => toast.success("系统配置已保存") })
+            update.mutate(form, {
+              onSuccess: () => {
+                syncedRef.current = form;
+                toast.success("系统配置已保存");
+              },
+            })
           }
           onReset={() => setForm(initial)}
         />

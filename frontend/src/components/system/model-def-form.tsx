@@ -31,17 +31,9 @@ function emptyModel(): ModelDef {
 // 深拷贝(字段全 JSON 可序列化)。用于隔离 form/baseline 与查询缓存。
 const clone = <T,>(x: T): T => JSON.parse(JSON.stringify(x)) as T;
 
-// 深相等(草稿 vs baseline)。字段全 JSON 可序列化,递归比较;数组按序。
-function deepEqual(a: unknown, b: unknown): boolean {
-  if (a === b) return true;
-  if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) return false;
-  const ka = Object.keys(a as object);
-  const kb = Object.keys(b as object);
-  if (ka.length !== kb.length) return false;
-  return ka.every((k) =>
-    deepEqual((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k]),
-  );
-}
+// 草稿 vs baseline 深相等:字段全 JSON 可序列化且键序稳定(均经 clone/cleanPayload 同构构造),
+// 故用 JSON.stringify 比较 —— 与 clone 的序列化机制一致,语义统一。
+const deepEqual = (a: ModelDef, b: ModelDef): boolean => JSON.stringify(a) === JSON.stringify(b);
 
 // 客户端门控:明显空缺则禁用保存(M6)。
 function clientValid(form: ModelDef): boolean {
@@ -163,7 +155,7 @@ export function ModelDefForm({ model, onSaved, onDirtyChange }: ModelDefFormProp
             ))}
           </Select>
         </Field>
-        <Field label="端口" hint="模型服务监听端口" htmlFor="mdf-port" error={!portValid ? "端口须在 1–65535" : null}>
+        <Field label="端口" hint="模型服务监听端口" htmlFor="mdf-port" error={!portValid && form.port !== 0 ? "端口须在 1–65535" : null}>
           <NumberInput id="mdf-port" value={form.port} onChange={(e) => set("port", num(e.target.value))} />
         </Field>
         <Field label="自启动" hint="程序启动时自动拉起该模型" htmlFor="mdf-auto">

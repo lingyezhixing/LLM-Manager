@@ -85,6 +85,13 @@ export function ModelDefPanel() {
   let formArea;
   if (list.isLoading) {
     formArea = <div className="text-sm text-muted-foreground">加载中…</div>;
+  } else if (list.isError) {
+    formArea = (
+      <div className="flex items-center gap-2 text-sm text-destructive">
+        加载失败:{(list.error as Error).message}
+        <Button size="sm" variant="ghost" onClick={() => list.refetch()}>重试</Button>
+      </div>
+    );
   } else if (typeof effSelected === "string") {
     formArea =
       detail.isLoading || !detail.data ? (
@@ -119,22 +126,27 @@ export function ModelDefPanel() {
         {list.isLoading && (
           <span className="px-3 py-2 text-sm text-muted-foreground">加载中…</span>
         )}
-        <div className="flex flex-col gap-0.5">
-          {items.map((m) => (
-            <button
-              key={m.name}
-              type="button"
-              onClick={() => selectModel(m.name)}
-              className={
-                "rounded-md px-3 py-2 text-left text-sm transition-colors " +
-                (m.name === effSelected
-                  ? "bg-muted font-medium text-foreground"
-                  : "text-muted-foreground hover:bg-muted hover:text-foreground")
-              }
-            >
-              {m.name}
-            </button>
-          ))}
+        <div className="flex flex-col gap-0.5" role="listbox" aria-label="模型列表">
+          {items.map((m) => {
+            const selected = m.name === effSelected;
+            return (
+              <button
+                key={m.name}
+                type="button"
+                role="option"
+                aria-selected={selected}
+                onClick={() => selectModel(m.name)}
+                className={
+                  "rounded-md px-3 py-2 text-left text-sm transition-colors " +
+                  (selected
+                    ? "bg-muted font-medium text-foreground"
+                    : "text-muted-foreground hover:bg-muted hover:text-foreground")
+                }
+              >
+                {m.name}
+              </button>
+            );
+          })}
         </div>
         <div className="flex flex-col gap-1 border-t border-border pt-2">
           <Button type="button" size="sm" variant="ghost" onClick={startCreate} className="w-full justify-start">

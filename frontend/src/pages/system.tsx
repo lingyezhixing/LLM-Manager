@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Button } from "@/components/ui/button";
 import { GeneralPanel } from "@/components/system/general-panel";
 import { ModelDefPanel } from "@/components/system/model-def-panel";
 import { RestartBanner } from "@/components/system/restart-banner";
@@ -33,8 +34,9 @@ export default function SystemPage() {
         />
       )}
       {restartError && (
-        <div className="mb-4 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
-          {restartError}
+        <div className="mb-4 flex flex-wrap items-center gap-3 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+          <span>{restartError}</span>
+          <Button size="sm" variant="ghost" onClick={() => window.location.reload()}>刷新页面</Button>
         </div>
       )}
       {restarting && (
