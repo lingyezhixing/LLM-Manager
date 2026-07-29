@@ -8,7 +8,16 @@ from collections.abc import Callable
 from pathlib import Path
 
 from llm_manager import config
-from llm_manager.config import AppConfig, Command, ModelConfig, ProgramConfig, Scheme, WakeOnLanConfig
+from llm_manager.config import (
+    AppConfig,
+    Command,
+    ModelConfig,
+    Pricing,
+    PricingTier,
+    ProgramConfig,
+    Scheme,
+    WakeOnLanConfig,
+)
 from llm_manager.data.persistence import Db
 
 
@@ -100,6 +109,22 @@ def _write_appconfig_locked(db: Db, cfg: AppConfig) -> None:
                     "INSERT INTO model_scripts (scheme_id, command) VALUES (?,?)",
                     (sid, command_json),
                 )
+            db.conn.execute(
+                "INSERT INTO model_pricing (model_id, pricing_type, hourly_price) VALUES (?,?,?) "
+                "ON CONFLICT(model_id) DO UPDATE SET "
+                "pricing_type=excluded.pricing_type, hourly_price=excluded.hourly_price",
+                (mid, m.pricing.pricing_type, m.pricing.hourly_price),
+            )
+            db.conn.execute("DELETE FROM pricing_tiers WHERE pricing_id=?", (mid,))
+            for t in m.pricing.tiers:
+                db.conn.execute(
+                    "INSERT INTO pricing_tiers (pricing_id, tier_index, min_input, max_input, "
+                    "min_output, max_output, input_price, output_price, support_cache, "
+                    "cache_write_price, cache_read_price) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                    (mid, t.tier_index, t.min_input, t.max_input, t.min_output, t.max_output,
+                     t.input_price, t.output_price, int(t.support_cache),
+                     t.cache_write_price, t.cache_read_price),
+                )
         db.conn.commit()
     except Exception:
         db.conn.rollback()
@@ -151,9 +176,27 @@ def _read_appconfig_locked(db: Db) -> AppConfig:
                 command=command,
                 memory_mb=dict(json.loads(srow["memory_mb"])),
             )
+        prow = db.conn.execute(
+            "SELECT pricing_type, hourly_price FROM model_pricing WHERE model_id=?", (mid,)).fetchone()
+        tiers = tuple(
+            PricingTier(
+                tier_index=tr["tier_index"], min_input=tr["min_input"], max_input=tr["max_input"],
+                min_output=tr["min_output"], max_output=tr["max_output"],
+                input_price=tr["input_price"], output_price=tr["output_price"],
+                support_cache=bool(tr["support_cache"]),
+                cache_write_price=tr["cache_write_price"], cache_read_price=tr["cache_read_price"])
+            for tr in db.conn.execute(
+                "SELECT tier_index, min_input, max_input, min_output, max_output, "
+                "input_price, output_price, support_cache, cache_write_price, cache_read_price "
+                "FROM pricing_tiers WHERE pricing_id=? ORDER BY tier_index", (mid,)))
+        pricing = Pricing(
+            pricing_type=prow["pricing_type"] if prow else "tier",
+            hourly_price=prow["hourly_price"] if prow else 0.0,
+            tiers=tiers,
+        )
         models[row["name"]] = ModelConfig(
             primary_name=row["name"], aliases=aliases, mode=row["mode"],
-            port=row["port"], auto_start=bool(row["auto_start"]), schemes=schemes,
+            port=row["port"], auto_start=bool(row["auto_start"]), schemes=schemes, pricing=pricing,
         )
     return AppConfig(program=program, models=models, wol=wol, claude_configs=claude_configs)
 

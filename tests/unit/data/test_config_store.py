@@ -368,3 +368,48 @@ def test_mutate_appconfig_rolls_back_on_validation_failure(tmp_path):
     out = read_appconfig(db)
     assert "Qwen3-4B" in out.models            # 原配置完好
     assert "Dup" not in out.models             # 回滚:未落 partial
+
+
+def test_pricing_round_trips_through_config_store(tmp_path):
+    from llm_manager.config import Pricing, PricingTier
+    db = open_db(tmp_path / "t.db")
+    scheme = Scheme(config_source="S", required_devices=frozenset({"gpu"}),
+                    command=Command(exe="q"), memory_mb={"gpu": 1})
+    cfg = AppConfig(
+        program=ProgramConfig("0.0.0.0", 8080, 60, "INFO"),
+        models={"M": ModelConfig(primary_name="M", aliases=("M",), mode="Chat", port=1,
+                                 schemes={"S": scheme},
+                                 pricing=Pricing(pricing_type="tier", hourly_price=2.5, tiers=(
+                                     PricingTier(tier_index=1, min_input=0, max_input=32768,
+                                                 input_price=3.0, output_price=9.0,
+                                                 support_cache=True, cache_write_price=3.75,
+                                                 cache_read_price=0.3),
+                                 )))},
+        wol=None, claude_configs={})
+    write_appconfig(db, cfg)
+    out = read_appconfig(db)
+    p = out.models["M"].pricing
+    assert p.pricing_type == "tier"
+    assert p.hourly_price == 2.5
+    assert len(p.tiers) == 1
+    t = p.tiers[0]
+    assert t.tier_index == 1 and t.input_price == 3.0 and t.output_price == 9.0
+    assert t.support_cache is True and t.cache_write_price == 3.75 and t.cache_read_price == 0.3
+
+
+def test_pricing_survives_unrelated_model_world_rewrite(tmp_path):
+    """CASCADE landmine: rewriting the model world must not wipe pricing that round-trips."""
+    from dataclasses import replace
+    from llm_manager.config import Pricing, PricingTier
+    db = open_db(tmp_path / "t.db")
+    scheme = Scheme("S", frozenset({"gpu"}), Command(exe="q"), {"gpu": 1})
+    priced = ModelConfig("M", ("M",), "Chat", 1, False, {"S": scheme},
+                         pricing=Pricing(tiers=(PricingTier(tier_index=1, input_price=5.0),)))
+    write_appconfig(db, AppConfig(program=ProgramConfig("0.0.0.0", 8080, 60, "INFO"),
+                                  models={"M": priced}, wol=None, claude_configs={}))
+    # mutate program only (triggers full model-world delete+reinsert)
+    cfg2 = read_appconfig(db)
+    write_appconfig(db, replace(cfg2, program=replace(cfg2.program, port=9999)))
+    out = read_appconfig(db)
+    assert out.models["M"].pricing.tiers[0].input_price == 5.0   # pricing survived
+    assert out.program.port == 9999
