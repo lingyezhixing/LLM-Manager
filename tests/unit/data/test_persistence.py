@@ -8,6 +8,8 @@ from llm_manager.data.persistence import (
     fetch_usage,
     open_db,
     record_usage,
+    record_runtime_start,
+    record_runtime_end,
     resolve_model_id,
     usage_by_model,
     usage_series,
@@ -177,3 +179,32 @@ def test_open_db_creates_config_tables(tmp_path):
     for t in ("system_settings", "model_defs", "model_aliases", "model_schemes",
               "model_scripts", "model_pricing", "pricing_tiers"):
         assert t in tables
+
+
+def test_open_db_creates_model_runtime_table(tmp_path):
+    db = open_db(tmp_path / "t.db")
+    tables = {r[0] for r in db.conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    assert "model_runtime" in tables
+
+
+def test_record_runtime_start_end_round_trip(tmp_path):
+    db = open_db(tmp_path / "t.db")
+    record_runtime_start(db, "m1", start=100.0)
+    record_runtime_end(db, "m1", end=250.0)
+    row = db.conn.execute(
+        "SELECT start_time, end_time FROM model_runtime r JOIN models m ON r.model_id=m.id "
+        "WHERE m.original_name='m1'").fetchone()
+    assert row["start_time"] == 100.0
+    assert row["end_time"] == 250.0
+
+
+def test_record_runtime_end_targets_latest_open_session(tmp_path):
+    db = open_db(tmp_path / "t.db")
+    record_runtime_start(db, "m1", start=100.0)
+    record_runtime_start(db, "m1", start=200.0)   # second load (first still open)
+    record_runtime_end(db, "m1", end=300.0)        # closes the LATEST open session
+    rows = db.conn.execute(
+        "SELECT start_time, end_time FROM model_runtime r JOIN models m ON r.model_id=m.id "
+        "WHERE m.original_name='m1' ORDER BY start_time").fetchall()
+    assert rows[0]["end_time"] is None             # first session still open
+    assert rows[1]["end_time"] == 300.0            # second closed

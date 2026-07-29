@@ -96,6 +96,15 @@ def open_db(path: Path) -> Db:
             FOREIGN KEY (pricing_id) REFERENCES model_pricing(model_id) ON DELETE CASCADE,
             PRIMARY KEY (pricing_id, tier_index)
         );
+        CREATE TABLE IF NOT EXISTS model_runtime (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            model_id INTEGER NOT NULL,
+            start_time REAL NOT NULL,
+            end_time REAL,
+            FOREIGN KEY (model_id) REFERENCES models(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_model_runtime_model ON model_runtime(model_id);
+        CREATE INDEX IF NOT EXISTS idx_model_runtime_times ON model_runtime(start_time, end_time);
     """)
     _migrate(conn)
     conn.commit()
@@ -138,6 +147,30 @@ def record_usage(db: Db, model_name: str, start: float, end: float,
         db.conn.execute(
             "INSERT INTO model_requests (model_id, start_time, end_time, input_tokens, output_tokens, cache_n, prompt_n) VALUES (?,?,?,?,?,?,?)",
             (mid, start, end, input_tokens, output_tokens, cache_n, prompt_n),
+        )
+        db.conn.commit()
+
+
+def record_runtime_start(db: Db, model_name: str, start: float) -> None:
+    """Begin a model-loaded billing session (model reached ROUTING). end_time stays NULL
+    until record_runtime_end. Auto-creates the models row (a model can load before any request)."""
+    with db.write_lock:
+        mid = _resolve_model_id_locked(db, model_name)
+        db.conn.execute(
+            "INSERT INTO model_runtime (model_id, start_time, end_time) VALUES (?,?,NULL)",
+            (mid, start),
+        )
+        db.conn.commit()
+
+
+def record_runtime_end(db: Db, model_name: str, end: float) -> None:
+    """Close the latest still-open session for the model (cooperative stop or crash)."""
+    with db.write_lock:
+        mid = _resolve_model_id_locked(db, model_name)
+        db.conn.execute(
+            "UPDATE model_runtime SET end_time=? WHERE id=("
+            "SELECT id FROM model_runtime WHERE model_id=? AND end_time IS NULL ORDER BY id DESC LIMIT 1)",
+            (end, mid),
         )
         db.conn.commit()
 
