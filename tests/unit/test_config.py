@@ -113,3 +113,27 @@ def test_referenced_devices_empty_when_no_schemes():
     cfg = AppConfig(program=ProgramConfig("0.0.0.0", 8080, 60, "INFO"),
                     models={"M": m}, wol=None, claude_configs={})
     assert referenced_devices(cfg) == set()
+
+
+def test_pricing_defaults_to_free_tier():
+    from llm_manager.config import ModelConfig
+    m = ModelConfig("M", ("M",), "Chat", 1, False, {})
+    assert m.pricing.pricing_type == "tier"
+    assert m.pricing.hourly_price == 0.0
+    assert m.pricing.tiers == ()
+
+
+def test_validate_rejects_duplicate_tier_index_and_negative_price():
+    from llm_manager.config import Pricing, PricingTier
+    cfg = AppConfig(
+        program=ProgramConfig("0.0.0.0", 8080, 60, "INFO"),
+        models={"M": ModelConfig("M", ("M",), "Chat", 1, False,
+                                 {"S": Scheme("S", frozenset({"gpu"}), Command(exe="a.bat"), {"gpu": 1})},
+                                 pricing=Pricing(tiers=(
+                                     PricingTier(tier_index=1, input_price=-1.0),
+                                     PricingTier(tier_index=1),
+                                 )))},
+        wol=None, claude_configs={})
+    errs = validate(cfg)
+    assert any("duplicate tier_index 1" in e for e in errs)
+    assert any("negative price" in e for e in errs)

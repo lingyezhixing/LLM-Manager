@@ -33,6 +33,27 @@ class Scheme:
 
 
 @dataclass(frozen=True, slots=True)
+class PricingTier:
+    tier_index: int
+    min_input: int | None = 0          # None/negative treated as 0 (closed lower bound)
+    max_input: int | None = None       # None/negative = unbounded (legacy -1)
+    min_output: int | None = 0
+    max_output: int | None = None
+    input_price: float = 0.0
+    output_price: float = 0.0
+    support_cache: bool = False
+    cache_write_price: float = 0.0
+    cache_read_price: float = 0.0
+
+
+@dataclass(frozen=True, slots=True)
+class Pricing:
+    pricing_type: str = "tier"         # "tier" | "hourly"
+    hourly_price: float = 0.0
+    tiers: tuple[PricingTier, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class ModelConfig:
     primary_name: str
     aliases: tuple[str, ...]  # 有序:aliases[0]=主别名=下游 served name(lmdeploy --model-name / llama.cpp -a)
@@ -40,6 +61,7 @@ class ModelConfig:
     port: int
     auto_start: bool = False
     schemes: dict[str, Scheme] = field(default_factory=dict)
+    pricing: Pricing = field(default_factory=Pricing)
 
 
 @dataclass(frozen=True, slots=True)
@@ -136,6 +158,20 @@ def validate(cfg: AppConfig) -> list[str]:
         for sname, scheme in m.schemes.items():
             if not scheme.command.exe:
                 errors.append(f"Model '{name}' scheme '{sname}' has empty command.exe")
+        # 验证定价层级
+        seen_tiers: set[int] = set()
+        for t in m.pricing.tiers:
+            if t.tier_index in seen_tiers:
+                errors.append(f"Model '{name}' has duplicate tier_index {t.tier_index}")
+            seen_tiers.add(t.tier_index)
+        for t in m.pricing.tiers:
+            for pname, pval in (("input_price", t.input_price), ("output_price", t.output_price),
+                                ("cache_write_price", t.cache_write_price),
+                                ("cache_read_price", t.cache_read_price)):
+                if pval < 0:
+                    errors.append(f"Model '{name}' has negative price {pname}")
+        if m.pricing.hourly_price < 0:
+            errors.append(f"Model '{name}' has negative price hourly_price")
     return errors
 
 
