@@ -11,6 +11,7 @@ from llm_manager.data.persistence import (
     record_runtime_start,
     record_runtime_end,
     resolve_model_id,
+    tier_cost,
     usage_by_model,
     usage_series,
     usage_summary,
@@ -208,3 +209,37 @@ def test_record_runtime_end_targets_latest_open_session(tmp_path):
         "WHERE m.original_name='m1' ORDER BY start_time").fetchall()
     assert rows[0]["end_time"] is None             # first session still open
     assert rows[1]["end_time"] == 300.0            # second closed
+
+
+def test_tier_cost_no_cache_matches_and_divides_by_million(tmp_path):
+    from llm_manager.config import Pricing, PricingTier
+    db = open_db(tmp_path / "t.db")   # unused but keeps style consistent  # noqa: F841
+    pricing = Pricing(tiers=(PricingTier(tier_index=1, min_input=0, max_input=32768,
+                                         input_price=3.0, output_price=9.0),))
+    # 1000 input @ 3/M + 500 output @ 9/M = (3000 + 4500)/1e6
+    assert tier_cost(pricing, 1000, 500, 0, 0) == (1000 * 3.0 + 500 * 9.0) / 1_000_000
+
+
+def test_tier_cost_cache_formula(tmp_path):
+    from llm_manager.config import Pricing, PricingTier
+    pricing = Pricing(tiers=(PricingTier(tier_index=1, min_input=0, max_input=None,
+                                         input_price=3.0, output_price=9.0, support_cache=True,
+                                         cache_write_price=3.75, cache_read_price=0.3),))
+    # cache_n*read + prompt_n*(input+write) + output*output, /1e6
+    expected = (200 * 0.3 + 800 * (3.0 + 3.75) + 500 * 9.0) / 1_000_000
+    assert tier_cost(pricing, 1000, 500, 200, 800) == expected
+
+
+def test_tier_cost_no_match_returns_zero(tmp_path):
+    from llm_manager.config import Pricing, PricingTier
+    pricing = Pricing(tiers=(PricingTier(tier_index=1, min_input=0, max_input=100,
+                                         input_price=3.0, output_price=9.0),))
+    assert tier_cost(pricing, 9999, 0, 0, 0) == 0.0      # outside the tier window
+
+
+def test_tier_cost_min_zero_closed_min_nonzero_open(tmp_path):
+    from llm_manager.config import Pricing, PricingTier
+    pricing = Pricing(tiers=(PricingTier(tier_index=1, min_input=100, max_input=None,
+                                         input_price=1.0, output_price=0.0),))
+    assert tier_cost(pricing, 100, 0, 0, 0) == 0.0       # min=100 (nonzero) → open → 100 not included
+    assert tier_cost(pricing, 101, 0, 0, 0) == 101 * 1.0 / 1_000_000

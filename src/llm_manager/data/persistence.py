@@ -8,6 +8,10 @@ import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from llm_manager.config import Pricing, PricingTier
 
 
 @dataclass(frozen=True, slots=True)
@@ -312,3 +316,31 @@ def usage_by_model(db: Db, *, start_ts: float, end_ts: float) -> list[ByModelRow
             latency_ms=float(r["s_lat"] or 0) * 1000,
         ))
     return out
+
+
+def _tier_matches(t: "PricingTier", inp: int, out: int) -> bool:  # type: ignore[name-defined]
+    """First-tier-wins window match (legacy semantics): min=0 closed, else open;
+    max None/negative = unbounded."""
+    lo_i = 0 if (t.min_input is None or t.min_input < 0) else t.min_input
+    hi_i = math.inf if (t.max_input is None or t.max_input < 0) else t.max_input
+    i_ok = (inp >= lo_i) if lo_i == 0 else (inp > lo_i)
+    lo_o = 0 if (t.min_output is None or t.min_output < 0) else t.min_output
+    hi_o = math.inf if (t.max_output is None or t.max_output < 0) else t.max_output
+    o_ok = (out >= lo_o) if lo_o == 0 else (out > lo_o)
+    return i_ok and inp <= hi_i and o_ok and out <= hi_o
+
+
+def tier_cost(pricing: "Pricing", input_t: int, output_t: int, cache_n: int, prompt_n: int) -> float:  # type: ignore[name-defined]
+    """Per-request tier cost in yuan. First matching tier wins; no match → 0.
+    Cache formula (legacy): cache_n×read + prompt_n×(input+write) + output×output."""
+    if pricing.pricing_type != "tier" or not pricing.tiers:
+        return 0.0
+    for t in pricing.tiers:
+        if not _tier_matches(t, input_t, output_t):
+            continue
+        if t.support_cache:
+            raw = cache_n * t.cache_read_price + prompt_n * (t.input_price + t.cache_write_price) + output_t * t.output_price
+        else:
+            raw = input_t * t.input_price + output_t * t.output_price
+        return raw / 1_000_000
+    return 0.0
