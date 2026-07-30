@@ -103,12 +103,12 @@ def _ok_probe(alias, port, start_time=None, timeout=60):
     return ProbeResult(True, "ok")
 
 
-def _make(sup=None, dev=None, probes=None, models=None):
+def _make(sup=None, dev=None, probes=None, models=None, db=None):
     sup = sup or FakeSupervisor()
     dev = dev or FakeDevices()
     probes = probes if probes is not None else {"Chat": _ok_probe}
     cfg = _cfg(*(models if models is not None else [_model()]))
-    return Lifecycle(get_cfg=lambda: cfg, supervisor=sup, devices=dev, probes=probes), sup, dev, cfg
+    return Lifecycle(get_cfg=lambda: cfg, supervisor=sup, devices=dev, probes=probes, db=db), sup, dev, cfg
 
 
 @pytest.fixture(autouse=True)
@@ -539,3 +539,28 @@ async def test_lifecycle_reads_fresh_cfg_each_call():
     state.record_pid("m2", 42)
     runnable = life._runnable(exclude="m1")
     assert "m2" in runnable
+
+
+# ---------- Task 7: lifecycle runtime hooks ----------
+async def test_runtime_session_recorded_on_start_and_stop(tmp_path):
+    from llm_manager.data.persistence import open_db
+    db = open_db(tmp_path / "t.db")
+    life, sup, dev, cfg = _make(db=db)
+    await life.ensure_running("m1")                       # → ROUTING → runtime start
+    open_rows = db.conn.execute(
+        "SELECT COUNT(*) AS n FROM model_runtime r JOIN models m ON r.model_id=m.id "
+        "WHERE m.original_name='m1' AND r.end_time IS NULL").fetchone()
+    assert open_rows["n"] == 1
+    await life.stop("m1")                                 # → runtime end
+    closed = db.conn.execute(
+        "SELECT end_time FROM model_runtime r JOIN models m ON r.model_id=m.id "
+        "WHERE m.original_name='m1'").fetchone()
+    assert closed["end_time"] is not None
+
+
+async def test_runtime_not_recorded_when_db_absent(tmp_path):
+    # default _make() (no db) must not crash and must not record
+    life, sup, dev, cfg = _make()
+    await life.ensure_running("m1")
+    await life.stop("m1")
+    # no assertion crash = pass (db is None path guarded)

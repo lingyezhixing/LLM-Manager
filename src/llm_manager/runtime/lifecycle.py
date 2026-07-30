@@ -14,6 +14,7 @@ import logging
 import os
 import time
 from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 from llm_manager import state
 from llm_manager.config import AppConfig, ModelConfig, Scheme, resolve_alias, select_adaptive
@@ -21,6 +22,9 @@ from llm_manager.data import logs as _logs
 from llm_manager.probes import ProbeResult
 from llm_manager.runtime import scheduling
 from llm_manager.state import ModelStatus
+
+if TYPE_CHECKING:
+    from llm_manager.data.persistence import Db
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +39,7 @@ class Lifecycle:
         probes: dict[str, Callable],
         scheme_select=select_adaptive,
         startup_timeout: float = 60.0,
+        db: "Db | None" = None,
     ) -> None:
         self._get_cfg = get_cfg
         self._supervisor = supervisor
@@ -42,6 +47,7 @@ class Lifecycle:
         self._probes = probes
         self._scheme_select = scheme_select
         self.startup_timeout = startup_timeout
+        self._db = db
         self._stop_events: dict[str, asyncio.Event] = {}
         self._active_schemes: dict[str, Scheme] = {}
         self._spawn_lock = asyncio.Lock()   # Plan 7:全局 spawn 锁(spec §3.2)
@@ -95,6 +101,7 @@ class Lifecycle:
         if fut is not None and not fut.done():
             fut.set_result(ModelStatus.STOPPED)
         _logs.end_session(alias)   # 结束内存会话日志:下次 start 起新会话(id 从 1)
+        self._runtime_end(alias)
         return state.get_status(alias)
 
     async def unload_all(self) -> list[str]:
@@ -105,6 +112,25 @@ class Lifecycle:
         ]
         results = await asyncio.gather(*[self.stop(n) for n in names], return_exceptions=True)
         return [n for n, r in zip(names, results) if not isinstance(r, Exception)]
+
+    # ---------- runtime recording helpers ----------
+    def _runtime_start(self, alias: str) -> None:
+        if self._db is None:
+            return
+        try:
+            from llm_manager.data import persistence as _p
+            _p.record_runtime_start(self._db, alias, time.time())
+        except Exception:
+            logger.warning("record_runtime_start failed for %s", alias, exc_info=True)
+
+    def _runtime_end(self, alias: str) -> None:
+        if self._db is None:
+            return
+        try:
+            from llm_manager.data import persistence as _p
+            _p.record_runtime_end(self._db, alias, time.time())
+        except Exception:
+            logger.warning("record_runtime_end failed for %s", alias, exc_info=True)
 
     # ---------- pipeline ----------
     async def _run_pipeline(self, alias: str) -> ModelStatus:
@@ -189,6 +215,7 @@ class Lifecycle:
                 return await self._abort_spawned(rec.pid)
             state.set_status(alias, ModelStatus.ROUTING)
             state.touch_activity(alias)
+            self._runtime_start(alias)
             self._supervisor.on_exit(rec.pid, lambda code: self._on_crash(alias, code))
             logger.info("%s -> routing", alias)
             return ModelStatus.ROUTING
@@ -206,6 +233,7 @@ class Lifecycle:
         try:
             if state.get_status(alias) == ModelStatus.STOPPED:
                 return
+            self._runtime_end(alias)
             state.record_failure(alias, f"process exited code={code}")
         except Exception as e:
             logger.error("on_exit callback error for %s: %s", alias, e)
