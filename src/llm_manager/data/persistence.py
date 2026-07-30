@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from llm_manager.config import Pricing, PricingTier
+    from llm_manager.config import AppConfig, Pricing, PricingTier
 
 
 @dataclass(frozen=True, slots=True)
@@ -344,3 +344,87 @@ def tier_cost(pricing: "Pricing", input_t: int, output_t: int, cache_n: int, pro
             raw = input_t * t.input_price + output_t * t.output_price
         return raw / 1_000_000
     return 0.0
+
+
+@dataclass(frozen=True, slots=True)
+class CostByModel:
+    model: str
+    pricing_type: str
+    cost: float
+
+
+@dataclass(frozen=True, slots=True)
+class CostSummary:
+    total_cost: float
+    by_model: list[CostByModel]
+
+
+def usage_cost(
+    db: Db,
+    cfg: "AppConfig",  # type: ignore[name-defined]
+    *,
+    start_ts: float,
+    end_ts: float,
+    now: float | None = None,
+) -> CostSummary:
+    """Aggregate cost (yuan) over [start_ts, end_ts). tier 模型逐请求 tier_cost;
+    hourly 模型按 model_runtime 与窗口重叠秒 × hourly_price/3600。免费/无数据模型省略。
+
+    两套独立数据源:tier 走 model_requests(按 end_time 落窗);hourly 走
+    model_runtime(按与窗口的重叠时长)。end_time IS NULL 的运行段用 now 收口。"""
+    now_ts = now if now is not None else time.time()
+    acc: dict[str, float] = {}
+
+    # tier:逐请求计费,按 end_time 落入窗口
+    tier_names = {n for n, m in cfg.models.items() if m.pricing.pricing_type == "tier"}
+    if tier_names:
+        rows = db.conn.execute(
+            "SELECT m.original_name AS model, r.input_tokens, r.output_tokens, r.cache_n, r.prompt_n "
+            "FROM model_requests r JOIN models m ON r.model_id=m.id "
+            "WHERE r.end_time>=? AND r.end_time<?",
+            (start_ts, end_ts),
+        ).fetchall()
+        for row in rows:
+            mc = cfg.models.get(row["model"])
+            if mc is None or mc.pricing.pricing_type != "tier":
+                continue
+            c = tier_cost(
+                mc.pricing,
+                int(row["input_tokens"]),
+                int(row["output_tokens"]),
+                int(row["cache_n"]),
+                int(row["prompt_n"]),
+            )
+            if c:
+                acc[row["model"]] = acc.get(row["model"], 0.0) + c
+
+    # hourly:运行段与窗口的重叠时长 × 单价/3600
+    hourly = {
+        n: m.pricing.hourly_price
+        for n, m in cfg.models.items()
+        if m.pricing.pricing_type == "hourly" and m.pricing.hourly_price > 0
+    }
+    if hourly:
+        rows = db.conn.execute(
+            "SELECT m.original_name AS model, r.start_time, r.end_time "
+            "FROM model_runtime r JOIN models m ON r.model_id=m.id "
+            "WHERE r.start_time < ? AND (r.end_time IS NULL OR r.end_time > ?)",
+            (end_ts, start_ts),
+        ).fetchall()
+        for row in rows:
+            rate = hourly.get(row["model"])
+            if not rate:
+                continue
+            sess_end = row["end_time"] if row["end_time"] is not None else now_ts
+            overlap = max(0.0, min(end_ts, sess_end) - max(start_ts, row["start_time"]))
+            if overlap > 0:
+                acc[row["model"]] = acc.get(row["model"], 0.0) + overlap * rate / 3600.0
+
+    ptype = {n: m.pricing.pricing_type for n, m in cfg.models.items()}
+    by_model = [
+        CostByModel(model=n, pricing_type=ptype.get(n, "tier"), cost=c)
+        for n, c in acc.items()
+        if c > 0
+    ]
+    by_model.sort(key=lambda x: x.cost, reverse=True)
+    return CostSummary(total_cost=round(sum(x.cost for x in by_model), 6), by_model=by_model)

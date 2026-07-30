@@ -12,6 +12,7 @@ from llm_manager.data.persistence import (
     record_runtime_end,
     resolve_model_id,
     tier_cost,
+    usage_cost,
     usage_by_model,
     usage_series,
     usage_summary,
@@ -243,3 +244,57 @@ def test_tier_cost_min_zero_closed_min_nonzero_open(tmp_path):
                                          input_price=1.0, output_price=0.0),))
     assert tier_cost(pricing, 100, 0, 0, 0) == 0.0       # min=100 (nonzero) → open → 100 not included
     assert tier_cost(pricing, 101, 0, 0, 0) == 101 * 1.0 / 1_000_000
+
+
+def _cfg_with(pricing):
+    from llm_manager.config import AppConfig, Command, ModelConfig, ProgramConfig, Scheme
+    return AppConfig(
+        program=ProgramConfig("0.0.0.0", 8080, 60, "INFO"),
+        models={"m1": ModelConfig("m1", ("m1",), "Chat", 1, False,
+                                  {"s": Scheme("s", frozenset({"gpu"}), Command(exe="x"), {"gpu": 1})},
+                                  pricing=pricing)},
+        wol=None, claude_configs={})
+
+
+def test_usage_cost_tier_model_sums_requests(tmp_path):
+    from llm_manager.config import Pricing, PricingTier
+    db = open_db(tmp_path / "t.db")
+    record_usage(db, "m1", start=5.0, end=10.0, input_tokens=1000, output_tokens=500, cache_n=0, prompt_n=1000)
+    record_usage(db, "m1", start=12.0, end=15.0, input_tokens=2000, output_tokens=0, cache_n=0, prompt_n=2000)
+    cfg = _cfg_with(Pricing(tiers=(PricingTier(tier_index=1, input_price=3.0, output_price=9.0),)))
+    s = usage_cost(db, cfg, start_ts=0.0, end_ts=100.0)
+    expected = ((1000 * 3.0 + 500 * 9.0) + (2000 * 3.0)) / 1_000_000
+    assert s.total_cost == expected
+    assert s.by_model[0].model == "m1" and s.by_model[0].pricing_type == "tier"
+
+
+def test_usage_cost_hourly_model_uses_runtime_overlap(tmp_path):
+    from llm_manager.config import Pricing
+    db = open_db(tmp_path / "t.db")
+    record_runtime_start(db, "m1", start=0.0)
+    record_runtime_end(db, "m1", end=7200.0)            # 2 hours loaded
+    cfg = _cfg_with(Pricing(pricing_type="hourly", hourly_price=10.0))
+    s = usage_cost(db, cfg, start_ts=0.0, end_ts=3600.0, now=9999.0)   # window = 1 hour
+    assert s.total_cost == 10.0                          # 1h × 10/h
+    assert s.by_model[0].pricing_type == "hourly"
+
+
+def test_usage_cost_open_session_uses_now(tmp_path):
+    from llm_manager.config import Pricing
+    db = open_db(tmp_path / "t.db")
+    record_runtime_start(db, "m1", start=0.0)           # never closed
+    cfg = _cfg_with(Pricing(pricing_type="hourly", hourly_price=10.0))
+    s = usage_cost(db, cfg, start_ts=0.0, end_ts=3600.0, now=3600.0)   # now caps the session at 1h
+    assert s.total_cost == 10.0
+
+
+def test_usage_cost_free_model_yields_zero_and_is_omitted(tmp_path):
+    db = open_db(tmp_path / "t.db")
+    record_usage(db, "m1", start=5.0, end=10.0, input_tokens=1000, output_tokens=500, cache_n=0, prompt_n=1000)
+    from llm_manager.config import AppConfig, Command, ModelConfig, ProgramConfig, Scheme
+    cfg = AppConfig(program=ProgramConfig("0.0.0.0", 8080, 60, "INFO"),
+                    models={"m1": ModelConfig("m1", ("m1",), "Chat", 1, False,
+                              {"s": Scheme("s", frozenset({"gpu"}), Command(exe="x"), {"gpu": 1})})},
+                    wol=None, claude_configs={})
+    s = usage_cost(db, cfg, start_ts=0.0, end_ts=100.0)
+    assert s.total_cost == 0.0 and s.by_model == []
