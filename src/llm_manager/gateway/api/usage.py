@@ -28,8 +28,8 @@ class SessionUsageResponse(BaseModel):
 
 class UsageSeriesResponse(BaseModel):
     buckets: list[float]            # bucket-start wall-clock epochs (chart x-axis)
-    total: list[int]                # tokens per bucket, summed across models
-    models: dict[str, list[int]]    # model name → tokens per bucket
+    total: list[float]              # value per bucket, summed across models (tokens 或 元)
+    models: dict[str, list[float]]  # model name → value per bucket
 
 
 class UsageSummaryResponse(BaseModel):

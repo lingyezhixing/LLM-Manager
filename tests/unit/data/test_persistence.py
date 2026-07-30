@@ -13,6 +13,7 @@ from llm_manager.data.persistence import (
     resolve_model_id,
     tier_cost,
     usage_cost,
+    usage_cost_series,
     usage_by_model,
     usage_series,
     usage_summary,
@@ -298,3 +299,36 @@ def test_usage_cost_free_model_yields_zero_and_is_omitted(tmp_path):
                     wol=None, claude_configs={})
     s = usage_cost(db, cfg, start_ts=0.0, end_ts=100.0)
     assert s.total_cost == 0.0 and s.by_model == []
+
+
+def test_usage_cost_series_buckets_tier_cost_by_end_time(tmp_path):
+    from llm_manager.config import Pricing, PricingTier
+    db = open_db(tmp_path / "t.db")
+    record_usage(db, "m1", start=9, end=10, input_tokens=1000, output_tokens=0, cache_n=0, prompt_n=1000)
+    record_usage(db, "m1", start=69, end=70, input_tokens=2000, output_tokens=0, cache_n=0, prompt_n=2000)
+    cfg = _cfg_with(Pricing(tiers=(PricingTier(tier_index=1, input_price=3.0, output_price=0.0),)))
+    res = usage_cost_series(db, cfg, start_ts=0, end_ts=120, bucket_seconds=60)
+    assert res.buckets == [0, 60]
+    assert res.models["m1"][0] == 1000 * 3.0 / 1_000_000   # end=10 → bucket 0
+    assert res.models["m1"][1] == 2000 * 3.0 / 1_000_000   # end=70 → bucket 60
+    assert res.total[0] == res.models["m1"][0]
+    assert res.total[1] == res.models["m1"][1]
+
+
+def test_usage_cost_series_hourly_spreads_across_buckets(tmp_path):
+    from llm_manager.config import Pricing
+    db = open_db(tmp_path / "t.db")
+    record_runtime_start(db, "m1", start=0.0)
+    record_runtime_end(db, "m1", end=120.0)               # 2 minutes loaded
+    cfg = _cfg_with(Pricing(pricing_type="hourly", hourly_price=3600.0))  # 1 元/s
+    res = usage_cost_series(db, cfg, start_ts=0, end_ts=120, bucket_seconds=60, now=9999.0)
+    assert res.buckets == [0, 60]
+    assert res.total == [60.0, 60.0]                       # 60s each × 1 元/s
+
+
+def test_usage_cost_series_empty_range_returns_no_buckets(tmp_path):
+    from llm_manager.config import Pricing
+    db = open_db(tmp_path / "t.db")
+    cfg = _cfg_with(Pricing())
+    res = usage_cost_series(db, cfg, start_ts=0, end_ts=0, bucket_seconds=60)
+    assert res.buckets == [] and res.total == [] and res.models == {}

@@ -190,8 +190,8 @@ def fetch_usage(db: Db, model_name: str, start: float, end: float) -> list[sqlit
 @dataclass(frozen=True, slots=True)
 class UsageSeries:
     buckets: list[float]            # bucket-start wall-clock epochs (the time axis)
-    models: dict[str, list[int]]    # model name → tokens per bucket (0-filled)
-    total: list[int]                # tokens per bucket summed across all models
+    models: dict[str, list[float]]  # model → value per bucket (tokens 或 元,0-filled)
+    total: list[float]              # value per bucket summed across models
 
 
 def usage_series(db: Db, *, start_ts: float, end_ts: float, bucket_seconds: int) -> UsageSeries:
@@ -222,13 +222,13 @@ def usage_series(db: Db, *, start_ts: float, end_ts: float, bucket_seconds: int)
         {"start": start_ts, "end": end_ts, "bucket": bucket_seconds, "offset": offset},
     ).fetchall()
 
-    models: dict[str, list[int]] = {}
-    total = [0] * n
+    models: dict[str, list[float]] = {}
+    total: list[float] = [0.0] * n
     for row in rows:
         idx = int((row["bucket"] - first) // bucket_seconds)
         if 0 <= idx < n:
             tokens = int(row["tokens"])
-            models.setdefault(row["model"], [0] * n)[idx] = tokens
+            models.setdefault(row["model"], [0.0] * n)[idx] = tokens
             total[idx] += tokens
     return UsageSeries(buckets=buckets, models=models, total=total)
 
@@ -428,3 +428,66 @@ def usage_cost(
     ]
     by_model.sort(key=lambda x: x.cost, reverse=True)
     return CostSummary(total_cost=round(sum(x.cost for x in by_model), 6), by_model=by_model)
+
+
+def usage_cost_series(
+    db: Db,
+    cfg: "AppConfig",  # type: ignore[name-defined]
+    *,
+    start_ts: float,
+    end_ts: float,
+    bucket_seconds: int,
+    now: float | None = None,
+) -> UsageSeries:
+    """Bucketed cost series (元/桶),时钟对齐分桶(同 usage_series)。tier 成本按请求
+    end_time 落桶;hourly 成本按运行段与各桶的重叠时长摊到桶。返回 UsageSeries 形
+    (total/models 的值是元,非 token)。"""
+    if end_ts <= start_ts or bucket_seconds <= 0:
+        return UsageSeries(buckets=[], models={}, total=[])
+    now_ts = now if now is not None else time.time()
+    offset = (-time.localtime().tm_gmtoff) % bucket_seconds
+    first = float(math.floor((start_ts - offset) / bucket_seconds) * bucket_seconds + offset)
+    n = max(1, math.ceil((end_ts - first) / bucket_seconds))
+    buckets = [first + i * bucket_seconds for i in range(n)]
+    models: dict[str, list[float]] = {}
+    total = [0.0] * n
+
+    for name, m in cfg.models.items():
+        if m.pricing.pricing_type == "tier":
+            rows = db.conn.execute(
+                "SELECT r.end_time, r.input_tokens, r.output_tokens, r.cache_n, r.prompt_n "
+                "FROM model_requests r JOIN models mm ON r.model_id=mm.id "
+                "WHERE mm.original_name=? AND r.end_time>=? AND r.end_time<?",
+                (name, start_ts, end_ts),
+            ).fetchall()
+            for row in rows:
+                c = tier_cost(
+                    m.pricing,
+                    int(row["input_tokens"]),
+                    int(row["output_tokens"]),
+                    int(row["cache_n"]),
+                    int(row["prompt_n"]),
+                )
+                if c <= 0:
+                    continue
+                idx = int((row["end_time"] - first) // bucket_seconds)
+                if 0 <= idx < n:
+                    models.setdefault(name, [0.0] * n)[idx] += c
+                    total[idx] += c
+        elif m.pricing.pricing_type == "hourly" and m.pricing.hourly_price > 0:
+            rate = m.pricing.hourly_price / 3600.0
+            rows = db.conn.execute(
+                "SELECT r.start_time, r.end_time FROM model_runtime r JOIN models mm ON r.model_id=mm.id "
+                "WHERE mm.original_name=? AND r.start_time < ? AND (r.end_time IS NULL OR r.end_time > ?)",
+                (name, end_ts, start_ts),
+            ).fetchall()
+            for row in rows:
+                sess_end = row["end_time"] if row["end_time"] is not None else now_ts
+                for i in range(n):
+                    b_start = first + i * bucket_seconds
+                    ov = max(0.0, min(b_start + bucket_seconds, sess_end) - max(b_start, row["start_time"]))
+                    if ov > 0:
+                        cost = ov * rate
+                        models.setdefault(name, [0.0] * n)[i] += cost
+                        total[i] += cost
+    return UsageSeries(buckets=buckets, models=models, total=total)
