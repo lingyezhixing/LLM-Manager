@@ -204,7 +204,7 @@ export function TokenChart({
           </div>
           {visibleNames.map((m) => (
             <div key={m} style={{ color: colorOf(m) }}>
-              {m} {fmtTokens(models[m][hover])}
+              {m} {formatY(models[m][hover])}
             </div>
           ))}
         </div>
