@@ -405,3 +405,37 @@ def test_restart_app_flips_should_exit_when_server_present(tmp_path):
         while time.monotonic() < deadline and not server.should_exit:
             time.sleep(0.05)
         assert server.should_exit is True
+
+
+def _def_body_with_pricing(name="M", port=8000):
+    return {"name": name, "mode": "Chat", "port": port, "auto_start": False,
+            "aliases": [name],
+            "schemes": [{"config_source": "S", "required_devices": ["gpu"],
+                         "command": {"exe": "run"}, "memory_mb": {"gpu": 1}}],
+            "pricing": {"pricing_type": "tier", "hourly_price": 2.5,
+                        "tiers": [{"tier_index": 1, "min_input": 0, "max_input": 32768,
+                                   "min_output": 0, "max_output": 32768,
+                                   "input_price": 3.0, "output_price": 9.0,
+                                   "support_cache": True, "cache_write_price": 3.75,
+                                   "cache_read_price": 0.3}]}}
+
+
+def test_model_def_pricing_round_trips_through_api(tmp_path):
+    with TestClient(_app(tmp_path)) as c:
+        r = c.post("/api/config/models", json=_def_body_with_pricing("M"))
+        assert r.status_code == 201
+        one = c.get("/api/config/models/M").json()
+        assert one["pricing"]["pricing_type"] == "tier"
+        assert one["pricing"]["hourly_price"] == 2.5
+        t = one["pricing"]["tiers"][0]
+        assert t["input_price"] == 3.0 and t["support_cache"] is True
+        assert t["cache_write_price"] == 3.75 and t["cache_read_price"] == 0.3
+
+
+def test_model_def_defaults_pricing_when_omitted(tmp_path):
+    with TestClient(_app(tmp_path)) as c:
+        c.post("/api/config/models", json=_def_body("M"))   # no pricing key
+        one = c.get("/api/config/models/M").json()
+        assert one["pricing"]["pricing_type"] == "tier"
+        assert one["pricing"]["tiers"] == []
+        assert one["pricing"]["hourly_price"] == 0.0

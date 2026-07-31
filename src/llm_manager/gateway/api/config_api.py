@@ -15,7 +15,7 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from llm_manager.config import AppConfig, Command, ModelConfig, Scheme, _norm_device
+from llm_manager.config import AppConfig, Command, ModelConfig, Pricing, PricingTier, Scheme, _norm_device
 from llm_manager.data.config_store import (
     ConfigValidationFailed,
     ModelExists,
@@ -76,6 +76,25 @@ class SchemeInput(BaseModel):
     memory_mb: dict[str, int] = {}
 
 
+class PricingTierInput(BaseModel):
+    tier_index: int
+    min_input: int | None = 0
+    max_input: int | None = None
+    min_output: int | None = 0
+    max_output: int | None = None
+    input_price: float = 0.0
+    output_price: float = 0.0
+    support_cache: bool = False
+    cache_write_price: float = 0.0
+    cache_read_price: float = 0.0
+
+
+class PricingInput(BaseModel):
+    pricing_type: str = "tier"          # "tier" | "hourly"
+    hourly_price: float = 0.0
+    tiers: list[PricingTierInput] = []
+
+
 class ModelDefInput(BaseModel):
     name: str
     mode: str                              # config.validate 校验 Chat/Embedding/Reranker
@@ -83,6 +102,7 @@ class ModelDefInput(BaseModel):
     auto_start: bool = False
     aliases: list[str]                     # 非空(validate)
     schemes: list[SchemeInput]             # 非空(validate)
+    pricing: PricingInput = Field(default_factory=PricingInput)
 
 
 def _to_model_config(body: ModelDefInput) -> ModelConfig:
@@ -99,6 +119,16 @@ def _to_model_config(body: ModelDefInput) -> ModelConfig:
                             env=dict(s.command.env), cwd=s.command.cwd, conda_env=s.command.conda_env),
             memory_mb={_norm_device(k): v for k, v in s.memory_mb.items()},
         )
+    pricing = Pricing(
+        pricing_type=body.pricing.pricing_type,
+        hourly_price=body.pricing.hourly_price,
+        tiers=tuple(PricingTier(
+            tier_index=t.tier_index, min_input=t.min_input, max_input=t.max_input,
+            min_output=t.min_output, max_output=t.max_output,
+            input_price=t.input_price, output_price=t.output_price,
+            support_cache=t.support_cache, cache_write_price=t.cache_write_price,
+            cache_read_price=t.cache_read_price) for t in body.pricing.tiers),
+    )
     return ModelConfig(
         primary_name=body.name,
         aliases=tuple(body.aliases),
@@ -106,7 +136,23 @@ def _to_model_config(body: ModelDefInput) -> ModelConfig:
         port=body.port,
         auto_start=body.auto_start,
         schemes=schemes,
+        pricing=pricing,
     )
+
+
+def _pricing_dict(p):
+    return {
+        "pricing_type": p.pricing_type,
+        "hourly_price": p.hourly_price,
+        "tiers": [
+            {"tier_index": t.tier_index, "min_input": t.min_input, "max_input": t.max_input,
+             "min_output": t.min_output, "max_output": t.max_output,
+             "input_price": t.input_price, "output_price": t.output_price,
+             "support_cache": t.support_cache, "cache_write_price": t.cache_write_price,
+             "cache_read_price": t.cache_read_price}
+            for t in p.tiers
+        ],
+    }
 
 
 def _create_model(cfg: AppConfig, body: ModelDefInput) -> AppConfig:
@@ -320,7 +366,8 @@ def register_config_routes(api: APIRouter) -> None:
                                          "env": s.command.env, "cwd": s.command.cwd,
                                          "conda_env": s.command.conda_env},
                              "memory_mb": dict(s.memory_mb)}
-                            for s in m.schemes.values()]}
+                            for s in m.schemes.values()],
+                "pricing": _pricing_dict(m.pricing)}
 
     @api.put("/config/models/{name}")
     def put_model_def(name: str, request: Request, body: ModelDefInput) -> dict:
