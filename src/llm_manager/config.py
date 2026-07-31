@@ -41,7 +41,6 @@ class PricingTier:
     max_output: int | None = None
     input_price: float = 0.0
     output_price: float = 0.0
-    support_cache: bool = False
     cache_write_price: float = 0.0
     cache_read_price: float = 0.0
 
@@ -50,6 +49,7 @@ class PricingTier:
 class Pricing:
     pricing_type: str = "tier"         # "tier" | "hourly"
     hourly_price: float = 0.0
+    support_cache: bool = False        # 模型级:是否支持 prompt 缓存(缓存计费开关)
     tiers: tuple[PricingTier, ...] = ()
 
 

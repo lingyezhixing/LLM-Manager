@@ -379,10 +379,11 @@ def test_pricing_round_trips_through_config_store(tmp_path):
         program=ProgramConfig("0.0.0.0", 8080, 60, "INFO"),
         models={"M": ModelConfig(primary_name="M", aliases=("M",), mode="Chat", port=1,
                                  schemes={"S": scheme},
-                                 pricing=Pricing(pricing_type="tier", hourly_price=2.5, tiers=(
+                                 pricing=Pricing(pricing_type="tier", hourly_price=2.5,
+                                                 support_cache=True, tiers=(
                                      PricingTier(tier_index=1, min_input=0, max_input=32768,
                                                  input_price=3.0, output_price=9.0,
-                                                 support_cache=True, cache_write_price=3.75,
+                                                 cache_write_price=3.75,
                                                  cache_read_price=0.3),
                                  )))},
         wol=None, claude_configs={})
@@ -391,10 +392,11 @@ def test_pricing_round_trips_through_config_store(tmp_path):
     p = out.models["M"].pricing
     assert p.pricing_type == "tier"
     assert p.hourly_price == 2.5
+    assert p.support_cache is True
     assert len(p.tiers) == 1
     t = p.tiers[0]
     assert t.tier_index == 1 and t.input_price == 3.0 and t.output_price == 9.0
-    assert t.support_cache is True and t.cache_write_price == 3.75 and t.cache_read_price == 0.3
+    assert t.cache_write_price == 3.75 and t.cache_read_price == 0.3
 
 
 def test_pricing_survives_unrelated_model_world_rewrite(tmp_path):

@@ -85,7 +85,6 @@ class PricingTierInput(BaseModel):
     max_output: int | None = None
     input_price: float = 0.0
     output_price: float = 0.0
-    support_cache: bool = False
     cache_write_price: float = 0.0
     cache_read_price: float = 0.0
 
@@ -93,6 +92,7 @@ class PricingTierInput(BaseModel):
 class PricingInput(BaseModel):
     pricing_type: Literal["tier", "hourly"] = "tier"
     hourly_price: float = 0.0
+    support_cache: bool = False
     tiers: list[PricingTierInput] = []
 
 
@@ -123,11 +123,12 @@ def _to_model_config(body: ModelDefInput) -> ModelConfig:
     pricing = Pricing(
         pricing_type=body.pricing.pricing_type,
         hourly_price=body.pricing.hourly_price,
+        support_cache=body.pricing.support_cache,
         tiers=tuple(PricingTier(
             tier_index=t.tier_index, min_input=t.min_input, max_input=t.max_input,
             min_output=t.min_output, max_output=t.max_output,
             input_price=t.input_price, output_price=t.output_price,
-            support_cache=t.support_cache, cache_write_price=t.cache_write_price,
+            cache_write_price=t.cache_write_price,
             cache_read_price=t.cache_read_price) for t in body.pricing.tiers),
     )
     return ModelConfig(
@@ -145,11 +146,12 @@ def _pricing_dict(p):
     return {
         "pricing_type": p.pricing_type,
         "hourly_price": p.hourly_price,
+        "support_cache": p.support_cache,
         "tiers": [
             {"tier_index": t.tier_index, "min_input": t.min_input, "max_input": t.max_input,
              "min_output": t.min_output, "max_output": t.max_output,
              "input_price": t.input_price, "output_price": t.output_price,
-             "support_cache": t.support_cache, "cache_write_price": t.cache_write_price,
+             "cache_write_price": t.cache_write_price,
              "cache_read_price": t.cache_read_price}
             for t in p.tiers
         ],

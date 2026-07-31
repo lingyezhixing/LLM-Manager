@@ -277,13 +277,13 @@ export interface PricingTier {
   max_output: number | null;
   input_price: number;
   output_price: number;
-  support_cache: boolean;
   cache_write_price: number;
   cache_read_price: number;
 }
 export interface Pricing {
   pricing_type: "tier" | "hourly";
   hourly_price: number;
+  support_cache: boolean;   // 模型级:是否支持 prompt 缓存(缓存计费开关)
   tiers: PricingTier[];
 }
 export interface ModelDef {

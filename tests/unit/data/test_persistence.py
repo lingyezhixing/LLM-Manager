@@ -224,11 +224,24 @@ def test_tier_cost_no_cache_matches_and_divides_by_million(tmp_path):
 
 def test_tier_cost_cache_formula(tmp_path):
     from llm_manager.config import Pricing, PricingTier
-    pricing = Pricing(tiers=(PricingTier(tier_index=1, min_input=0, max_input=None,
-                                         input_price=3.0, output_price=9.0, support_cache=True,
-                                         cache_write_price=3.75, cache_read_price=0.3),))
+    # support_cache 是模型级开关(Pricing 上),缓存价仍在阶梯上
+    pricing = Pricing(support_cache=True, tiers=(
+        PricingTier(tier_index=1, min_input=0, max_input=None,
+                    input_price=3.0, output_price=9.0,
+                    cache_write_price=3.75, cache_read_price=0.3),))
     # cache_n*read + prompt_n*(input+write) + output*output, /1e6
     expected = (200 * 0.3 + 800 * (3.0 + 3.75) + 500 * 9.0) / 1_000_000
+    assert tier_cost(pricing, 1000, 500, 200, 800) == expected
+
+
+def test_tier_cost_cache_off_uses_plain_formula(tmp_path):
+    """support_cache=False(默认)→ 即使阶梯带缓存价也走无缓存公式。"""
+    from llm_manager.config import Pricing, PricingTier
+    pricing = Pricing(tiers=(
+        PricingTier(tier_index=1, min_input=0, max_input=None,
+                    input_price=3.0, output_price=9.0,
+                    cache_write_price=3.75, cache_read_price=0.3),))
+    expected = (1000 * 3.0 + 500 * 9.0) / 1_000_000   # 无缓存公式,忽略缓存价
     assert tier_cost(pricing, 1000, 500, 200, 800) == expected
 
 
@@ -332,3 +345,31 @@ def test_usage_cost_series_empty_range_returns_no_buckets(tmp_path):
     cfg = _cfg_with(Pricing())
     res = usage_cost_series(db, cfg, start_ts=0, end_ts=0, bucket_seconds=60)
     assert res.buckets == [] and res.total == [] and res.models == {}
+
+
+def test_migrate_moves_support_cache_to_model_pricing(tmp_path):
+    """P4 回改迁移:旧库(model_pricing 无 support_cache、pricing_tiers 有)→ 开库后上移到模型级。"""
+    import sqlite3
+    p = tmp_path / "legacy.db"
+    conn = sqlite3.connect(str(p))
+    conn.executescript(
+        "CREATE TABLE model_defs (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, "
+        "mode TEXT NOT NULL, port INTEGER NOT NULL, auto_start INTEGER NOT NULL DEFAULT 0, ord INTEGER NOT NULL DEFAULT 0);"
+        "CREATE TABLE model_pricing (model_id INTEGER PRIMARY KEY, pricing_type TEXT NOT NULL DEFAULT 'tier', "
+        "hourly_price REAL NOT NULL DEFAULT 0, "
+        "FOREIGN KEY (model_id) REFERENCES model_defs(id) ON DELETE CASCADE);"
+        "CREATE TABLE pricing_tiers (pricing_id INTEGER NOT NULL, tier_index INTEGER NOT NULL, "
+        "min_input INTEGER, max_input INTEGER, min_output INTEGER, max_output INTEGER, "
+        "input_price REAL, output_price REAL, support_cache INTEGER NOT NULL DEFAULT 0, "
+        "cache_write_price REAL, cache_read_price REAL, "
+        "FOREIGN KEY (pricing_id) REFERENCES model_pricing(model_id) ON DELETE CASCADE, "
+        "PRIMARY KEY (pricing_id, tier_index));"
+    )
+    conn.commit()
+    conn.close()
+
+    db = open_db(p)   # 迁移:model_pricing 补列 + pricing_tiers 删列
+    mp_cols = {r[1] for r in db.conn.execute("PRAGMA table_info(model_pricing)")}
+    pt_cols = {r[1] for r in db.conn.execute("PRAGMA table_info(pricing_tiers)")}
+    assert "support_cache" in mp_cols
+    assert "support_cache" not in pt_cols

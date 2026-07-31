@@ -87,6 +87,7 @@ def open_db(path: Path) -> Db:
             model_id INTEGER PRIMARY KEY,
             pricing_type TEXT NOT NULL DEFAULT 'tier',
             hourly_price REAL NOT NULL DEFAULT 0,
+            support_cache INTEGER NOT NULL DEFAULT 0,
             FOREIGN KEY (model_id) REFERENCES model_defs(id) ON DELETE CASCADE
         );
         CREATE TABLE IF NOT EXISTS pricing_tiers (
@@ -95,7 +96,6 @@ def open_db(path: Path) -> Db:
             min_input INTEGER, max_input INTEGER,
             min_output INTEGER, max_output INTEGER,
             input_price REAL, output_price REAL,
-            support_cache INTEGER NOT NULL DEFAULT 0,
             cache_write_price REAL, cache_read_price REAL,
             FOREIGN KEY (pricing_id) REFERENCES model_pricing(model_id) ON DELETE CASCADE,
             PRIMARY KEY (pricing_id, tier_index)
@@ -124,6 +124,14 @@ def _migrate(conn: sqlite3.Connection) -> None:
         # SQLite refuses DROP COLUMN while an index references it; drop the index first.
         conn.execute("DROP INDEX IF EXISTS idx_model_requests_ts")
         conn.execute("ALTER TABLE model_requests DROP COLUMN ts")
+    # P4 回改:support_cache 从阶梯级上移到模型级(model_pricing)。
+    # 旧库:model_pricing 无该列则补;pricing_tiers 有该列则删(SQLite ≥3.35 支持 DROP COLUMN)。
+    mp_cols = {row[1] for row in conn.execute("PRAGMA table_info(model_pricing)")}
+    if "support_cache" not in mp_cols:
+        conn.execute("ALTER TABLE model_pricing ADD COLUMN support_cache INTEGER NOT NULL DEFAULT 0")
+    pt_cols = {row[1] for row in conn.execute("PRAGMA table_info(pricing_tiers)")}
+    if "support_cache" in pt_cols:
+        conn.execute("ALTER TABLE pricing_tiers DROP COLUMN support_cache")
 
 
 def _resolve_model_id_locked(db: Db, model_name: str) -> int:
@@ -332,13 +340,14 @@ def _tier_matches(t: "PricingTier", inp: int, out: int) -> bool:  # type: ignore
 
 def tier_cost(pricing: "Pricing", input_t: int, output_t: int, cache_n: int, prompt_n: int) -> float:  # type: ignore[name-defined]
     """Per-request tier cost in yuan. First matching tier wins; no match → 0.
-    Cache formula (legacy): cache_n×read + prompt_n×(input+write) + output×output."""
+    Cache formula (legacy): cache_n×read + prompt_n×(input+write) + output×output.
+    support_cache 是模型级开关(pricing.support_cache),控制缓存计费是否生效。"""
     if pricing.pricing_type != "tier" or not pricing.tiers:
         return 0.0
     for t in pricing.tiers:
         if not _tier_matches(t, input_t, output_t):
             continue
-        if t.support_cache:
+        if pricing.support_cache:
             raw = cache_n * t.cache_read_price + prompt_n * (t.input_price + t.cache_write_price) + output_t * t.output_price
         else:
             raw = input_t * t.input_price + output_t * t.output_price

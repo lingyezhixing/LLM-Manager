@@ -20,7 +20,7 @@ export function PricingEditor({ value, onChange }: { value: Pricing; onChange: (
         ...value.tiers,
         { tier_index: Math.max(0, ...value.tiers.map((t) => t.tier_index)) + 1, min_input: 0, max_input: null,
           min_output: 0, max_output: null, input_price: 0, output_price: 0,
-          support_cache: false, cache_write_price: 0, cache_read_price: 0 },
+          cache_write_price: 0, cache_read_price: 0 },
       ],
     });
   const num = (s: string): number | null => (s === "" ? null : Number(s));
@@ -53,6 +53,10 @@ export function PricingEditor({ value, onChange }: { value: Pricing; onChange: (
           <p className="text-xs text-muted-foreground">
             每个阶梯 = 一个 token 量区间 + 单价;请求命中首个匹配阶梯。留空阶梯 = 免费。min=0 闭区间,否则开区间;max 留空 = 无上限。
           </p>
+          <div className="flex items-center gap-2">
+            <Switch id="pr-cache" checked={value.support_cache} onChange={(v) => onChange({ ...value, support_cache: v })} />
+            <label htmlFor="pr-cache" className="text-xs text-muted-foreground">支持缓存(prompt_n 同算输入费 + 写缓存费)</label>
+          </div>
           {value.tiers.map((t, i) => (
             <div key={i} className="rounded-md border border-border p-3">
               <div className="mb-2 flex items-center justify-between">
@@ -81,15 +85,11 @@ export function PricingEditor({ value, onChange }: { value: Pricing; onChange: (
                   <NumberInput value={t.output_price} onChange={(e) => setTier(i, { ...t, output_price: e.target.value === "" ? 0 : Number(e.target.value) })} />
                 </Field>
                 <Field label="缓存读价(元/M)">
-                  <NumberInput value={t.cache_read_price} disabled={!t.support_cache} onChange={(e) => setTier(i, { ...t, cache_read_price: e.target.value === "" ? 0 : Number(e.target.value) })} />
+                  <NumberInput value={t.cache_read_price} disabled={!value.support_cache} onChange={(e) => setTier(i, { ...t, cache_read_price: e.target.value === "" ? 0 : Number(e.target.value) })} />
                 </Field>
                 <Field label="缓存写价(元/M)">
-                  <NumberInput value={t.cache_write_price} disabled={!t.support_cache} onChange={(e) => setTier(i, { ...t, cache_write_price: e.target.value === "" ? 0 : Number(e.target.value) })} />
+                  <NumberInput value={t.cache_write_price} disabled={!value.support_cache} onChange={(e) => setTier(i, { ...t, cache_write_price: e.target.value === "" ? 0 : Number(e.target.value) })} />
                 </Field>
-              </div>
-              <div className="mt-2 flex items-center gap-2">
-                <Switch id={`pr-cache-${i}`} checked={t.support_cache} onChange={(v) => setTier(i, { ...t, support_cache: v })} />
-                <label htmlFor={`pr-cache-${i}`} className="text-xs text-muted-foreground">支持缓存(prompt_n 同算输入费 + 写缓存费)</label>
               </div>
             </div>
           ))}

@@ -412,11 +412,11 @@ def _def_body_with_pricing(name="M", port=8000):
             "aliases": [name],
             "schemes": [{"config_source": "S", "required_devices": ["gpu"],
                          "command": {"exe": "run"}, "memory_mb": {"gpu": 1}}],
-            "pricing": {"pricing_type": "tier", "hourly_price": 2.5,
+            "pricing": {"pricing_type": "tier", "hourly_price": 2.5, "support_cache": True,
                         "tiers": [{"tier_index": 1, "min_input": 0, "max_input": 32768,
                                    "min_output": 0, "max_output": 32768,
                                    "input_price": 3.0, "output_price": 9.0,
-                                   "support_cache": True, "cache_write_price": 3.75,
+                                   "cache_write_price": 3.75,
                                    "cache_read_price": 0.3}]}}
 
 
@@ -427,12 +427,13 @@ def test_model_def_pricing_round_trips_through_api(tmp_path):
         one = c.get("/api/config/models/M").json()
         assert one["pricing"]["pricing_type"] == "tier"
         assert one["pricing"]["hourly_price"] == 2.5
+        assert one["pricing"]["support_cache"] is True
         t = one["pricing"]["tiers"][0]
         assert t["tier_index"] == 1
         assert t["min_input"] == 0 and t["max_input"] == 32768
         assert t["min_output"] == 0 and t["max_output"] == 32768
         assert t["input_price"] == 3.0 and t["output_price"] == 9.0
-        assert t["support_cache"] is True
+        assert "support_cache" not in t                     # 已上移到模型级
         assert t["cache_write_price"] == 3.75 and t["cache_read_price"] == 0.3
 
 
@@ -443,6 +444,7 @@ def test_model_def_defaults_pricing_when_omitted(tmp_path):
         assert one["pricing"]["pricing_type"] == "tier"
         assert one["pricing"]["tiers"] == []
         assert one["pricing"]["hourly_price"] == 0.0
+        assert one["pricing"]["support_cache"] is False
 
 
 def test_model_def_rejects_bogus_pricing_type(tmp_path):

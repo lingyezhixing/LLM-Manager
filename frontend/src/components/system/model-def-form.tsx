@@ -26,7 +26,7 @@ function emptyModel(): ModelDef {
         memory_mb: {},
       },
     ],
-    pricing: { pricing_type: "tier", hourly_price: 0, tiers: [] },
+    pricing: { pricing_type: "tier", hourly_price: 0, support_cache: false, tiers: [] },
   };
 }
 
