@@ -3,6 +3,7 @@ import { ConfigSaveBar } from "@/components/config-save-bar";
 import { Button } from "@/components/ui/button";
 import { Field, NumberInput, Select, Switch, TextInput } from "@/components/ui/form";
 import { StringListEditor } from "@/components/ui/repeatable-fields";
+import { PricingEditor } from "@/components/system/pricing-editor";
 import { SchemeEditor } from "@/components/system/scheme-editor";
 import { type ModelDef, type ModelWriteResult, type SchemeDef } from "@/lib/api";
 import { useCreateModelDef, useUpdateModelDef } from "@/lib/use-model-defs";
@@ -196,6 +197,9 @@ export function ModelDefForm({ model, onSaved, onDirtyChange }: ModelDefFormProp
           />
         ))}
       </div>
+
+      <div className="mb-1 mt-4 text-sm font-medium text-foreground">计费</div>
+      <PricingEditor value={form.pricing} onChange={(pricing) => set("pricing", pricing)} />
 
       {(dirty || isCreate) && (
         <div className="mt-3">
