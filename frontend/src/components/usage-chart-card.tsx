@@ -2,6 +2,7 @@ import { useState } from "react";
 
 import { useQuery } from "@tanstack/react-query";
 
+import { Button } from "@/components/ui/button";
 import { TokenChart } from "@/components/token-chart";
 import { fetchUsageCostSeries, fetchUsageSeries, type UsageSeries, type UsageSeriesParams } from "@/lib/api";
 import { formatCost } from "@/lib/format";
@@ -61,7 +62,12 @@ export function UsageChartCard({
         </div>
       </div>
       {view === "cost" ? (
-        costSeriesQ.isLoading || !costSeriesQ.data ? (
+        costSeriesQ.isError ? (
+          <div className="flex h-[240px] items-center justify-center gap-2 text-sm text-destructive">
+            加载失败:{(costSeriesQ.error as Error).message}
+            <Button size="sm" variant="ghost" onClick={() => costSeriesQ.refetch()}>重试</Button>
+          </div>
+        ) : costSeriesQ.isLoading || !costSeriesQ.data ? (
           <div className="flex h-[240px] items-center justify-center text-sm text-muted-foreground">加载中…</div>
         ) : costSeriesQ.data.buckets.length === 0 ? (
           <div className="flex h-[240px] items-center justify-center rounded-lg border border-dashed border-border text-sm text-muted-foreground">该时间范围内暂无成本</div>
