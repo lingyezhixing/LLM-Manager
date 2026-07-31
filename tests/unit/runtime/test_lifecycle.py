@@ -562,5 +562,23 @@ async def test_runtime_not_recorded_when_db_absent(tmp_path):
     # default _make() (no db) must not crash and must not record
     life, sup, dev, cfg = _make()
     await life.ensure_running("m1")
+    assert state.get_status("m1") == ModelStatus.ROUTING
     await life.stop("m1")
+    assert state.get_status("m1") == ModelStatus.STOPPED
     # no assertion crash = pass (db is None path guarded)
+
+
+async def test_runtime_session_closed_on_crash(tmp_path):
+    from llm_manager.data.persistence import open_db
+    db = open_db(tmp_path / "t.db")
+    life, sup, dev, cfg = _make(db=db)
+    await life.ensure_running("m1")                       # ROUTING → open session
+    sup.trigger_exit(1000, code=1)                        # external crash → _on_crash
+    assert state.get_status("m1") == ModelStatus.FAILED
+    rows = db.conn.execute(
+        "SELECT end_time FROM model_runtime r JOIN models m ON r.model_id=m.id "
+        "WHERE m.original_name='m1'").fetchall()
+    assert len(rows) == 1 and rows[0]["end_time"] is not None   # session closed exactly once
+    await life.stop("m1")                                 # stop on FAILED → no double-record
+    rows2 = db.conn.execute("SELECT COUNT(*) AS n FROM model_runtime").fetchone()
+    assert rows2["n"] == 1

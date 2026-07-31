@@ -91,6 +91,7 @@ class Lifecycle:
         if state.get_status(alias) in (ModelStatus.STOPPED, ModelStatus.FAILED):
             return state.get_status(alias)
         state.set_status(alias, ModelStatus.STOPPED, force=True, reason="user stop")
+        self._runtime_end(alias)   # 关 runtime 会话:必须在首个 await 前(防并发 restart 抢先开新会话,record_runtime_end 只关最新一条)
         self._stop_events.setdefault(alias, asyncio.Event()).set()
         pid = state.get_pid(alias)
         if pid is not None:
@@ -101,7 +102,6 @@ class Lifecycle:
         if fut is not None and not fut.done():
             fut.set_result(ModelStatus.STOPPED)
         _logs.end_session(alias)   # 结束内存会话日志:下次 start 起新会话(id 从 1)
-        self._runtime_end(alias)
         return state.get_status(alias)
 
     async def unload_all(self) -> list[str]:
@@ -245,6 +245,7 @@ class Lifecycle:
         pid = state.get_pid(alias)
         alive = pid is not None and self._supervisor.alive(pid)
         if s == ModelStatus.ROUTING and not alive:
+            self._runtime_end(alias)   # exit cb 漏触发时兜底关会话(无开会话则 0 行 UPDATE,幂等)
             state.record_failure(alias, f"reconcile: process dead (pid={pid})")
         elif s in (ModelStatus.STARTING, ModelStatus.INIT_SCRIPT, ModelStatus.HEALTH_CHECK) \
                 and not state.has_inflight(alias):
