@@ -2,10 +2,10 @@ import { useState, type ReactNode } from "react";
 
 import { useQuery } from "@tanstack/react-query";
 
-import { fetchUsageByModel, type UsageSeriesParams } from "@/lib/api";
-import { formatCount, formatHitRate, formatLatency, formatPercent, formatTokens } from "@/lib/format";
+import { fetchUsageByModel, fetchUsageCost, type UsageSeriesParams } from "@/lib/api";
+import { formatCost, formatCount, formatHitRate, formatLatency, formatPercent, formatTokens } from "@/lib/format";
 
-type SortKey = "input_tokens" | "output_tokens" | "cache_n" | "request_count" | "hit_rate" | "latency_ms";
+type SortKey = "input_tokens" | "output_tokens" | "cache_n" | "request_count" | "hit_rate" | "latency_ms" | "cost";
 
 export function UsageByModelTable({
   params,
@@ -19,6 +19,12 @@ export function UsageByModelTable({
     queryFn: () => fetchUsageByModel(params),
     refetchInterval: refetch,
   });
+  const costQ = useQuery({
+    queryKey: ["usage", "cost", params],
+    queryFn: () => fetchUsageCost(params),
+    refetchInterval: refetch,
+  });
+  const costOf = new Map((costQ.data?.by_model ?? []).map((r) => [r.model, r.cost]));
   const [sortKey, setSortKey] = useState<SortKey>("input_tokens");
   const [desc, setDesc] = useState(true);
 
@@ -26,6 +32,10 @@ export function UsageByModelTable({
   if (!data || data.length === 0) return <Card><Empty /></Card>;
 
   const rows = [...data].sort((a, b) => {
+    if (sortKey === "cost") {
+      const d = (costOf.get(a.model) ?? 0) - (costOf.get(b.model) ?? 0);
+      return desc ? -d : d;
+    }
     const d = a[sortKey] - b[sortKey];
     return desc ? -d : d;
   });
@@ -50,6 +60,7 @@ export function UsageByModelTable({
             <th className="p-2 text-left text-xs font-medium text-muted-foreground">占比</th>
             <ThNum label="命中率" k="hit_rate" sortKey={sortKey} desc={desc} onSort={onSort} />
             <ThNum label="平均延迟" k="latency_ms" sortKey={sortKey} desc={desc} onSort={onSort} />
+            <ThNum label="成本" k="cost" sortKey={sortKey} desc={desc} onSort={onSort} />
           </tr>
         </thead>
         <tbody>
@@ -70,6 +81,7 @@ export function UsageByModelTable({
               </td>
               <td className="p-2 text-right tabular-nums">{formatHitRate(r.hit_rate)}</td>
               <td className="p-2 text-right tabular-nums">{formatLatency(r.latency_ms)}</td>
+              <td className="p-2 text-right tabular-nums">{formatCost(costOf.get(r.model) ?? 0)}</td>
             </tr>
           ))}
         </tbody>
