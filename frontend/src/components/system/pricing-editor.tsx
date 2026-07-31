@@ -7,13 +7,18 @@ export function PricingEditor({ value, onChange }: { value: Pricing; onChange: (
   const setTier = (i: number, next: PricingTier) =>
     onChange({ ...value, tiers: value.tiers.map((t, idx) => (idx === i ? next : t)) });
   const removeTier = (i: number) =>
-    onChange({ ...value, tiers: [...value.tiers.slice(0, i), ...value.tiers.slice(i + 1)] });
+    onChange({
+      ...value,
+      tiers: value.tiers
+        .filter((_, idx) => idx !== i)
+        .map((t, idx) => ({ ...t, tier_index: idx + 1 })),
+    });
   const addTier = () =>
     onChange({
       ...value,
       tiers: [
         ...value.tiers,
-        { tier_index: value.tiers.length + 1, min_input: 0, max_input: null,
+        { tier_index: Math.max(0, ...value.tiers.map((t) => t.tier_index)) + 1, min_input: 0, max_input: null,
           min_output: 0, max_output: null, input_price: 0, output_price: 0,
           support_cache: false, cache_write_price: 0, cache_read_price: 0 },
       ],
