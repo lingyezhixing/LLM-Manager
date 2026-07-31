@@ -91,7 +91,15 @@ function LegendDot({ color, label }: { color: string; label: string }) {
   );
 }
 
-export function TokenChart({ data, preset }: { data: UsageSeries; preset: string }) {
+export function TokenChart({
+  data,
+  preset,
+  formatY = fmtTokens,
+}: {
+  data: UsageSeries;
+  preset: string;
+  formatY?: (n: number) => string;
+}) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [hidden, setHidden] = useState<Set<string>>(new Set());
   const [hover, setHover] = useState<number | null>(null);
@@ -160,7 +168,7 @@ export function TokenChart({ data, preset }: { data: UsageSeries; preset: string
         {yTicks.map((t, i) => (
           <g key={i}>
             <line x1={PAD.l} y1={t.y} x2={W - PAD.r} y2={t.y} stroke="currentColor" strokeOpacity={i === 4 ? 0.3 : 0.12} />
-            <text x={PAD.l - 6} y={t.y + 3} textAnchor="end" fontSize="10" fill="currentColor">{fmtTokens(t.v)}</text>
+            <text x={PAD.l - 6} y={t.y + 3} textAnchor="end" fontSize="10" fill="currentColor">{formatY(t.v)}</text>
           </g>
         ))}
         {/* x labels */}
@@ -192,7 +200,7 @@ export function TokenChart({ data, preset }: { data: UsageSeries; preset: string
         <div className="pointer-events-none absolute z-10 min-w-[120px] rounded-md border border-border bg-card px-2 py-1 text-xs shadow-sm" style={{ left: pos.x + 14, top: pos.y + 14 }}>
           <div className="mb-0.5 text-foreground">{fmtTs(buckets[hover], preset)}</div>
           <div>
-            总量 <span className="text-foreground">{fmtTokens(total[hover])}</span>
+            总量 <span className="text-foreground">{formatY(total[hover])}</span>
           </div>
           {visibleNames.map((m) => (
             <div key={m} style={{ color: colorOf(m) }}>

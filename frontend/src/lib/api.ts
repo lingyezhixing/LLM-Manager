@@ -113,6 +113,36 @@ export async function fetchUsageByModel(params: UsageSeriesParams): Promise<ByMo
   return (await res.json()) as ByModelEntry[];
 }
 
+// 计费成本 — cost 汇总 + cost 时间序列(序列与 usage/series 同形)。Match gateway/api/usage.py
+// 的 CostSummaryResponse / UsageSeriesResponse。
+export interface CostByModel {
+  model: string;
+  pricing_type: "tier" | "hourly";
+  cost: number;
+}
+export interface CostSummary {
+  total_cost: number;
+  by_model: CostByModel[];
+}
+
+export async function fetchUsageCost(params: UsageSeriesParams): Promise<CostSummary> {
+  const qs = new URLSearchParams(
+    "range" in params ? { range: params.range } : { start: String(params.start), end: String(params.end) },
+  );
+  const res = await fetch(`/api/usage/cost?${qs.toString()}`);
+  if (!res.ok) throw new Error(`/api/usage/cost failed: ${res.status}`);
+  return (await res.json()) as CostSummary;
+}
+
+export async function fetchUsageCostSeries(params: UsageSeriesParams): Promise<UsageSeries> {
+  const qs = new URLSearchParams(
+    "range" in params ? { range: params.range } : { start: String(params.start), end: String(params.end) },
+  );
+  const res = await fetch(`/api/usage/cost-series?${qs.toString()}`);
+  if (!res.ok) throw new Error(`/api/usage/cost-series failed: ${res.status}`);
+  return (await res.json()) as UsageSeries;
+}
+
 // 模型管理 — per-model control + structured log stream. LogLine matches the SSE frame the
 // backend emits on /api/models/{alias}/logs/stream (LogLineResponse in gateway/api/models.py;
 // captured/leveled in data/logs.py).
@@ -238,6 +268,24 @@ export interface SchemeDef {
   command: CommandDef;
   memory_mb: Record<string, number>;
 }
+// 计费定价 — 对应 GET /api/config/models/{name} 的 _pricing_dict 输出(逐字段同形)。
+export interface PricingTier {
+  tier_index: number;
+  min_input: number | null;
+  max_input: number | null;
+  min_output: number | null;
+  max_output: number | null;
+  input_price: number;
+  output_price: number;
+  support_cache: boolean;
+  cache_write_price: number;
+  cache_read_price: number;
+}
+export interface Pricing {
+  pricing_type: "tier" | "hourly";
+  hourly_price: number;
+  tiers: PricingTier[];
+}
 export interface ModelDef {
   name: string;
   mode: string;
@@ -245,6 +293,7 @@ export interface ModelDef {
   auto_start: boolean;
   aliases: string[];
   schemes: SchemeDef[];
+  pricing: Pricing;
 }
 
 // 列表端点摘要:schemes 仅回 config_source 键(list(m.schemes)),非全量对象。
