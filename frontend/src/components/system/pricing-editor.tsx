@@ -66,13 +66,13 @@ export function PricingEditor({ value, onChange }: { value: Pricing; onChange: (
                   <NumberInput value={t.min_input ?? 0} onChange={(e) => setTier(i, { ...t, min_input: num(e.target.value) ?? 0 })} />
                 </Field>
                 <Field label="输入 max(空=∞)">
-                  <NumberInput value={t.max_input ?? 0} onChange={(e) => setTier(i, { ...t, max_input: num(e.target.value) })} />
+                  <NumberInput value={t.max_input ?? ""} onChange={(e) => setTier(i, { ...t, max_input: num(e.target.value) })} />
                 </Field>
                 <Field label="输出 min">
                   <NumberInput value={t.min_output ?? 0} onChange={(e) => setTier(i, { ...t, min_output: num(e.target.value) ?? 0 })} />
                 </Field>
                 <Field label="输出 max(空=∞)">
-                  <NumberInput value={t.max_output ?? 0} onChange={(e) => setTier(i, { ...t, max_output: num(e.target.value) })} />
+                  <NumberInput value={t.max_output ?? ""} onChange={(e) => setTier(i, { ...t, max_output: num(e.target.value) })} />
                 </Field>
                 <Field label="输入价(元/M)">
                   <NumberInput value={t.input_price} onChange={(e) => setTier(i, { ...t, input_price: e.target.value === "" ? 0 : Number(e.target.value) })} />
@@ -88,8 +88,8 @@ export function PricingEditor({ value, onChange }: { value: Pricing; onChange: (
                 </Field>
               </div>
               <div className="mt-2 flex items-center gap-2">
-                <Switch checked={t.support_cache} onChange={(v) => setTier(i, { ...t, support_cache: v })} />
-                <span className="text-xs text-muted-foreground">支持缓存(prompt_n 同算输入费 + 写缓存费)</span>
+                <Switch id={`pr-cache-${i}`} checked={t.support_cache} onChange={(v) => setTier(i, { ...t, support_cache: v })} />
+                <label htmlFor={`pr-cache-${i}`} className="text-xs text-muted-foreground">支持缓存(prompt_n 同算输入费 + 写缓存费)</label>
               </div>
             </div>
           ))}
