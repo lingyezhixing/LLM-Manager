@@ -582,3 +582,20 @@ async def test_runtime_session_closed_on_crash(tmp_path):
     await life.stop("m1")                                 # stop on FAILED → no double-record
     rows2 = db.conn.execute("SELECT COUNT(*) AS n FROM model_runtime").fetchone()
     assert rows2["n"] == 1
+
+
+async def test_runtime_session_closed_on_reconcile_dead(tmp_path):
+    """Fix 2 pin:exit cb 丢失(进程死但 on_exit 未触发)→ _reconcile 关旧会话、重启开新会话。"""
+    from llm_manager.data.persistence import open_db
+    db = open_db(tmp_path / "t.db")
+    life, sup, dev, cfg = _make(db=db)
+    await life.ensure_running("m1")                       # ROUTING → session 1 open
+    sup.alive_pids.discard(1000)                          # process dead, exit cb never fired
+    status = await life.ensure_running("m1")              # reconcile → _runtime_end → restart
+    assert status == ModelStatus.ROUTING
+    rows = db.conn.execute(
+        "SELECT end_time FROM model_runtime r JOIN models m ON r.model_id=m.id "
+        "WHERE m.original_name='m1' ORDER BY r.id").fetchall()
+    assert len(rows) == 2                                 # old closed + new open
+    assert rows[0]["end_time"] is not None
+    assert rows[1]["end_time"] is None
