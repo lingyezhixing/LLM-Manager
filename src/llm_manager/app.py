@@ -88,7 +88,8 @@ def create_app(db_path: Path | None = None, *, legacy_yaml: Path | None = None) 
                 resolved_db, len(cfg.models), cfg.program.host, cfg.program.port, cfg.program.alive_time)
     monitor = DeviceMonitor(ENUMERATORS, config.referenced_devices(cfg))
     supervisor = Supervisor()
-    lifecycle = Lifecycle(get_cfg=store.snapshot, supervisor=supervisor, devices=monitor, probes=probe_registry)
+    lifecycle = Lifecycle(get_cfg=store.snapshot, supervisor=supervisor, devices=monitor,
+                          probes=probe_registry, db=db)
     clients: dict[int, httpx.AsyncClient] = {}
 
     @asynccontextmanager
