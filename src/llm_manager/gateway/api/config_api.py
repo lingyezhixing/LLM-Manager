@@ -11,6 +11,7 @@ import json
 import time
 from dataclasses import replace
 from pathlib import Path
+from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -90,7 +91,7 @@ class PricingTierInput(BaseModel):
 
 
 class PricingInput(BaseModel):
-    pricing_type: str = "tier"          # "tier" | "hourly"
+    pricing_type: Literal["tier", "hourly"] = "tier"
     hourly_price: float = 0.0
     tiers: list[PricingTierInput] = []
 

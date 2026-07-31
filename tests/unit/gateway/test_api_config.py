@@ -428,7 +428,11 @@ def test_model_def_pricing_round_trips_through_api(tmp_path):
         assert one["pricing"]["pricing_type"] == "tier"
         assert one["pricing"]["hourly_price"] == 2.5
         t = one["pricing"]["tiers"][0]
-        assert t["input_price"] == 3.0 and t["support_cache"] is True
+        assert t["tier_index"] == 1
+        assert t["min_input"] == 0 and t["max_input"] == 32768
+        assert t["min_output"] == 0 and t["max_output"] == 32768
+        assert t["input_price"] == 3.0 and t["output_price"] == 9.0
+        assert t["support_cache"] is True
         assert t["cache_write_price"] == 3.75 and t["cache_read_price"] == 0.3
 
 
@@ -439,3 +443,11 @@ def test_model_def_defaults_pricing_when_omitted(tmp_path):
         assert one["pricing"]["pricing_type"] == "tier"
         assert one["pricing"]["tiers"] == []
         assert one["pricing"]["hourly_price"] == 0.0
+
+
+def test_model_def_rejects_bogus_pricing_type(tmp_path):
+    with TestClient(_app(tmp_path)) as c:
+        body = _def_body("M")
+        body["pricing"] = {"pricing_type": "Tier", "hourly_price": 0, "tiers": []}
+        r = c.post("/api/config/models", json=body)
+    assert r.status_code == 422
