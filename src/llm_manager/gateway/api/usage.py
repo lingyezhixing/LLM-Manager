@@ -14,7 +14,7 @@ from fastapi import APIRouter, Request
 from pydantic import BaseModel
 
 from llm_manager.data import session
-from llm_manager.data.persistence import usage_by_model, usage_series, usage_summary
+from llm_manager.data.persistence import usage_by_model, usage_cost, usage_cost_series, usage_series, usage_summary
 
 
 class SessionUsageResponse(BaseModel):
@@ -50,6 +50,17 @@ class ByModelEntryResponse(BaseModel):
     hit_rate: float
     share: float
     latency_ms: float
+
+
+class CostByModelResponse(BaseModel):
+    model: str
+    pricing_type: str
+    cost: float
+
+
+class CostSummaryResponse(BaseModel):
+    total_cost: float
+    by_model: list[CostByModelResponse]
 
 
 def _bucket_for_span(span: float) -> int:
@@ -153,3 +164,33 @@ def register_usage_routes(router: APIRouter) -> None:
             )
             for r in rows
         ]
+
+    @router.get("/usage/cost", response_model=CostSummaryResponse)
+    def usage_cost_endpoint(
+        request: Request,
+        range: str = "7d",
+        start: float | None = None,
+        end: float | None = None,
+    ) -> CostSummaryResponse:
+        db = request.app.state.db
+        cfg = request.app.state.config_store.snapshot()
+        s_ts, e_ts = _resolve_window(range, start, end)
+        s = usage_cost(db, cfg, start_ts=s_ts, end_ts=e_ts)
+        return CostSummaryResponse(
+            total_cost=s.total_cost,
+            by_model=[CostByModelResponse(model=r.model, pricing_type=r.pricing_type, cost=r.cost)
+                      for r in s.by_model],
+        )
+
+    @router.get("/usage/cost-series", response_model=UsageSeriesResponse)
+    def usage_cost_series_endpoint(
+        request: Request,
+        range: str = "7d",
+        start: float | None = None,
+        end: float | None = None,
+    ) -> UsageSeriesResponse:
+        db = request.app.state.db
+        cfg = request.app.state.config_store.snapshot()
+        s_ts, e_ts, bucket = _resolve_range(range, start, end)
+        result = usage_cost_series(db, cfg, start_ts=s_ts, end_ts=e_ts, bucket_seconds=bucket)
+        return UsageSeriesResponse(buckets=result.buckets, total=result.total, models=result.models)

@@ -11,12 +11,17 @@ from llm_manager.data.persistence import open_db, record_usage
 from llm_manager.gateway.api.usage import register_usage_routes
 
 
-def _app(db=None) -> FastAPI:
+def _app(db=None, cfg=None) -> FastAPI:
     app = FastAPI()
     api = APIRouter(prefix="/api")
     register_usage_routes(api)
     app.include_router(api)
     app.state.db = db if db is not None else open_db(Path(":memory:"))
+    if cfg is not None:
+        class _Stub:
+            def __init__(self, c): self._c = c
+            def snapshot(self): return self._c
+        app.state.config_store = _Stub(cfg)
     return app
 
 
@@ -111,3 +116,45 @@ def test_usage_by_model_endpoint_empty_returns_empty_list(tmp_path) -> None:
         r = c.get("/api/usage/by-model?start=0&end=100")
     assert r.status_code == 200
     assert r.json() == []
+
+
+def test_usage_cost_endpoint_tier_and_hourly(tmp_path):
+    from llm_manager.config import AppConfig, Command, ModelConfig, Pricing, PricingTier, ProgramConfig, Scheme
+    db = open_db(tmp_path / "t.db")
+    record_usage(db, "m1", start=5.0, end=10.0, input_tokens=1000, output_tokens=500, cache_n=0, prompt_n=1000)
+    from llm_manager.data.persistence import record_runtime_start, record_runtime_end
+    record_runtime_start(db, "m2", start=0.0)
+    record_runtime_end(db, "m2", end=3600.0)
+    cfg = AppConfig(program=ProgramConfig("0.0.0.0", 8080, 60, "INFO"), models={
+        "m1": ModelConfig("m1", ("m1",), "Chat", 1, False,
+                          {"s": Scheme("s", frozenset({"gpu"}), Command(exe="x"), {"gpu": 1})},
+                          pricing=Pricing(tiers=(PricingTier(tier_index=1, input_price=3.0, output_price=9.0),))),
+        "m2": ModelConfig("m2", ("m2",), "Chat", 2, False,
+                          {"s": Scheme("s", frozenset({"gpu"}), Command(exe="x"), {"gpu": 1})},
+                          pricing=Pricing(pricing_type="hourly", hourly_price=10.0)),
+    }, wol=None, claude_configs={})
+    with TestClient(_app(db, cfg)) as c:
+        r = c.get("/api/usage/cost?start=0&end=7200")
+    assert r.status_code == 200
+    j = r.json()
+    names = {row["model"]: row for row in j["by_model"]}
+    assert abs(j["total_cost"] - (((1000 * 3.0 + 500 * 9.0) / 1_000_000) + 10.0)) < 1e-9
+    assert names["m1"]["pricing_type"] == "tier"
+    assert names["m2"]["pricing_type"] == "hourly"
+
+
+def test_usage_cost_series_endpoint_returns_buckets(tmp_path):
+    from llm_manager.config import AppConfig, Command, ModelConfig, Pricing, PricingTier, ProgramConfig, Scheme
+    db = open_db(tmp_path / "t.db")
+    record_usage(db, "m1", start=9, end=10, input_tokens=1000, output_tokens=0, cache_n=0, prompt_n=1000)
+    cfg = AppConfig(program=ProgramConfig("0.0.0.0", 8080, 60, "INFO"), models={
+        "m1": ModelConfig("m1", ("m1",), "Chat", 1, False,
+                          {"s": Scheme("s", frozenset({"gpu"}), Command(exe="x"), {"gpu": 1})},
+                          pricing=Pricing(tiers=(PricingTier(tier_index=1, input_price=3.0),))),
+    }, wol=None, claude_configs={})
+    with TestClient(_app(db, cfg)) as c:
+        r = c.get("/api/usage/cost-series?start=0&end=7200")
+    assert r.status_code == 200
+    j = r.json()
+    assert len(j["buckets"]) == len(j["total"])
+    assert abs(j["models"]["m1"][0] - 1000 * 3.0 / 1_000_000) < 1e-9
