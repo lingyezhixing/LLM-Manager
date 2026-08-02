@@ -216,6 +216,51 @@ export interface ConfigWriteResult {
   serving: string[];
 }
 
+export interface WolConfig {
+  broadcast_address: string;
+  mac_address: string;
+}
+
+// 系统页网络区:WOL 配置写回(PUT /api/config/wol,两字段必填,Pydantic 422 拦部分更新)。
+export async function updateWol(body: WolConfig): Promise<ConfigWriteResult> {
+  const res = await fetch("/api/config/wol", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw await parseApiError(res);
+  return (await res.json()) as ConfigWriteResult;
+}
+
+// Claude 预设:整组全量替换(PUT /api/config/claude)。
+export async function updateClaudeConfigs(configs: Record<string, Record<string, string>>): Promise<ConfigWriteResult> {
+  const res = await fetch("/api/config/claude", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ configs }),
+  });
+  if (!res.ok) throw await parseApiError(res);
+  return (await res.json()) as ConfigWriteResult;
+}
+
+// 应用预设到 Claude settings.json(POST /api/config/claude/apply)。
+export async function applyClaudePreset(name: string): Promise<{ applied: string }> {
+  const res = await fetch("/api/config/claude/apply", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
+  if (!res.ok) throw await parseApiError(res);
+  return (await res.json()) as { applied: string };
+}
+
+// 当前生效预设(GET /api/config/claude/current,探测不到 "(未知)")。
+export async function fetchClaudeCurrent(): Promise<{ current: string }> {
+  const res = await fetch("/api/config/claude/current");
+  if (!res.ok) throw await parseApiError(res);
+  return (await res.json()) as { current: string };
+}
+
 export type ProgramUpdate = Partial<ProgramConfig>;
 
 export async function fetchSystemInfo(): Promise<SystemInfo> {

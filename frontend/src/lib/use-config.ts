@@ -1,13 +1,18 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  applyClaudePreset,
+  fetchClaudeCurrent,
   fetchConfig,
   fetchHealth,
   fetchRestartStatus,
   fetchSystemInfo,
   restartApp,
+  updateClaudeConfigs,
   updateProgram,
+  updateWol,
   type ProgramUpdate,
+  type WolConfig,
 } from "./api";
 
 export function useSystemInfo() {
@@ -32,6 +37,41 @@ export function useUpdateProgram() {
       qc.invalidateQueries({ queryKey: ["restart-status"] });
     },
   });
+}
+
+export function useUpdateWol() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: WolConfig) => updateWol(body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["config"] });
+      qc.invalidateQueries({ queryKey: ["restart-status"] });
+    },
+  });
+}
+
+export function useUpdateClaudeConfigs() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (configs: Record<string, Record<string, string>>) => updateClaudeConfigs(configs),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["config"] });
+      qc.invalidateQueries({ queryKey: ["restart-status"] });
+    },
+  });
+}
+
+// 应用后失效 current 查询(否则 ClaudePanel「当前生效」保持陈旧——代码审查 Minor)。
+export function useApplyClaudePreset() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (name: string) => applyClaudePreset(name),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["config", "claude", "current"] }),
+  });
+}
+
+export function useClaudeCurrent() {
+  return useQuery({ queryKey: ["config", "claude", "current"], queryFn: fetchClaudeCurrent });
 }
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
