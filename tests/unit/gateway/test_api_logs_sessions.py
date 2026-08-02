@@ -1,0 +1,158 @@
+"""GET /api/logs/* — persistent session logs (system + model) over SQLite.
+
+Covers: sessions list (type/model filters, before pagination), per-session line
+paging (level filter / before), SSE live stream (DB backfill + broadcaster tail),
+cross-session text search, unknown-alias 404, unknown-session 404.
+
+SSE 测试直接驱动 _session_stream 生成器(同 test_api_logs.py 的 _logs_stream
+模式):starlette TestClient 与 httpx ASGITransport 都会 await app(...) 到 ASGI
+应用跑完才返回 —— 无限 SSE 流永不结束,任何客户端传输层都会死锁。生成器单循环
+测试覆盖真实逻辑(DB 回填 + 广播实时行);HTTP 层路由/404 由 test_session_404
+经同步 TestClient 覆盖。
+"""
+import asyncio
+import json
+
+import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+from llm_manager import config
+from llm_manager.data import logs as _logs
+from llm_manager.data import persistence as _p
+from llm_manager.data.config_store import ConfigStore, write_appconfig
+from llm_manager.data.persistence import open_db
+from llm_manager.gateway.api.logs import _session_stream
+from llm_manager.gateway.routes import register_routes
+from llm_manager.state import ModelStatus
+
+
+class _NoLife:
+    async def ensure_running(self, alias, *, inc_pending=False): return ModelStatus.STOPPED
+    async def stop(self, alias): return ModelStatus.STOPPED
+
+
+_CFG = """
+program: {host: 0.0.0.0, port: 8080, alive_time: 60, log_level: INFO}
+Local-Models:
+  m1:
+    aliases: ["m1a"]
+    mode: Chat
+    port: 8001
+    RTX4060:
+      required_devices: ["rtx 4060"]
+      command: {exe: "q.bat"}
+      memory_mb: {"rtx 4060": 2048}
+"""
+
+
+def _build(tmp_path):
+    """App + DB + 两个会话。system 会话持久化直建(无广播器,SSE 不测系统);
+    model 会话走 logs 管线建(登记广播器,SSE 实时推可测)。"""
+    p = tmp_path / "config.yaml"
+    p.write_text(_CFG, encoding="utf-8")
+    db = open_db(tmp_path / "t.db")
+    write_appconfig(db, config.load(p))
+    store = ConfigStore(db)
+    app = FastAPI()
+    register_routes(app, _NoLife(), db, {})
+    app.state.config_store = store
+    app.state.db = db
+    _logs.reset()
+    _logs.init(db)
+    sid_sys = _p.log_start_session(db, "system", None, None, 1000.0)
+    _p.log_insert_lines(db, sid_sys, [(1, 1000.1, "sys", "info", "boot"),
+                                      (2, 1000.2, "sys", "error", "boom")])
+    _p.log_end_session(db, sid_sys, 1500.0)
+    sid_m = _logs.start_session("model", "m1", "m1a", 2000.0)
+    return app, db, sid_sys, sid_m
+
+
+@pytest.fixture
+def client(tmp_path):
+    app, db, sid_sys, sid_m = _build(tmp_path)
+    with TestClient(app) as c:
+        yield c, db, sid_sys, sid_m
+
+
+def test_sessions_list(client):
+    c, db, sid_sys, sid_m = client
+    r = c.get("/api/logs/sessions")
+    assert r.status_code == 200
+    data = r.json()
+    assert len(data) == 2
+    assert data[0]["id"] == sid_m and data[0]["type"] == "model"
+    assert data[0]["alias"] == "m1a"
+    assert data[1]["line_count"] == 2 and data[1]["status"] == "ended"
+    r2 = c.get("/api/logs/sessions?type=system")
+    assert [d["id"] for d in r2.json()] == [sid_sys]
+    r3 = c.get("/api/logs/sessions?type=model&model=m1a")
+    assert [d["id"] for d in r3.json()] == [sid_m]
+
+
+def test_sessions_before_pagination(client):
+    c, db, sid_sys, sid_m = client
+    r = c.get("/api/logs/sessions?before=2")
+    assert [d["id"] for d in r.json()] == [sid_sys]   # id < 2
+
+
+def test_session_lines_and_level(client):
+    c, db, sid_sys, sid_m = client
+    r = c.get(f"/api/logs/sessions/{sid_sys}/lines")
+    assert [d["text"] for d in r.json()] == ["boot", "boom"]
+    r2 = c.get(f"/api/logs/sessions/{sid_sys}/lines?level=error")
+    assert [d["text"] for d in r2.json()] == ["boom"]
+    r3 = c.get(f"/api/logs/sessions/{sid_sys}/lines?before=2&limit=1")
+    assert [d["text"] for d in r3.json()] == ["boot"]
+
+
+def test_session_404(client):
+    c, db, sid_sys, sid_m = client
+    assert c.get("/api/logs/sessions/9999/lines").status_code == 404
+    assert c.get("/api/logs/sessions/9999/stream").status_code == 404
+
+
+def test_logs_search(client):
+    c, db, sid_sys, sid_m = client
+    r = c.get("/api/logs/search?q=BOOM")
+    data = r.json()
+    assert data["total"] == 1
+    assert data["matches"][0]["session_id"] == sid_sys
+    assert data["matches"][0]["line"]["text"] == "boom"
+    r2 = c.get("/api/logs/search?q=boom&type=model")
+    assert r2.json()["total"] == 0
+    r3 = c.get(f"/api/logs/search?q=boom&session_id={sid_sys}")
+    assert r3.json()["total"] == 1
+    r4 = c.get("/api/logs/search?q=boom&model=m1a")
+    assert r4.json()["total"] == 0
+
+
+def test_unknown_model_alias_404(client):
+    c, db, sid_sys, sid_m = client
+    assert c.get("/api/logs/sessions?model=nope").status_code == 404
+
+
+def test_session_stream_backfill_and_live(client):
+    c, db, sid_sys, sid_m = client
+    # 回填行经 capture+flush 落库 —— 直插 seq=1 会与 capture 的 next_seq 冲突
+    # (UNIQUE(session_id, seq));此刻无订阅者,广播丢弃,仅落库。
+    _logs.capture("m1", "listening", "out")
+    asyncio.run(_logs.flush())
+
+    async def go():
+        out = []
+        q = _logs.subscribe(sid_m)          # 端点里的存在性检查同款
+        gen = _session_stream(sid_m, None, db, q)
+        try:
+            frame = await anext(gen)        # 回填最近行(DB)
+            out.append(json.loads(frame.removeprefix("data: ").strip()))
+            _logs.capture("m1", "live line", "out")
+            await _logs.flush()             # 落库 + 广播(同一循环)
+            frame = await anext(gen)        # 实时行经广播
+            out.append(json.loads(frame.removeprefix("data: ").strip()))
+        finally:
+            await gen.aclose()              # finally → unsubscribe
+        return out
+
+    res = asyncio.run(go())
+    assert [ll["text"] for ll in res] == ["listening", "live line"]

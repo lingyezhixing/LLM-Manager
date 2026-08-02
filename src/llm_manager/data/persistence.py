@@ -627,6 +627,13 @@ def log_end_session(db: Db, session_id: int, end: float) -> None:
         db.conn.commit()
 
 
+def log_session_exists(db: Db, session_id: int) -> bool:
+    """会话行是否存在(读接口 404 校验用)。"""
+    return db.conn.execute(
+        "SELECT 1 FROM log_sessions WHERE id = ?", (session_id,)
+    ).fetchone() is not None
+
+
 def log_insert_lines(db: Db, session_id: int, rows: list[tuple[int, float, str, str, str]]) -> list[int]:
     """批量插行。rows = [(seq, ts, stream, level, text), ...];返回全局行 id(RETURNING)。
 
