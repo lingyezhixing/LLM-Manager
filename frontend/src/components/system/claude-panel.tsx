@@ -229,7 +229,7 @@ export function ClaudePanel() {
                 id="cp-json"
                 value={editing.json}
                 onChange={(e) => setEditing({ ...editing, json: e.target.value })}
-                className="min-h-40"
+                className="min-h-80"
               />
             </Field>
             <div className="mt-2 flex items-center gap-2">
