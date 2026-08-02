@@ -592,3 +592,46 @@ def test_log_cleanup_both_rules_independent(tmp_path):
     removed_s, removed_l = _p.log_cleanup(db, days=1, count=10, now=90000.0)  # 仅时间规则触发
     assert removed_s == 1 and removed_l == 1
     assert [r["id"] for r in _p.log_sessions(db)] == [sid2]
+
+
+def test_log_cleanup_both_rules_fire_simultaneously(tmp_path):
+    """两规则同时触发:时间规则删 {100, 200}(cutoff=3600),条数规则(3>2)补最旧 1 会话(100,
+    已含)→ 并集去重 → 删 {100, 200}。"""
+    db = open_db(tmp_path / "t.db")
+    sid1 = _p.log_start_session(db, "system", None, None, 100.0)   # 超期,且最旧
+    _p.log_insert_lines(db, sid1, [(1, 100.1, "sys", "info", "a")])
+    sid2 = _p.log_start_session(db, "system", None, None, 200.0)   # 超期
+    _p.log_insert_lines(db, sid2, [(1, 200.1, "sys", "info", "b")])
+    sid3 = _p.log_start_session(db, "system", None, None, 5000.0)  # 新鲜
+    _p.log_insert_lines(db, sid3, [(1, 5000.1, "sys", "info", "c")])
+    removed_s, removed_l = _p.log_cleanup(db, days=1, count=2, now=90000.0)
+    assert removed_s == 2 and removed_l == 2
+    rows = _p.log_sessions(db)
+    assert [r["id"] for r in rows] == [sid3]
+    assert [r["start_time"] for r in rows] == [5000.0]
+
+
+def test_log_cleanup_no_doomed_returns_zero(tmp_path):
+    """无到期会话且条数未超 → 早退 (0, 0),数据原样。"""
+    db = open_db(tmp_path / "t.db")
+    sid = _p.log_start_session(db, "system", None, None, 1000.0)
+    _p.log_insert_lines(db, sid, [(1, 1000.1, "sys", "info", "a")])
+    assert _p.log_cleanup(db, days=9999, count=10, now=10000.0) == (0, 0)
+    rows = _p.log_sessions(db)
+    assert [r["id"] for r in rows] == [sid]
+    assert rows[0]["line_count"] == 1
+
+
+def test_log_cleanup_chunks_large_doomed_sets(tmp_path):
+    """IN 子句按 150 分块:把 SQLITE_LIMIT_VARIABLE_NUMBER 降到 999(模拟 stock CPython
+    的编译默认;conda 构建默认 250000 会掩盖该问题)→ >999 会话在册时不触发
+    too many SQL variables;行/会话数跨块累计精确。"""
+    import sqlite3
+    db = open_db(tmp_path / "t.db")
+    db.conn.setlimit(sqlite3.SQLITE_LIMIT_VARIABLE_NUMBER, 999)
+    sids = [_p.log_start_session(db, "system", None, None, float(1000 + i)) for i in range(1000)]
+    for sid in sids[:200]:  # 200 会话带行 → 行删除跨 2 块
+        _p.log_insert_lines(db, sid, [(1, 1001.0, "sys", "info", "x")])
+    removed_s, removed_l = _p.log_cleanup(db, days=2, count=10000, now=200000.0)
+    assert removed_s == 1000 and removed_l == 200
+    assert _p.log_sessions(db) == []

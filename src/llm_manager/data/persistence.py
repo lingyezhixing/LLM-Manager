@@ -737,7 +737,11 @@ def log_search(db: Db, q: str, *, type_: str | None = None, model_name: str | No
 
 def log_cleanup(db: Db, days: int, count: int, now: float | None = None) -> tuple[int, int]:
     """保留规则:时间规则删 start_time < now-days 的会话;条数规则删最旧多余会话。
-    两规则独立、同时生效、先到先清。返回 (删会话数, 删行数)。now 注入(可测)。"""
+    两规则独立、同时生效、先到先清。返回 (删会话数, 删行数)。now 注入(可测)。
+
+    IN 子句按 150 id 分块(同 log_insert_lines:语句参数数受 SQLITE_MAX_VARIABLE_NUMBER
+    限制,stock CPython 为 999),行/会话数跨块累计;全程同一 write_lock、一次 commit,
+    失败 rollback 整体回滚后重新抛出。"""
     now = now if now is not None else time.time()
     with db.write_lock:
         doomed: set[int] = set()
@@ -752,10 +756,22 @@ def log_cleanup(db: Db, days: int, count: int, now: float | None = None) -> tupl
         if not doomed:
             return 0, 0
         ids = list(doomed)
-        ph = ",".join("?" * len(ids))
-        cur_l = db.conn.execute(f"DELETE FROM log_lines WHERE session_id IN ({ph})", ids)
-        removed_l = cur_l.rowcount
-        db.conn.execute(f"DELETE FROM log_sessions WHERE id IN ({ph})", ids)
-        removed_s = db.conn.execute("SELECT changes() AS n").fetchone()["n"]
-        db.conn.commit()
+        chunk_size = 150
+        removed_l = 0
+        removed_s = 0
+        try:
+            for i in range(0, len(ids), chunk_size):
+                chunk = ids[i:i + chunk_size]
+                ph = ",".join("?" * len(chunk))
+                cur = db.conn.execute(f"DELETE FROM log_lines WHERE session_id IN ({ph})", chunk)
+                removed_l += cur.rowcount
+            for i in range(0, len(ids), chunk_size):
+                chunk = ids[i:i + chunk_size]
+                ph = ",".join("?" * len(chunk))
+                cur = db.conn.execute(f"DELETE FROM log_sessions WHERE id IN ({ph})", chunk)
+                removed_s += cur.rowcount
+            db.conn.commit()
+        except Exception:
+            db.conn.rollback()
+            raise
         return removed_s, removed_l
