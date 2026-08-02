@@ -188,7 +188,7 @@ export function ClaudePanel() {
   const serverPresets = data?.claude ?? {};
   const names = [...Object.keys(serverPresets)].sort();
   const current = currentData?.current ?? "";
-  const currentMissing = current !== "" && !(current in serverPresets);
+  const currentMissing = current !== "" && current !== "(未知)" && !(current in serverPresets);
 
   // 新建卡:nonce>0 时渲染一张;保存成功(onCreated)或取消后清零,期间禁新增。
   const [newNonce, setNewNonce] = useState(0);
