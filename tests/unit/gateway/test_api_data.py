@@ -8,7 +8,12 @@ from types import SimpleNamespace
 from fastapi import APIRouter, FastAPI
 from fastapi.testclient import TestClient
 
-from llm_manager.data.persistence import open_db, record_usage
+from llm_manager.data.persistence import (
+    log_insert_lines,
+    log_start_session,
+    open_db,
+    record_usage,
+)
 from llm_manager.gateway.api.data_api import register_data_routes
 
 
@@ -36,6 +41,8 @@ def test_storage_stats_empty() -> None:
     assert j["total_requests"] == 0
     assert j["total_models_with_data"] == 0
     assert j["models_data"] == {}
+    assert j["log_sessions"] == 0
+    assert j["log_lines"] == 0
 
 
 def test_storage_stats_with_data(tmp_path) -> None:
@@ -54,6 +61,19 @@ def test_storage_stats_with_data(tmp_path) -> None:
     assert j["models_data"]["m1"]["request_count"] == 2
     assert j["models_data"]["m3"] == {"request_count": 0, "has_runtime_data": False}  # 配置但无数据
     assert set(j["models_data"]) == {"m1", "m2", "m3"}
+
+
+def test_storage_stats_includes_log_counts(tmp_path) -> None:
+    db = open_db(tmp_path / "t.db")
+    sid = log_start_session(db, "system", None, None, 1000.0)
+    log_insert_lines(db, sid, [(1, 1000.1, "sys", "info", "a"), (2, 1000.2, "sys", "info", "b")])
+    cfg = SimpleNamespace(models={})
+    with TestClient(_app(db, cfg, resolved_db=str(tmp_path / "t.db"))) as c:
+        r = c.get("/api/data/storage-stats")
+    assert r.status_code == 200
+    j = r.json()
+    assert j["log_sessions"] == 1
+    assert j["log_lines"] == 2
 
 
 def test_orphaned_returns_diff() -> None:

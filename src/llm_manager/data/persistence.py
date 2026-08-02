@@ -783,3 +783,10 @@ def log_cleanup(db: Db, days: int, count: int, now: float | None = None) -> tupl
             db.conn.rollback()
             raise
         return removed_s, removed_l
+
+
+def log_counts(db: Db) -> tuple[int, int]:
+    """(会话数, 行数) — DB 管理页统计。"""
+    s = db.conn.execute("SELECT COUNT(*) FROM log_sessions").fetchone()[0]
+    l = db.conn.execute("SELECT COUNT(*) FROM log_lines").fetchone()[0]
+    return s, l

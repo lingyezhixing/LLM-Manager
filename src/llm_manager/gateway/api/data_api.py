@@ -21,6 +21,7 @@ def register_data_routes(api: APIRouter) -> None:
         size = db_path.stat().st_size if db_path.exists() else None
         cfg = request.app.state.config_store.snapshot()
         s = _p.storage_stats(db, configured=set(cfg.models.keys()), size_bytes=size)
+        log_sessions, log_lines = _p.log_counts(db)
         return {
             "size_bytes": s.size_bytes,
             "total_requests": s.total_requests,
@@ -29,6 +30,8 @@ def register_data_routes(api: APIRouter) -> None:
                 name: {"request_count": st.request_count, "has_runtime_data": st.has_runtime_data}
                 for name, st in s.models_data.items()
             },
+            "log_sessions": log_sessions,
+            "log_lines": log_lines,
         }
 
     @api.get("/data/models/orphaned")
