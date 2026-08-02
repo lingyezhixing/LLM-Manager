@@ -75,7 +75,9 @@ export function GeneralPanel() {
   }
 
   const initial: GeneralForm = { program: data!.program, logs: data!.logs };
-  const dirty = !sameForm(form, initial);
+  // dirty 以 syncedRef(最近采纳的服务端值)为基准,而非 live data——外部刷新被中途丢弃后,
+  // 若用户恰好还原到 syncedRef,保存条应熄灭而非出现「点了没反应」的幽灵态。
+  const dirty = syncedRef.current !== null && !sameForm(form, syncedRef.current);
   const portValid = form.program.port >= 1 && form.program.port <= 65535;
   const aliveValid = form.program.alive_time >= 0;
   const set = (p: ProgramConfig) => setForm({ ...form, program: p });
@@ -109,7 +111,7 @@ export function GeneralPanel() {
   return (
     <div>
       <p className="mb-1 text-xs text-muted-foreground">
-        host / port / 日志 / 路径类字段改完需重启程序(顶部会提示);alive_time 即时生效。
+        host / port / 日志级别 / 路径类字段改完需重启程序(顶部会提示);alive_time 与日志保留即时生效。
       </p>
 
       <SectionTitle>监听与运行</SectionTitle>
@@ -153,7 +155,10 @@ export function GeneralPanel() {
           saving={saving}
           error={saveError ? (saveError as Error).message : null}
           onSave={onSave}
-          onReset={() => setForm(initial)}
+          onReset={() => {
+            syncedRef.current = initial;
+            setForm(initial);
+          }}
         />
       )}
     </div>
