@@ -53,8 +53,6 @@ class _Session:
     id: int
     type: str
     model_name: str | None
-    alias: str | None
-    start: float
     bc: Broadcaster[LogLine]
     next_seq: int = 1
 
@@ -65,6 +63,7 @@ _sessions: dict[int, _Session] = {}
 _alias_to_session: dict[str, int] = {}
 _pending: list[tuple[int, int, float, str, str, str]] = []   # (session_id, seq, ts, stream, level, text)
 _system_session_id: int | None = None
+_flush_chain: asyncio.Task | None = None   # flush 串行链尾(见 flush 文档)
 BATCH_SIZE = 200
 FLUSH_INTERVAL = 1.0
 
@@ -77,11 +76,12 @@ def init(db: _p.Db) -> None:
 
 def reset() -> None:
     """测试隔离:清空全部状态(不写 DB)。"""
-    global _system_session_id
+    global _system_session_id, _flush_chain
     _sessions.clear()
     _alias_to_session.clear()
     _pending.clear()
     _system_session_id = None
+    _flush_chain = None
 
 
 def start_session(type_: str, model_name: str | None = None,
@@ -92,7 +92,7 @@ def start_session(type_: str, model_name: str | None = None,
     assert _db is not None, "logs.init(db) 未调用"
     start = start if start is not None else time.time()
     sid = _p.log_start_session(_db, type_, model_name, alias, start)
-    _sessions[sid] = _Session(sid, type_, model_name, alias, start, Broadcaster())
+    _sessions[sid] = _Session(sid, type_, model_name, Broadcaster())
     if model_name is not None:
         _alias_to_session[model_name] = sid
     if type_ == "system":
@@ -101,8 +101,8 @@ def start_session(type_: str, model_name: str | None = None,
 
 
 def end_session(session_id: int) -> None:
-    """收口会话:落库 end_time;模型会话移除 alias 映射;系统会话清除当前登记;
-    无订阅者的广播器移除。未接线 DB(_db 为 None,测试/启动早期)→ 仅内存收口。"""
+    """收口会话:落库 end_time;模型会话移除 alias 映射;系统会话清除当前登记。
+    未接线 DB(_db 为 None,测试/启动早期)→ 仅内存收口。"""
     global _system_session_id
     if _db is not None:
         _p.log_end_session(_db, session_id, time.time())
@@ -113,8 +113,6 @@ def end_session(session_id: int) -> None:
         _alias_to_session.pop(s.model_name, None)
     if s.type == "system" and _system_session_id == session_id:
         _system_session_id = None
-    if s.bc.subscriber_count == 0:
-        del s.bc  # 无订阅者 → 广播器随会话丢弃
 
 
 def current_system_session_id() -> int | None:
@@ -167,26 +165,42 @@ def _enqueue(session_id: int, text: str, stream: str, level: str, ts: float) -> 
 
 
 async def flush() -> None:
-    """强制落库当前 pending(测试/关停用)。按 session 分组落库,落库后逐行广播(带 DB 全局 id)。"""
-    if not _pending:
-        return
-    assert _db is not None
-    batch = _pending[:]
-    _pending.clear()
-    by_session: dict[int, list[tuple[int, float, str, str, str]]] = {}
-    for sid, seq, ts, stream, level, text in batch:
-        by_session.setdefault(sid, []).append((seq, ts, stream, level, text))
-    for sid, rows in by_session.items():
-        ids = await asyncio.to_thread(_p.log_insert_lines, _db, sid, rows)
-        s = _sessions.get(sid)
-        if s is None:
-            continue
-        for line, lid in zip(rows, ids):
-            s.bc.publish(LogLine(id=lid, ts=line[1], stream=line[2], level=line[3], text=line[4]))
+    """强制落库当前 pending(测试/关停用)。按 session 分组落库,落库后逐行广播(带 DB 全局 id)。
+
+    并发 flush 严格串行(链式):先等链尾 flush 任务收尾、再自任新链尾——write_lock 非 FIFO,
+    并行落库会把全局行 id 顺序打乱(与会话内 seq 脱节,backfill 呈现倒置历史),
+    串行保证落库序 == 捕获序。"""
+    global _flush_chain
+    me = asyncio.current_task()
+    while True:
+        prev = _flush_chain
+        if prev is None or prev is me:
+            break
+        await prev
+    _flush_chain = me
+    try:
+        if not _pending:
+            return
+        assert _db is not None
+        batch = _pending[:]
+        _pending.clear()
+        by_session: dict[int, list[tuple[int, float, str, str, str]]] = {}
+        for sid, seq, ts, stream, level, text in batch:
+            by_session.setdefault(sid, []).append((seq, ts, stream, level, text))
+        for sid, rows in by_session.items():
+            ids = await asyncio.to_thread(_p.log_insert_lines, _db, sid, rows)
+            s = _sessions.get(sid)
+            if s is None:
+                continue
+            for line, lid in zip(rows, ids):
+                s.bc.publish(LogLine(id=lid, ts=line[1], stream=line[2], level=line[3], text=line[4]))
+    finally:
+        if _flush_chain is me:
+            _flush_chain = None
 
 
 async def flush_loop(stop_event: asyncio.Event) -> None:
-    """常驻 flush 任务(阈值 200 行或 1s,先到先 flush)。"""
+    """常驻 flush 任务(阈值 200 行或 1s,先到先 flush);退出前兜底清空剩余 pending。"""
     while not stop_event.is_set():
         try:
             if _pending:
@@ -196,6 +210,7 @@ async def flush_loop(stop_event: asyncio.Event) -> None:
             pass
         except asyncio.CancelledError:
             break
+    await flush()
 
 
 def subscribe(session_id: int):
