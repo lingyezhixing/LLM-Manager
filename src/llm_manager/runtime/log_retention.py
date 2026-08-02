@@ -15,10 +15,21 @@ logger = logging.getLogger(__name__)
 
 
 def retention_settings(db) -> tuple[int, int]:
-    """(days, count) 直读 system_settings(默认 30/10)。"""
-    days = int(get_setting(db, "log_retention_days") or 30)
-    count = int(get_setting(db, "log_retention_count") or 10)
-    return days, count
+    """(days, count) 直读 system_settings(默认 30/10;非法值回退默认)。
+
+    防御手改 DB:值非整数(如 "abc")时若让 int() 抛 ValueError,循环每轮都会被
+    异常兜底记 error 且永远不清理——回退默认值保持规则可用。"""
+    def _int(key: str, default: int) -> int:
+        raw = get_setting(db, key)
+        if raw is None:
+            return default
+        try:
+            return int(raw)
+        except ValueError:
+            logger.warning("invalid log retention %s=%r, falling back to %d", key, raw, default)
+            return default
+
+    return _int("log_retention_days", 30), _int("log_retention_count", 10)
 
 
 async def log_retention_loop(db, get_settings, stop_event: asyncio.Event,
