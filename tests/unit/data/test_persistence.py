@@ -488,3 +488,47 @@ def test_log_session_line_count(tmp_path):
     _p.log_insert_lines(db, sid, [(2, 1000.2, "sys", "info", "b")])
     rows = _p.log_sessions(db)
     assert rows[0]["line_count"] == 2
+
+
+def test_log_insert_lines_empty_returns_empty(tmp_path):
+    db = open_db(tmp_path / "t.db")
+    assert _p.log_insert_lines(db, 123, []) == []  # 空列表守卫,不触发任何写
+
+
+def test_log_insert_lines_chunks_large_batches(tmp_path):
+    db = open_db(tmp_path / "t.db")
+    sid = _p.log_start_session(db, "system", None, None, 1000.0)
+    rows = [(i, 1000.0 + i, "sys", "info", f"line {i}") for i in range(1, 400)]  # 399 行 → 3 块(150+150+99)
+    ids = _p.log_insert_lines(db, sid, rows)
+    assert len(ids) == 399
+    assert ids == sorted(ids)  # 分块后仍全局自增、保持插入序
+    back = _p.log_lines_backfill(db, sid, limit=5000)
+    assert [r["text"] for r in back] == [f"line {i}" for i in range(1, 400)]
+
+
+def test_log_sessions_model_filter_and_before_pagination(tmp_path):
+    db = open_db(tmp_path / "t.db")
+    s1 = _p.log_start_session(db, "model", "m1", "m1a", 1000.0)
+    s2 = _p.log_start_session(db, "model", "m2", "m2a", 2000.0)
+    s3 = _p.log_start_session(db, "system", None, None, 3000.0)
+    rows = _p.log_sessions(db, model_name="m1")
+    assert [r["id"] for r in rows] == [s1]
+    rows = _p.log_sessions(db, limit=2)
+    assert [r["id"] for r in rows] == [s3, s2]
+    rows = _p.log_sessions(db, limit=2, before_id=s3)
+    assert [r["id"] for r in rows] == [s2, s1]
+
+
+def test_log_search_matches_across_sessions_and_filters(tmp_path):
+    db = open_db(tmp_path / "t.db")
+    s1 = _p.log_start_session(db, "system", None, None, 1000.0)
+    s2 = _p.log_start_session(db, "model", "m1", "m1-alias", 2000.0)
+    _p.log_insert_lines(db, s1, [(1, 1000.1, "sys", "info", "boot Error")])
+    _p.log_insert_lines(db, s2, [(1, 2000.1, "stdout", "warn", "model startup error")])
+    rows = _p.log_search(db, "error")
+    assert [r["text"] for r in rows] == ["boot Error", "model startup error"]  # 跨会话 + ASCII 大小写不敏感
+    assert rows[0]["session_type"] == "system" and rows[1]["session_type"] == "model"
+    rows = _p.log_search(db, "error", session_id=s1)
+    assert [r["text"] for r in rows] == ["boot Error"]
+    rows = _p.log_search(db, "error", type_="model")
+    assert [r["text"] for r in rows] == ["model startup error"]

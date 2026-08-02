@@ -609,6 +609,7 @@ def delete_model_data(db: Db, model_name: str) -> bool:
 
 
 def log_start_session(db: Db, type_: str, model_name: str | None, alias: str | None, start: float) -> int:
+    """开新日志会话(系统或模型);返回会话 id。"""
     with db.write_lock:
         cur = db.conn.execute(
             "INSERT INTO log_sessions (type, model_name, alias, start_time) VALUES (?,?,?,?)",
@@ -620,6 +621,7 @@ def log_start_session(db: Db, type_: str, model_name: str | None, alias: str | N
 
 
 def log_end_session(db: Db, session_id: int, end: float) -> None:
+    """关闭会话:写入 end_time。"""
     with db.write_lock:
         db.conn.execute("UPDATE log_sessions SET end_time=? WHERE id=?", (end, session_id))
         db.conn.commit()
@@ -629,18 +631,24 @@ def log_insert_lines(db: Db, session_id: int, rows: list[tuple[int, float, str, 
     """批量插行。rows = [(seq, ts, stream, level, text), ...];返回全局行 id(RETURNING)。
 
     注意:CPython 的 executemany 不能用于带 RETURNING 的语句(sqlite3.InterfaceError),
-    故用单条 execute + 多行 VALUES,一次往返拿回全部行 id(插入序)。"""
+    故用单条 execute + 多行 VALUES。语句参数数受 SQLITE_MAX_VARIABLE_NUMBER 限制
+    (stock CPython 为 999 → 每语句 ≤166 行),因此按 150 行分块插入,累积各块行 id
+    (全局自增,天然保持插入序);全程同一 write_lock、一次 commit。"""
     if not rows:
         return []
+    chunk_size = 150
+    ids: list[int] = []
     with db.write_lock:
-        sql = ("INSERT INTO log_lines (session_id, seq, ts, stream, level, text) VALUES "
-               + ",".join(["(?,?,?,?,?,?)"] * len(rows)) + " RETURNING id")
-        flat: list = []
-        for r in rows:
-            flat.append(session_id)
-            flat.extend(r)
-        cur = db.conn.execute(sql, flat)
-        ids = [row["id"] for row in cur.fetchall()]
+        for i in range(0, len(rows), chunk_size):
+            chunk = rows[i:i + chunk_size]
+            sql = ("INSERT INTO log_lines (session_id, seq, ts, stream, level, text) VALUES "
+                   + ",".join(["(?,?,?,?,?,?)"] * len(chunk)) + " RETURNING id")
+            flat: list = []
+            for r in chunk:
+                flat.append(session_id)
+                flat.extend(r)
+            cur = db.conn.execute(sql, flat)
+            ids.extend(row["id"] for row in cur.fetchall())
         db.conn.commit()
         return ids
 
@@ -667,10 +675,14 @@ def log_sessions(db: Db, *, type_: str | None = None, model_name: str | None = N
     return db.conn.execute(sql, args).fetchall()
 
 
-def log_lines_backfill(db: Db, session_id: int, limit: int = 1500, level: str | None = None) -> list[sqlite3.Row]:
-    """会话内最近 limit 行(升序)。"""
+def _log_lines_tail(db: Db, session_id: int, limit: int, level: str | None,
+                    before_id: int | None = None) -> list[sqlite3.Row]:
+    """会话内最近 limit 行(升序)。before_id 给定则限定 id < before_id(往前翻页)。"""
     sql = "SELECT * FROM log_lines WHERE session_id = ?"
     args: list = [session_id]
+    if before_id is not None:
+        sql += " AND id < ?"
+        args.append(before_id)
     if level is not None:
         sql += " AND level = ?"
         args.append(level)
@@ -679,28 +691,24 @@ def log_lines_backfill(db: Db, session_id: int, limit: int = 1500, level: str | 
     rows = db.conn.execute(sql, args).fetchall()
     rows.reverse()
     return rows
+
+
+def log_lines_backfill(db: Db, session_id: int, limit: int = 1500, level: str | None = None) -> list[sqlite3.Row]:
+    """会话内最近 limit 行(升序)。"""
+    return _log_lines_tail(db, session_id, limit, level)
 
 
 def log_lines_before(db: Db, session_id: int, before_id: int, limit: int = 1500,
                      level: str | None = None) -> list[sqlite3.Row]:
     """id < before_id 的最近 limit 行(升序)——往前翻页。"""
-    sql = "SELECT * FROM log_lines WHERE session_id = ? AND id < ?"
-    args: list = [session_id, before_id]
-    if level is not None:
-        sql += " AND level = ?"
-        args.append(level)
-    sql += " ORDER BY id DESC LIMIT ?"
-    args.append(max(1, min(limit, 5000)))
-    rows = db.conn.execute(sql, args).fetchall()
-    rows.reverse()
-    return rows
+    return _log_lines_tail(db, session_id, limit, level, before_id=before_id)
 
 
 def log_search(db: Db, q: str, *, type_: str | None = None, model_name: str | None = None,
                session_id: int | None = None, level: str | None = None,
                limit: int = 500) -> list[sqlite3.Row]:
-    """行级 LIKE 检索(大小写不敏感),跨会话;返回匹配行(升序),含 session 归属。
-    session_id 指定时限定单会话(日志页搜索跳转用)。"""
+    """行级 LIKE 检索,跨会话;返回匹配行(升序),含 session 归属。
+    session_id 指定时限定单会话(日志页搜索跳转用)。SQLite LIKE 对 ASCII 大小写不敏感。"""
     sql = ("SELECT l.*, s.type AS session_type, s.model_name AS session_model "
            "FROM log_lines l JOIN log_sessions s ON s.id = l.session_id "
            "WHERE l.text LIKE '%' || ? || '%' COLLATE NOCASE")
