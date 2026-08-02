@@ -532,3 +532,23 @@ def test_log_search_matches_across_sessions_and_filters(tmp_path):
     assert [r["text"] for r in rows] == ["boot Error"]
     rows = _p.log_search(db, "error", type_="model")
     assert [r["text"] for r in rows] == ["model startup error"]
+
+
+def test_log_insert_lines_rolls_back_partial_chunks_on_failure(tmp_path):
+    """分块插入任一块失败(重复 seq → IntegrityError)→ 整体回滚,不留部分行;
+    同连接后续无关 commit 也不得把残留行带落盘。"""
+    import pytest
+    import sqlite3
+    p = tmp_path / "t.db"
+    db = open_db(p)
+    sid = _p.log_start_session(db, "system", None, None, 1000.0)
+    rows = [(i, 1000.0 + i, "sys", "info", f"line {i}") for i in range(1, 201)]  # seq 1..200
+    rows.append((151, 3000.0, "sys", "info", "dup seq 151"))                     # 201 行 → 第 2 块内重复
+    with pytest.raises(sqlite3.IntegrityError):
+        _p.log_insert_lines(db, sid, rows)
+    _p.log_end_session(db, sid, 5000.0)  # 同连接后续 commit —— 若残留事务会误提交部分行
+    db.conn.close()
+    db2 = open_db(p)  # 全新连接读盘,验证零泄漏
+    assert db2.conn.execute("SELECT COUNT(*) FROM log_lines").fetchone()[0] == 0
+    assert db2.conn.execute("SELECT COUNT(*) FROM log_sessions").fetchone()[0] == 1
+    assert db2.conn.execute("SELECT end_time FROM log_sessions").fetchone()[0] == 5000.0

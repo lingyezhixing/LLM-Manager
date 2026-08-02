@@ -633,23 +633,28 @@ def log_insert_lines(db: Db, session_id: int, rows: list[tuple[int, float, str, 
     注意:CPython 的 executemany 不能用于带 RETURNING 的语句(sqlite3.InterfaceError),
     故用单条 execute + 多行 VALUES。语句参数数受 SQLITE_MAX_VARIABLE_NUMBER 限制
     (stock CPython 为 999 → 每语句 ≤166 行),因此按 150 行分块插入,累积各块行 id
-    (全局自增,天然保持插入序);全程同一 write_lock、一次 commit。"""
+    (全局自增,天然保持插入序);全程同一 write_lock、一次 commit。任一块失败则
+    rollback 整体回滚(不落盘部分行)后重新抛出。"""
     if not rows:
         return []
     chunk_size = 150
     ids: list[int] = []
     with db.write_lock:
-        for i in range(0, len(rows), chunk_size):
-            chunk = rows[i:i + chunk_size]
-            sql = ("INSERT INTO log_lines (session_id, seq, ts, stream, level, text) VALUES "
-                   + ",".join(["(?,?,?,?,?,?)"] * len(chunk)) + " RETURNING id")
-            flat: list = []
-            for r in chunk:
-                flat.append(session_id)
-                flat.extend(r)
-            cur = db.conn.execute(sql, flat)
-            ids.extend(row["id"] for row in cur.fetchall())
-        db.conn.commit()
+        try:
+            for i in range(0, len(rows), chunk_size):
+                chunk = rows[i:i + chunk_size]
+                sql = ("INSERT INTO log_lines (session_id, seq, ts, stream, level, text) VALUES "
+                       + ",".join(["(?,?,?,?,?,?)"] * len(chunk)) + " RETURNING id")
+                flat: list = []
+                for r in chunk:
+                    flat.append(session_id)
+                    flat.extend(r)
+                cur = db.conn.execute(sql, flat)
+                ids.extend(row["id"] for row in cur.fetchall())
+            db.conn.commit()
+        except Exception:
+            db.conn.rollback()
+            raise
         return ids
 
 
