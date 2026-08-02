@@ -2,6 +2,7 @@ import { useState, type ReactNode } from "react";
 
 import { useQuery } from "@tanstack/react-query";
 
+import { Button } from "@/components/ui/button";
 import { fetchUsageByModel, fetchUsageCost, type UsageSeriesParams } from "@/lib/api";
 import { formatCost, formatCount, formatHitRate, formatLatency, formatPercent, formatTokens } from "@/lib/format";
 
@@ -49,6 +50,12 @@ export function UsageByModelTable({
 
   return (
     <Card>
+      {costQ.isError && (
+        <div className="mb-3 flex items-center gap-2 text-sm text-destructive">
+          成本加载失败:{(costQ.error as Error).message}
+          <Button size="sm" variant="ghost" onClick={() => costQ.refetch()}>重试</Button>
+        </div>
+      )}
       <table className="w-full text-sm">
         <thead>
           <tr>
@@ -81,7 +88,7 @@ export function UsageByModelTable({
               </td>
               <td className="p-2 text-right tabular-nums">{formatHitRate(r.hit_rate)}</td>
               <td className="p-2 text-right tabular-nums">{formatLatency(r.latency_ms)}</td>
-              <td className="p-2 text-right tabular-nums">{formatCost(costOf.get(r.model) ?? 0)}</td>
+              <td className="p-2 text-right tabular-nums">{costQ.data ? formatCost(costOf.get(r.model) ?? 0) : "—"}</td>
             </tr>
           ))}
         </tbody>

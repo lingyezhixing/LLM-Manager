@@ -1,5 +1,8 @@
+import { type ReactNode } from "react";
+
 import { useQuery } from "@tanstack/react-query";
 
+import { Button } from "@/components/ui/button";
 import { fetchUsageCost, fetchUsageSummary, type UsageSeriesParams } from "@/lib/api";
 import { formatCost, formatCount, formatHitRate, formatTokens } from "@/lib/format";
 
@@ -37,12 +40,27 @@ export function UsageKpiRow({
       <Tile label="未命中" value={formatTokens(data.cache_miss)} valueClass="text-destructive" />
       <Tile label="命中率" value={formatHitRate(data.hit_rate)} valueClass="text-primary" />
       <Tile label="请求数" value={formatCount(data.request_count)} />
-      <Tile label="成本" value={costQ.data ? formatCost(costQ.data.total_cost) : "—"} valueClass="text-primary" />
+      <Tile
+        label="成本"
+        valueClass="text-primary"
+        value={
+          costQ.isError ? (
+            <span className="flex items-center gap-1.5">
+              加载失败
+              <Button size="sm" variant="ghost" onClick={() => costQ.refetch()}>重试</Button>
+            </span>
+          ) : costQ.data ? (
+            formatCost(costQ.data.total_cost)
+          ) : (
+            "—"
+          )
+        }
+      />
     </div>
   );
 }
 
-function Tile({ label, value, valueClass = "" }: { label: string; value: string; valueClass?: string }) {
+function Tile({ label, value, valueClass = "" }: { label: string; value: ReactNode; valueClass?: string }) {
   return (
     <div className="rounded-lg border border-border px-3 py-2">
       <div className="text-xs text-muted-foreground">{label}</div>
