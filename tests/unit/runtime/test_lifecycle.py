@@ -479,32 +479,55 @@ class _CapturingSupervisor(FakeSupervisor):
         return await super().spawn(cmd, shell=shell, on_output=on_output)
 
 
-def test_pipeline_wires_on_output_to_logs_capture():
+async def test_pipeline_wires_on_output_to_logs_capture(tmp_path):
+    """spawn 时 on_output capture 接线:输出行经 capture 落库到该模型的最新会话。"""
+    from llm_manager.data.persistence import open_db
     logs.reset()
-    cap = _CapturingSupervisor()
-    lc, sup, dev, cfg = _make(sup=cap)
-    asyncio.run(lc.ensure_running("m1"))
-    assert cap.on_output is not None
-    # 模拟 supervisor 读线程 marshal 出来的行(capture 同步,可直接调)
-    cap.on_output("server listening on :8000", "out")
-    cap.on_output("error: boom", "err")
-    bf = logs.backfill("m1", 10)
-    assert [line.text for line in bf] == ["server listening on :8000", "error: boom"]
-    assert [line.level for line in bf] == ["ok", "error"]
+    db = open_db(tmp_path / "t.db")
+    logs.init(db)
+    try:
+        cap = _CapturingSupervisor()
+        lc, sup, dev, cfg = _make(sup=cap, db=db)
+        await lc.ensure_running("m1")
+        assert cap.on_output is not None
+        sid = logs.resolve_session("m1")
+        assert sid is not None
+        # 模拟 supervisor 读线程 marshal 出来的行(capture 同步,可直接调)
+        cap.on_output("server listening on :8000", "out")
+        cap.on_output("error: boom", "err")
+        await logs.flush()
+        lines = _p.log_lines_backfill(db, sid, limit=10)
+        assert [line["text"] for line in lines] == ["server listening on :8000", "error: boom"]
+        assert [line["level"] for line in lines] == ["ok", "error"]
+    finally:
+        logs.reset()
 
 
-def test_stop_ends_log_session():
+async def test_stop_ends_log_session(tmp_path):
+    """stop 后会话收口:resolve_session 返回 None、DB end_time 已落库;后续 capture 被丢弃。"""
+    from llm_manager.data.persistence import open_db
     logs.reset()
-    cap = _CapturingSupervisor()
-    lc, sup, dev, cfg = _make(sup=cap)
-    asyncio.run(lc.ensure_running("m1"))
-    assert cap.on_output is not None
-    cap.on_output("old session line", "out")
-    asyncio.run(lc.stop("m1"))
-    # stop 后会话结束;新 capture 开启全新会话(id 从 1 起)
-    logs.capture("m1", "new session", "out")
-    bf = logs.backfill("m1", 10)
-    assert len(bf) == 1 and bf[0].id == 1 and bf[0].text == "new session"
+    db = open_db(tmp_path / "t.db")
+    logs.init(db)
+    try:
+        cap = _CapturingSupervisor()
+        lc, sup, dev, cfg = _make(sup=cap, db=db)
+        await lc.ensure_running("m1")
+        assert cap.on_output is not None
+        cap.on_output("old session line", "out")
+        sid = logs.resolve_session("m1")
+        assert sid is not None
+        await lc.stop("m1")
+        assert logs.resolve_session("m1") is None
+        rows = _p.log_sessions(db, type_="model", model_name="m1")
+        assert len(rows) == 1 and rows[0]["end_time"] is not None
+        # stop 后 capture 无进行中会话可入 → 丢弃(行数不变,不污染历史)
+        logs.capture("m1", "dropped after stop", "out")
+        await logs.flush()
+        lines = _p.log_lines_backfill(db, sid, limit=10)
+        assert [line["text"] for line in lines] == ["old session line"]
+    finally:
+        logs.reset()
 
 
 # ---------- conda_env argv wrapping (Windows cmd /c) ----------
@@ -622,7 +645,7 @@ async def test_model_log_session_open_on_spawn_closed_on_stop(tmp_path):
         logs.capture("m1", "server listening on :8000", "out")
         await logs.flush()
         lines = _p.log_lines_backfill(db, sid, limit=10)
-        assert [l["text"] for l in lines] == ["server listening on :8000"]
+        assert [ll["text"] for ll in lines] == ["server listening on :8000"]
 
         await life.stop("m1")
         assert logs.resolve_session("m1") is None

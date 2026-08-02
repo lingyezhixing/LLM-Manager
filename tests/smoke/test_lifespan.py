@@ -35,7 +35,7 @@ def test_lifespan_opens_db_and_monitor_then_cleans_up(tmp_path):
 
 def test_lifespan_opens_and_closes_system_session(tmp_path):
     app = create_app(db_path=tmp_path / "t.db")
-    with TestClient(app) as client:
+    with TestClient(app):
         sid = logs.current_system_session_id()
         assert sid is not None                        # lifespan 已开系统会话
         rows = _p.log_sessions(app.state.db, type_="system")

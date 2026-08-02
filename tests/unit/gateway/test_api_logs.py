@@ -1,7 +1,21 @@
+"""GET /api/models/{alias}/logs* — legacy model log endpoints, now DB-backed.
+
+Old URL + response shape preserved (frontend ModelLogPanel contract):
+backfill/before paging (limit clamped 1..5000), search {matches: list[int],
+total}, SSE stream (DB backfill then live tail). Data source is the model's
+LATEST session (current session while running; most recent after stop) — so
+logs stay readable after stop (persisted), and unknown aliases still 404.
+
+SSE 测试直接驱动 _logs_stream 生成器(同 test_api_logs_sessions.py 的
+_session_stream 模式):starlette TestClient 与 httpx ASGITransport 都会
+await app(...) 到 ASGI 应用跑完才返回 —— 无限 SSE 流永不结束,任何客户端传输层
+都会死锁。生成器单循环测试覆盖真实逻辑(DB 回填 + 广播实时行);HTTP 层路由/404
+由其余端点测试经同步 TestClient 覆盖。
+"""
 import asyncio
 import json
-from pathlib import Path
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -34,28 +48,40 @@ Local-Models:
 """
 
 
-def _app(tmp_path):
+@pytest.fixture
+def app(tmp_path):
+    """App + 独立 tmp DB + logs 接线(每测试独立,会话/行 id 从 1 起)。"""
     p = tmp_path / "config.yaml"
     p.write_text(_CFG, encoding="utf-8")
-    db = open_db(Path(":memory:"))
+    db = open_db(tmp_path / "t.db")
     write_appconfig(db, config.load(p))
     store = ConfigStore(db)
     app = FastAPI()
     register_routes(app, _NoLife(), db, {})
     app.state.config_store = store
     app.state.db = db
-    return app
-
-
-def test_logs_stream_backfills_then_streams():
     logs.reset()
-    logs.capture("m1", "old1", "out")
-    logs.capture("m1", "old2", "out")
-    logs.capture("m1", "error: boom", "err")
+    logs.init(db)
+    yield app, db
+    logs.reset()
+
+
+def _seed(lines: list[tuple[str, str]]) -> int:
+    """开 m1 模型日志会话、capture 各行并落库;返回 sid。"""
+    sid = logs.start_session("model", "m1", "m1")
+    for text, stream in lines:
+        logs.capture("m1", text, stream)
+    asyncio.run(logs.flush())
+    return sid
+
+
+def test_logs_stream_backfills_then_streams(app):
+    app, db = app
+    _seed([("old1", "out"), ("old2", "out"), ("error: boom", "err")])
 
     async def go():
         out = []
-        gen = _logs_stream("m1", limit=10)
+        gen = _logs_stream("m1", db, limit=10)
         async for frame in gen:
             out.append(json.loads(frame.removeprefix("data: ").strip()))
             if len(out) == 3:        # 取完回填 3 行即停(真端点无限)
@@ -69,15 +95,13 @@ def test_logs_stream_backfills_then_streams():
     assert res[0]["id"] == 1 and res[2]["id"] == 3
 
 
-def test_logs_stream_respects_level_filter_on_backfill():
-    logs.reset()
-    logs.capture("m1", "info line", "out")
-    logs.capture("m1", "error: x", "err")
-    logs.capture("m1", "info line2", "out")
+def test_logs_stream_respects_level_filter_on_backfill(app):
+    app, db = app
+    _seed([("info line", "out"), ("error: x", "err"), ("info line2", "out")])
 
     async def go():
         out = []
-        gen = _logs_stream("m1", limit=10, level="error")
+        gen = _logs_stream("m1", db, limit=10, level="error")
         async for frame in gen:
             out.append(json.loads(frame.removeprefix("data: ").strip()))
             if len(out) == 1:
@@ -89,40 +113,64 @@ def test_logs_stream_respects_level_filter_on_backfill():
     assert len(res) == 1 and res[0]["text"] == "error: x" and res[0]["level"] == "error"
 
 
-def test_logs_search_endpoint_returns_matches(tmp_path):
-    logs.reset()
-    logs.capture("m1", "ctx a", "out")
-    logs.capture("m1", "error: x", "err")
-    logs.capture("m1", "ctx b", "out")
-    logs.capture("m1", "error: y", "err")
-    with TestClient(_app(tmp_path)) as c:
+def test_logs_search_endpoint_returns_matches(app):
+    app, db = app
+    _seed([("ctx a", "out"), ("error: x", "err"), ("ctx b", "out"), ("error: y", "err")])
+    with TestClient(app) as c:
         r = c.get("/api/models/m1/logs/search?q=error")
     assert r.status_code == 200
     j = r.json()
     assert j["matches"] == [2, 4] and j["total"] == 2
 
 
-def test_logs_search_endpoint_level_filter(tmp_path):
-    logs.reset()
-    logs.capture("m1", "ERROR boom", "err")     # id1 level=error
-    logs.capture("m1", "error out", "out")      # id2 level=info(stream=out)
-    with TestClient(_app(tmp_path)) as c:
+def test_logs_search_endpoint_level_filter(app):
+    app, db = app
+    _seed([("ERROR boom", "err"), ("error out", "out")])   # id1 error / id2 info(stream=out)
+    with TestClient(app) as c:
         r = c.get("/api/models/m1/logs/search?q=error&level=error")
     assert r.json()["matches"] == [1]
 
 
-def test_logs_before_endpoint_pages_older(tmp_path):
-    logs.reset()
-    for i in range(10):
-        logs.capture("m1", f"line{i}", "out")   # ids 1..10
-    with TestClient(_app(tmp_path)) as c:
+def test_logs_before_endpoint_pages_older(app):
+    app, db = app
+    _seed([(f"line{i}", "out") for i in range(10)])        # ids 1..10
+    with TestClient(app) as c:
         r = c.get("/api/models/m1/logs?before=6&limit=3")
     assert r.status_code == 200
     assert [ll["id"] for ll in r.json()] == [3, 4, 5]
 
 
-def test_logs_unknown_alias_404(tmp_path):
-    logs.reset()
-    with TestClient(_app(tmp_path)) as c:
+def test_logs_still_readable_after_session_end(app):
+    """停止后仍可读:end_session 收口后,列表/检索改读 DB 最新(已结束)会话。"""
+    app, db = app
+    sid = _seed([("persisted line", "out")])
+    logs.end_session(sid)                                  # stop 收口:alias 映射移除,DB 行保留
+    assert logs.resolve_session("m1") is None
+    with TestClient(app) as c:
+        r = c.get("/api/models/m1/logs")
+        s = c.get("/api/models/m1/logs/search?q=persisted")
+    assert r.status_code == 200
+    assert [ll["text"] for ll in r.json()] == ["persisted line"]
+    assert s.json() == {"matches": [1], "total": 1}
+
+
+def test_logs_no_session_returns_empty(app):
+    """从未启动:无最新会话 → 列表 []、search 空、stream 空流。"""
+    app, db = app
+    with TestClient(app) as c:
+        r = c.get("/api/models/m1/logs")
+        s = c.get("/api/models/m1/logs/search?q=x")
+
+    async def go():
+        return [f async for f in _logs_stream("m1", db, limit=10)]
+
+    assert r.json() == []
+    assert s.json() == {"matches": [], "total": 0}
+    assert asyncio.run(go()) == []
+
+
+def test_logs_unknown_alias_404(app):
+    app, db = app
+    with TestClient(app) as c:
         r = c.get("/api/models/nope/logs/search?q=x")
     assert r.status_code == 404

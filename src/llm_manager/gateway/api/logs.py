@@ -11,63 +11,14 @@ from collections.abc import AsyncIterator
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
 
 from llm_manager import config
 from llm_manager.data import logs as _logs
 from llm_manager.data import persistence as _p
-
-_LOG_LEVELS = ("info", "ok", "warn", "error")
-
-
-class LogLineResponse(BaseModel):
-    id: int
-    ts: float
-    stream: str
-    level: str
-    text: str
-
-
-class LogSessionResponse(BaseModel):
-    id: int
-    type: str
-    model_name: str | None
-    alias: str | None
-    start_time: float
-    end_time: float | None
-    status: str           # "running" | "ended"
-    duration_s: float | None
-    line_count: int
-
-
-class LogSearchResponse(BaseModel):
-    total: int
-    matches: list[dict]   # [{session_id, line: LogLineResponse}]
-
-
-def _to_line(r) -> LogLineResponse:
-    """sqlite3.Row(回填/检索)或 _logs.LogLine(广播实时行) → 统一响应模型。"""
-    if isinstance(r, _logs.LogLine):
-        return LogLineResponse(id=r.id, ts=r.ts, stream=r.stream,
-                               level=r.level, text=r.text)
-    return LogLineResponse(id=r["id"], ts=r["ts"], stream=r["stream"],
-                           level=r["level"], text=r["text"])
-
-
-def _to_session(r) -> LogSessionResponse:
-    ended = r["end_time"] is not None
-    return LogSessionResponse(
-        id=r["id"], type=r["type"], model_name=r["model_name"], alias=r["alias"],
-        start_time=r["start_time"], end_time=r["end_time"],
-        status="ended" if ended else "running",
-        duration_s=(r["end_time"] - r["start_time"]) if ended else None,
-        line_count=r["line_count"],
-    )
-
-
-def _level_param(request: Request) -> str | None:
-    lv = request.query_params.get("level")
-    return lv if lv in _LOG_LEVELS else None
+from llm_manager.gateway.api.logs_schemas import (
+    LogLineResponse, LogSearchMatch, LogSearchResponse, LogSessionResponse,
+    _level_param, _to_line, _to_session,
+)
 
 
 def _db(request: Request):
@@ -144,5 +95,5 @@ def register_logs_routes(api: APIRouter) -> None:
                              session_id=session_id, level=level, limit=limit)
         return LogSearchResponse(
             total=len(rows),
-            matches=[{"session_id": r["session_id"], "line": _to_line(r)} for r in rows],
+            matches=[LogSearchMatch(session_id=r["session_id"], line=_to_line(r)) for r in rows],
         )

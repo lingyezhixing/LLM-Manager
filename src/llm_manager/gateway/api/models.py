@@ -17,6 +17,8 @@ from pydantic import BaseModel
 
 from llm_manager import config, state
 from llm_manager.data import logs as _logs
+from llm_manager.data import persistence as _p
+from llm_manager.gateway.api.logs_schemas import LogLineResponse, _level_param, _to_line
 from llm_manager.realtime import ModelFeed
 
 
@@ -37,16 +39,8 @@ class ModelsResponse(BaseModel):
     data: list[ModelInfo]
 
 
-class LogLineResponse(BaseModel):
-    id: int
-    ts: float
-    stream: str
-    level: str
-    text: str
-
-
-class LogSearchResponse(BaseModel):
-    matches: list[int]   # 匹配行 id(升序)
+class ModelLogSearchResponse(BaseModel):
+    matches: list[int]   # 匹配行 id(升序)——旧端点契约;新 /api/logs/search 的 LogSearchResponse 形态不同
     total: int
 
 
@@ -87,24 +81,36 @@ async def _models_stream(feed: ModelFeed[ModelsResponse]) -> AsyncIterator[str]:
         feed.unsubscribe(q)
 
 
-def _to_log_response(line: _logs.LogLine) -> LogLineResponse:
-    return LogLineResponse(id=line.id, ts=line.ts, stream=line.stream, level=line.level, text=line.text)
+def _log_event(line) -> str:
+    return f"data: {_to_line(line).model_dump_json()}\n\n"
 
 
-def _log_event(line: _logs.LogLine) -> str:
-    return f"data: {_to_log_response(line).model_dump_json()}\n\n"
+def _latest_model_session(db, primary: str) -> int | None:
+    """模型最新日志会话 id:运行中 = 当前进行中会话;停止后 = 最近一次(id 最大)→ 历史持久可读。
+    从未启动过 → None。"""
+    rows = _p.log_sessions(db, type_="model", model_name=primary, limit=1)
+    return rows[0]["id"] if rows else None
 
 
-async def _logs_stream(alias: str, limit: int = 2048, level: str | None = None) -> AsyncIterator[str]:
-    """无限 SSE:先回填最近 limit 行(可 level 过滤),再实时推新行。alias 是 primary_name。"""
-    q = _logs.subscribe(alias)
+async def _logs_stream(primary: str, db, limit: int = 2048, level: str | None = None) -> AsyncIterator[str]:
+    """无限 SSE:先回填 DB 最近 limit 行(可 level 过滤),再实时推新行。primary 是 primary_name。
+
+    无会话(从未启动)→ 空流;回填后会话已收口(订阅不到)→ 仅回填不订阅。"""
+    sid = _latest_model_session(db, primary)
+    if sid is None:
+        return
+    for r in _p.log_lines_backfill(db, sid, limit, level):
+        yield _log_event(r)
+    q = _logs.subscribe(sid)
+    if q is None:
+        return   # 仅回填不订阅(会话在回填期间已收口)
     try:
-        for line in _logs.backfill(alias, limit, level):
-            yield _log_event(line)
         while True:
-            yield _log_event(await q.get())
+            line = await q.get()
+            if level is None or line.level == level:
+                yield _log_event(line)
     finally:
-        _logs.unsubscribe(alias, q)
+        _logs.unsubscribe(sid, q)
 
 
 def _resolve_alias(alias: str, cfg: config.AppConfig) -> str:
@@ -113,15 +119,6 @@ def _resolve_alias(alias: str, cfg: config.AppConfig) -> str:
         return config.resolve_alias(cfg, alias)
     except KeyError:
         raise HTTPException(404, f"模型别名 '{alias}' 未在配置中找到")
-
-
-_LOG_LEVELS = ("info", "ok", "warn", "error")
-
-
-def _level_param(request: Request) -> str | None:
-    """?level= 白名单:非 info/ok/warn/error 一律视为不过滤。"""
-    lv = request.query_params.get("level")
-    return lv if lv in _LOG_LEVELS else None
 
 
 def _cfg(request: Request) -> config.AppConfig:
@@ -170,15 +167,21 @@ def register_models_routes(router: APIRouter, lifecycle) -> None:
     async def stream_logs(alias: str, request: Request) -> StreamingResponse:
         primary = _resolve_alias(alias, _cfg(request))           # 404 on unknown alias
         # logs 以 primary_name 为键(生命周期 capture 用的就是 primary_name),故传 primary 而非 URL alias
-        return StreamingResponse(_logs_stream(primary, level=_level_param(request)),
+        return StreamingResponse(_logs_stream(primary, request.app.state.db,
+                                              level=_level_param(request)),
                                   media_type="text/event-stream")
 
-    @router.get("/models/{alias}/logs/search", response_model=LogSearchResponse)
-    def search_logs(alias: str, request: Request) -> LogSearchResponse:
+    @router.get("/models/{alias}/logs/search", response_model=ModelLogSearchResponse)
+    def search_logs(alias: str, request: Request) -> ModelLogSearchResponse:
         primary = _resolve_alias(alias, _cfg(request))
+        sid = _latest_model_session(request.app.state.db, primary)
+        if sid is None:                                  # 从未启动 → 空
+            return ModelLogSearchResponse(matches=[], total=0)
         q = request.query_params.get("q", "")
-        res = _logs.search(primary, q, _level_param(request))   # 全量检索本次会话日志(可叠加 level)
-        return LogSearchResponse(matches=res.matches, total=res.total)
+        # 限定该模型最新会话(历史可搜;可叠加 level)
+        rows = _p.log_search(request.app.state.db, q, type_="model", model_name=primary,
+                             session_id=sid, level=_level_param(request))
+        return ModelLogSearchResponse(matches=[r["id"] for r in rows], total=len(rows))
 
     @router.get("/models/{alias}/logs", response_model=list[LogLineResponse])
     def list_logs(alias: str, request: Request) -> list[LogLineResponse]:
@@ -186,6 +189,10 @@ def register_models_routes(router: APIRouter, lifecycle) -> None:
         before = request.query_params.get("before")
         limit = max(1, min(5000, int(request.query_params.get("limit", "1500"))))   # 钳制 1..5000
         level = _level_param(request)
-        lines = (_logs.before(primary, int(before), limit, level) if before is not None
-                 else _logs.backfill(primary, limit, level))
-        return [_to_log_response(ll) for ll in lines]
+        sid = _latest_model_session(request.app.state.db, primary)
+        if sid is None:                                  # 从未启动 → 空
+            return []
+        rows = (_p.log_lines_before(request.app.state.db, sid, int(before), limit, level)
+                if before is not None
+                else _p.log_lines_backfill(request.app.state.db, sid, limit, level))
+        return [_to_line(r) for r in rows]
