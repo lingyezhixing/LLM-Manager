@@ -733,3 +733,29 @@ def log_search(db: Db, q: str, *, type_: str | None = None, model_name: str | No
     sql += " ORDER BY l.id LIMIT ?"
     args.append(max(1, min(limit, 500)))
     return db.conn.execute(sql, args).fetchall()
+
+
+def log_cleanup(db: Db, days: int, count: int, now: float | None = None) -> tuple[int, int]:
+    """保留规则:时间规则删 start_time < now-days 的会话;条数规则删最旧多余会话。
+    两规则独立、同时生效、先到先清。返回 (删会话数, 删行数)。now 注入(可测)。"""
+    now = now if now is not None else time.time()
+    with db.write_lock:
+        doomed: set[int] = set()
+        cutoff = now - days * 86_400
+        for r in db.conn.execute("SELECT id FROM log_sessions WHERE start_time < ?", (cutoff,)):
+            doomed.add(r["id"])
+        total = db.conn.execute("SELECT COUNT(*) FROM log_sessions").fetchone()[0]
+        if total > count:
+            excess = total - count
+            for r in db.conn.execute("SELECT id FROM log_sessions ORDER BY id ASC LIMIT ?", (excess,)):
+                doomed.add(r["id"])
+        if not doomed:
+            return 0, 0
+        ids = list(doomed)
+        ph = ",".join("?" * len(ids))
+        cur_l = db.conn.execute(f"DELETE FROM log_lines WHERE session_id IN ({ph})", ids)
+        removed_l = cur_l.rowcount
+        db.conn.execute(f"DELETE FROM log_sessions WHERE id IN ({ph})", ids)
+        removed_s = db.conn.execute("SELECT changes() AS n").fetchone()["n"]
+        db.conn.commit()
+        return removed_s, removed_l

@@ -552,3 +552,43 @@ def test_log_insert_lines_rolls_back_partial_chunks_on_failure(tmp_path):
     assert db2.conn.execute("SELECT COUNT(*) FROM log_lines").fetchone()[0] == 0
     assert db2.conn.execute("SELECT COUNT(*) FROM log_sessions").fetchone()[0] == 1
     assert db2.conn.execute("SELECT end_time FROM log_sessions").fetchone()[0] == 5000.0
+
+
+def test_log_cleanup_time_and_count(tmp_path):
+    """时间规则:now=200000,days=2 → cutoff 27200;全部早于 cutoff → 清光。
+    3 个会话:旧系统会话(1000s,3 行)、旧模型会话(1005s,2 行)、新系统会话(5000s,1 行)。"""
+    db = open_db(tmp_path / "t.db")
+    old_sys = _p.log_start_session(db, "system", None, None, 1000.0)
+    _p.log_insert_lines(db, old_sys, [(1, 1000.1, "sys", "info", "a"), (2, 1000.2, "sys", "info", "b"),
+                                      (3, 1000.3, "sys", "info", "c")])
+    old_mod = _p.log_start_session(db, "model", "m1", "m1", 1005.0)
+    _p.log_insert_lines(db, old_mod, [(1, 1005.1, "out", "info", "d"), (2, 1005.2, "out", "info", "e")])
+    new_sys = _p.log_start_session(db, "system", None, None, 5000.0)
+    _p.log_insert_lines(db, new_sys, [(1, 5000.1, "sys", "info", "f")])
+
+    removed_s, removed_l = _p.log_cleanup(db, days=2, count=10, now=200000.0)
+    assert removed_s == 3 and removed_l == 6
+    assert _p.log_sessions(db) == []
+    assert _p.log_lines_backfill(db, old_sys, limit=10) == []
+
+
+def test_log_cleanup_count_keeps_newest(tmp_path):
+    db = open_db(tmp_path / "t.db")
+    for i in range(3):
+        sid = _p.log_start_session(db, "system", None, None, float(1000 + i))
+        _p.log_insert_lines(db, sid, [(1, float(1000 + i) + 0.1, "sys", "info", f"l{i}")])
+    removed_s, removed_l = _p.log_cleanup(db, days=9999, count=2, now=10000.0)
+    assert removed_s == 1 and removed_l == 1           # 最旧 1 会话(1 行)
+    rows = _p.log_sessions(db)
+    assert [r["start_time"] for r in rows] == [1002.0, 1001.0]
+
+
+def test_log_cleanup_both_rules_independent(tmp_path):
+    db = open_db(tmp_path / "t.db")
+    sid1 = _p.log_start_session(db, "system", None, None, 100.0)   # 超期 且 最旧
+    _p.log_insert_lines(db, sid1, [(1, 100.1, "sys", "info", "a")])
+    sid2 = _p.log_start_session(db, "system", None, None, 5000.0)  # 不超期
+    _p.log_insert_lines(db, sid2, [(1, 5000.1, "sys", "info", "b")])
+    removed_s, removed_l = _p.log_cleanup(db, days=1, count=10, now=90000.0)  # 仅时间规则触发
+    assert removed_s == 1 and removed_l == 1
+    assert [r["id"] for r in _p.log_sessions(db)] == [sid2]
