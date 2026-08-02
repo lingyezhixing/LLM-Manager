@@ -38,8 +38,6 @@ export function SystemInfoPanel() {
       <Tile label="版本" value={data.version} />
       <Tile label="运行时长" value={formatDuration(uptime)} />
       <Tile label="数据库大小" value={formatBytes(data.db_size_bytes)} />
-      <Tile label="数据库路径" value={data.db_path} />
-      <Tile label="日志目录" value={data.log_dir} />
       <Tile label="启动时间" value={new Date(data.started_at * 1000).toLocaleString()} />
     </div>
   );

@@ -99,16 +99,10 @@ export function GeneralPanel() {
             ))}
           </Select>
         </Field>
-        <Field label="日志目录 (log_dir)" htmlFor="cfg-logdir">
-          <TextInput id="cfg-logdir" value={form.log_dir} onChange={(e) => set("log_dir", e.target.value)} />
-        </Field>
       </FieldGrid>
 
       <SectionTitle>数据与集成</SectionTitle>
       <FieldGrid>
-        <Field label="数据库路径 (db_path)" hint="改完需手动迁移文件" htmlFor="cfg-db">
-          <TextInput id="cfg-db" value={form.db_path} onChange={(e) => set("db_path", e.target.value)} />
-        </Field>
         <Field label="Claude settings 路径" htmlFor="cfg-claude">
           <TextInput id="cfg-claude" value={form.claude_settings_path} onChange={(e) => set("claude_settings_path", e.target.value)} />
         </Field>

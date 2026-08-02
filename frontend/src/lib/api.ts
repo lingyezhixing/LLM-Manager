@@ -187,9 +187,7 @@ export interface SystemInfo {
   version: string;
   started_at: number;        // epoch seconds (time.time())
   uptime_s: number;
-  db_path: string;
   db_size_bytes: number | null;
-  log_dir: string;
 }
 
 export interface ProgramConfig {
@@ -197,8 +195,6 @@ export interface ProgramConfig {
   port: number;
   alive_time: number;
   log_level: string;
-  log_dir: string;
-  db_path: string;
   claude_settings_path: string;
 }
 

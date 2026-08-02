@@ -22,7 +22,7 @@
 `deploy/docker-entrypoint.sh` 在 81 上循环;`deploy/docker-compose.yml` 用 `restart: unless-stopped` 兜底。生产建议外层套 `tini`(PID 1 回收 + 信号)。**本仓库不构建镜像**(GPU/conda/卷属独立 DevOps 工程)——提供的是重启契约 + 入口模板。
 
 ## 验证清单
-- 改重启字段(host/port/db_path/log_dir/log_level/claude_settings_path)→ WebUI「立即重启」→ 观察进程以 81 退出 → 监督器重启 → 前端自动重连刷新。
+- 改重启字段(host/port/log_level/claude_settings_path)→ WebUI「立即重启」→ 观察进程以 81 退出 → 监督器重启 → 前端自动重连刷新。
 - tray「🔄 重启程序」走同一路径。
 
 ## 排错
