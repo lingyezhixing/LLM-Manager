@@ -11,16 +11,14 @@ from collections.abc import Callable
 
 class SystemLogHandler(logging.Handler):
     """Synchronous handler → collector callable (``logs.capture_system``).
-    Collector receives one ``(text, ts, levelname)`` tuple per record and must be
-    non-blocking (in-memory append); app wiring adapts it via
-    ``lambda item: capture_system(*item)``."""
+    Collector must be non-blocking (in-memory append)."""
 
-    def __init__(self, collector: Callable[[tuple[str, float, str]], None]) -> None:
+    def __init__(self, collector: Callable[[str, float, str], None]) -> None:
         super().__init__()
         self._collector = collector
 
     def emit(self, record: logging.LogRecord) -> None:
         try:
-            self._collector((record.getMessage(), record.created, record.levelname))
+            self._collector(record.getMessage(), record.created, record.levelname)
         except Exception:
             pass   # 日志管道永不影响主程序
