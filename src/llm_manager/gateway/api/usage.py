@@ -1,7 +1,12 @@
-"""GET /api/usage/session (since-start totals) + GET /api/usage/series (token time-series).
+"""GET /api/usage/* — token + cost aggregates over a time window.
 
-``session`` = module-level aggregate (proxy-fed), refetched every 3s by the 概览 card.
-``series``  = bucketed per-model + total token consumption, refetched per-preset cadence.
+``session``      = since-start totals (module-level, proxy-fed), polled every 3s by the 概览 card.
+``series``       = bucketed token series (total + per-model), clock-aligned buckets.
+``summary``      = window totals (input/output/cache/hit-rate/request count).
+``by-model``     = per-model window stats (tokens, share, latency).
+``cost``         = window cost: tier 模型按请求公式,按时模型按运行重叠。
+``cost-series``  = bucketed cost series (元/桶), clock-aligned like ``series``.
+
 The frontend ticks uptime locally from ``started_at``; series buckets carry wall-clock
 epochs so the chart's x-axis is displayable.
 """

@@ -202,6 +202,22 @@ class UsageSeries:
     total: list[float]              # value per bucket summed across models
 
 
+def _bucket_axis(start_ts: float, end_ts: float, bucket_seconds: int) -> tuple[float, list[float]]:
+    """时钟对齐桶轴:(first_bucket_start, [buckets])。空窗/非正桶 → (0.0, []).
+
+    Buckets are **absolute** (clock-aligned to multiples of ``bucket_seconds``), not
+    relative to the window start — so a request's bucket is fixed and a sliding live
+    window scrolls the chart instead of reshaping it. Alignment to LOCAL boundaries
+    (e.g. local midnight for daily) via the TZ offset.
+    """
+    if end_ts <= start_ts or bucket_seconds <= 0:
+        return 0.0, []
+    offset = (-time.localtime().tm_gmtoff) % bucket_seconds
+    first = float(math.floor((start_ts - offset) / bucket_seconds) * bucket_seconds + offset)
+    n = max(1, math.ceil((end_ts - first) / bucket_seconds))
+    return first, [first + i * bucket_seconds for i in range(n)]
+
+
 def usage_series(db: Db, *, start_ts: float, end_ts: float, bucket_seconds: int) -> UsageSeries:
     """Aggregate token consumption (input + output) per model + total, bucketed by wall-clock
     end_time (the request's completion timestamp — when usage is recorded).
@@ -211,15 +227,11 @@ def usage_series(db: Db, *, start_ts: float, end_ts: float, bucket_seconds: int)
     the chart instead of reshaping it. Returns the full bucket axis 0-filled for continuity.
     ``tokens = input + output``.
     """
-    if end_ts <= start_ts or bucket_seconds <= 0:
+    first, buckets = _bucket_axis(start_ts, end_ts, bucket_seconds)
+    n = len(buckets)
+    if not buckets:
         return UsageSeries(buckets=[], models={}, total=[])
 
-    # Align buckets to LOCAL boundaries (e.g. local midnight for daily) via the TZ offset,
-    # so a 1-day bucket is a calendar day, not an epoch day (which would split at 8am local).
-    offset = (-time.localtime().tm_gmtoff) % bucket_seconds
-    first = float(math.floor((start_ts - offset) / bucket_seconds) * bucket_seconds + offset)
-    n = max(1, math.ceil((end_ts - first) / bucket_seconds))
-    buckets = [first + i * bucket_seconds for i in range(n)]
     rows = db.conn.execute(
         """SELECT m.original_name AS model,
                   CAST((r.end_time - :offset) / :bucket AS INTEGER) * :bucket + :offset AS bucket,
@@ -227,7 +239,7 @@ def usage_series(db: Db, *, start_ts: float, end_ts: float, bucket_seconds: int)
            FROM model_requests r JOIN models m ON r.model_id = m.id
            WHERE r.end_time >= :start AND r.end_time < :end
            GROUP BY m.original_name, bucket""",
-        {"start": start_ts, "end": end_ts, "bucket": bucket_seconds, "offset": offset},
+        {"start": start_ts, "end": end_ts, "bucket": bucket_seconds, "offset": (-time.localtime().tm_gmtoff) % bucket_seconds},
     ).fetchall()
 
     models: dict[str, list[float]] = {}
@@ -451,13 +463,11 @@ def usage_cost_series(
     """Bucketed cost series (元/桶),时钟对齐分桶(同 usage_series)。tier 成本按请求
     end_time 落桶;hourly 成本按运行段与各桶的重叠时长摊到桶。返回 UsageSeries 形
     (total/models 的值是元,非 token)。"""
-    if end_ts <= start_ts or bucket_seconds <= 0:
+    first, buckets = _bucket_axis(start_ts, end_ts, bucket_seconds)
+    n = len(buckets)
+    if not buckets:
         return UsageSeries(buckets=[], models={}, total=[])
     now_ts = now if now is not None else time.time()
-    offset = (-time.localtime().tm_gmtoff) % bucket_seconds
-    first = float(math.floor((start_ts - offset) / bucket_seconds) * bucket_seconds + offset)
-    n = max(1, math.ceil((end_ts - first) / bucket_seconds))
-    buckets = [first + i * bucket_seconds for i in range(n)]
     models: dict[str, list[float]] = {}
     total = [0.0] * n
 
