@@ -224,7 +224,10 @@ export async function searchSessionLogs(
   if (level) qs.set("level", level);
   const res = await fetch(`/api/logs/search?${qs}`);
   if (!res.ok) throw new Error(`/api/logs/search failed: ${res.status}`);
-  return (await res.json()) as LogSearch;
+  // /api/logs/search 的 matches 是 {session_id, line} 对象数组(跨会话检索);
+  // 映射为行 id 以满足共享 hook 的 LogSearch(matches: number[]) 契约——行 id 全局唯一。
+  const d = (await res.json()) as { total: number; matches: { session_id: number; line: LogLine }[] };
+  return { total: d.total, matches: d.matches.map((m) => m.line.id) };
 }
 
 // 系统配置 — config 写回 + system info. Types hand-defined to match
