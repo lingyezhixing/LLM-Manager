@@ -1,4 +1,6 @@
 
+import time
+
 from fastapi.testclient import TestClient
 
 from llm_manager.app import create_app
@@ -48,3 +50,28 @@ def test_lifespan_opens_and_closes_system_session(tmp_path):
     finally:
         db2.conn.close()
     assert logs.current_system_session_id() is None   # 内存登记已清除
+
+
+def test_lifespan_closes_crash_residual_system_sessions(tmp_path):
+    """崩溃残留(system,end_time NULL)在下次启动收口(D6),再开新的运行会话。"""
+    db_path = tmp_path / "t.db"
+    db = open_db(db_path)
+    try:
+        resid = _p.log_start_session(db, "system", None, None, time.time() - 100)
+    finally:
+        db.conn.close()
+    app = create_app(db_path=db_path)
+    with TestClient(app):
+        rows = _p.log_sessions(app.state.db, type_="system")
+        by_id = {r["id"]: r for r in rows}
+        assert by_id[resid]["end_time"] is not None       # 残留已收口
+        current = logs.current_system_session_id()
+        assert current is not None and current != resid   # 新会话已开
+        assert by_id[current]["end_time"] is None         # 新会话进行中
+    # shutdown 收口新会话
+    db2 = open_db(db_path)
+    try:
+        rows = _p.log_sessions(db2, type_="system")
+        assert all(r["end_time"] is not None for r in rows)
+    finally:
+        db2.conn.close()

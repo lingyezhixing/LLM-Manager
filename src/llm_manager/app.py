@@ -19,7 +19,7 @@ from fastapi import FastAPI
 from llm_manager import config
 from llm_manager.data import logs as _logs
 from llm_manager.data.log_handler import SystemLogHandler
-from llm_manager.data.persistence import open_db
+from llm_manager.data.persistence import log_close_open_system_sessions, open_db
 from llm_manager.devices import ENUMERATORS, DeviceMonitor
 from llm_manager.gateway.api.models import build_models_response
 from llm_manager.gateway.routes import register_routes
@@ -105,6 +105,11 @@ def create_app(db_path: Path | None = None, *, legacy_yaml: Path | None = None) 
         app.state.cfg = cfg
         app.state.loop = asyncio.get_running_loop()
         # === 系统日志会话:handler 任意线程 emit → capture_system → flush_loop 落库 ===
+        # 崩溃/强杀残留的上次 system 会话(end_time IS NULL)先统一收口(D6),再开新会话;
+        # 收口刻意放在 app 接线而非 logs.start_system_session:保持 logs 模块测试隔离。
+        n_residual = log_close_open_system_sessions(db)
+        if n_residual:
+            logger.info("closed %d crash-residual system log session(s)", n_residual)
         _logs.start_system_session()
         sys_handler = SystemLogHandler(_logs.capture_system)
         logging.getLogger().addHandler(sys_handler)

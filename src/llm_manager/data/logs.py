@@ -10,6 +10,7 @@ dropped). The system logging handler (data/log_handler.py) feeds ``capture_syste
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 import threading
 import time
@@ -17,6 +18,8 @@ from dataclasses import dataclass
 
 from llm_manager.data import persistence as _p
 from llm_manager.realtime import Broadcaster
+
+logger = logging.getLogger(__name__)
 
 _ERR = re.compile(r"error|fail|exception|traceback", re.I)
 _OK = re.compile(r"listening|ready|started|server.*ok", re.I)
@@ -117,15 +120,22 @@ def start_session(type_: str, model_name: str | None = None,
 def end_session(session_id: int) -> None:
     """收口会话:落库 end_time;模型会话移除 alias 映射;系统会话清除当前登记。
     未接线 DB(_db 为 None,测试/启动早期)→ 仅内存收口。"""
-    global _system_session_id
     if _db is not None:
         _p.log_end_session(_db, session_id, time.time())
-    s = _sessions.pop(session_id, None)
+    s = _sessions.get(session_id)
     if s is None:
         return
-    if s.model_name is not None and _alias_to_session.get(s.model_name) == session_id:
+    _forget_session(s)
+
+
+def _forget_session(s: _Session) -> None:
+    """把会话从模块内存登记移除:广播器映射、alias 映射、系统当前登记。
+    end_session 与 flush(会话 DB 行已被 retention 删除)共用。"""
+    global _system_session_id
+    _sessions.pop(s.id, None)
+    if s.model_name is not None and _alias_to_session.get(s.model_name) == s.id:
         _alias_to_session.pop(s.model_name, None)
-    if s.type == "system" and _system_session_id == session_id:
+    if s.type == "system" and _system_session_id == s.id:
         _system_session_id = None
 
 
@@ -208,7 +218,18 @@ async def flush() -> None:
         for sid, seq, ts, stream, level, text in batch:
             by_session.setdefault(sid, []).append((seq, ts, stream, level, text))
         for sid, rows in by_session.items():
-            ids = await asyncio.to_thread(_p.log_insert_lines, _db, sid, rows)
+            try:
+                ids = await asyncio.to_thread(_p.log_insert_lines, _db, sid, rows)
+            except Exception as e:  # noqa: BLE001 — 单会话落库失败不容许杀掉整批
+                # 会话的 DB 行已被 retention 删除(或任何落库异常):该会话的剩余行
+                # 已无法落库,丢弃它(停止接收新行)后继续落库其它会话——否则一个
+                # 死会话会让 flush 抛 IntegrityError,flush_loop 只捕 Timeout/
+                # Cancelled → 整个日志管线死亡、_pending 永久丢弃。
+                s = _sessions.get(sid)
+                if s is not None:
+                    _forget_session(s)
+                logger.warning("log flush: dropping dead session %d (insert failed: %s)", sid, e)
+                continue
             s = _sessions.get(sid)
             if s is None:
                 continue

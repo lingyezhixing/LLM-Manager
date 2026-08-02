@@ -627,6 +627,22 @@ def log_end_session(db: Db, session_id: int, end: float) -> None:
         db.conn.commit()
 
 
+def log_close_open_system_sessions(db: Db, end: float | None = None) -> int:
+    """收口残留进行中 system 会话(崩溃/强杀遗留),返回收口数。
+
+    app 启动时调用(在开新系统会话之前,见 app.lifespan):把上次崩溃/强杀
+    留下的 end_time IS NULL 的 system 会话统一写上结束时间,避免残留永远
+    显示"进行中"。刻意放在 app 接线而非 logs.start_system_session——
+    保持 logs 模块的测试隔离(模块不隐式写库)。"""
+    end = end if end is not None else time.time()
+    with db.write_lock:
+        cur = db.conn.execute(
+            "UPDATE log_sessions SET end_time=? WHERE type='system' AND end_time IS NULL", (end,))
+        n = cur.rowcount
+        db.conn.commit()
+        return n
+
+
 def log_session_exists(db: Db, session_id: int) -> bool:
     """会话行是否存在(读接口 404 校验用)。"""
     return db.conn.execute(
@@ -743,9 +759,14 @@ def log_search(db: Db, q: str, *, type_: str | None = None, model_name: str | No
     return db.conn.execute(sql, args).fetchall()
 
 
-def log_cleanup(db: Db, days: int, count: int, now: float | None = None) -> tuple[int, int]:
+def log_cleanup(db: Db, days: int, count: int, now: float | None = None,
+                live_session_ids: set[int] | None = None) -> tuple[int, int]:
     """保留规则:时间规则删 start_time < now-days 的会话;条数规则删最旧多余会话。
     两规则独立、同时生效、先到先清。返回 (删会话数, 删行数)。now 注入(可测)。
+
+    live_session_ids = 模块内存中仍在运行的会话 id(flusher 正在接收行)——两规则都
+    排除,绝不删除"正在直播"的会话行(belt-and-braces:行被删后 flush 落库 FK 失败,
+    logs.flush 已有兜底丢弃,但首选是不删)。
 
     IN 子句按 150 id 分块(同 log_insert_lines:语句参数数受 SQLITE_MAX_VARIABLE_NUMBER
     限制,stock CPython 为 999),行/会话数跨块累计;全程同一 write_lock、一次 commit,
@@ -761,6 +782,8 @@ def log_cleanup(db: Db, days: int, count: int, now: float | None = None) -> tupl
             excess = total - count
             for r in db.conn.execute("SELECT id FROM log_sessions ORDER BY id ASC LIMIT ?", (excess,)):
                 doomed.add(r["id"])
+        if live_session_ids:
+            doomed.difference_update(live_session_ids)
         if not doomed:
             return 0, 0
         ids = list(doomed)
@@ -787,6 +810,6 @@ def log_cleanup(db: Db, days: int, count: int, now: float | None = None) -> tupl
 
 def log_counts(db: Db) -> tuple[int, int]:
     """(会话数, 行数) — DB 管理页统计。"""
-    s = db.conn.execute("SELECT COUNT(*) FROM log_sessions").fetchone()[0]
-    l = db.conn.execute("SELECT COUNT(*) FROM log_lines").fetchone()[0]
-    return s, l
+    sessions = db.conn.execute("SELECT COUNT(*) FROM log_sessions").fetchone()[0]
+    lines = db.conn.execute("SELECT COUNT(*) FROM log_lines").fetchone()[0]
+    return sessions, lines

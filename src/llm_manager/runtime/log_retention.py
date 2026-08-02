@@ -8,6 +8,10 @@ from __future__ import annotations
 import asyncio
 import logging
 
+# 取模块级 live 会话传给 log_cleanup 排除(I1 belt-and-braces:保留规则不删直播会话,
+# 否则其 DB 行被删后 logs.flush 落库 FK 失败)。导入安全无环:logs 仅依赖
+# persistence / realtime(→devices),均不依赖 runtime.log_retention。
+from llm_manager.data import logs as _logs
 from llm_manager.data import persistence as _p
 from llm_manager.data.config_store import get_setting
 
@@ -40,7 +44,8 @@ async def log_retention_loop(db, get_settings, stop_event: asyncio.Event,
             days, count = get_settings()
             if days > 0 and count > 0:
                 removed_s, removed_l = await asyncio.to_thread(
-                    _p.log_cleanup, db, days, count, now)
+                    _p.log_cleanup, db, days, count, now,
+                    live_session_ids=set(_logs._sessions))
                 if removed_s:
                     logger.info("log retention cleaned %d sessions / %d lines",
                                 removed_s, removed_l)

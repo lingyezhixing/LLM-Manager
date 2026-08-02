@@ -635,3 +635,17 @@ def test_log_cleanup_chunks_large_doomed_sets(tmp_path):
     removed_s, removed_l = _p.log_cleanup(db, days=2, count=10000, now=200000.0)
     assert removed_s == 1000 and removed_l == 200
     assert _p.log_sessions(db) == []
+
+
+def test_log_close_open_system_sessions(tmp_path):
+    """崩溃/强杀残留的进行中 system 会话(end_time NULL)一次性收口,返回收口数。"""
+    db = open_db(tmp_path / "t.db")
+    resid = _p.log_start_session(db, "system", None, None, 1000.0)
+    mid = _p.log_start_session(db, "model", "m1", "m1", 2000.0)   # 非 system,不收口
+    n = _p.log_close_open_system_sessions(db, end=5000.0)
+    assert n == 1
+    rows = _p.log_sessions(db)
+    by_id = {r["id"]: r for r in rows}
+    assert by_id[resid]["end_time"] == 5000.0
+    assert by_id[mid]["end_time"] is None                          # model 会话不受影响
+    assert _p.log_close_open_system_sessions(db, end=6000.0) == 0  # 幂等:无残留可收
