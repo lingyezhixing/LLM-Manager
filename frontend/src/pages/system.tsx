@@ -7,7 +7,6 @@ import { RestartBanner } from "@/components/system/restart-banner";
 import { SystemInfoPanel } from "@/components/system/system-info-panel";
 import { SystemNav, type SystemZone } from "@/components/system/system-nav";
 import { WolPanel } from "@/components/system/wol-panel";
-import { ZonePlaceholder } from "@/components/system/zone-placeholder";
 import { useRestartApp, useRestartStatus } from "@/lib/use-config";
 
 export default function SystemPage() {
@@ -48,7 +47,6 @@ export default function SystemPage() {
           {zone === "info" && <SystemInfoPanel />}
           {zone === "network" && <WolPanel />}
           {zone === "claude" && <ClaudePanel />}
-          {zone === "logs" && <ZonePlaceholder label="日志" />}
         </div>
       </div>
     </>

@@ -198,11 +198,19 @@ export interface ProgramConfig {
   claude_settings_path: string;
 }
 
+// 日志保留规则(GET/PUT /api/config/logs;time_enabled/days = 按时间清理,count_enabled/count = 按条数清理)。
+export interface LogRetention {
+  time_enabled: boolean;
+  days: number;
+  count_enabled: boolean;
+  count: number;
+}
+
 export interface ConfigResponse {
   program: ProgramConfig;
   wol: { broadcast_address: string; mac_address: string } | null;
   claude: Record<string, Record<string, string>>;
-  logs: { time_enabled: boolean; days: number; count_enabled: boolean; count: number };
+  logs: LogRetention;
   restart_fields: string[];
 }
 
@@ -234,6 +242,17 @@ export async function updateClaudeConfigs(configs: Record<string, Record<string,
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ configs }),
+  });
+  if (!res.ok) throw await parseApiError(res);
+  return (await res.json()) as ConfigWriteResult;
+}
+
+// 日志保留规则写回(PUT /api/config/logs;不进 AppConfig 快照,恒不触发重启)。
+export async function updateLogRetention(body: LogRetention): Promise<ConfigWriteResult> {
+  const res = await fetch("/api/config/logs", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
   });
   if (!res.ok) throw await parseApiError(res);
   return (await res.json()) as ConfigWriteResult;

@@ -1,11 +1,10 @@
-export type SystemZone = "general" | "models" | "network" | "claude" | "logs" | "info";
+export type SystemZone = "general" | "models" | "network" | "claude" | "info";
 
 const ZONES: { key: SystemZone; label: string }[] = [
   { key: "general", label: "通用" },
   { key: "models", label: "模型" },
   { key: "network", label: "网络" },
   { key: "claude", label: "Claude" },
-  { key: "logs", label: "日志" },
   { key: "info", label: "系统信息" },
 ];
 
