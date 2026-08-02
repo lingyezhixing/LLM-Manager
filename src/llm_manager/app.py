@@ -27,6 +27,7 @@ from llm_manager.probes import probe_registry
 from llm_manager.realtime import DeviceFeed, ModelFeed
 from llm_manager.runtime.lifecycle import Lifecycle
 from llm_manager.runtime import background
+from llm_manager.runtime.log_retention import log_retention_loop, retention_settings
 from llm_manager.supervisor import Supervisor
 from llm_manager.tray import host as tray_host
 
@@ -109,6 +110,8 @@ def create_app(db_path: Path | None = None, *, legacy_yaml: Path | None = None) 
         logging.getLogger().addHandler(sys_handler)
         log_stop = asyncio.Event()
         flush_task = asyncio.create_task(_logs.flush_loop(log_stop))
+        retention_task = asyncio.create_task(
+            log_retention_loop(db, lambda: retention_settings(db), log_stop))
         await asyncio.to_thread(monitor.refresh)
         online = sorted(monitor.online_devices())
         logger.info("devices online: %s", ", ".join(online) if online else "(none)")
@@ -161,7 +164,7 @@ def create_app(db_path: Path | None = None, *, legacy_yaml: Path | None = None) 
             # === 系统日志收尾:停 flush_loop → 兜底清空剩余 pending → 摘 handler → 收口会话 ===
             try:
                 log_stop.set()
-                await asyncio.gather(flush_task, return_exceptions=True)
+                await asyncio.gather(flush_task, retention_task, return_exceptions=True)
                 await _logs.flush()
             finally:
                 logging.getLogger().removeHandler(sys_handler)
