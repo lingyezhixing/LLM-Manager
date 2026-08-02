@@ -720,7 +720,8 @@ def log_search(db: Db, q: str, *, type_: str | None = None, model_name: str | No
                session_id: int | None = None, level: str | None = None,
                limit: int = 500) -> list[sqlite3.Row]:
     """行级 LIKE 检索,跨会话;返回匹配行(升序),含 session 归属。
-    session_id 指定时限定单会话(日志页搜索跳转用)。SQLite LIKE 对 ASCII 大小写不敏感。"""
+    session_id 指定时限定单会话(日志页搜索跳转用)。SQLite LIKE 对 ASCII 大小写不敏感。
+    limit 钳 1..5000(默认 500;旧 /api/models/{alias}/logs/search 契约传 5000 取全部)。"""
     sql = ("SELECT l.*, s.type AS session_type, s.model_name AS session_model "
            "FROM log_lines l JOIN log_sessions s ON s.id = l.session_id "
            "WHERE l.text LIKE '%' || ? || '%' COLLATE NOCASE")
@@ -738,7 +739,7 @@ def log_search(db: Db, q: str, *, type_: str | None = None, model_name: str | No
         sql += " AND l.level = ?"
         args.append(level)
     sql += " ORDER BY l.id LIMIT ?"
-    args.append(max(1, min(limit, 500)))
+    args.append(max(1, min(limit, 5000)))
     return db.conn.execute(sql, args).fetchall()
 
 

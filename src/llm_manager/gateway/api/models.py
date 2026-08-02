@@ -95,22 +95,25 @@ def _latest_model_session(db, primary: str) -> int | None:
 async def _logs_stream(primary: str, db, limit: int = 2048, level: str | None = None) -> AsyncIterator[str]:
     """无限 SSE:先回填 DB 最近 limit 行(可 level 过滤),再实时推新行。primary 是 primary_name。
 
-    无会话(从未启动)→ 空流;回填后会话已收口(订阅不到)→ 仅回填不订阅。"""
+    无会话(从未启动)→ 空流;会话已收口(订阅不到)→ 回填后长休眠保持连接打开
+    (不发数据也不关闭),避免 EventSource 断线重连反复重放回填行(面板行重复)。"""
     sid = _latest_model_session(db, primary)
     if sid is None:
         return
     for r in _p.log_lines_backfill(db, sid, limit, level):
         yield _log_event(r)
     q = _logs.subscribe(sid)
-    if q is None:
-        return   # 仅回填不订阅(会话在回填期间已收口)
     try:
+        if q is None:
+            while True:
+                await asyncio.sleep(3600)   # 已收口:长休眠保持连接;aclose/取消可中断
         while True:
             line = await q.get()
             if level is None or line.level == level:
                 yield _log_event(line)
     finally:
-        _logs.unsubscribe(sid, q)
+        if q is not None:
+            _logs.unsubscribe(sid, q)
 
 
 def _resolve_alias(alias: str, cfg: config.AppConfig) -> str:
@@ -178,9 +181,10 @@ def register_models_routes(router: APIRouter, lifecycle) -> None:
         if sid is None:                                  # 从未启动 → 空
             return ModelLogSearchResponse(matches=[], total=0)
         q = request.query_params.get("q", "")
-        # 限定该模型最新会话(历史可搜;可叠加 level)
+        # 限定该模型最新会话(历史可搜;可叠加 level);limit=5000 同 list_logs 钳制族——
+        # 旧契约返回全部匹配(真 total),不截断 500
         rows = _p.log_search(request.app.state.db, q, type_="model", model_name=primary,
-                             session_id=sid, level=_level_param(request))
+                             session_id=sid, level=_level_param(request), limit=5000)
         return ModelLogSearchResponse(matches=[r["id"] for r in rows], total=len(rows))
 
     @router.get("/models/{alias}/logs", response_model=list[LogLineResponse])

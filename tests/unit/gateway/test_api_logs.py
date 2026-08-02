@@ -174,3 +174,35 @@ def test_logs_unknown_alias_404(app):
     with TestClient(app) as c:
         r = c.get("/api/models/nope/logs/search?q=x")
     assert r.status_code == 404
+
+
+def test_logs_stream_ended_session_holds_open(app):
+    """已收口会话:回填发完后生成器保持打开(不结束 → EventSource 不重连重放回填行)。"""
+    app, db = app
+    sid = _seed([("line1", "out"), ("line2", "out")])
+    logs.end_session(sid)                              # 收口:无订阅者
+
+    async def go():
+        gen = _logs_stream("m1", db, limit=10)
+        try:
+            frames = [json.loads((await anext(gen)).removeprefix("data: ").strip())
+                      for _ in range(2)]               # 回填 2 行
+            with pytest.raises(asyncio.TimeoutError):
+                await asyncio.wait_for(anext(gen), timeout=0.1)   # 无新数据,但生成器仍活着
+        finally:
+            await gen.aclose()
+        return frames
+
+    res = asyncio.run(go())
+    assert [ll["text"] for ll in res] == ["line1", "line2"]
+
+
+def test_logs_search_returns_all_matches(app):
+    """旧契约:search 返回全部匹配(>500 不截断),total 为真实计数(面板 ‹/› 跳转可达全部)。"""
+    app, db = app
+    _seed([(f"x line {i}", "out") for i in range(600)])
+    with TestClient(app) as c:
+        r = c.get("/api/models/m1/logs/search?q=x")
+    j = r.json()
+    assert j["total"] == 600 and len(j["matches"]) == 600
+    assert j["matches"] == list(range(1, 601))
