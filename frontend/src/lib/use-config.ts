@@ -63,14 +63,13 @@ export function useUpdateClaudeConfigs() {
   });
 }
 
-// 日志保留规则:不进 AppConfig 快照,恒不触发重启;失效 config(其 logs 字段 get_setting 直读)。
+// 日志保留规则:不进 AppConfig 快照,恒不触发重启(无需失效 restart-status);失效 config(其 logs 字段 get_setting 直读)。
 export function useUpdateLogRetention() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (body: LogRetention) => updateLogRetention(body),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["config"] });
-      qc.invalidateQueries({ queryKey: ["restart-status"] });
     },
   });
 }

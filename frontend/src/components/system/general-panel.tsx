@@ -3,14 +3,27 @@ import { ConfigSaveBar } from "@/components/config-save-bar";
 import { Button } from "@/components/ui/button";
 import { Field, NumberInput, Select, TextInput } from "@/components/ui/form";
 import { useToast } from "@/components/ui/toast";
-import { type ProgramConfig } from "@/lib/api";
-import { useConfig, useUpdateProgram } from "@/lib/use-config";
+import { LogRetentionEditor } from "@/components/system/log-retention-editor";
+import { type LogRetention, type ProgramConfig } from "@/lib/api";
+import { useConfig, useUpdateLogRetention, useUpdateProgram } from "@/lib/use-config";
 
 const LOG_LEVELS = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"];
 
-function shallowEqual(a: ProgramConfig, b: ProgramConfig): boolean {
+function sameProgram(a: ProgramConfig, b: ProgramConfig): boolean {
   return (Object.keys(a) as (keyof ProgramConfig)[]).every((k) => a[k] === b[k]);
 }
+
+function sameLogs(a: LogRetention, b: LogRetention): boolean {
+  return a.time_enabled === b.time_enabled && a.days === b.days
+    && a.count_enabled === b.count_enabled && a.count === b.count;
+}
+
+// 通用页表单 = program 段 + 日志保留段;两段各自独立 dirty,保存时分别 PUT 对应端点。
+interface GeneralForm {
+  program: ProgramConfig;
+  logs: LogRetention;
+}
+const sameForm = (a: GeneralForm, b: GeneralForm) => sameProgram(a.program, b.program) && sameLogs(a.logs, b.logs);
 
 // 段标题:轻量横线分隔(── 标题 ──────),与模型表单的分区一致。
 function SectionTitle({ children }: { children: ReactNode }) {
@@ -30,23 +43,24 @@ function FieldGrid({ children }: { children: ReactNode }) {
 export function GeneralPanel() {
   const { data, isLoading, isError, error, refetch } = useConfig();
   const update = useUpdateProgram();
+  const updateLogs = useUpdateLogRetention();
   const toast = useToast();
-  const [form, setForm] = useState<ProgramConfig | null>(data?.program ?? null);
+  const [form, setForm] = useState<GeneralForm | null>(null);
   // 上一次采纳进表单的服务端值;区分「未编辑(form 仍 == 该值)→ 跟随外部刷新」vs「编辑中 → 保留」。
-  const syncedRef = useRef<ProgramConfig | null>(data?.program ?? null);
+  const syncedRef = useRef<GeneralForm | null>(null);
 
   // 初值就绪填表单;后续 data 外部刷新时,若用户未编辑则跟随(避免 stale-form),编辑中则保留。
   // 用函数式更新读最新 form,避免把 form 列入依赖(编辑中不打断)。
   useEffect(() => {
-    const incoming = data?.program;
-    if (!incoming) return;
+    if (!data) return;
+    const incoming: GeneralForm = { program: data.program, logs: data.logs };
     setForm((prev) => {
       const base = syncedRef.current;
-      if (prev !== null && base !== null && !shallowEqual(prev, base)) return prev; // 编辑中,保留
+      if (prev !== null && base !== null && !sameForm(prev, base)) return prev; // 编辑中,保留
       syncedRef.current = incoming;
       return incoming;
     });
-  }, [data?.program]);
+  }, [data]);
 
   if (isError) {
     return (
@@ -60,17 +74,40 @@ export function GeneralPanel() {
     return <div className="text-sm text-muted-foreground">加载中…</div>;
   }
 
-  const initial = data!.program;
-  const dirty = !shallowEqual(form, initial);
-  const portValid = form.port >= 1 && form.port <= 65535;
-  const aliveValid = form.alive_time >= 0;
-  const set = <K extends keyof ProgramConfig>(k: K, v: ProgramConfig[K]) =>
-    setForm({ ...form, [k]: v });
+  const initial: GeneralForm = { program: data!.program, logs: data!.logs };
+  const dirty = !sameForm(form, initial);
+  const portValid = form.program.port >= 1 && form.program.port <= 65535;
+  const aliveValid = form.program.alive_time >= 0;
+  const set = (p: ProgramConfig) => setForm({ ...form, program: p });
+  const setLogs = (l: LogRetention) => setForm({ ...form, logs: l });
   const num = (s: string): number => (s === "" ? 0 : Number(s));
+  const saving = update.isPending || updateLogs.isPending;
+  const saveError = update.error ?? updateLogs.error;
+
+  const onSave = () => {
+    const pDirty = !sameProgram(form.program, syncedRef.current!.program);
+    const lDirty = !sameLogs(form.logs, syncedRef.current!.logs);
+    let toasted = false;
+    if (pDirty) {
+      update.mutate(form.program, {
+        onSuccess: () => {
+          syncedRef.current = { ...syncedRef.current!, program: form.program };
+          if (!toasted) { toasted = true; toast.success("系统配置已保存"); }
+        },
+      });
+    }
+    if (lDirty) {
+      updateLogs.mutate(form.logs, {
+        onSuccess: () => {
+          syncedRef.current = { ...syncedRef.current!, logs: form.logs };
+          if (!toasted) { toasted = true; toast.success("系统配置已保存"); }
+        },
+      });
+    }
+  };
 
   return (
     <div>
-      {/* 重启策略说明:取代原先每个字段重复挂的「🔴 需重启」。改完需重启时顶部横幅会提示。 */}
       <p className="mb-1 text-xs text-muted-foreground">
         host / port / 日志 / 路径类字段改完需重启程序(顶部会提示);alive_time 即时生效。
       </p>
@@ -78,22 +115,22 @@ export function GeneralPanel() {
       <SectionTitle>监听与运行</SectionTitle>
       <FieldGrid>
         <Field label="监听地址 (host)" htmlFor="cfg-host">
-          <TextInput id="cfg-host" value={form.host} onChange={(e) => set("host", e.target.value)} />
+          <TextInput id="cfg-host" value={form.program.host} onChange={(e) => set({ ...form.program, host: e.target.value })} />
         </Field>
         <Field label="监听端口 (port)" htmlFor="cfg-port"
-          error={!portValid && form.port !== 0 ? "端口须在 1–65535" : null}>
-          <NumberInput id="cfg-port" value={form.port} onChange={(e) => set("port", num(e.target.value))} />
+          error={!portValid && form.program.port !== 0 ? "端口须在 1–65535" : null}>
+          <NumberInput id="cfg-port" value={form.program.port} onChange={(e) => set({ ...form.program, port: num(e.target.value) })} />
         </Field>
         <Field label="空闲检测 (alive_time)" hint="秒 · 🟢 改完即时生效" htmlFor="cfg-alive"
           error={!aliveValid ? "须 ≥ 0" : null}>
-          <NumberInput id="cfg-alive" value={form.alive_time} onChange={(e) => set("alive_time", num(e.target.value))} />
+          <NumberInput id="cfg-alive" value={form.program.alive_time} onChange={(e) => set({ ...form.program, alive_time: num(e.target.value) })} />
         </Field>
       </FieldGrid>
 
       <SectionTitle>日志</SectionTitle>
       <FieldGrid>
         <Field label="日志级别 (log_level)" htmlFor="cfg-level">
-          <Select id="cfg-level" value={form.log_level} onChange={(e) => set("log_level", e.target.value)}>
+          <Select id="cfg-level" value={form.program.log_level} onChange={(e) => set({ ...form.program, log_level: e.target.value })}>
             {LOG_LEVELS.map((lv) => (
               <option key={lv} value={lv}>{lv}</option>
             ))}
@@ -101,25 +138,21 @@ export function GeneralPanel() {
         </Field>
       </FieldGrid>
 
+      <SectionTitle>日志保留</SectionTitle>
+      <LogRetentionEditor value={form.logs} onChange={setLogs} />
+
       <SectionTitle>数据与集成</SectionTitle>
       <FieldGrid>
         <Field label="Claude settings 路径" htmlFor="cfg-claude">
-          <TextInput id="cfg-claude" value={form.claude_settings_path} onChange={(e) => set("claude_settings_path", e.target.value)} />
+          <TextInput id="cfg-claude" value={form.program.claude_settings_path} onChange={(e) => set({ ...form.program, claude_settings_path: e.target.value })} />
         </Field>
       </FieldGrid>
 
       {dirty && (
         <ConfigSaveBar
-          saving={update.isPending}
-          error={update.error ? (update.error as Error).message : null}
-          onSave={() =>
-            update.mutate(form, {
-              onSuccess: () => {
-                syncedRef.current = form;
-                toast.success("系统配置已保存");
-              },
-            })
-          }
+          saving={saving}
+          error={saveError ? (saveError as Error).message : null}
+          onSave={onSave}
           onReset={() => setForm(initial)}
         />
       )}
