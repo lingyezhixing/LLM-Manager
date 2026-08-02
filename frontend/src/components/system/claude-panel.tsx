@@ -203,7 +203,7 @@ export function ClaudePanel() {
       setPathInput(data.program.claude_settings_path);
       setPathSaved(data.program.claude_settings_path);
     }
-  }, [data]);
+  }, [data, pathInput, pathSaved]);
   const pathDirty = pathInput !== pathSaved;
   const onSavePath = () => {
     updateProgram.mutate(
@@ -213,6 +213,7 @@ export function ClaudePanel() {
           setPathSaved(pathInput);
           toast.success("Claude settings 路径已保存");
         },
+        onError: (e: unknown) => toast.error((e as Error).message),
       },
     );
   };
