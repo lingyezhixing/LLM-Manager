@@ -112,6 +112,26 @@ def open_db(path: Path) -> Db:
         );
         CREATE INDEX IF NOT EXISTS idx_model_runtime_model ON model_runtime(model_id);
         CREATE INDEX IF NOT EXISTS idx_model_runtime_times ON model_runtime(start_time, end_time);
+        CREATE TABLE IF NOT EXISTS log_sessions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            type TEXT NOT NULL CHECK (type IN ('system','model')),
+            model_name TEXT,
+            alias TEXT,
+            start_time REAL NOT NULL,
+            end_time REAL
+        );
+        CREATE INDEX IF NOT EXISTS idx_log_sessions_start ON log_sessions(start_time);
+        CREATE TABLE IF NOT EXISTS log_lines (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id INTEGER NOT NULL REFERENCES log_sessions(id) ON DELETE CASCADE,
+            seq INTEGER NOT NULL,
+            ts REAL NOT NULL,
+            stream TEXT NOT NULL,
+            level TEXT NOT NULL,
+            text TEXT NOT NULL,
+            UNIQUE (session_id, seq)
+        );
+        CREATE INDEX IF NOT EXISTS idx_log_lines_session ON log_lines(session_id, id);
     """)
     _migrate(conn)
     conn.commit()
@@ -583,3 +603,120 @@ def delete_model_data(db: Db, model_name: str) -> bool:
     except Exception as e:  # noqa: BLE001 — VACUUM 失败不影响删除结果
         logger.warning("VACUUM 失败(不影响删除结果): %s", e)
     return True
+
+
+# ---------------- log sessions / log lines ----------------
+
+
+def log_start_session(db: Db, type_: str, model_name: str | None, alias: str | None, start: float) -> int:
+    with db.write_lock:
+        cur = db.conn.execute(
+            "INSERT INTO log_sessions (type, model_name, alias, start_time) VALUES (?,?,?,?)",
+            (type_, model_name, alias, start),
+        )
+        db.conn.commit()
+        assert cur.lastrowid is not None
+        return cur.lastrowid
+
+
+def log_end_session(db: Db, session_id: int, end: float) -> None:
+    with db.write_lock:
+        db.conn.execute("UPDATE log_sessions SET end_time=? WHERE id=?", (end, session_id))
+        db.conn.commit()
+
+
+def log_insert_lines(db: Db, session_id: int, rows: list[tuple[int, float, str, str, str]]) -> list[int]:
+    """批量插行。rows = [(seq, ts, stream, level, text), ...];返回全局行 id(RETURNING)。
+
+    注意:CPython 的 executemany 不能用于带 RETURNING 的语句(sqlite3.InterfaceError),
+    故用单条 execute + 多行 VALUES,一次往返拿回全部行 id(插入序)。"""
+    if not rows:
+        return []
+    with db.write_lock:
+        sql = ("INSERT INTO log_lines (session_id, seq, ts, stream, level, text) VALUES "
+               + ",".join(["(?,?,?,?,?,?)"] * len(rows)) + " RETURNING id")
+        flat: list = []
+        for r in rows:
+            flat.append(session_id)
+            flat.extend(r)
+        cur = db.conn.execute(sql, flat)
+        ids = [row["id"] for row in cur.fetchall()]
+        db.conn.commit()
+        return ids
+
+
+def log_sessions(db: Db, *, type_: str | None = None, model_name: str | None = None,
+                 limit: int = 50, before_id: int | None = None) -> list[sqlite3.Row]:
+    """会话列表倒序(id 降序)。line_count 一次 GROUP BY 算出;status 由 end_time 计算。
+    before_id = id < before_id 的翻页。"""
+    sql = ("SELECT s.*, COUNT(l.id) AS line_count, "
+           "CASE WHEN s.end_time IS NULL THEN 'running' ELSE 'ended' END AS status "
+           "FROM log_sessions s LEFT JOIN log_lines l ON l.session_id = s.id WHERE 1=1")
+    args: list = []
+    if type_ is not None:
+        sql += " AND s.type = ?"
+        args.append(type_)
+    if model_name is not None:
+        sql += " AND s.model_name = ?"
+        args.append(model_name)
+    if before_id is not None:
+        sql += " AND s.id < ?"
+        args.append(before_id)
+    sql += " GROUP BY s.id ORDER BY s.id DESC LIMIT ?"
+    args.append(max(1, min(limit, 500)))
+    return db.conn.execute(sql, args).fetchall()
+
+
+def log_lines_backfill(db: Db, session_id: int, limit: int = 1500, level: str | None = None) -> list[sqlite3.Row]:
+    """会话内最近 limit 行(升序)。"""
+    sql = "SELECT * FROM log_lines WHERE session_id = ?"
+    args: list = [session_id]
+    if level is not None:
+        sql += " AND level = ?"
+        args.append(level)
+    sql += " ORDER BY id DESC LIMIT ?"
+    args.append(max(1, min(limit, 5000)))
+    rows = db.conn.execute(sql, args).fetchall()
+    rows.reverse()
+    return rows
+
+
+def log_lines_before(db: Db, session_id: int, before_id: int, limit: int = 1500,
+                     level: str | None = None) -> list[sqlite3.Row]:
+    """id < before_id 的最近 limit 行(升序)——往前翻页。"""
+    sql = "SELECT * FROM log_lines WHERE session_id = ? AND id < ?"
+    args: list = [session_id, before_id]
+    if level is not None:
+        sql += " AND level = ?"
+        args.append(level)
+    sql += " ORDER BY id DESC LIMIT ?"
+    args.append(max(1, min(limit, 5000)))
+    rows = db.conn.execute(sql, args).fetchall()
+    rows.reverse()
+    return rows
+
+
+def log_search(db: Db, q: str, *, type_: str | None = None, model_name: str | None = None,
+               session_id: int | None = None, level: str | None = None,
+               limit: int = 500) -> list[sqlite3.Row]:
+    """行级 LIKE 检索(大小写不敏感),跨会话;返回匹配行(升序),含 session 归属。
+    session_id 指定时限定单会话(日志页搜索跳转用)。"""
+    sql = ("SELECT l.*, s.type AS session_type, s.model_name AS session_model "
+           "FROM log_lines l JOIN log_sessions s ON s.id = l.session_id "
+           "WHERE l.text LIKE '%' || ? || '%' COLLATE NOCASE")
+    args: list = [q]
+    if session_id is not None:
+        sql += " AND l.session_id = ?"
+        args.append(session_id)
+    if type_ is not None:
+        sql += " AND s.type = ?"
+        args.append(type_)
+    if model_name is not None:
+        sql += " AND s.model_name = ?"
+        args.append(model_name)
+    if level is not None:
+        sql += " AND l.level = ?"
+        args.append(level)
+    sql += " ORDER BY l.id LIMIT ?"
+    args.append(max(1, min(limit, 500)))
+    return db.conn.execute(sql, args).fetchall()

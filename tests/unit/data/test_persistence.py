@@ -5,6 +5,7 @@ src layout (src/llm_manager/data/persistence.py)."""
 import threading
 from pathlib import Path
 
+from llm_manager.data import persistence as _p
 from llm_manager.data.persistence import (
     delete_model_data,
     fetch_usage,
@@ -446,3 +447,44 @@ def test_delete_model_data_in_memory_db_no_crash():
     db = open_db(Path(":memory:"))
     record_usage(db, "m1", 1, 2, input_tokens=1, output_tokens=1, cache_n=0, prompt_n=0)
     assert delete_model_data(db, "m1") is True  # VACUUM 异常被吞,不阻塞删除
+
+
+# ---- log_sessions / log_lines ----
+
+
+def test_log_session_crud(tmp_path):
+    db = open_db(tmp_path / "t.db")
+    sid = _p.log_start_session(db, "system", None, None, 1000.0)
+    sid2 = _p.log_start_session(db, "model", "m1", "m1-alias", 2000.0)
+    rows = _p.log_sessions(db)
+    assert [r["id"] for r in rows] == [sid2, sid]  # 倒序
+    assert rows[0]["type"] == "model" and rows[0]["alias"] == "m1-alias"
+    _p.log_end_session(db, sid, 1500.0)
+    rows = _p.log_sessions(db, type_="system")
+    assert rows[0]["end_time"] == 1500.0 and rows[0]["status"] == "ended"
+
+
+def test_log_lines_insert_and_query(tmp_path):
+    db = open_db(tmp_path / "t.db")
+    sid = _p.log_start_session(db, "system", None, None, 1000.0)
+    ids = _p.log_insert_lines(db, sid, [
+        (1, 1000.1, "sys", "info", "boot line"),
+        (2, 1000.2, "sys", "warn", "warning"),
+        (3, 1000.3, "sys", "error", "boom"),
+    ])
+    assert len(ids) == 3 and ids[0] < ids[1] < ids[2]
+    bf = _p.log_lines_backfill(db, sid, limit=2)
+    assert [r["text"] for r in bf] == ["warning", "boom"]
+    page = _p.log_lines_before(db, sid, before_id=ids[2], limit=1)
+    assert [r["id"] for r in page] == [ids[1]]
+    errs = _p.log_lines_backfill(db, sid, limit=10, level="error")
+    assert [r["text"] for r in errs] == ["boom"]
+
+
+def test_log_session_line_count(tmp_path):
+    db = open_db(tmp_path / "t.db")
+    sid = _p.log_start_session(db, "system", None, None, 1000.0)
+    _p.log_insert_lines(db, sid, [(1, 1000.1, "sys", "info", "a")])
+    _p.log_insert_lines(db, sid, [(2, 1000.2, "sys", "info", "b")])
+    rows = _p.log_sessions(db)
+    assert rows[0]["line_count"] == 2
