@@ -25,6 +25,7 @@ from llm_manager.data.config_store import (
     mutate_appconfig,
     set_settings,
 )
+from llm_manager.tray import claude
 
 try:
     from importlib.metadata import PackageNotFoundError, version as _pkg_version
@@ -60,6 +61,10 @@ class LogRetentionUpdate(BaseModel):
     days: int | None = Field(default=None, ge=1)
     count_enabled: bool | None = None
     count: int | None = Field(default=None, ge=1)
+
+
+class ClaudeApplyRequest(BaseModel):
+    name: str
 
 
 class CommandInput(BaseModel):
@@ -289,6 +294,27 @@ def register_config_routes(api: APIRouter) -> None:
         cfg = _store(request).reload()
         rf = _restart_fields(cfg, _boot(request))
         return {"needs_restart": bool(rf), "restart_fields": rf, "serving": _serving()}
+
+    @api.post("/config/claude/apply")
+    def apply_claude_preset(request: Request, body: ClaudeApplyRequest) -> dict:
+        """把已存预设写入 Claude settings.json(非破坏,仅更新 env 键)。404 未知预设;400 未配置路径。"""
+        cfg = _store(request).snapshot()
+        preset = (cfg.claude_configs or {}).get(body.name)
+        if preset is None:
+            raise HTTPException(404, f"preset '{body.name}' not found")
+        path = cfg.program.claude_settings_path
+        if not path:
+            raise HTTPException(400, "未配置 Claude settings 路径")
+        claude.apply_preset(Path(path), dict(preset))
+        return {"applied": body.name}
+
+    @api.get("/config/claude/current")
+    def current_claude_preset(request: Request) -> dict:
+        """探测当前生效预设(按 ANTHROPIC_BASE_URL 子串匹配);未配置路径/读失败 → "(未知)"。"""
+        cfg = _store(request).snapshot()
+        path = Path(cfg.program.claude_settings_path) if cfg.program.claude_settings_path else None
+        current = claude.detect_current_preset(path, dict(cfg.claude_configs)) if path else "(未知)"
+        return {"current": current}
 
     @api.put("/config/logs")
     def put_logs(request: Request, body: LogRetentionUpdate) -> dict:

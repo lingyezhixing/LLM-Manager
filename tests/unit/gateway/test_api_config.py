@@ -1,3 +1,4 @@
+import json
 import time
 import types
 
@@ -453,3 +454,49 @@ def test_model_def_rejects_bogus_pricing_type(tmp_path):
         body["pricing"] = {"pricing_type": "Tier", "hourly_price": 0, "tiers": []}
         r = c.post("/api/config/models", json=body)
     assert r.status_code == 422
+
+
+def test_apply_claude_preset_writes_settings_preserving_other_keys(tmp_path):
+    settings = tmp_path / "settings.json"
+    settings.write_text(json.dumps({"apiKeyHelper": "off", "env": {"EXISTING": "1"}}), encoding="utf-8")
+    with TestClient(_app(tmp_path)) as c:
+        c.put("/api/config/claude", json={"configs": {"GLM": {"ANTHROPIC_BASE_URL": "http://glm"}}})
+        c.put("/api/config/program", json={"claude_settings_path": str(settings)})
+        r = c.post("/api/config/claude/apply", json={"name": "GLM"})
+    assert r.status_code == 200
+    assert r.json() == {"applied": "GLM"}
+    data = json.loads(settings.read_text(encoding="utf-8"))
+    assert data["apiKeyHelper"] == "off"                # 非破坏:顶层键保留
+    assert data["env"]["EXISTING"] == "1"               # env 既有键保留
+    assert data["env"]["ANTHROPIC_BASE_URL"] == "http://glm"
+
+
+def test_apply_claude_preset_unknown_preset_404(tmp_path):
+    with TestClient(_app(tmp_path)) as c:
+        r = c.post("/api/config/claude/apply", json={"name": "NOPE"})
+    assert r.status_code == 404
+
+
+def test_apply_claude_preset_without_path_400(tmp_path):
+    with TestClient(_app(tmp_path)) as c:
+        c.put("/api/config/claude", json={"configs": {"GLM": {"ANTHROPIC_BASE_URL": "http://glm"}}})
+        r = c.post("/api/config/claude/apply", json={"name": "GLM"})
+    assert r.status_code == 400
+
+
+def test_current_claude_preset_detects_by_base_url(tmp_path):
+    settings = tmp_path / "settings.json"
+    settings.write_text(json.dumps({"env": {"ANTHROPIC_BASE_URL": "http://glm/v1"}}), encoding="utf-8")
+    with TestClient(_app(tmp_path)) as c:
+        c.put("/api/config/claude", json={"configs": {"GLM": {"ANTHROPIC_BASE_URL": "http://glm"}}})
+        c.put("/api/config/program", json={"claude_settings_path": str(settings)})
+        r = c.get("/api/config/claude/current")
+    assert r.status_code == 200
+    assert r.json() == {"current": "GLM"}
+
+
+def test_current_claude_preset_unknown_without_settings(tmp_path):
+    with TestClient(_app(tmp_path)) as c:
+        c.put("/api/config/claude", json={"configs": {"GLM": {"ANTHROPIC_BASE_URL": "http://glm"}}})
+        r = c.get("/api/config/claude/current")
+    assert r.json() == {"current": "(未知)"}
