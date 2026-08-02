@@ -147,7 +147,7 @@ export async function fetchUsageCostSeries(params: UsageSeriesParams): Promise<U
 // backend emits on /api/models/{alias}/logs/stream (LogLineResponse in gateway/api/models.py;
 // captured/leveled in data/logs.py).
 export interface LogLine {
-  id: number; ts: number; stream: "out" | "err";
+  id: number; ts: number; stream: "out" | "err" | "sys";
   level: "info" | "ok" | "warn" | "error"; text: string;
 }
 
@@ -178,6 +178,52 @@ export async function searchLogs(alias: string, q: string, level?: string): Prom
   if (level) qs.set("level", level);
   const res = await fetch(`/api/models/${encodeURIComponent(alias)}/logs/search?${qs}`);
   if (!res.ok) throw new Error(`/logs/search failed: ${res.status}`);
+  return (await res.json()) as LogSearch;
+}
+
+// 日志查看页 — persistent session logs (/api/logs/*)
+export interface LogSession {
+  id: number;
+  type: "system" | "model";
+  model_name: string | null;
+  alias: string | null;
+  start_time: number;
+  end_time: number | null;
+  status: "running" | "ended";
+  duration_s: number | null;
+  line_count: number;
+}
+
+export async function fetchSessions(
+  opts: { type?: "system" | "model"; model?: string; limit?: number; before?: number } = {},
+): Promise<LogSession[]> {
+  const qs = new URLSearchParams();
+  if (opts.type) qs.set("type", opts.type);
+  if (opts.model) qs.set("model", opts.model);
+  if (opts.limit) qs.set("limit", String(opts.limit));
+  if (opts.before) qs.set("before", String(opts.before));
+  const res = await fetch(`/api/logs/sessions?${qs}`);
+  if (!res.ok) throw new Error(`/api/logs/sessions failed: ${res.status}`);
+  return (await res.json()) as LogSession[];
+}
+
+export async function fetchSessionLines(
+  sessionId: number, before: number, limit = 1500, level?: string,
+): Promise<LogLine[]> {
+  const qs = new URLSearchParams({ before: String(before), limit: String(limit) });
+  if (level) qs.set("level", level);
+  const res = await fetch(`/api/logs/sessions/${sessionId}/lines?${qs}`);
+  if (!res.ok) throw new Error(`/api/logs/sessions/${sessionId}/lines failed: ${res.status}`);
+  return (await res.json()) as LogLine[];
+}
+
+export async function searchSessionLogs(
+  sessionId: number, q: string, level?: string,
+): Promise<LogSearch> {
+  const qs = new URLSearchParams({ q, session_id: String(sessionId) });
+  if (level) qs.set("level", level);
+  const res = await fetch(`/api/logs/search?${qs}`);
+  if (!res.ok) throw new Error(`/api/logs/search failed: ${res.status}`);
   return (await res.json()) as LogSearch;
 }
 

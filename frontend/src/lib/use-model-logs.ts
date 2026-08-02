@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { LogLine } from "@/lib/api";
-import { fetchLogPage, searchLogs } from "@/lib/api";
+import type { LogLine, LogSearch } from "@/lib/api";
+import { fetchLogPage, fetchSessionLines, searchLogs, searchSessionLogs } from "@/lib/api";
 
 const WINDOW = 1500;          // 实时尾窗口 + 历史页大小(行数)
 const STICKY_THRESHOLD = 24;  // 贴底判定阈值(px)
@@ -8,20 +8,50 @@ const TOP_THRESHOLD = 8;      // 触顶判定阈值(px)——触发向上加载�
 const MAX_PREFIX = 5000;      // historyPrefix 上限(防卡顿;超过丢最旧)
 
 /**
- * 单模型日志查看器。两种模式:
- *  - live:订阅 /logs/stream,实时追加(贴底跟进);滚到顶部自动加载更早历史(prepend 到
+ * 日志数据源抽象:useLogViewer 通过它访问 SSE / 翻页 / 搜索,不感知具体后端
+ * (模型实时日志 /api/models/{alias}/logs* vs 持久会话 /api/logs/sessions/*)。
+ * 注意:传给 useLogViewer 的 api 对象必须身份稳定(包装层 useMemo 按 alias/sessionId
+ * 缓存),否则 SSE 订阅 effect 会随每次渲染重跑。
+ */
+export interface LogApi {
+  streamUrl: (level?: string) => string;
+  fetchPage: (before: number, limit: number, level?: string) => Promise<LogLine[]>;
+  search: (q: string, level?: string) => Promise<LogSearch>;
+}
+
+export function modelLogApi(alias: string): LogApi {
+  const enc = encodeURIComponent(alias);
+  return {
+    streamUrl: (level) => `/api/models/${enc}/logs/stream${level ? `?level=${level}` : ""}`,
+    fetchPage: (before, limit, level) => fetchLogPage(alias, before, limit, level),
+    search: (q, level) => searchLogs(alias, q, level),
+  };
+}
+
+export function sessionLogApi(sessionId: number): LogApi {
+  return {
+    streamUrl: (level) => `/api/logs/sessions/${sessionId}/stream${level ? `?level=${level}` : ""}`,
+    fetchPage: (before, limit, level) => fetchSessionLines(sessionId, before, limit, level),
+    search: (q, level) => searchSessionLogs(sessionId, q, level),
+  };
+}
+
+/**
+ * 单日志源查看器(模型实时日志或单会话持久日志,由 api 参数决定)。两种模式:
+ *  - live:订阅 streamUrl 的 SSE,实时追加(贴底跟进);滚到顶部自动加载更早历史(prepend 到
  *   historyPrefix),滚轮上滚暂停跟进,来新行累加 newCount。
- *  - history:搜索跳转到窗口外的匹配时载入历史页(/logs?before=),静态浏览;实时行仍进 liveLines
+ *  - history:搜索跳转到窗口外的匹配时载入历史页(fetchPage before=),静态浏览;实时行仍进 liveLines
  *   (后台),用 newCount 记数;「返回最新」切回 live。
  * 搜索:后端全量检索 → 匹配行 id;‹/› 在匹配间跳转,目标不在当前窗口则翻页载入后滚动定位。
  * hasSearched 跟踪「是否真的执行过搜索」(runSearch 调用过),而非「输入框是否有字」——
  * 输入未按 Enter 时不显示「无匹配」,避免误导。
  * level 为后端查询参数(SSE/搜索/翻页/向上加载均带),变更时重订阅 + 清搜索。
- * runKey 为运行实例标识(传入模型 pid):停止(null)或重启(新进程)时变化 → 重订阅并清空,
+ * runKey 为运行实例标识(模型日志传 pid):停止(null)或重启(新进程)时变化 → 重订阅并清空,
  * 使同一 alias 的停止/重启能正确清旧日志、加载新日志(否则 alias/level 不变,旧缓冲残留、
- * EventSource 不重连、重启后新日志进不来,须手动切换模型才重置)。
+ * EventSource 不重连、重启后新日志进不来,须手动切换模型才重置)。会话日志恒传 null(父级
+ * key={sessionId} 重建组件)。
  */
-export function useModelLogs(alias: string, level: string, runKey: number | null) {
+export function useLogViewer(api: LogApi, level: string, runKey: number | null) {
   const levelParam = level || undefined;
   const [liveLines, setLiveLines] = useState<LogLine[]>([]);
   const [historyPrefix, setHistoryPrefix] = useState<LogLine[]>([]);     // live 模式顶部加载的历史(旧→新)
@@ -47,13 +77,12 @@ export function useModelLogs(alias: string, level: string, runKey: number | null
   const displayed = historyPage ?? liveView;
   const mode: "live" | "history" = historyPage ? "history" : "live";
 
-  // SSE 实时尾(随 alias/level/runKey 重订阅,重置视图 + 搜索)。新行不在「实时+跟进」态则记 newCount。
+  // SSE 实时尾(随 api/level/runKey 重订阅,重置视图 + 搜索)。新行不在「实时+跟进」态则记 newCount。
   // runKey(pid)随模型停止/重启变化 → 重连到新进程流并清空旧日志(否则同一 alias 重启后新日志进不来)。
   useEffect(() => {
     setLiveLines([]); setHistoryPrefix([]); setHistoryPage(null); setFollowing(true); setNewCount(0);
     setMatches([]); setMatchIdx(-1); setHasSearched(false); setAtOldest(false);
-    const url = `/api/models/${encodeURIComponent(alias)}/logs/stream${levelParam ? `?level=${levelParam}` : ""}`;
-    const es = new EventSource(url);
+    const es = new EventSource(api.streamUrl(levelParam));
     es.onmessage = (ev) => {
       try {
         const l = JSON.parse(ev.data) as LogLine;
@@ -65,7 +94,7 @@ export function useModelLogs(alias: string, level: string, runKey: number | null
       } catch { /* 帧异常忽略 */ }
     };
     return () => es.close();
-  }, [alias, levelParam, runKey]);
+  }, [api, levelParam, runKey]);
 
   // 跟进:live + following → 新行贴底。
   useEffect(() => {
@@ -102,7 +131,7 @@ export function useModelLogs(alias: string, level: string, runKey: number | null
     if (el) pendingTopFixRef.current = { h: el.scrollHeight, t: el.scrollTop }; // prepend 前基准
     setLoadingTop(true);
     try {
-      const page = await fetchLogPage(alias, firstId, WINDOW, levelParam);
+      const page = await api.fetchPage(firstId, WINDOW, levelParam);
       const newer = page.filter((l) => l.id < firstId);   // 去重(后端返回 id<firstId 的最近 WINDOW 行)
       if (newer.length === 0) { setAtOldest(true); return; }
       setHistoryPrefix((prev) => {
@@ -113,7 +142,7 @@ export function useModelLogs(alias: string, level: string, runKey: number | null
     } catch { /* best-effort */ } finally {
       setLoadingTop(false);
     }
-  }, [alias, levelParam, loadingTop, mode, historyPrefix, liveLines]);
+  }, [api, levelParam, loadingTop, mode, historyPrefix, liveLines]);
 
   const onScroll = useCallback(() => {
     if (mode === "history") return;          // 历史页不自动跟进/加载
@@ -133,24 +162,24 @@ export function useModelLogs(alias: string, level: string, runKey: number | null
     if (inView) {
       setScrollTargetId(target);
     } else {
-      fetchLogPage(alias, target + 1, WINDOW, levelParam)
+      api.fetchPage(target + 1, WINDOW, levelParam)
         .then((page) => { setHistoryPage(page); setScrollTargetId(target); })
         .catch(() => { /* best-effort */ });
     }
-  }, [alias, levelParam, historyPage, liveView]);
+  }, [api, levelParam, historyPage, liveView]);
 
   const runSearch = useCallback(async (q: string) => {
     setHasSearched(true);                    // bug1:标记已执行搜索(无论 q 是否空)
     if (!q.trim()) { setMatches([]); setMatchIdx(-1); return; }
     setSearching(true);
     try {
-      const res = await searchLogs(alias, q, levelParam);
+      const res = await api.search(q, levelParam);
       setMatches(res.matches);
       const idx = res.matches.length ? 0 : -1;
       setMatchIdx(idx);
       if (idx >= 0) jumpToMatch(res.matches, idx);
     } finally { setSearching(false); }
-  }, [alias, levelParam, jumpToMatch]);
+  }, [api, levelParam, jumpToMatch]);
 
   // bug1:用户改输入 → 清上次搜索结果 + hasSearched(回「未搜索」态,不显示「无匹配」)。
   // 若在 history 模式(搜索跳转过),回 live 起始。historyPrefix(向上加载的历史)保留。
@@ -193,4 +222,19 @@ export function useModelLogs(alias: string, level: string, runKey: number | null
     runSearch, onInputChange, nextMatch, prevMatch, backToLive,
     loadingTop, atOldest,
   };
+}
+
+/**
+ * 单模型日志查看器(模型管理页右栏)。api 按 alias 缓存——alias/level/runKey 变化时重订阅,
+ * 其余渲染不复建(api 身份稳定是 useLogViewer 订阅语义的前提)。签名不变,ModelLogPanel 零改动。
+ */
+export function useModelLogs(alias: string, level: string, runKey: number | null) {
+  const api = useMemo(() => modelLogApi(alias), [alias]);
+  return useLogViewer(api, level, runKey);
+}
+
+/** 单会话日志(日志查看页)。runKey 恒 null——切会话由父级 key={sessionId} 重建组件。 */
+export function useSessionLogs(sessionId: number, level: string) {
+  const api = useMemo(() => sessionLogApi(sessionId), [sessionId]);
+  return useLogViewer(api, level, null);
 }
