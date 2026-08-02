@@ -381,7 +381,7 @@ def test_migrate_moves_support_cache_to_model_pricing(tmp_path):
 
 def test_storage_stats_empty(tmp_path):
     db = open_db(tmp_path / "t.db")
-    s = storage_stats(db, size_bytes=123)
+    s = storage_stats(db, configured=set(), size_bytes=123)
     assert s.size_bytes == 123
     assert s.total_requests == 0
     assert s.total_models_with_data == 0
@@ -394,12 +394,22 @@ def test_storage_stats_counts_requests_and_runtime(tmp_path):
     record_usage(db, "m1", 300, 400, input_tokens=1, output_tokens=1, cache_n=0, prompt_n=0)
     record_runtime_start(db, "m2", 500)
     record_runtime_end(db, "m2", 600)
-    s = storage_stats(db, size_bytes=99)
+    s = storage_stats(db, configured=set(), size_bytes=99)
     assert s.total_requests == 2
     assert s.total_models_with_data == 2
     m1, m2 = s.models_data["m1"], s.models_data["m2"]
     assert m1.request_count == 2 and not m1.has_runtime_data
     assert m2.request_count == 0 and m2.has_runtime_data
+
+
+def test_storage_stats_union_includes_configured_without_data(tmp_path):
+    db = open_db(tmp_path / "t.db")
+    record_usage(db, "used", 1, 2, input_tokens=1, output_tokens=1, cache_n=0, prompt_n=0)
+    s = storage_stats(db, configured={"used", "cfg-only"}, size_bytes=None)
+    assert set(s.models_data) == {"used", "cfg-only"}
+    assert s.models_data["cfg-only"].request_count == 0
+    assert not s.models_data["cfg-only"].has_runtime_data
+    assert s.total_models_with_data == 1  # 配置但无数据的不计入
 
 
 def test_orphaned_models_is_config_diff(tmp_path):

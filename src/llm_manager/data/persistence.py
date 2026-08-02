@@ -531,24 +531,26 @@ class StorageStats:
     models_data: dict[str, ModelDataStats]
 
 
-def storage_stats(db: Db, *, size_bytes: int | None = None) -> StorageStats:
-    """遍历 models 表全部行:每模型请求数与是否有运行段;
-    total_models_with_data = 请求 > 0 或有运行段的模型数;total_requests = 全库请求总数。"""
+def storage_stats(db: Db, *, configured: set[str], size_bytes: int | None = None) -> StorageStats:
+    """数据库存储统计(数据管理页)。models_data = 配置模型 ∪ 数据库模型的并集:
+    配置但无记录的模型显示 0 请求/无运行段(与 legacy 表格一致)。孤立模型(仅在
+    数据库,不在配置)同样列出。total_models_with_data = 请求 > 0 或有运行段的模型数。"""
     total_requests = int(db.conn.execute("SELECT COUNT(*) FROM model_requests").fetchone()[0])
     runtime_ids = {
         r["model_id"] for r in db.conn.execute("SELECT DISTINCT model_id FROM model_runtime")
     }
-    models_data: dict[str, ModelDataStats] = {}
+    stats: dict[str, tuple[int, bool]] = {}
     rows = db.conn.execute(
         "SELECT m.original_name AS name, m.id AS mid, "
         "(SELECT COUNT(*) FROM model_requests r WHERE r.model_id = m.id) AS rc "
-        "FROM models m ORDER BY m.original_name"
+        "FROM models m"
     ).fetchall()
     for row in rows:
-        rc = int(row["rc"])
-        models_data[row["name"]] = ModelDataStats(
-            request_count=rc, has_runtime_data=row["mid"] in runtime_ids,
-        )
+        stats[row["name"]] = (int(row["rc"]), row["mid"] in runtime_ids)
+    models_data: dict[str, ModelDataStats] = {}
+    for name in sorted(set(configured) | set(stats)):
+        rc, has_runtime = stats.get(name, (0, False))
+        models_data[name] = ModelDataStats(request_count=rc, has_runtime_data=has_runtime)
     total_models_with_data = sum(
         1 for st in models_data.values() if st.request_count > 0 or st.has_runtime_data
     )

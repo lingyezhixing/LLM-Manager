@@ -117,7 +117,12 @@ export function DatabasePanel() {
             </div>
             {entries.map(([name, st]) => (
               <div key={name} className="grid grid-cols-[minmax(0,1fr)_auto_auto] gap-3 border-t border-border px-3 py-2 text-sm">
-                <div className="truncate text-foreground">{name}</div>
+                <div className="flex min-w-0 items-center gap-1.5">
+                  {orphans.includes(name) && (
+                    <span className="shrink-0 rounded border border-destructive/60 px-1 text-[10px] leading-4 text-destructive">孤立</span>
+                  )}
+                  <span className="truncate text-foreground">{name}</span>
+                </div>
                 <div className="w-20 text-right text-muted-foreground">{st.request_count.toLocaleString()}</div>
                 <div className={`w-20 text-right ${st.has_runtime_data ? "text-success" : "text-muted-foreground"}`}>
                   {st.has_runtime_data ? "✓ 有" : "✗ 无"}

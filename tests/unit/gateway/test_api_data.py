@@ -28,7 +28,7 @@ def _app(db=None, cfg=None, resolved_db: str | None = None) -> FastAPI:
 
 
 def test_storage_stats_empty() -> None:
-    with TestClient(_app()) as c:
+    with TestClient(_app(cfg=SimpleNamespace(models={}))) as c:
         r = c.get("/api/data/storage-stats")
     assert r.status_code == 200
     j = r.json()
@@ -43,7 +43,8 @@ def test_storage_stats_with_data(tmp_path) -> None:
     record_usage(db, "m1", 1, 2, input_tokens=5, output_tokens=5, cache_n=0, prompt_n=0)
     record_usage(db, "m1", 3, 4, input_tokens=1, output_tokens=1, cache_n=0, prompt_n=0)
     record_usage(db, "m2", 1, 2, input_tokens=2, output_tokens=2, cache_n=0, prompt_n=0)
-    with TestClient(_app(db, resolved_db=str(tmp_path / "t.db"))) as c:
+    cfg = SimpleNamespace(models={"m1": object(), "m3": object()})
+    with TestClient(_app(db, cfg, resolved_db=str(tmp_path / "t.db"))) as c:
         r = c.get("/api/data/storage-stats")
     assert r.status_code == 200
     j = r.json()
@@ -51,6 +52,8 @@ def test_storage_stats_with_data(tmp_path) -> None:
     assert j["total_requests"] == 3
     assert j["total_models_with_data"] == 2
     assert j["models_data"]["m1"]["request_count"] == 2
+    assert j["models_data"]["m3"] == {"request_count": 0, "has_runtime_data": False}  # 配置但无数据
+    assert set(j["models_data"]) == {"m1", "m2", "m3"}
 
 
 def test_orphaned_returns_diff() -> None:

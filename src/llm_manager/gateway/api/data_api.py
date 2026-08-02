@@ -19,7 +19,8 @@ def register_data_routes(api: APIRouter) -> None:
         db = request.app.state.db
         db_path = Path(str(getattr(request.app.state, "resolved_db", "data/llm_manager.db")))
         size = db_path.stat().st_size if db_path.exists() else None
-        s = _p.storage_stats(db, size_bytes=size)
+        cfg = request.app.state.config_store.snapshot()
+        s = _p.storage_stats(db, configured=set(cfg.models.keys()), size_bytes=size)
         return {
             "size_bytes": s.size_bytes,
             "total_requests": s.total_requests,
