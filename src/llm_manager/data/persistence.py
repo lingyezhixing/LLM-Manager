@@ -2,6 +2,7 @@
 Single writer connection serialized by lock; reads concurrent under WAL."""
 from __future__ import annotations
 
+import logging
 import math
 import sqlite3
 import threading
@@ -12,6 +13,8 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from llm_manager.config import AppConfig, Pricing, PricingTier
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -510,3 +513,71 @@ def usage_cost_series(
                         models.setdefault(name, [0.0] * n)[i] += cost
                         total[i] += cost
     return UsageSeries(buckets=buckets, models=models, total=total)
+
+
+@dataclass(frozen=True, slots=True)
+class ModelDataStats:
+    """单模型积累数据量(请求 + 运行段)。"""
+    request_count: int
+    has_runtime_data: bool
+
+
+@dataclass(frozen=True, slots=True)
+class StorageStats:
+    """数据库存储统计(数据管理页)。size_bytes 由调用方传入(API 层从 resolved_db 取)。"""
+    size_bytes: int | None
+    total_requests: int
+    total_models_with_data: int
+    models_data: dict[str, ModelDataStats]
+
+
+def storage_stats(db: Db, *, size_bytes: int | None = None) -> StorageStats:
+    """遍历 models 表全部行:每模型请求数与是否有运行段;
+    total_models_with_data = 请求 > 0 或有运行段的模型数;total_requests = 全库请求总数。"""
+    total_requests = int(db.conn.execute("SELECT COUNT(*) FROM model_requests").fetchone()[0])
+    runtime_ids = {
+        r["model_id"] for r in db.conn.execute("SELECT DISTINCT model_id FROM model_runtime")
+    }
+    models_data: dict[str, ModelDataStats] = {}
+    rows = db.conn.execute(
+        "SELECT m.original_name AS name, m.id AS mid, "
+        "(SELECT COUNT(*) FROM model_requests r WHERE r.model_id = m.id) AS rc "
+        "FROM models m ORDER BY m.original_name"
+    ).fetchall()
+    for row in rows:
+        rc = int(row["rc"])
+        models_data[row["name"]] = ModelDataStats(
+            request_count=rc, has_runtime_data=row["mid"] in runtime_ids,
+        )
+    total_models_with_data = sum(
+        1 for st in models_data.values() if st.request_count > 0 or st.has_runtime_data
+    )
+    return StorageStats(
+        size_bytes=size_bytes,
+        total_requests=total_requests,
+        total_models_with_data=total_models_with_data,
+        models_data=models_data,
+    )
+
+
+def orphaned_models(db: Db, configured: set[str]) -> list[str]:
+    """孤立模型 = models 表存在但不在当前配置(primary_name 集合)中。升序。"""
+    names = [r["original_name"] for r in db.conn.execute("SELECT original_name FROM models")]
+    return sorted(n for n in names if n not in configured)
+
+
+def delete_model_data(db: Db, model_name: str) -> bool:
+    """删除模型全部积累数据(外键级联清 model_requests/model_runtime)。
+    未知名称 → False。删除 commit 后自动 VACUUM + wal_checkpoint(TRUNCATE) 回收空间;
+    VACUUM 失败仅 warning(legacy 同款;:memory: DB 的 VACUUM 亦被吞,不阻塞删除)。"""
+    with db.write_lock:
+        cur = db.conn.execute("DELETE FROM models WHERE original_name = ?", (model_name,))
+        db.conn.commit()
+        if cur.rowcount == 0:
+            return False
+    try:
+        db.conn.execute("VACUUM")
+        db.conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    except Exception as e:  # noqa: BLE001 — VACUUM 失败不影响删除结果
+        logger.warning("VACUUM 失败(不影响删除结果): %s", e)
+    return True

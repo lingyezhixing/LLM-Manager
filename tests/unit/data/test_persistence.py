@@ -3,14 +3,18 @@ start/end), resolve_model_id, lock-serialized concurrency, fetch_usage, usage_se
 (bucketed by end_time), and the legacy ``ts`` migration. Consolidated here to mirror the
 src layout (src/llm_manager/data/persistence.py)."""
 import threading
+from pathlib import Path
 
 from llm_manager.data.persistence import (
+    delete_model_data,
     fetch_usage,
     open_db,
+    orphaned_models,
     record_usage,
     record_runtime_start,
     record_runtime_end,
     resolve_model_id,
+    storage_stats,
     tier_cost,
     usage_cost,
     usage_cost_series,
@@ -373,3 +377,62 @@ def test_migrate_moves_support_cache_to_model_pricing(tmp_path):
     pt_cols = {r[1] for r in db.conn.execute("PRAGMA table_info(pricing_tiers)")}
     assert "support_cache" in mp_cols
     assert "support_cache" not in pt_cols
+
+
+def test_storage_stats_empty(tmp_path):
+    db = open_db(tmp_path / "t.db")
+    s = storage_stats(db, size_bytes=123)
+    assert s.size_bytes == 123
+    assert s.total_requests == 0
+    assert s.total_models_with_data == 0
+    assert s.models_data == {}
+
+
+def test_storage_stats_counts_requests_and_runtime(tmp_path):
+    db = open_db(tmp_path / "t.db")
+    record_usage(db, "m1", 100, 200, input_tokens=5, output_tokens=5, cache_n=0, prompt_n=0)
+    record_usage(db, "m1", 300, 400, input_tokens=1, output_tokens=1, cache_n=0, prompt_n=0)
+    record_runtime_start(db, "m2", 500)
+    record_runtime_end(db, "m2", 600)
+    s = storage_stats(db, size_bytes=99)
+    assert s.total_requests == 2
+    assert s.total_models_with_data == 2
+    m1, m2 = s.models_data["m1"], s.models_data["m2"]
+    assert m1.request_count == 2 and not m1.has_runtime_data
+    assert m2.request_count == 0 and m2.has_runtime_data
+
+
+def test_orphaned_models_is_config_diff(tmp_path):
+    db = open_db(tmp_path / "t.db")
+    record_usage(db, "kept", 1, 2, input_tokens=1, output_tokens=1, cache_n=0, prompt_n=0)
+    record_usage(db, "gone", 1, 2, input_tokens=1, output_tokens=1, cache_n=0, prompt_n=0)
+    assert orphaned_models(db, {"kept"}) == ["gone"]
+    assert orphaned_models(db, {"kept", "gone"}) == []
+
+
+def test_delete_model_data_cascades_and_unknown_returns_false(tmp_path):
+    db = open_db(tmp_path / "t.db")
+    record_usage(db, "gone", 1, 2, input_tokens=1, output_tokens=1, cache_n=0, prompt_n=0)
+    record_runtime_start(db, "gone", 1)
+    assert delete_model_data(db, "gone") is True
+    assert delete_model_data(db, "gone") is False  # 已删 → 未知
+    assert db.conn.execute("SELECT COUNT(*) FROM models").fetchone()[0] == 0
+    assert db.conn.execute("SELECT COUNT(*) FROM model_requests").fetchone()[0] == 0
+    assert db.conn.execute("SELECT COUNT(*) FROM model_runtime").fetchone()[0] == 0
+
+
+def test_delete_model_data_vacuum_compacts_pages(tmp_path):
+    db = open_db(tmp_path / "t.db")
+    for i in range(200):
+        record_usage(db, f"m{i}", 1, 2, input_tokens=1, output_tokens=1, cache_n=0, prompt_n=0)
+    before = db.conn.execute("PRAGMA page_count").fetchone()[0]
+    for i in range(200):
+        assert delete_model_data(db, f"m{i}") is True
+    after = db.conn.execute("PRAGMA page_count").fetchone()[0]
+    assert after < before  # VACUUM 压缩后页数显著减少
+
+
+def test_delete_model_data_in_memory_db_no_crash():
+    db = open_db(Path(":memory:"))
+    record_usage(db, "m1", 1, 2, input_tokens=1, output_tokens=1, cache_n=0, prompt_n=0)
+    assert delete_model_data(db, "m1") is True  # VACUUM 异常被吞,不阻塞删除
