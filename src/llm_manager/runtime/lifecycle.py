@@ -51,6 +51,7 @@ class Lifecycle:
         self._stop_events: dict[str, asyncio.Event] = {}
         self._active_schemes: dict[str, Scheme] = {}
         self._spawn_lock = asyncio.Lock()   # Plan 7:全局 spawn 锁(spec §3.2)
+        self._log_session_ids: dict[str, int] = {}   # alias → 进行中模型日志会话 id(多模型并发,按 alias 独立追踪)
 
     # ---------- public ----------
     async def ensure_running(self, alias: str, *, inc_pending: bool = False) -> ModelStatus:
@@ -101,7 +102,7 @@ class Lifecycle:
         fut = state.pop_inflight(alias)
         if fut is not None and not fut.done():
             fut.set_result(ModelStatus.STOPPED)
-        _logs.end_session(alias)   # 结束内存会话日志:下次 start 起新会话(id 从 1)
+        self._log_end(alias)   # 收口模型日志会话(落库 end_time):下次 start 起新会话
         return state.get_status(alias)
 
     async def unload_all(self) -> list[str]:
@@ -131,6 +132,13 @@ class Lifecycle:
             _p.record_runtime_end(self._db, alias, time.time())
         except Exception:
             logger.warning("record_runtime_end failed for %s", alias, exc_info=True)
+
+    # ---------- log session recording helpers ----------
+    def _log_end(self, alias: str) -> None:
+        """收口模型日志会话(若开着):stop / 崩溃 / 新 spawn 前调用。"""
+        sid = self._log_session_ids.pop(alias, None)
+        if sid is not None:
+            _logs.end_session(sid)
 
     # ---------- pipeline ----------
     async def _run_pipeline(self, alias: str) -> ModelStatus:
@@ -179,6 +187,15 @@ class Lifecycle:
                 on_output=lambda line, stream: _logs.capture(alias, line, stream))
             logger.info("spawn %s pid=%d", alias, rec.pid)
 
+            # === 模型日志会话:先收口上一会话(防快速 restart 残留),再开新会话。
+            # 失败仅降级(该模型本次日志不落库),不阻断 spawn(guard D:spawn 锁内不得抛)。===
+            try:
+                self._log_end(alias)
+                self._log_session_ids[alias] = _logs.start_session(
+                    "model", model_name=alias, alias=model.aliases[0])
+            except Exception:
+                logger.warning("log session start failed for %s", alias, exc_info=True)
+
             # === post-spawn critical section (no await) === invariant 3
             state.record_pid(alias, rec.pid)
             orphan_pid = rec.pid if ev.is_set() else None
@@ -207,6 +224,7 @@ class Lifecycle:
                 await self._supervisor.kill_tree(rec.pid)
                 if ev.is_set():
                     return ModelStatus.STOPPED        # kill_tree awaited; stop may have come — don't overwrite STOPPED (guard H)
+                self._log_end(alias)   # probe 失败不会走 on_exit / stop(FAILED 早退)→ 必须在此收口,防泄漏 running 会话
                 state.record_failure(alias, f"probe failed: {probe.message}")
                 return ModelStatus.FAILED
 
@@ -221,6 +239,7 @@ class Lifecycle:
             return ModelStatus.ROUTING
         except (Exception, asyncio.CancelledError):
             await self._supervisor.kill_tree(rec.pid)
+            self._log_end(alias)   # 异常/取消路径同样收口(会话已在 spawn 打开)
             raise
 
     async def _abort_spawned(self, pid: int | None) -> ModelStatus:
@@ -234,6 +253,7 @@ class Lifecycle:
             if state.get_status(alias) == ModelStatus.STOPPED:
                 return
             self._runtime_end(alias)
+            self._log_end(alias)   # 进程崩溃 → 收口日志会话
             state.record_failure(alias, f"process exited code={code}")
         except Exception as e:
             logger.error("on_exit callback error for %s: %s", alias, e)

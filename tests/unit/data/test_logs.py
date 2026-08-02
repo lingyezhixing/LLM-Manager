@@ -1,4 +1,5 @@
 import asyncio
+import threading
 import time
 
 import pytest
@@ -171,3 +172,33 @@ def test_auto_flush_threshold_in_loop(store):
     asyncio.run(go())
     rows = _p.log_lines_backfill(store, sid, limit=logs.BATCH_SIZE + 10)
     assert len(rows) == logs.BATCH_SIZE
+
+
+def test_capture_system_from_worker_thread(store):
+    """系统 handler 任意线程 emit:与 flush 并发不丢行、seq 不重复。"""
+    sid = logs.start_session("system", None, None)
+    errors = []
+
+    def worker():
+        try:
+            for i in range(500):
+                logs.capture_system(f"line {i}", float(i), "INFO")
+                if i % 50 == 0:
+                    time.sleep(0.0001)
+        except Exception as e:
+            errors.append(e)
+
+    t = threading.Thread(target=worker)
+    t.start()
+    async def go():
+        for _ in range(20):
+            await asyncio.sleep(0.005)
+            await logs.flush()
+    asyncio.run(go())
+    t.join(timeout=5)
+    assert not t.is_alive(), "worker 应在 5s 内完成"
+    assert not errors
+    asyncio.run(logs.flush())   # 兜底:worker 尾部行(与 flush 并发期交错时)
+    rows = _p.log_lines_backfill(store, sid, limit=10000)
+    assert len(rows) == 500   # 一行不丢(锁正确时)
+    assert sorted(r["seq"] for r in rows) == list(range(1, 501))   # seq 无重复(递增持锁)

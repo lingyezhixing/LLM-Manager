@@ -17,6 +17,8 @@ import httpx
 from fastapi import FastAPI
 
 from llm_manager import config
+from llm_manager.data import logs as _logs
+from llm_manager.data.log_handler import SystemLogHandler
 from llm_manager.data.persistence import open_db
 from llm_manager.devices import ENUMERATORS, DeviceMonitor
 from llm_manager.gateway.api.models import build_models_response
@@ -73,6 +75,7 @@ def create_app(db_path: Path | None = None, *, legacy_yaml: Path | None = None) 
     setup_logging()
     resolved_db = Path(db_path or os.environ.get("LLM_MANAGER_DB_PATH", "data/llm_manager.db"))
     db = open_db(resolved_db)
+    _logs.init(db)   # 接线日志存储(幂等)
     try:
         from llm_manager.data.config_store import ConfigStore, initialize
         initialize(db, legacy_yaml)
@@ -100,6 +103,12 @@ def create_app(db_path: Path | None = None, *, legacy_yaml: Path | None = None) 
         app.state.lifecycle = lifecycle
         app.state.cfg = cfg
         app.state.loop = asyncio.get_running_loop()
+        # === 系统日志会话:handler 任意线程 emit → capture_system → flush_loop 落库 ===
+        _logs.start_system_session()
+        sys_handler = SystemLogHandler(_logs.capture_system)
+        logging.getLogger().addHandler(sys_handler)
+        log_stop = asyncio.Event()
+        flush_task = asyncio.create_task(_logs.flush_loop(log_stop))
         await asyncio.to_thread(monitor.refresh)
         online = sorted(monitor.online_devices())
         logger.info("devices online: %s", ", ".join(online) if online else "(none)")
@@ -149,6 +158,14 @@ def create_app(db_path: Path | None = None, *, legacy_yaml: Path | None = None) 
                 if not auto_task.done():
                     auto_task.cancel()
                 await asyncio.gather(idle_task, auto_task, return_exceptions=True)
+            # === 系统日志收尾:停 flush_loop → 兜底清空剩余 pending → 摘 handler → 收口会话 ===
+            try:
+                log_stop.set()
+                await asyncio.gather(flush_task, return_exceptions=True)
+                await _logs.flush()
+            finally:
+                logging.getLogger().removeHandler(sys_handler)
+                _logs.end_system_session()
             for client in clients.values():
                 await client.aclose()
             db.conn.close()

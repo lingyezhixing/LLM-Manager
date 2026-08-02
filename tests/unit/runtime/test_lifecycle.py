@@ -7,6 +7,7 @@ import pytest
 from llm_manager import state
 from llm_manager.config import AppConfig, Command, ModelConfig, ProgramConfig, Scheme
 from llm_manager.data import logs
+from llm_manager.data import persistence as _p
 from llm_manager.devices import DeviceInfo
 from llm_manager.probes import ProbeResult
 from llm_manager.runtime.lifecycle import Lifecycle
@@ -599,3 +600,116 @@ async def test_runtime_session_closed_on_reconcile_dead(tmp_path):
     assert len(rows) == 2                                 # old closed + new open
     assert rows[0]["end_time"] is not None
     assert rows[1]["end_time"] is None
+
+
+# ---------- Task 5: model log sessions (DB-backed) ----------
+async def test_model_log_session_open_on_spawn_closed_on_stop(tmp_path):
+    """spawn 后:resolve_session 非 None + DB 有进行中会话(行可落库);
+    stop 后:end_time 落库 + resolve_session 返回 None。"""
+    from llm_manager.data.persistence import open_db
+    logs.reset()   # 清残留 pending/sessions(早先失败测试可能遗留内存行)
+    db = open_db(tmp_path / "t.db")
+    logs.init(db)
+    try:
+        life, sup, dev, cfg = _make(db=db)
+        await life.ensure_running("m1")
+        sid = logs.resolve_session("m1")
+        assert sid is not None
+        rows = _p.log_sessions(db, type_="model", model_name="m1")
+        assert len(rows) == 1 and rows[0]["end_time"] is None   # 进行中
+        assert rows[0]["alias"] == "m1"                          # alias=aliases[0](served name)
+        # spawn 输出 → 该会话的日志行(接线 on_output → capture 按 alias 关联)
+        logs.capture("m1", "server listening on :8000", "out")
+        await logs.flush()
+        lines = _p.log_lines_backfill(db, sid, limit=10)
+        assert [l["text"] for l in lines] == ["server listening on :8000"]
+
+        await life.stop("m1")
+        assert logs.resolve_session("m1") is None
+        rows = _p.log_sessions(db, type_="model", model_name="m1")
+        assert rows[0]["end_time"] is not None   # stop 收口(旧 bug:end_session 收到字符串静默 no-op)
+    finally:
+        logs.reset()
+
+
+async def test_model_log_session_closed_on_crash(tmp_path):
+    """进程崩溃(on_exit 回调)→ 会话收口(end_time 落库)。"""
+    from llm_manager.data.persistence import open_db
+    logs.reset()
+    db = open_db(tmp_path / "t.db")
+    logs.init(db)
+    try:
+        life, sup, dev, cfg = _make(db=db)
+        await life.ensure_running("m1")
+        assert logs.resolve_session("m1") is not None
+        sup.trigger_exit(1000, code=1)
+        assert logs.resolve_session("m1") is None
+        rows = _p.log_sessions(db, type_="model", model_name="m1")
+        assert len(rows) == 1 and rows[0]["end_time"] is not None
+    finally:
+        logs.reset()
+
+
+async def test_model_log_session_restart_opens_new_session_closes_old(tmp_path):
+    """快速 restart:新 spawn 先收口旧会话、再开新会话(防残留,id 各不同)。"""
+    from llm_manager.data.persistence import open_db
+    logs.reset()
+    db = open_db(tmp_path / "t.db")
+    logs.init(db)
+    try:
+        life, sup, dev, cfg = _make(db=db)
+        await life.ensure_running("m1")
+        sid1 = logs.resolve_session("m1")
+        await life.stop("m1")
+        await life.ensure_running("m1")
+        sid2 = logs.resolve_session("m1")
+        assert sid1 != sid2 and sid2 is not None
+        rows = _p.log_sessions(db, type_="model", model_name="m1")   # id 降序:最新在前
+        assert len(rows) == 2
+        assert rows[0]["end_time"] is None       # 新会话进行中
+        assert rows[1]["end_time"] is not None   # 旧会话已收口
+    finally:
+        logs.reset()
+
+
+async def test_model_log_session_closed_on_probe_failure(tmp_path):
+    """probe 失败路径:会话已在 spawn 打开,FAILED 早退不触发 stop/_on_crash → spawn 后必须收口。"""
+    from llm_manager.data.persistence import open_db
+    logs.reset()
+    db = open_db(tmp_path / "t.db")
+    logs.init(db)
+    try:
+        life, sup, dev, cfg = _make(
+            db=db, probes={"Chat": lambda *a, **k: ProbeResult(False, "unhealthy")})
+        status = await life.ensure_running("m1")
+        assert status == ModelStatus.FAILED
+        assert logs.resolve_session("m1") is None
+        rows = _p.log_sessions(db, type_="model", model_name="m1")
+        assert len(rows) == 1 and rows[0]["end_time"] is not None
+    finally:
+        logs.reset()
+
+
+async def test_model_log_sessions_tracked_per_alias(tmp_path):
+    """多模型并发:各 alias 独立会话,互不干扰(stop 一个不收口另一个)。"""
+    from llm_manager.data.persistence import open_db
+    logs.reset()
+    db = open_db(tmp_path / "t.db")
+    logs.init(db)
+    try:
+        m1 = _model("m1", port=8000)
+        m2 = _model("m2", port=8001)
+        life, sup, dev, cfg = _make(models=[m1, m2], db=db)
+        await life.ensure_running("m1")
+        await life.ensure_running("m2")
+        assert logs.resolve_session("m1") is not None
+        assert logs.resolve_session("m2") is not None
+        await life.stop("m1")
+        assert logs.resolve_session("m1") is None
+        assert logs.resolve_session("m2") is not None     # m2 会话不受影响
+        rows1 = _p.log_sessions(db, type_="model", model_name="m1")
+        rows2 = _p.log_sessions(db, type_="model", model_name="m2")
+        assert rows1[0]["end_time"] is not None
+        assert rows2[0]["end_time"] is None
+    finally:
+        logs.reset()

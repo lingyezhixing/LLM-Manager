@@ -2,6 +2,9 @@
 from fastapi.testclient import TestClient
 
 from llm_manager.app import create_app
+from llm_manager.data import logs
+from llm_manager.data import persistence as _p
+from llm_manager.data.persistence import open_db
 
 _CFG_BODY = """
 program: {host: 0.0.0.0, port: 8080, alive_time: 60, log_level: INFO, db_path: %s}
@@ -28,3 +31,20 @@ def test_lifespan_opens_db_and_monitor_then_cleans_up(tmp_path):
         assert resp.status_code == 200
     # after shutdown the db connection is closed; reopening works (no lock leftover)
     assert (tmp_path / "t.db").exists()
+
+
+def test_lifespan_opens_and_closes_system_session(tmp_path):
+    app = create_app(db_path=tmp_path / "t.db")
+    with TestClient(app) as client:
+        sid = logs.current_system_session_id()
+        assert sid is not None                        # lifespan 已开系统会话
+        rows = _p.log_sessions(app.state.db, type_="system")
+        assert rows[0]["end_time"] is None            # 进行中
+    # shutdown 后连接已关:重开检查 end_time 落库
+    db2 = open_db(tmp_path / "t.db")
+    try:
+        rows = _p.log_sessions(db2, type_="system")
+        assert rows[0]["end_time"] is not None        # shutdown 收口
+    finally:
+        db2.conn.close()
+    assert logs.current_system_session_id() is None   # 内存登记已清除

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+import threading
 import time
 from dataclasses import dataclass
 
@@ -57,12 +58,20 @@ class _Session:
     next_seq: int = 1
 
 
-# ---- 模块级状态(事件循环单线程,无需锁)----
+# ---- 模块级状态 ----
+# 事件循环单线程。`_pending` 的读改写受 `_pending_lock` 保护:系统 logging handler
+# 的 emit 可在任意线程调用 capture_system → _enqueue(追加 + seq 递增),与事件循环线程的
+# flush(快照 + 清空)并发,无锁会丢行 / 重复 seq。`_system_session_id` 的读(任意线程)持锁,
+# 写仅事件循环线程(lifespan 单线程设置/清除)。`_sessions`/`_alias_to_session` 的写只发生在
+# 事件循环线程(模型路径);系统路径仅读 _system_session_id 与 _sessions.get
+# (CPython GIL 下 dict.get 原子,读到旧会话只丢行不损坏)。
 _db: _p.Db | None = None
 _sessions: dict[int, _Session] = {}
 _alias_to_session: dict[str, int] = {}
 _pending: list[tuple[int, int, float, str, str, str]] = []   # (session_id, seq, ts, stream, level, text)
 _system_session_id: int | None = None
+_pending_lock = threading.Lock()
+_mem_sid_seq: int = 0   # 未接线 DB 时的内存会话 id 分配(测试/启动早期)
 _flush_chain: asyncio.Task | None = None   # flush 串行链尾(见 flush 文档)
 BATCH_SIZE = 200
 FLUSH_INTERVAL = 1.0
@@ -76,22 +85,27 @@ def init(db: _p.Db) -> None:
 
 def reset() -> None:
     """测试隔离:清空全部状态(不写 DB)。"""
-    global _system_session_id, _flush_chain
+    global _system_session_id, _flush_chain, _mem_sid_seq
     _sessions.clear()
     _alias_to_session.clear()
     _pending.clear()
     _system_session_id = None
     _flush_chain = None
+    _mem_sid_seq = 0
 
 
 def start_session(type_: str, model_name: str | None = None,
                   alias: str | None = None, start: float | None = None) -> int:
     """开新会话(落库),登记广播器。alias→session 映射被新会话接管;
-    type_="system" 的会话同时登记为当前系统会话。"""
-    global _system_session_id
-    assert _db is not None, "logs.init(db) 未调用"
+    type_="system" 的会话同时登记为当前系统会话。
+    未接线 DB(_db 为 None,lifecycle 单测)→ 仅内存会话(不落库,与 end_session 对称)。"""
+    global _system_session_id, _mem_sid_seq
     start = start if start is not None else time.time()
-    sid = _p.log_start_session(_db, type_, model_name, alias, start)
+    if _db is not None:
+        sid = _p.log_start_session(_db, type_, model_name, alias, start)
+    else:
+        _mem_sid_seq += 1
+        sid = _mem_sid_seq
     _sessions[sid] = _Session(sid, type_, model_name, Broadcaster())
     if model_name is not None:
         _alias_to_session[model_name] = sid
@@ -116,7 +130,8 @@ def end_session(session_id: int) -> None:
 
 
 def current_system_session_id() -> int | None:
-    return _system_session_id
+    with _pending_lock:
+        return _system_session_id
 
 
 def start_system_session() -> int:
@@ -141,23 +156,27 @@ def capture(alias: str, line: str, stream: str) -> None:
 
 
 def capture_system(text: str, ts: float, levelname: str | None = None) -> None:
-    """系统日志入口(logging handler)。无系统会话(启动早期)→ 丢弃。
+    """系统日志入口(logging handler,任意线程)。无系统会话(启动早期)→ 丢弃。
     levelname 缺省时从行首 token 解析(形如 "WARNING disk full" 的文本格式)。"""
-    if _system_session_id is None:
-        return
     if levelname is None:
         head = text.split(None, 1)
         levelname = head[0] if head else "INFO"
-    _enqueue(_system_session_id, text, "sys", system_level(levelname), ts)
+    with _pending_lock:
+        sid = _system_session_id
+    if sid is None:
+        return
+    _enqueue(sid, text, "sys", system_level(levelname), ts)
 
 
 def _enqueue(session_id: int, text: str, stream: str, level: str, ts: float) -> None:
     s = _sessions.get(session_id)
     if s is None:
         return
-    _pending.append((session_id, s.next_seq, ts, stream, level, text))
-    s.next_seq += 1
-    if len(_pending) >= BATCH_SIZE:
+    with _pending_lock:
+        _pending.append((session_id, s.next_seq, ts, stream, level, text))
+        s.next_seq += 1   # 多线程(系统 handler)可并发入队 → seq 递增必须持锁
+        trigger = len(_pending) >= BATCH_SIZE
+    if trigger:
         try:
             asyncio.get_running_loop().create_task(flush())
         except RuntimeError:
@@ -179,11 +198,12 @@ async def flush() -> None:
         await prev
     _flush_chain = me
     try:
-        if not _pending:
-            return
+        with _pending_lock:
+            if not _pending:
+                return
+            batch = _pending[:]
+            _pending.clear()
         assert _db is not None
-        batch = _pending[:]
-        _pending.clear()
         by_session: dict[int, list[tuple[int, float, str, str, str]]] = {}
         for sid, seq, ts, stream, level, text in batch:
             by_session.setdefault(sid, []).append((seq, ts, stream, level, text))
