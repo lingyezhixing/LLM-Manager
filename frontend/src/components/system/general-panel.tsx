@@ -6,8 +6,29 @@ import { useToast } from "@/components/ui/toast";
 import { LogRetentionEditor } from "@/components/system/log-retention-editor";
 import { type LogRetention, type ProgramConfig } from "@/lib/api";
 import { useConfig, useUpdateLogRetention, useUpdateProgram } from "@/lib/use-config";
+import { useNowTick } from "@/lib/use-now";
+import { useSystemInfo } from "@/lib/use-config";
 
 const LOG_LEVELS = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"];
+
+function formatDuration(sec: number): string {
+  const s = Math.max(0, Math.floor(sec));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const ss = s % 60;
+  const pad = (x: number) => String(x).padStart(2, "0");
+  return `${pad(h)}:${pad(m)}:${pad(ss)}`;
+}
+
+// 信息 tile:圆角边框 + label + value,与原 SystemInfoPanel 的 Tile 同款。
+function InfoTile({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg border border-border px-3 py-2">
+      <div className="text-xs text-muted-foreground">{label}</div>
+      <div className="mt-0.5 break-all text-base font-semibold text-foreground">{value}</div>
+    </div>
+  );
+}
 
 function sameProgram(a: ProgramConfig, b: ProgramConfig): boolean {
   return (Object.keys(a) as (keyof ProgramConfig)[]).every((k) => a[k] === b[k]);
@@ -41,6 +62,8 @@ function FieldGrid({ children }: { children: ReactNode }) {
 
 export function GeneralPanel() {
   const { data, isLoading, isError, error, refetch } = useConfig();
+  const { data: info } = useSystemInfo();
+  const now = useNowTick(1000);
   const update = useUpdateProgram();
   const updateLogs = useUpdateLogRetention();
   const toast = useToast();
@@ -109,6 +132,13 @@ export function GeneralPanel() {
 
   return (
     <div>
+      {info && (
+        <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-3">
+          <InfoTile label="版本" value={info.version} />
+          <InfoTile label="启动时间" value={new Date(info.started_at * 1000).toLocaleString()} />
+          <InfoTile label="运行时长" value={formatDuration(now / 1000 - info.started_at)} />
+        </div>
+      )}
       <p className="mb-1 text-xs text-muted-foreground">
         host / port / 日志级别 / 路径类字段改完需重启程序(顶部会提示);alive_time 与日志保留即时生效。
       </p>
