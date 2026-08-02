@@ -15,6 +15,19 @@ export default function LogsPage() {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
 
+  // 模型下拉选项:仅来自未过滤的 type=model 列表(无 model 参数),每次进入模型 Tab 刷新。
+  // 若取过滤后响应,选 "m1" 后选项会收缩成 ["m1"],选无会话的模型会清空 —— 违反
+  // §8"稳定历史派生列表"。含已删模型的残留 alias,后端按会话历史回退解析(不再 404)。
+  useEffect(() => {
+    if (tab !== "model") return;
+    fetchSessions({ type: "model", limit: 50 })
+      .then((s) => {
+        setModels(Array.from(new Set(s.map((x) => x.alias).filter((a): a is string => !!a))));
+      })
+      .catch(() => { /* 后端不可达:保留原选项 */ });
+  }, [tab]);
+
+  // 会话列表:随 Tab / 模型筛选变化。404(如选项取到后会话被保留策略清掉)走 catch → 空列表。
   useEffect(() => {
     setSessions([]); setSelectedId(null);
     setLoading(true);
@@ -23,11 +36,8 @@ export default function LogsPage() {
       .then((s) => {
         setSessions(s);
         if (s.length > 0) setSelectedId(s[0].id);
-        if (tab === "model") {
-          setModels(Array.from(new Set(s.map((x) => x.alias).filter((a): a is string => !!a))));
-        }
       })
-      .catch(() => { /* 后端不可达:留空列表 */ })
+      .catch(() => { /* 后端不可达或未知 alias 404:留空列表 */ })
       .finally(() => setLoading(false));
   }, [tab, model]);
 

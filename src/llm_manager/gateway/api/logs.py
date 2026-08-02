@@ -3,7 +3,8 @@
 Sessions list (with line counts), per-session line paging (backfill/before),
 SSE live stream (DB backfill then broadcaster tail), and cross-session text
 search. ``model`` query param accepts alias (resolved to primary_name via
-config.resolve_alias); logs API reads ``request.app.state.db``.
+config.resolve_alias, falling back to session history for deleted-model
+residuals); logs API reads ``request.app.state.db``.
 """
 from __future__ import annotations
 
@@ -26,14 +27,21 @@ def _db(request: Request):
 
 
 def _resolve_model(request: Request, model: str | None) -> str | None:
-    """model 参数接受 alias → resolve 到 primary_name;未配置 → 404。"""
+    """model 参数接受 alias → resolve 到 primary_name;未配置 → 404。
+
+    配置解析失败时回退到会话历史(已删模型的残留会话仍可按其 alias/原名
+    过滤查看,见 §8 下拉选项来源);配置与会话历史都无 → 404。"""
     if model is None:
         return None
     cfg = request.app.state.config_store.snapshot()
     try:
         return config.resolve_alias(cfg, model)
     except KeyError:
+        pass
+    name = _p.log_resolve_model_name(_db(request), model)
+    if name is None:
         raise HTTPException(404, f"模型别名 '{model}' 未在配置中找到")
+    return name
 
 
 async def _session_stream(session_id: int, level: str | None, db, q) -> AsyncIterator[str]:

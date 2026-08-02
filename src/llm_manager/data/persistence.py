@@ -650,6 +650,21 @@ def log_session_exists(db: Db, session_id: int) -> bool:
     ).fetchone() is not None
 
 
+def log_resolve_model_name(db: Db, alias_or_name: str) -> str | None:
+    """按 alias 或 model_name 命中会话历史,返回最近一条的 model_name。
+
+    配置里已删除模型的 alias 无法经 config.resolve_alias 解析,logs API 的
+    model 参数回退到此处——让残留会话仍可按旧 alias/原名查看。无匹配 → None。"""
+    row = db.conn.execute(
+        "SELECT model_name FROM log_sessions WHERE alias = ? OR model_name = ? "
+        "ORDER BY id DESC LIMIT 1",
+        (alias_or_name, alias_or_name),
+    ).fetchone()
+    if row is None or row["model_name"] is None:
+        return None
+    return row["model_name"]
+
+
 def log_insert_lines(db: Db, session_id: int, rows: list[tuple[int, float, str, str, str]]) -> list[int]:
     """批量插行。rows = [(seq, ts, stream, level, text), ...];返回全局行 id(RETURNING)。
 

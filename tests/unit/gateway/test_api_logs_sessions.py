@@ -2,7 +2,8 @@
 
 Covers: sessions list (type/model filters, before pagination), per-session line
 paging (level filter / before), SSE live stream (DB backfill + broadcaster tail),
-cross-session text search, unknown-alias 404, unknown-session 404.
+cross-session text search, deleted-model alias resolution from session history,
+unknown-alias 404, unknown-session 404.
 
 SSE 测试直接驱动 _session_stream 生成器(同 test_api_logs.py 的 _logs_stream
 模式):starlette TestClient 与 httpx ASGITransport 都会 await app(...) 到 ASGI
@@ -129,7 +130,29 @@ def test_logs_search(client):
 
 def test_unknown_model_alias_404(client):
     c, db, sid_sys, sid_m = client
-    assert c.get("/api/logs/sessions?model=nope").status_code == 404
+    # 真正未知的 alias(配置与会话历史都无)→ 仍 404
+    assert c.get("/api/logs/sessions?model=totally_unknown").status_code == 404
+
+
+def test_deleted_model_alias_resolves_from_session_history(client):
+    """已删模型的残留会话:alias/model_name 命中会话历史 → 过滤出该模型会话(不再 404)。
+
+    §8 承诺模型下拉含"已删除模型的残留会话";删模型后 config 无此 alias,
+    需回退到 log_sessions 历史按 alias/原名解析。"""
+    c, db, sid_sys, sid_m = client
+    sid_del = _p.log_start_session(db, "model", "deleted_model", "gone", 3000.0)
+    _p.log_insert_lines(db, sid_del, [(1, 3000.1, "model", "info", "residual")])
+    _p.log_end_session(db, sid_del, 3500.0)
+    # 按历史 alias 过滤
+    r = c.get("/api/logs/sessions?type=model&model=gone")
+    assert r.status_code == 200
+    assert [d["id"] for d in r.json()] == [sid_del]
+    # 按历史 model_name 过滤同样命中
+    r2 = c.get("/api/logs/sessions?type=model&model=deleted_model")
+    assert [d["id"] for d in r2.json()] == [sid_del]
+    # 搜索端点共享同一解析逻辑
+    r3 = c.get("/api/logs/search?q=residual&model=gone")
+    assert r3.json()["total"] == 1
 
 
 def test_session_stream_backfill_and_live(client):
