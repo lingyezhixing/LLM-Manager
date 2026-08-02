@@ -139,8 +139,6 @@ export function GeneralPanel() {
           </Select>
         </Field>
       </FieldGrid>
-
-      <SectionTitle>日志保留</SectionTitle>
       <LogRetentionEditor value={form.logs} onChange={setLogs} />
 
       <SectionTitle>数据与集成</SectionTitle>
