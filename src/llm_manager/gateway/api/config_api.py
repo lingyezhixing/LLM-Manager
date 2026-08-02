@@ -55,9 +55,8 @@ class ClaudeConfigsUpdate(BaseModel):
     configs: dict[str, dict[str, str]]
 
 class LogRetentionUpdate(BaseModel):
-    time_enabled: bool | None = None
+    """日志保留规则:恒生效的两个参数(按时间保留 N 天 + 按条数保留 N 条,系统与模型日志同时适用)。"""
     days: int | None = Field(default=None, ge=1)
-    count_enabled: bool | None = None
     count: int | None = Field(default=None, ge=1)
 
 
@@ -244,9 +243,7 @@ def register_config_routes(api: APIRouter) -> None:
                      "mac_address": cfg.wol.mac_address} if cfg.wol is not None else None),
             "claude": cfg.claude_configs,
             "logs": {
-                "time_enabled": get_setting(_db(request), "log_retention_time_enabled") == "1",
                 "days": int(get_setting(_db(request), "log_retention_days") or 30),
-                "count_enabled": get_setting(_db(request), "log_retention_count_enabled") == "1",
                 "count": int(get_setting(_db(request), "log_retention_count") or 10),
             },
             "restart_fields": _restart_fields(cfg, boot),
@@ -316,12 +313,8 @@ def register_config_routes(api: APIRouter) -> None:
     @api.put("/config/logs")
     def put_logs(request: Request, body: LogRetentionUpdate) -> dict:
         updates: dict[str, str] = {}
-        if body.time_enabled is not None:
-            updates["log_retention_time_enabled"] = "1" if body.time_enabled else "0"
         if body.days is not None:
             updates["log_retention_days"] = str(body.days)
-        if body.count_enabled is not None:
-            updates["log_retention_count_enabled"] = "1" if body.count_enabled else "0"
         if body.count is not None:
             updates["log_retention_count"] = str(body.count)
         if updates:

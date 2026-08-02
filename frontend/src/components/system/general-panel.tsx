@@ -14,8 +14,7 @@ function sameProgram(a: ProgramConfig, b: ProgramConfig): boolean {
 }
 
 function sameLogs(a: LogRetention, b: LogRetention): boolean {
-  return a.time_enabled === b.time_enabled && a.days === b.days
-    && a.count_enabled === b.count_enabled && a.count === b.count;
+  return a.days === b.days && a.count === b.count;
 }
 
 // 通用页表单 = program 段 + 日志保留段;两段各自独立 dirty,保存时分别 PUT 对应端点。

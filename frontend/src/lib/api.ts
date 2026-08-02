@@ -198,11 +198,9 @@ export interface ProgramConfig {
   claude_settings_path: string;
 }
 
-// 日志保留规则(GET/PUT /api/config/logs;time_enabled/days = 按时间清理,count_enabled/count = 按条数清理)。
+// 日志保留规则(GET/PUT /api/config/logs;恒生效:按时间保留 N 天 + 按条数保留 N 条,系统与模型日志同时适用)。
 export interface LogRetention {
-  time_enabled: boolean;
   days: number;
-  count_enabled: boolean;
   count: number;
 }
 

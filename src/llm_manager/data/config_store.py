@@ -271,9 +271,7 @@ DEFAULTS: dict[str, str] = {
     "port": "8080",
     "alive_time": "60",
     "log_level": "INFO",
-    "log_retention_time_enabled": "0",
     "log_retention_days": "30",
-    "log_retention_count_enabled": "0",
     "log_retention_count": "10",
     "claude_configs": "{}",
 }

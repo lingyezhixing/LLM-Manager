@@ -50,9 +50,7 @@ def test_get_config_returns_current_program_wol_claude_logs(tmp_path):
     assert j["program"]["alive_time"] == 60
     assert j["wol"] is None
     assert j["claude"] == {}
-    assert j["logs"] == {
-        "time_enabled": False, "days": 30, "count_enabled": False, "count": 10,
-    }
+    assert j["logs"] == {"days": 30, "count": 10}
     assert j["restart_fields"] == []                # boot == snapshot → 无差异
 
 
@@ -106,10 +104,10 @@ def test_put_claude_replaces_configs(tmp_path):
 
 def test_put_logs_updates_retention_rules(tmp_path):
     with TestClient(_app(tmp_path)) as c:
-        r = c.put("/api/config/logs", json={"time_enabled": True, "days": 14, "count_enabled": False, "count": 10})
+        r = c.put("/api/config/logs", json={"days": 14, "count": 20})
     assert r.status_code == 200
     assert c.get("/api/config").json()["logs"] == {
-        "time_enabled": True, "days": 14, "count_enabled": False, "count": 10,
+        "days": 14, "count": 20,
     }
 
 

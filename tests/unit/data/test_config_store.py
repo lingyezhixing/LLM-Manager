@@ -160,7 +160,7 @@ def test_seed_defaults_marks_initialized(tmp_path):
     seed_defaults(db)
     assert is_initialized(db) is True
     assert get_setting(db, "host") == "0.0.0.0"
-    assert get_setting(db, "log_retention_time_enabled") == "0"
+    assert get_setting(db, "log_retention_days") == "30"
 
 
 def test_initialize_imports_legacy_yaml_when_db_empty(tmp_path):
