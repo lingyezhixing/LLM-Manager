@@ -1,10 +1,71 @@
-/** 日志查看 — historical archive (program + model logs within retention). Stub; Stage 3. */
+import { useEffect, useMemo, useState } from "react";
+import { fetchSessions } from "@/lib/api";
+import type { LogSession } from "@/lib/api";
+import { SessionList } from "@/components/logs/session-list";
+import { LogViewer } from "@/components/logs/log-viewer";
+
+type Tab = "system" | "model";
+
+/** 日志查看页:双 Tab(系统/模型)+ 左会话列表 + 右行详情。 */
 export default function LogsPage() {
+  const [tab, setTab] = useState<Tab>("system");
+  const [models, setModels] = useState<string[]>([]);   // 模型下拉选项(alias,来自会话历史)
+  const [model, setModel] = useState<string>("");
+  const [sessions, setSessions] = useState<LogSession[]>([]);
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    setSessions([]); setSelectedId(null);
+    setLoading(true);
+    fetchSessions(tab === "system" ? { type: "system", limit: 50 }
+      : { type: "model", model: model || undefined, limit: 50 })
+      .then((s) => {
+        setSessions(s);
+        if (s.length > 0) setSelectedId(s[0].id);
+        if (tab === "model") {
+          setModels(Array.from(new Set(s.map((x) => x.alias).filter((a): a is string => !!a))));
+        }
+      })
+      .catch(() => { /* 后端不可达:留空列表 */ })
+      .finally(() => setLoading(false));
+  }, [tab, model]);
+
+  const selected = useMemo(
+    () => sessions.find((s) => s.id === selectedId) ?? null, [sessions, selectedId]);
+
   return (
-    <>
-      <div className="rounded-lg border border-dashed border-border p-16 text-center text-sm text-muted-foreground">
-        建设中
+    <div className="flex h-full flex-col gap-3 p-4">
+      {/* Tab 栏 */}
+      <div className="flex items-center gap-1 rounded-lg border border-border bg-card p-1 text-[12px]">
+        {(["system", "model"] as const).map((t) => (
+          <button key={t} onClick={() => setTab(t)}
+            className={`rounded-md px-3 py-1 font-medium transition-colors ${tab === t ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}>
+            {t === "system" ? "系统日志" : "模型日志"}
+          </button>
+        ))}
+        {tab === "model" && (
+          <select value={model} onChange={(e) => setModel(e.target.value)}
+            className="ml-auto rounded border border-border bg-background px-2 py-1 text-[11px] text-foreground focus:border-primary focus:outline-none">
+            <option value="">全部模型</option>
+            {models.map((m) => <option key={m} value={m}>{m}</option>)}
+          </select>
+        )}
       </div>
-    </>
+      {/* 主从 */}
+      <div className="grid min-h-0 flex-1 grid-cols-[260px_1fr] gap-3">
+        <div className="overflow-y-auto rounded-lg border border-border bg-card">
+          {loading ? <div className="p-4 text-center text-xs text-muted-foreground">加载中…</div>
+            : <SessionList sessions={sessions} selectedId={selectedId} onSelect={setSelectedId} />}
+        </div>
+        <div className="min-h-0">
+          {selected ? <LogViewer key={selected.id} session={selected} /> : (
+            <div className="flex h-full items-center justify-center rounded-lg border border-dashed border-border text-sm text-muted-foreground">
+              选择左侧会话查看日志
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }

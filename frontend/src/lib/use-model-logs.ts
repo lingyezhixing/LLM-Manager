@@ -79,19 +79,33 @@ export function useLogViewer(api: LogApi, level: string, runKey: number | null) 
 
   // SSE 实时尾(随 api/level/runKey 重订阅,重置视图 + 搜索)。新行不在「实时+跟进」态则记 newCount。
   // runKey(pid)随模型停止/重启变化 → 重连到新进程流并清空旧日志(否则同一 alias 重启后新日志进不来)。
+  // 已结束会话:stream 端点对非活跃会话 404 → onerror 且不重连;回退 fetchPage 取最新一页作初始视图
+  // (翻页/搜索/向上加载照常)。瞬时错误(运行中会话)EventSource 自行重连;若先收到过行则不回退,
+  // 避免与重连后的回填重复。onmessage 里的 id 守卫兜底防重复追加(回退与回填交错时)。
   useEffect(() => {
     setLiveLines([]); setHistoryPrefix([]); setHistoryPage(null); setFollowing(true); setNewCount(0);
     setMatches([]); setMatchIdx(-1); setHasSearched(false); setAtOldest(false);
+    let receivedAny = false;   // 本次订阅是否收到过行
     const es = new EventSource(api.streamUrl(levelParam));
     es.onmessage = (ev) => {
       try {
         const l = JSON.parse(ev.data) as LogLine;
+        receivedAny = true;
         setLiveLines((prev) => {
+          if (prev.length > 0 && l.id <= prev[prev.length - 1].id) return prev;  // 防重连回填重复
           const next = prev.length >= WINDOW ? prev.slice(prev.length - WINDOW + 1) : prev;
           return [...next, l];
         });
         if (!(liveRef.current && followingRef.current)) setNewCount((n) => n + 1);
       } catch { /* 帧异常忽略 */ }
+    };
+    es.onerror = () => {
+      if (receivedAny) return;          // 运行中会话的瞬时错误:EventSource 自行重连,不回退
+      // 已结束会话:stream 端点 404 → error 且不会重连(规范:非 200 直接 fail)。
+      // 运行中会话的首连瞬时错误:回退页先顶上,重连成功后的回填由 id 守卫去重,实时尾照常。
+      api.fetchPage(Number.MAX_SAFE_INTEGER, WINDOW, levelParam)
+        .then((page) => { setLiveLines((prev) => (prev.length > 0 ? prev : page)); })
+        .catch(() => { /* best-effort */ });
     };
     return () => es.close();
   }, [api, levelParam, runKey]);

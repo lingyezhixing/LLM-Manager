@@ -31,3 +31,16 @@ export function formatCost(yuan: number): string {
   if (yuan >= 1) return `¥${yuan.toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
   return `¥${yuan.toFixed(2)}`;
 }
+
+/** 时间戳(epoch 秒)→ 本地时间字符串(24 小时制)— 日志查看页会话列表用。 */
+export function fmtTime(ts: number): string {
+  return new Date(ts * 1000).toLocaleString("zh-CN", { hour12: false });
+}
+
+/** 秒数 → 人类可读时长(如 3m 12s、1h 5m)— 日志查看页会话列表用。 */
+export function fmtDuration(sec: number): string {
+  if (sec < 60) return `${Math.round(sec)}s`;
+  if (sec < 3600) return `${Math.floor(sec / 60)}m ${Math.round(sec % 60)}s`;
+  const h = Math.floor(sec / 3600);
+  return `${h}h ${Math.round((sec % 3600) / 60)}m`;
+}
