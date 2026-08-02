@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Field, TextArea, TextInput } from "@/components/ui/form";
 import { useConfirm } from "@/components/ui/dialog";
@@ -22,7 +22,7 @@ function parseEnvJson(text: string): { ok: true; value: Record<string, string> }
     }
     return { ok: true, value: v as Record<string, string> };
   } catch (e) {
-    return { ok: false, message: (e as Error).message };
+    return { ok: false, message: `JSON 格式错误:${(e as Error).message}` };
   }
 }
 
@@ -51,15 +51,17 @@ export function ClaudePanel() {
   const names = [...Object.keys(serverPresets)].sort();
   const [editing, setEditing] = useState<Editing | null>(null);
 
-  // 数据就绪且未在编辑 → 默认选第一个(仅初始载入;删除后的重选在 onDelete 内显式处理)。
+  // 仅首次数据就绪时默认选第一个;删除后的重选在 onDelete 内显式处理(hydratedRef 防 stale refetch 复活已删预设)。
+  const hydratedRef = useRef(false);
   useEffect(() => {
-    if (!data || editing !== null) return;
+    if (!data || hydratedRef.current) return;
+    hydratedRef.current = true;
     const first = Object.keys(data.claude).sort()[0];
     if (first) {
       const json = JSON.stringify(data.claude[first], null, 2);
       setEditing({ key: first, name: first, json, baselineName: first, baselineJson: json, isNew: false });
     }
-  }, [data, editing]);
+  }, [data]);
 
   const parsed = editing ? parseEnvJson(editing.json) : null;
   const jsonErr = parsed && !parsed.ok ? parsed.message : null;
@@ -72,7 +74,19 @@ export function ClaudePanel() {
   const applyEnabled = !!editing && !editing.isNew && !dirty && !jsonErr && editing.key !== null && editing.key !== current;
   const deleteEnabled = !!editing && !editing.isNew && !dirty;
 
-  const startCreate = () => {
+  // 切换/新增前 dirty 守卫(仿 ModelDefPanel):有未保存修改则确认。
+  const guard = async (): Promise<boolean> =>
+    !dirty
+    || await confirm({
+      title: "放弃未保存的修改?",
+      description: "当前预设有未保存修改,切换将丢弃。",
+      confirmText: "放弃",
+      cancelText: "继续编辑",
+      danger: true,
+    });
+
+  const startCreate = async () => {
+    if (!(await guard())) return;
     const used = new Set(names);
     let name = "新预设";
     for (let i = 2; used.has(name); i++) name = `新预设 ${i}`;
@@ -85,7 +99,11 @@ export function ClaudePanel() {
     if (editing.key !== null && editing.key !== editing.name) delete next[editing.key];  // 改名:移除旧键
     update.mutate(next, {
       onSuccess: () => {
-        setEditing({ ...editing, key: editing.name, baselineName: editing.name, baselineJson: editing.json, isNew: false });
+        setEditing((prev) =>
+          prev
+            ? { ...prev, key: editing.name, baselineName: editing.name, baselineJson: editing.json, isNew: false }
+            : prev,
+        );
         toast.success(editing.isNew ? `已创建预设「${editing.name}」` : "已保存");
       },
     });
@@ -162,7 +180,8 @@ export function ClaudePanel() {
                 type="button"
                 role="option"
                 aria-selected={selected}
-                onClick={() => {
+                onClick={async () => {
+                  if (!(await guard())) return;
                   const json = JSON.stringify(serverPresets[n], null, 2);
                   setEditing({ key: n, name: n, json, baselineName: n, baselineJson: json, isNew: false });
                 }}
