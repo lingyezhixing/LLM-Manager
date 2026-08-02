@@ -140,7 +140,7 @@ export function GeneralPanel() {
         </div>
       )}
       <p className="mb-1 text-xs text-muted-foreground">
-        host / port / 日志级别 / 路径类字段改完需重启程序(顶部会提示);alive_time 与日志保留即时生效。
+        host / port / 日志级别改完需重启程序(顶部会提示);alive_time 与日志保留即时生效。
       </p>
 
       <SectionTitle>监听与运行</SectionTitle>
@@ -169,13 +169,6 @@ export function GeneralPanel() {
         </Field>
       </FieldGrid>
       <LogRetentionEditor value={form.logs} onChange={setLogs} />
-
-      <SectionTitle>数据与集成</SectionTitle>
-      <FieldGrid>
-        <Field label="Claude settings 路径" htmlFor="cfg-claude">
-          <TextInput id="cfg-claude" value={form.program.claude_settings_path} onChange={(e) => set({ ...form.program, claude_settings_path: e.target.value })} />
-        </Field>
-      </FieldGrid>
 
       {dirty && (
         <ConfigSaveBar
