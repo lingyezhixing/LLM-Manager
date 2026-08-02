@@ -1,7 +1,7 @@
 """System log handler: forwards logging records into the LogStore queue without
 blocking the caller. Dropped records never affect the main program (the collector
 is O(1) append; batching/persistence happen in the LogStore flush task).
-Fed by app.py lifespan (install/remove) — tests and non-lifespan paths stay clean.
+To be wired by app.py lifespan (install/remove); tests and non-lifespan paths stay clean.
 """
 from __future__ import annotations
 

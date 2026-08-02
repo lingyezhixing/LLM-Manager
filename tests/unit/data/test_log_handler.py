@@ -36,6 +36,14 @@ def test_handler_levels_pass_through():
     assert [d[2] for d in delivered] == ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
 
 
+def test_handler_lazy_formats_record():
+    delivered = []
+    h = log_handler.SystemLogHandler(_make_collector(delivered))
+    rec = logging.LogRecord("t", logging.WARNING, "f", 1, "disk %s full", ("nearly",), None)
+    h.emit(rec)
+    assert delivered[0][0] == "disk nearly full"   # getMessage() 惰性格式化
+
+
 def test_handler_accepts_capture_system_direct():
     # capture_system 无系统会话时静默丢弃 → 冒烟验证签名兼容、不抛
     h = log_handler.SystemLogHandler(logs.capture_system)
