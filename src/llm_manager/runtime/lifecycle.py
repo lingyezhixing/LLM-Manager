@@ -203,6 +203,7 @@ class Lifecycle:
         # === 锁外:orphan kill + probe 并行 ===
         if orphan_pid is not None:
             await self._supervisor.kill_tree(orphan_pid)
+            self._log_end(alias)   # stop 在 spawn await 中到达(会话于其 _log_end 之后才开)→ 必须在此收口,防泄漏 running 会话
             return ModelStatus.STOPPED
 
         # Any raise below must kill the spawned pid before propagating;

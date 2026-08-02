@@ -690,6 +690,35 @@ async def test_model_log_session_closed_on_probe_failure(tmp_path):
         logs.reset()
 
 
+async def test_stop_during_spawn_closes_log_session(tmp_path):
+    """stop 恰在 spawn await 中到达(会话尚未打开)→ stop 自身 _log_end 收口了个寂寞;
+    orphan 分支返回 STOPPED 时必须补收口,否则 running 会话永久泄漏(下次 stop 早退,无人再关)。"""
+    from llm_manager.data.persistence import open_db
+    logs.reset()
+    db = open_db(tmp_path / "t.db")
+    logs.init(db)
+    try:
+        life, sup, dev, cfg = _make(db=db)
+        spawn_entered = asyncio.Event()
+        orig_spawn = sup.spawn
+        async def slow_spawn(cmd, *, shell=False, on_output=None, env=None, cwd=None):
+            spawn_entered.set()
+            await asyncio.sleep(0.05)   # 给 stop() 在 spawn await 中插入的窗口
+            return await orig_spawn(cmd, shell=shell, on_output=on_output)
+        sup.spawn = slow_spawn
+        task = asyncio.create_task(life.ensure_running("m1"))
+        await spawn_entered.wait()                  # 管线已进 spawn await(会话未开)
+        await life.stop("m1")                       # stop 先跑:_log_end pops nothing(会话未开)
+        status = await task
+        assert status == ModelStatus.STOPPED
+        assert 1000 in sup.killed                   # orphan 被 kill
+        assert logs.resolve_session("m1") is None
+        rows = _p.log_sessions(db, type_="model", model_name="m1")
+        assert len(rows) == 1 and rows[0]["end_time"] is not None   # 无泄漏:orphan 分支已收口
+    finally:
+        logs.reset()
+
+
 async def test_model_log_sessions_tracked_per_alias(tmp_path):
     """多模型并发:各 alias 独立会话,互不干扰(stop 一个不收口另一个)。"""
     from llm_manager.data.persistence import open_db
