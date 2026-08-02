@@ -499,4 +499,15 @@ def test_current_claude_preset_unknown_without_settings(tmp_path):
     with TestClient(_app(tmp_path)) as c:
         c.put("/api/config/claude", json={"configs": {"GLM": {"ANTHROPIC_BASE_URL": "http://glm"}}})
         r = c.get("/api/config/claude/current")
+    assert r.status_code == 200
     assert r.json() == {"current": "(未知)"}
+
+
+def test_apply_claude_preset_write_failure_500(tmp_path):
+    # settings 路径指向已存在目录 → mkdir/write_text 抛 OSError → 500 带可读信息
+    with TestClient(_app(tmp_path)) as c:
+        c.put("/api/config/claude", json={"configs": {"GLM": {"ANTHROPIC_BASE_URL": "http://glm"}}})
+        c.put("/api/config/program", json={"claude_settings_path": str(tmp_path)})
+        r = c.post("/api/config/claude/apply", json={"name": "GLM"})
+    assert r.status_code == 500
+    assert "写入 settings.json 失败" in r.json()["detail"]

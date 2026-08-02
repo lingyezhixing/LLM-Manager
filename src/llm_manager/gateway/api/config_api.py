@@ -305,7 +305,10 @@ def register_config_routes(api: APIRouter) -> None:
         path = cfg.program.claude_settings_path
         if not path:
             raise HTTPException(400, "未配置 Claude settings 路径")
-        claude.apply_preset(Path(path), dict(preset))
+        try:
+            claude.apply_preset(Path(path), dict(preset))
+        except OSError as e:
+            raise HTTPException(500, f"写入 settings.json 失败:{e}")
         return {"applied": body.name}
 
     @api.get("/config/claude/current")
