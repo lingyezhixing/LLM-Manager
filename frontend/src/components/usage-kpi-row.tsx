@@ -45,7 +45,7 @@ export function UsageKpiRow({
         valueClass="text-primary"
         value={
           costQ.isError ? (
-            <span className="flex items-center gap-1.5">
+            <span className="flex items-center gap-1.5 text-destructive">
               加载失败
               <Button size="sm" variant="ghost" onClick={() => costQ.refetch()}>重试</Button>
             </span>
