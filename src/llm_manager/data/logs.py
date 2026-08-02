@@ -1,18 +1,27 @@
-"""Per-model live log capture: 内存会话日志 + 级别推断 + Broadcaster 扇出(SSE 用)。
+"""Per-model + system log capture: DB-backed (single source of truth) with in-memory
+broadcast for SSE. ``capture``/``capture_system`` enqueue lines; a batch flusher
+(pending size or interval) persists to SQLite via persistence.log_insert_lines and
+publishes the final DB rows (global ids) to the session broadcaster.
 
-``capture(alias, line, stream)`` 是 supervisor ``on_output`` 的落点(经 call_soon_threadsafe
-回到事件循环)。捕获绑定子进程生命周期:spawn 起读、进程退出 EOF 止;会话日志保留至该模型
-下次 spawn(新会话 id 重置)。Phase 1 仅内存(大上限);Phase 2 加持久归档 + 分页/搜索。"""
+Sessions are opened by the runtime (system boot / model spawn) and closed on stop;
+``end_session`` persists end_time and drops the alias→session mapping (late lines are
+dropped). The system logging handler (data/log_handler.py) feeds ``capture_system``.
+"""
 from __future__ import annotations
 
+import asyncio
 import re
 import time
 from dataclasses import dataclass
 
+from llm_manager.data import persistence as _p
 from llm_manager.realtime import Broadcaster
 
 _ERR = re.compile(r"error|fail|exception|traceback", re.I)
 _OK = re.compile(r"listening|ready|started|server.*ok", re.I)
+
+_SYS_LEVELS = {"DEBUG": "info", "INFO": "info", "WARNING": "warn",
+               "ERROR": "error", "CRITICAL": "error"}
 
 
 def infer_level(text: str, stream: str) -> str:
@@ -25,103 +34,181 @@ def infer_level(text: str, stream: str) -> str:
     return "info"
 
 
+def system_level(levelname: str) -> str:
+    """logging levelname → 4 级归一。"""
+    return _SYS_LEVELS.get(levelname, "info")
+
+
 @dataclass(frozen=True, slots=True)
 class LogLine:
     id: int
     ts: float            # 墙钟(捕获时刻)
-    stream: str          # "out" | "err"
+    stream: str          # "out" | "err" | "sys"
     level: str           # "info" | "ok" | "warn" | "error"
     text: str
 
 
-@dataclass(frozen=True, slots=True)
-class LogSearch:
-    matches: list[int]   # 匹配行 id(升序)
-    total: int
+@dataclass(slots=True)
+class _Session:
+    id: int
+    type: str
+    model_name: str | None
+    alias: str | None
+    start: float
+    bc: Broadcaster[LogLine]
+    next_seq: int = 1
 
 
-class SessionLog:
-    """单模型本次会话的内存日志。append O(1) 摊销;backfill 返回最近 limit 行;
-    before 返回 id < line_id 的最近 limit 行(往前翻页);search 全文检索(可按 level)。"""
-
-    def __init__(self, cap: int = 100_000) -> None:
-        self._lines: list[LogLine] = []
-        self._next_id = 1
-        self._bc: Broadcaster[LogLine] = Broadcaster()
-        self._cap = cap
-
-    def append(self, line: str, stream: str) -> LogLine:
-        ll = LogLine(self._next_id, time.time(), stream, infer_level(line, stream), line)
-        self._next_id += 1
-        self._lines.append(ll)
-        if len(self._lines) > self._cap:
-            self._lines = self._lines[-self._cap:]   # 丢最旧(Phase 2 归档兜底)
-        self._bc.publish(ll)
-        return ll
-
-    def backfill(self, limit: int, level: str | None = None) -> list[LogLine]:
-        sel = self._lines if level is None else [ll for ll in self._lines if ll.level == level]
-        return sel[-limit:]
-
-    def before(self, line_id: int, limit: int, level: str | None = None) -> list[LogLine]:
-        """id < line_id 的最近 limit 行(升序)——往前翻页 / 搜索跳转时载入历史窗口。"""
-        sel = [ll for ll in self._lines if ll.id < line_id and (level is None or ll.level == level)]
-        return sel[-limit:]
-
-    def search(self, q: str, level: str | None = None) -> LogSearch:
-        """全文子串检索(大小写不敏感),可叠加 level 过滤。返回升序匹配行 id + 总数。"""
-        needle = q.lower()
-        matches = [ll.id for ll in self._lines
-                   if needle in ll.text.lower() and (level is None or ll.level == level)]
-        return LogSearch(matches=matches, total=len(matches))
-
-    def subscribe(self): return self._bc.subscribe()
-    def unsubscribe(self, q): self._bc.unsubscribe(q)
+# ---- 模块级状态(事件循环单线程,无需锁)----
+_db: _p.Db | None = None
+_sessions: dict[int, _Session] = {}
+_alias_to_session: dict[str, int] = {}
+_pending: list[tuple[int, int, float, str, str, str]] = []   # (session_id, seq, ts, stream, level, text)
+_system_session_id: int | None = None
+BATCH_SIZE = 200
+FLUSH_INTERVAL = 1.0
 
 
-# ---- 模块级注册表(事件循环单线程,无需锁)----
-_sessions: dict[str, SessionLog] = {}
-
-
-def _get(alias: str) -> SessionLog:
-    s = _sessions.get(alias)
-    if s is None:
-        s = SessionLog()
-        _sessions[alias] = s
-    return s
-
-
-def capture(alias: str, line: str, stream: str) -> LogLine:
-    return _get(alias).append(line, stream)
-
-
-def backfill(alias: str, limit: int, level: str | None = None) -> list[LogLine]:
-    return _get(alias).backfill(limit, level)
-
-
-def before(alias: str, before: int, limit: int, level: str | None = None) -> list[LogLine]:
-    return _get(alias).before(before, limit, level)
-
-
-def search(alias: str, q: str, level: str | None = None) -> LogSearch:
-    return _get(alias).search(q, level)
-
-
-def subscribe(alias: str):
-    return _get(alias).subscribe()
-
-
-def unsubscribe(alias: str, q) -> None:
-    s = _sessions.get(alias)
-    if s is not None:
-        s.unsubscribe(q)
-
-
-def end_session(alias: str) -> None:
-    """模型停止/中断:结束本次会话(丢弃内存日志;下次 capture 起新会话,id 从 1 重来)。"""
-    _sessions.pop(alias, None)
+def init(db: _p.Db) -> None:
+    """接线 DB(幂等)。create_app 时调用;测试用 tmp DB。"""
+    global _db
+    _db = db
 
 
 def reset() -> None:
-    """测试隔离。"""
+    """测试隔离:清空全部状态(不写 DB)。"""
+    global _system_session_id
     _sessions.clear()
+    _alias_to_session.clear()
+    _pending.clear()
+    _system_session_id = None
+
+
+def start_session(type_: str, model_name: str | None = None,
+                  alias: str | None = None, start: float | None = None) -> int:
+    """开新会话(落库),登记广播器。alias→session 映射被新会话接管;
+    type_="system" 的会话同时登记为当前系统会话。"""
+    global _system_session_id
+    assert _db is not None, "logs.init(db) 未调用"
+    start = start if start is not None else time.time()
+    sid = _p.log_start_session(_db, type_, model_name, alias, start)
+    _sessions[sid] = _Session(sid, type_, model_name, alias, start, Broadcaster())
+    if model_name is not None:
+        _alias_to_session[model_name] = sid
+    if type_ == "system":
+        _system_session_id = sid
+    return sid
+
+
+def end_session(session_id: int) -> None:
+    """收口会话:落库 end_time;模型会话移除 alias 映射;系统会话清除当前登记;
+    无订阅者的广播器移除。未接线 DB(_db 为 None,测试/启动早期)→ 仅内存收口。"""
+    global _system_session_id
+    if _db is not None:
+        _p.log_end_session(_db, session_id, time.time())
+    s = _sessions.pop(session_id, None)
+    if s is None:
+        return
+    if s.model_name is not None and _alias_to_session.get(s.model_name) == session_id:
+        _alias_to_session.pop(s.model_name, None)
+    if s.type == "system" and _system_session_id == session_id:
+        _system_session_id = None
+    if s.bc.subscriber_count == 0:
+        del s.bc  # 无订阅者 → 广播器随会话丢弃
+
+
+def current_system_session_id() -> int | None:
+    return _system_session_id
+
+
+def start_system_session() -> int:
+    global _system_session_id
+    _system_session_id = start_session("system")
+    return _system_session_id
+
+
+def end_system_session() -> None:
+    global _system_session_id
+    if _system_session_id is not None:
+        end_session(_system_session_id)
+        _system_session_id = None
+
+
+def capture(alias: str, line: str, stream: str) -> None:
+    """模型日志入口(supervisor on_output)。无当前会话(已停止/未启动)→ 丢弃。"""
+    sid = _alias_to_session.get(alias)
+    if sid is None:
+        return
+    _enqueue(sid, line, stream, infer_level(line, stream), time.time())
+
+
+def capture_system(text: str, ts: float, levelname: str | None = None) -> None:
+    """系统日志入口(logging handler)。无系统会话(启动早期)→ 丢弃。
+    levelname 缺省时从行首 token 解析(形如 "WARNING disk full" 的文本格式)。"""
+    if _system_session_id is None:
+        return
+    if levelname is None:
+        head = text.split(None, 1)
+        levelname = head[0] if head else "INFO"
+    _enqueue(_system_session_id, text, "sys", system_level(levelname), ts)
+
+
+def _enqueue(session_id: int, text: str, stream: str, level: str, ts: float) -> None:
+    s = _sessions.get(session_id)
+    if s is None:
+        return
+    _pending.append((session_id, s.next_seq, ts, stream, level, text))
+    s.next_seq += 1
+    if len(_pending) >= BATCH_SIZE:
+        try:
+            asyncio.get_running_loop().create_task(flush())
+        except RuntimeError:
+            pass   # 无运行 loop(测试/启动早期)→ 由 flush_loop 定时兜底
+
+
+async def flush() -> None:
+    """强制落库当前 pending(测试/关停用)。按 session 分组落库,落库后逐行广播(带 DB 全局 id)。"""
+    if not _pending:
+        return
+    assert _db is not None
+    batch = _pending[:]
+    _pending.clear()
+    by_session: dict[int, list[tuple[int, float, str, str, str]]] = {}
+    for sid, seq, ts, stream, level, text in batch:
+        by_session.setdefault(sid, []).append((seq, ts, stream, level, text))
+    for sid, rows in by_session.items():
+        ids = await asyncio.to_thread(_p.log_insert_lines, _db, sid, rows)
+        s = _sessions.get(sid)
+        if s is None:
+            continue
+        for line, lid in zip(rows, ids):
+            s.bc.publish(LogLine(id=lid, ts=line[1], stream=line[2], level=line[3], text=line[4]))
+
+
+async def flush_loop(stop_event: asyncio.Event) -> None:
+    """常驻 flush 任务(阈值 200 行或 1s,先到先 flush)。"""
+    while not stop_event.is_set():
+        try:
+            if _pending:
+                await flush()
+            await asyncio.wait_for(stop_event.wait(), timeout=FLUSH_INTERVAL)
+        except asyncio.TimeoutError:
+            pass
+        except asyncio.CancelledError:
+            break
+
+
+def subscribe(session_id: int):
+    s = _sessions.get(session_id)
+    return s.bc.subscribe() if s is not None else None
+
+
+def unsubscribe(session_id: int, q) -> None:
+    s = _sessions.get(session_id)
+    if s is not None:
+        s.bc.unsubscribe(q)
+
+
+def resolve_session(alias: str) -> int | None:
+    """alias → 当前进行中会话 id(旧端点兼容用)。"""
+    return _alias_to_session.get(alias)
