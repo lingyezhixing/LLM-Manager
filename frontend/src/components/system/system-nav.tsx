@@ -1,11 +1,11 @@
-export type SystemZone = "general" | "models" | "network" | "claude" | "info";
+export type SystemZone = "general" | "models" | "network" | "claude" | "database";
 
 const ZONES: { key: SystemZone; label: string }[] = [
   { key: "general", label: "通用" },
   { key: "models", label: "模型" },
   { key: "network", label: "网络" },
   { key: "claude", label: "Claude" },
-  { key: "info", label: "系统信息" },
+  { key: "database", label: "数据库" },
 ];
 
 export function SystemNav({

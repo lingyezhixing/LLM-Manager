@@ -1,10 +1,10 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { ClaudePanel } from "@/components/system/claude-panel";
+import { DatabasePanel } from "@/components/system/database-panel";
 import { GeneralPanel } from "@/components/system/general-panel";
 import { ModelDefPanel } from "@/components/system/model-def-panel";
 import { RestartBanner } from "@/components/system/restart-banner";
-import { SystemInfoPanel } from "@/components/system/system-info-panel";
 import { SystemNav, type SystemZone } from "@/components/system/system-nav";
 import { WolPanel } from "@/components/system/wol-panel";
 import { useRestartApp, useRestartStatus } from "@/lib/use-config";
@@ -44,9 +44,9 @@ export default function SystemPage() {
         <div className="mt-6">
           {zone === "general" && <GeneralPanel />}
           {zone === "models" && <ModelDefPanel />}
-          {zone === "info" && <SystemInfoPanel />}
           {zone === "network" && <WolPanel />}
           {zone === "claude" && <ClaudePanel />}
+          {zone === "database" && <DatabasePanel />}
         </div>
       </div>
     </>
