@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
+import { ClaudePanel } from "@/components/system/claude-panel";
 import { GeneralPanel } from "@/components/system/general-panel";
 import { ModelDefPanel } from "@/components/system/model-def-panel";
 import { RestartBanner } from "@/components/system/restart-banner";
@@ -8,12 +9,6 @@ import { SystemNav, type SystemZone } from "@/components/system/system-nav";
 import { WolPanel } from "@/components/system/wol-panel";
 import { ZonePlaceholder } from "@/components/system/zone-placeholder";
 import { useRestartApp, useRestartStatus } from "@/lib/use-config";
-
-const PLACEHOLDER_LABEL: Record<Exclude<SystemZone, "general" | "models" | "info">, string> = {
-  network: "网络",
-  claude: "Claude",
-  logs: "日志",
-};
 
 export default function SystemPage() {
   const [zone, setZone] = useState<SystemZone>("general");
@@ -52,9 +47,8 @@ export default function SystemPage() {
           {zone === "models" && <ModelDefPanel />}
           {zone === "info" && <SystemInfoPanel />}
           {zone === "network" && <WolPanel />}
-          {zone !== "general" && zone !== "models" && zone !== "info" && zone !== "network" && (
-            <ZonePlaceholder label={PLACEHOLDER_LABEL[zone]} />
-          )}
+          {zone === "claude" && <ClaudePanel />}
+          {zone === "logs" && <ZonePlaceholder label="日志" />}
         </div>
       </div>
     </>
