@@ -70,8 +70,6 @@ class ProgramConfig:
     port: int
     alive_time: int
     log_level: str
-    log_dir: str = "logs"
-    db_path: str = "data/llm_manager.db"
     claude_settings_path: str | None = None
 
 
@@ -101,8 +99,6 @@ def load(path: Path) -> AppConfig:
         port=int(p.get("port", 8080)),
         alive_time=int(p.get("alive_time", 60)),
         log_level=p.get("log_level", "INFO"),
-        log_dir=p.get("log_dir", "logs"),
-        db_path=p.get("db_path", "data/llm_manager.db"),
         claude_settings_path=p.get("claude_settings_path"),
     )
     models: dict[str, ModelConfig] = {}

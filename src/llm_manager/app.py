@@ -157,7 +157,8 @@ def create_app(db_path: Path | None = None, *, legacy_yaml: Path | None = None) 
     register_routes(app, lifecycle, db, clients)
     app.state.cfg = cfg
     app.state.config_store = store
-    app.state.boot_program = {f: str(getattr(cfg.program, f)) for f in ("host", "port", "db_path", "log_dir", "claude_settings_path", "log_level")}
+    app.state.resolved_db = str(resolved_db)   # 供 system_info 算 db_size_bytes(不暴露路径键)
+    app.state.boot_program = {f: str(getattr(cfg.program, f)) for f in ("host", "port", "claude_settings_path", "log_level")}
     app.state.started_at = time.time()
     return app
 

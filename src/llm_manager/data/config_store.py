@@ -71,8 +71,6 @@ def _write_appconfig_locked(db: Db, cfg: AppConfig) -> None:
         _upsert_locked(db, "port", str(p.port))
         _upsert_locked(db, "alive_time", str(p.alive_time))
         _upsert_locked(db, "log_level", p.log_level)
-        _upsert_locked(db, "log_dir", p.log_dir)
-        _upsert_locked(db, "db_path", p.db_path)
         if p.claude_settings_path is not None:
             _upsert_locked(db, "claude_settings_path", p.claude_settings_path)
         if cfg.wol is not None:
@@ -148,8 +146,6 @@ def _read_appconfig_locked(db: Db) -> AppConfig:
         port=int(s.get("port", "8080")),
         alive_time=int(s.get("alive_time", "60")),
         log_level=s.get("log_level", "INFO"),
-        log_dir=s.get("log_dir", "logs"),
-        db_path=s.get("db_path", "data/llm_manager.db"),
         claude_settings_path=s.get("claude_settings_path"),
     )
     wol = None
@@ -268,8 +264,6 @@ ENV_MAP: dict[str, str] = {
     "LLM_MANAGER_PORT": "port",
     "LLM_MANAGER_ALIVE_TIME": "alive_time",
     "LLM_MANAGER_LOG_LEVEL": "log_level",
-    "LLM_MANAGER_LOG_DIR": "log_dir",
-    "LLM_MANAGER_DB_PATH": "db_path",
 }
 
 DEFAULTS: dict[str, str] = {
@@ -277,8 +271,6 @@ DEFAULTS: dict[str, str] = {
     "port": "8080",
     "alive_time": "60",
     "log_level": "INFO",
-    "log_dir": "logs",
-    "db_path": "data/llm_manager.db",
     "log_retention_time_enabled": "0",
     "log_retention_days": "30",
     "log_retention_count_enabled": "0",

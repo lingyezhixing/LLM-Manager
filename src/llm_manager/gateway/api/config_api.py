@@ -1,7 +1,7 @@
 """System config write-back API: GET/PUT /api/config*, /api/system/info, restart 检测.
 
 校验层 = Pydantic 请求模型(FastAPI 自动 422)。写经 set_settings(多键原子)→ store.reload()。
-restart 检测:对比 snapshot.program 的 host/port/db_path/log_dir 与 app.state.boot_program(启动期捕获)。
+restart 检测:对比 snapshot.program 的 host/port/claude_settings_path/log_level 与 app.state.boot_program(启动期捕获)。
 读穿仅 system_settings 影响的消费方(idle 循环/tray/logging)——lifecycle/catalog/models 随 P2 模型 CRUD。
 """
 from __future__ import annotations
@@ -36,7 +36,7 @@ try:
 except Exception:
     _VERSION = "unknown"
 
-_RESTART_FIELDS = ("host", "port", "db_path", "log_dir", "claude_settings_path", "log_level")
+_RESTART_FIELDS = ("host", "port", "claude_settings_path", "log_level")
 
 
 class ProgramUpdate(BaseModel):
@@ -44,8 +44,6 @@ class ProgramUpdate(BaseModel):
     port: int | None = Field(default=None, ge=1, le=65535)
     alive_time: int | None = Field(default=None, ge=0)
     log_level: str | None = None
-    log_dir: str | None = None
-    db_path: str | None = None
     claude_settings_path: str | None = None
 
 
@@ -222,17 +220,13 @@ def register_config_routes(api: APIRouter) -> None:
 
     @api.get("/system/info")
     def system_info(request: Request) -> dict:
-        cfg = _store(request).snapshot()
-        boot = _boot(request)
         started_at = getattr(request.app.state, "started_at", None) or time.time()
-        db_path = Path(boot.get("db_path", cfg.program.db_path))
+        db_path = Path(str(getattr(request.app.state, "resolved_db", "data/llm_manager.db")))
         return {
             "version": _VERSION,
             "started_at": started_at,
             "uptime_s": max(0.0, time.time() - started_at),
-            "db_path": str(db_path),
             "db_size_bytes": db_path.stat().st_size if db_path.exists() else None,
-            "log_dir": boot.get("log_dir", cfg.program.log_dir),
         }
 
     @api.get("/config")
@@ -243,7 +237,7 @@ def register_config_routes(api: APIRouter) -> None:
         return {
             "program": {
                 "host": p.host, "port": p.port, "alive_time": p.alive_time,
-                "log_level": p.log_level, "log_dir": p.log_dir, "db_path": p.db_path,
+                "log_level": p.log_level,
                 "claude_settings_path": p.claude_settings_path,
             },
             "wol": ({"broadcast_address": cfg.wol.broadcast_address,
@@ -261,7 +255,7 @@ def register_config_routes(api: APIRouter) -> None:
     @api.put("/config/program")
     def put_program(request: Request, body: ProgramUpdate) -> dict:
         updates: dict[str, str] = {}
-        for f in ("host", "log_level", "log_dir", "db_path", "claude_settings_path"):
+        for f in ("host", "log_level", "claude_settings_path"):
             v = getattr(body, f)
             if v is not None:
                 updates[f] = v

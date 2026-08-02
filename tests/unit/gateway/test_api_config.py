@@ -22,20 +22,21 @@ def _app(tmp_path):
     app.state.db = db
     app.state.config_store = store
     app.state.boot_program = {"host": "0.0.0.0", "port": "8080",
-                              "db_path": "data/llm_manager.db", "log_dir": "logs", "log_level": "INFO"}
+                              "claude_settings_path": None, "log_level": "INFO"}
+    app.state.resolved_db = str(tmp_path / "t.db")
     app.state.started_at = time.time()
     return app
 
 
-def test_system_info_returns_db_logdir_version(tmp_path):
+def test_system_info_returns_version_uptime_db_size(tmp_path):
     with TestClient(_app(tmp_path)) as c:
         r = c.get("/api/system/info")
     assert r.status_code == 200
     j = r.json()
     assert isinstance(j["version"], str)
     assert isinstance(j["started_at"], (int, float))
-    assert j["log_dir"] == "logs"
-    assert "db_path" in j
+    assert "db_path" not in j and "log_dir" not in j   # 已移除:不再暴露路径
+    assert isinstance(j["db_size_bytes"], int)          # 保留:实际库文件大小(fixture 挂了 resolved_db)
 
 
 def test_get_config_returns_current_program_wol_claude_logs(tmp_path):
@@ -511,3 +512,13 @@ def test_apply_claude_preset_write_failure_500(tmp_path):
         r = c.post("/api/config/claude/apply", json={"name": "GLM"})
     assert r.status_code == 500
     assert "写入 settings.json 失败" in r.json()["detail"]
+
+
+def test_put_program_ignores_removed_log_dir_db_path(tmp_path):
+    # 已移除的底层键:静默忽略(不写入、不触发重启),配置响应永不出现
+    with TestClient(_app(tmp_path)) as c:
+        r = c.put("/api/config/program", json={"log_dir": "/evil", "db_path": "/evil.db"})
+    assert r.status_code == 200
+    assert r.json()["needs_restart"] is False
+    p = c.get("/api/config").json()["program"]
+    assert "log_dir" not in p and "db_path" not in p
