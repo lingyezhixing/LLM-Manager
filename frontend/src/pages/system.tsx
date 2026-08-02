@@ -5,6 +5,7 @@ import { ModelDefPanel } from "@/components/system/model-def-panel";
 import { RestartBanner } from "@/components/system/restart-banner";
 import { SystemInfoPanel } from "@/components/system/system-info-panel";
 import { SystemNav, type SystemZone } from "@/components/system/system-nav";
+import { WolPanel } from "@/components/system/wol-panel";
 import { ZonePlaceholder } from "@/components/system/zone-placeholder";
 import { useRestartApp, useRestartStatus } from "@/lib/use-config";
 
@@ -50,7 +51,8 @@ export default function SystemPage() {
           {zone === "general" && <GeneralPanel />}
           {zone === "models" && <ModelDefPanel />}
           {zone === "info" && <SystemInfoPanel />}
-          {zone !== "general" && zone !== "models" && zone !== "info" && (
+          {zone === "network" && <WolPanel />}
+          {zone !== "general" && zone !== "models" && zone !== "info" && zone !== "network" && (
             <ZonePlaceholder label={PLACEHOLDER_LABEL[zone]} />
           )}
         </div>
