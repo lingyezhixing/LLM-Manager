@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Field, TextArea, TextInput } from "@/components/ui/form";
 import { useConfirm } from "@/components/ui/dialog";
@@ -8,6 +8,7 @@ import {
   useClaudeCurrent,
   useConfig,
   useUpdateClaudeConfigs,
+  useUpdateProgram,
 } from "@/lib/use-config";
 
 // 解析预设 JSON 文本:须为 str→str 对象。失败 → { ok:false, message }。
@@ -26,131 +27,195 @@ function parseEnvJson(text: string): { ok: true; value: Record<string, string> }
   }
 }
 
-// 编辑态:key = 服务端预设名(null = 新建);baseline* = 最近一次保存/加载时的值(dirty 基准)。
-interface Editing {
-  key: string | null;
-  name: string;
-  json: string;
-  baselineName: string;
-  baselineJson: string;
-  isNew: boolean;
+// ── 单张方案卡片 ─────────────────────────────────────────────
+// mode="edit":已保存预设,name/preset 由父级传入,名字只读(创建后锁定);
+// mode="new":新建卡,名字可输入、自动展开、不可折叠,保存成功后 onCreated。
+// 折叠只隐藏身体(组件保持挂载),编辑不丢失;脏且折叠时头部显示「未保存」。
+interface ClaudePresetCardProps {
+  presets: Record<string, Record<string, string>>; // 全部预设(保存/删除 = 整组 PUT)
+  name?: string;                                    // edit 模式:预设名(只读)
+  preset?: Record<string, string>;                  // edit 模式:预设内容
+  names: string[];                                  // 全部预设名(新建时查重)
+  isCurrent: boolean;                               // 是否当前生效
+  mode?: "edit" | "new";
+  onCreated?: (name: string) => void;               // 新建保存成功(面板移除新建卡)
+  onCancelNew?: () => void;                         // 新建卡「取消」
 }
 
-// 系统页「Claude」区:预设管理(名称 + 环境变量 JSON)。编辑先在本地,保存 = 整组 PUT;
-// 应用 = 把该预设写入 Claude settings.json(与托盘同逻辑)。删除/应用在有未保存修改时禁用。
-export function ClaudePanel() {
-  const { data, isLoading, isError, error, refetch } = useConfig();
-  const update = useUpdateClaudeConfigs();
-  const del = useUpdateClaudeConfigs();
+export function ClaudePresetCard({
+  presets,
+  name,
+  preset,
+  names,
+  isCurrent,
+  mode = "edit",
+  onCreated,
+  onCancelNew,
+}: ClaudePresetCardProps) {
+  const isNew = mode === "new";
+  const update = useUpdateClaudeConfigs();   // 保存
+  const del = useUpdateClaudeConfigs();      // 删除
   const apply = useApplyClaudePreset();
-  const { data: currentData } = useClaudeCurrent();
   const confirm = useConfirm();
   const toast = useToast();
 
-  const serverPresets = data?.claude ?? {};
-  const names = [...Object.keys(serverPresets)].sort();
-  const [editing, setEditing] = useState<Editing | null>(null);
+  // 默认:生效中的卡展开,其余收起;新建卡必展开。
+  const [expanded, setExpanded] = useState(isNew || isCurrent);
+  const [nameInput, setNameInput] = useState("");
+  const [json, setJson] = useState(isNew ? "{}" : JSON.stringify(preset, null, 2));
+  const [baselineJson, setBaselineJson] = useState(json);
 
-  // 仅首次数据就绪时默认选第一个;删除后的重选在 onDelete 内显式处理(hydratedRef 防 stale refetch 复活已删预设)。
-  const hydratedRef = useRef(false);
-  useEffect(() => {
-    if (!data || hydratedRef.current) return;
-    hydratedRef.current = true;
-    const first = Object.keys(data.claude).sort()[0];
-    if (first) {
-      const json = JSON.stringify(data.claude[first], null, 2);
-      setEditing({ key: first, name: first, json, baselineName: first, baselineJson: json, isNew: false });
-    }
-  }, [data]);
-
-  const parsed = editing ? parseEnvJson(editing.json) : null;
+  const parsed = parseEnvJson(json);
   const jsonErr = parsed && !parsed.ok ? parsed.message : null;
-  const nameOk = !!editing?.name.trim();
-  const collision = editing !== null && editing.key !== editing.name && editing.name in serverPresets;
-  const dirty = editing !== null && (editing.isNew || editing.name !== editing.baselineName || editing.json !== editing.baselineJson);
-  const current = currentData?.current ?? "";
+  const nameOk = !isNew || nameInput.trim().length > 0;
+  const collision = isNew && nameInput.trim() !== "" && names.includes(nameInput.trim());
+  const dirty = isNew || json !== baselineJson;
+  const editName = isNew ? nameInput.trim() : (name ?? "");
 
-  const saveEnabled = !!editing && dirty && !jsonErr && nameOk && !collision;
-  const applyEnabled = !!editing && !editing.isNew && !dirty && !jsonErr && editing.key !== null && editing.key !== current;
-  const deleteEnabled = !!editing && !editing.isNew && !dirty;
-
-  // 切换/新增前 dirty 守卫(仿 ModelDefPanel):有未保存修改则确认。
-  const guard = async (): Promise<boolean> =>
-    !dirty
-    || await confirm({
-      title: "放弃未保存的修改?",
-      description: "当前预设有未保存修改,切换将丢弃。",
-      confirmText: "放弃",
-      cancelText: "继续编辑",
-      danger: true,
-    });
-
-  const startCreate = async () => {
-    if (!(await guard())) return;
-    const used = new Set(names);
-    let name = "新预设";
-    for (let i = 2; used.has(name); i++) name = `新预设 ${i}`;
-    setEditing({ key: null, name, json: "{}", baselineName: name, baselineJson: "{}", isNew: true });
-  };
+  const saveEnabled = dirty && nameOk && !collision && !jsonErr && !update.isPending;
+  const applyEnabled = !isNew && !dirty && !isCurrent && !jsonErr;
+  const deleteEnabled = !isNew && !dirty;
+  const mutError = update.error ?? del.error ?? apply.error;
 
   const onSave = () => {
-    if (!editing || !parsed?.ok) return;
-    const next = { ...serverPresets, [editing.name]: parsed.value };
-    if (editing.key !== null && editing.key !== editing.name) delete next[editing.key];  // 改名:移除旧键
+    if (!parsed?.ok || !editName) return;
+    const next = { ...presets, [editName]: parsed.value };
     update.mutate(next, {
       onSuccess: () => {
-        setEditing((prev) =>
-          prev
-            ? { ...prev, key: editing.name, baselineName: editing.name, baselineJson: editing.json, isNew: false }
-            : prev,
-        );
-        toast.success(editing.isNew ? `已创建预设「${editing.name}」` : "已保存");
+        setBaselineJson(json);
+        if (isNew) {
+          toast.success(`已创建预设「${editName}」`);
+          onCreated?.(editName);
+        } else {
+          toast.success("已保存");
+        }
       },
     });
   };
 
   const onDelete = async () => {
-    if (!editing || editing.key === null) return;
-    const name = editing.key;
+    if (isNew) { onCancelNew?.(); return; }
     const ok = await confirm({
-      title: `删除预设 ${name}?`,
+      title: `删除预设 ${editName}?`,
       description: "此操作不可撤销。",
       confirmText: "删除",
       cancelText: "取消",
       danger: true,
     });
     if (!ok) return;
-    const next = { ...serverPresets };
-    delete next[name];
-    del.mutate(next, {
-      onSuccess: () => {
-        // 显式重选(不依赖异步 refetch):剩余第一个,或空态。
-        const remaining = Object.keys(next).sort();
-        setEditing(
-          remaining.length === 0
-            ? null
-            : {
-                key: remaining[0],
-                name: remaining[0],
-                json: JSON.stringify(next[remaining[0]], null, 2),
-                baselineName: remaining[0],
-                baselineJson: JSON.stringify(next[remaining[0]], null, 2),
-                isNew: false,
-              },
-        );
-        toast.success(`已删除预设「${name}」`);
-      },
-    });
+    const next = { ...presets };
+    delete next[editName];
+    del.mutate(next, { onSuccess: () => toast.success(`已删除预设「${editName}」`) });
   };
 
   const onApply = () => {
-    if (!editing || editing.key === null) return;
-    apply.mutate(editing.key, {
-      onSuccess: (r) => toast.success(`已应用预设「${r.applied}」`),
-    });
+    if (isNew || !editName) return;
+    apply.mutate(editName, { onSuccess: (r) => toast.success(`已应用预设「${r.applied}」`) });
   };
 
-  const mutError = update.error ?? del.error ?? apply.error;
+  return (
+    <div className="rounded-lg border border-border p-3">
+      {/* 头部:折叠后也常驻(应用/删除/生效标记都在) */}
+      <div className="flex items-center gap-2">
+        {!isNew && (
+          <button
+            type="button"
+            className="w-4 text-xs text-muted-foreground hover:text-foreground"
+            aria-label={expanded ? "收起" : "展开"}
+            onClick={() => setExpanded(!expanded)}
+          >
+            {expanded ? "▾" : "▸"}
+          </button>
+        )}
+        {isNew ? (
+          <TextInput
+            value={nameInput}
+            onChange={(e) => setNameInput(e.target.value)}
+            placeholder="方案名"
+            className="w-44"
+          />
+        ) : (
+          <span className="text-sm font-medium text-foreground">{name}</span>
+        )}
+        {isCurrent
+          ? <span className="text-xs font-medium text-success">● 生效中</span>
+          : <span className="text-xs text-muted-foreground">○ 未生效</span>}
+        {!expanded && dirty && <span className="text-xs text-warning">未保存</span>}
+        <div className="flex-1" />
+        <Button type="button" size="sm" variant="ghost" onClick={onApply} disabled={!applyEnabled || apply.isPending}>
+          {apply.isPending ? "应用中…" : "应用"}
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          className="text-destructive"
+          onClick={onDelete}
+          disabled={(!isNew && !deleteEnabled) || del.isPending}
+        >
+          {del.isPending ? "删除中…" : isNew ? "取消" : "删除"}
+        </Button>
+      </div>
+
+      {/* 身体:仅展开时显示(折叠只隐藏,不卸载,编辑不丢失) */}
+      <div className={expanded ? "mt-3" : "hidden"}>
+        <Field
+          label="环境变量 JSON"
+          hint="写入 Claude settings.json 的 env;键值须为字符串"
+          error={jsonErr ?? (collision ? "方案名与现有预设重复" : null)}
+        >
+          <TextArea value={json} onChange={(e) => setJson(e.target.value)} className="min-h-80" />
+        </Field>
+        <div className="mt-1 flex items-center justify-end gap-2">
+          <Button type="button" size="sm" onClick={onSave} disabled={!saveEnabled}>
+            {update.isPending ? "保存中…" : "保存"}
+          </Button>
+        </div>
+        {mutError && <p className="mt-2 text-xs text-destructive">操作失败:{(mutError as Error).message}</p>}
+      </div>
+    </div>
+  );
+}
+
+// 系统页「Claude」区:顶部 settings 路径行 + 方案卡片列表 + 底部「+ 新增方案」。
+// 每张卡独立保存/应用/删除;名字创建后锁定。current 不匹配任何预设时顶部警示。
+export function ClaudePanel() {
+  const { data, isLoading, isError, error, refetch } = useConfig();
+  const { data: currentData } = useClaudeCurrent();
+  const updateProgram = useUpdateProgram();
+  const toast = useToast();
+
+  const serverPresets = data?.claude ?? {};
+  const names = [...Object.keys(serverPresets)].sort();
+  const current = currentData?.current ?? "";
+  const currentMissing = current !== "" && !(current in serverPresets);
+
+  // 新建卡:nonce>0 时渲染一张;保存成功(onCreated)或取消后清零,期间禁新增。
+  const [newNonce, setNewNonce] = useState(0);
+
+  // ── Claude settings 路径行(自通用页移入)──
+  // 本地输入 + 最近保存值;外部刷新且未编辑(pathSaved === pathInput)时跟随。
+  const [pathInput, setPathInput] = useState("");
+  const [pathSaved, setPathSaved] = useState("");
+  useEffect(() => {
+    if (!data) return;
+    if (pathSaved === pathInput) {
+      setPathInput(data.program.claude_settings_path);
+      setPathSaved(data.program.claude_settings_path);
+    }
+  }, [data]);
+  const pathDirty = pathInput !== pathSaved;
+  const onSavePath = () => {
+    updateProgram.mutate(
+      { claude_settings_path: pathInput },
+      {
+        onSuccess: () => {
+          setPathSaved(pathInput);
+          toast.success("Claude settings 路径已保存");
+        },
+      },
+    );
+  };
 
   if (isError) {
     return (
@@ -165,89 +230,54 @@ export function ClaudePanel() {
   }
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[minmax(0,280px)_minmax(0,1fr)]">
-      {/* 左栏:预设列表 + 新增 */}
-      <div className="flex flex-col gap-1">
-        <div className="flex flex-col gap-0.5" role="listbox" aria-label="Claude 预设列表">
-          {names.length === 0 && (
-            <span className="px-3 py-2 text-sm text-muted-foreground">暂无预设</span>
-          )}
-          {names.map((n) => {
-            const selected = editing !== null && editing.key === n;
-            return (
-              <button
-                key={n}
-                type="button"
-                role="option"
-                aria-selected={selected}
-                onClick={async () => {
-                  if (!(await guard())) return;
-                  const json = JSON.stringify(serverPresets[n], null, 2);
-                  setEditing({ key: n, name: n, json, baselineName: n, baselineJson: json, isNew: false });
-                }}
-                className={
-                  "rounded-md px-3 py-2 text-left text-sm transition-colors " +
-                  (selected
-                    ? "bg-muted font-medium text-foreground"
-                    : "text-muted-foreground hover:bg-muted hover:text-foreground")
-                }
-              >
-                {n}
-              </button>
-            );
-          })}
-        </div>
-        <div className="flex flex-col gap-1 border-t border-border pt-2">
-          <Button type="button" size="sm" variant="ghost" onClick={startCreate} className="w-full justify-start">
-            + 新增
+    <div className="flex flex-col gap-3">
+      <Field label="Claude settings 路径" hint="改完需重启生效(顶部会提示)" htmlFor="csp-path">
+        <div className="flex items-center gap-2">
+          <TextInput id="csp-path" value={pathInput} onChange={(e) => setPathInput(e.target.value)} className="flex-1" />
+          <Button type="button" size="sm" onClick={onSavePath} disabled={!pathDirty || updateProgram.isPending}>
+            {updateProgram.isPending ? "保存中…" : "保存"}
           </Button>
         </div>
-      </div>
+      </Field>
 
-      {/* 右栏:名称 + JSON 输入框 + 删除/保存/应用 */}
-      <div>
-        {editing === null ? (
-          <div className="rounded-lg border border-dashed border-border p-16 text-center text-sm text-muted-foreground">
-            选择或新增一个预设
-          </div>
-        ) : (
-          <>
-            <div className="grid grid-cols-1 gap-x-6 sm:grid-cols-2">
-              <Field label="预设名" hint={editing.key === null ? "保存后生效" : undefined} htmlFor="cp-name">
-                <TextInput id="cp-name" value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })} />
-              </Field>
-              <Field label="当前生效" hint="点击「应用」后更新">
-                <span className="flex h-9 items-center text-sm text-muted-foreground">{current || "—"}</span>
-              </Field>
-            </div>
-            <Field
-              label="环境变量 JSON"
-              hint="写入 Claude settings.json 的 env;键值须为字符串"
-              error={jsonErr ?? (collision ? "预设名与现有预设重复" : null)}
-            >
-              <TextArea
-                id="cp-json"
-                value={editing.json}
-                onChange={(e) => setEditing({ ...editing, json: e.target.value })}
-                className="min-h-80"
-              />
-            </Field>
-            <div className="mt-2 flex items-center gap-2">
-              <Button type="button" size="sm" variant="ghost" className="text-destructive" onClick={onDelete} disabled={!deleteEnabled || del.isPending}>
-                删除
-              </Button>
-              <div className="flex-1" />
-              <Button type="button" size="sm" variant="ghost" onClick={onApply} disabled={!applyEnabled || apply.isPending}>
-                {apply.isPending ? "应用中…" : "应用"}
-              </Button>
-              <Button type="button" size="sm" onClick={onSave} disabled={!saveEnabled || update.isPending}>
-                {update.isPending ? "保存中…" : "保存"}
-              </Button>
-            </div>
-            {mutError && <p className="mt-2 text-xs text-destructive">操作失败:{(mutError as Error).message}</p>}
-          </>
-        )}
-      </div>
+      {currentMissing && (
+        <div className="rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-sm text-foreground">
+          当前生效的 settings.json 与任何预设都不匹配
+        </div>
+      )}
+
+      {names.map((n) => (
+        <ClaudePresetCard
+          key={n}
+          presets={serverPresets}
+          name={n}
+          preset={serverPresets[n]}
+          names={names}
+          isCurrent={n === current}
+        />
+      ))}
+
+      {newNonce > 0 && (
+        <ClaudePresetCard
+          key={`new-${newNonce}`}
+          presets={serverPresets}
+          mode="new"
+          names={names}
+          isCurrent={false}
+          onCreated={() => setNewNonce(0)}
+          onCancelNew={() => setNewNonce(0)}
+        />
+      )}
+
+      <Button
+        type="button"
+        variant="ghost"
+        className="justify-start self-start"
+        disabled={newNonce > 0}
+        onClick={() => setNewNonce((n) => n + 1)}
+      >
+        + 新增方案
+      </Button>
     </div>
   );
 }
