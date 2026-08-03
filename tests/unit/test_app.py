@@ -1,10 +1,11 @@
+import logging
 import time
 
 import pytest
 from fastapi.testclient import TestClient
 
 from llm_manager import state
-from llm_manager.app import create_app
+from llm_manager.app import create_app, setup_logging as _real_setup_logging
 from llm_manager.state import ModelStatus
 
 _CFG_BODY = """
@@ -49,7 +50,7 @@ def test_create_app_warm_start_skips_import(tmp_path):
     create_app(db_path=tmp_path / "t.db", legacy_yaml=cfg_path)          # 首次:导入
     # 二次:不带 legacy_yaml,库已 initialized → seed/import 都跳过,仅 env 写库
     app2 = create_app(db_path=tmp_path / "t.db")
-    assert "m1" in app2.state.cfg.models                                 # 保留首次导入的模型
+    assert "m1" in app2.state.config_store.snapshot().models             # 保留首次导入的模型
 
 
 def test_create_app_closes_db_on_bootstrap_error(tmp_path):
@@ -94,6 +95,18 @@ def test_crud_then_catalog_reflects_without_restart(tmp_path, monkeypatch):
         c.delete("/api/config/models/A")
         v1b = {m["id"] for m in c.get("/v1/models").json()["data"]}
         assert "a" not in v1b and "b" in v1b
+
+
+def test_log_level_from_config_applied(tmp_path, monkeypatch):
+    """C1:cfg.program.log_level 真正接入 setup_logging(此前硬编码 INFO 从未生效)。"""
+    import logging
+    # conftest 全测试 stub 了 setup_logging(防污染生产日志);本测恢复真实实现才能验证接线。
+    monkeypatch.setattr("llm_manager.app.setup_logging", _real_setup_logging)
+    monkeypatch.setattr("llm_manager.devices.is_lhm_available", lambda: False)
+    cfg_path = tmp_path / "config.yaml"
+    cfg_path.write_text(_CFG_BODY.replace("log_level: INFO", "log_level: DEBUG"), encoding="utf-8")
+    create_app(db_path=tmp_path / "t.db", legacy_yaml=cfg_path)
+    assert logging.getLogger().level == logging.DEBUG
 
 
 def test_exit_code_for_returns_sentinel_only_when_requested():

@@ -152,7 +152,7 @@ export function GeneralPanel() {
           error={!portValid && form.program.port !== 0 ? "端口须在 1–65535" : null}>
           <NumberInput id="cfg-port" value={form.program.port} onChange={(e) => set({ ...form.program, port: num(e.target.value) })} />
         </Field>
-        <Field label="空闲检测 (alive_time)" hint="秒 · 🟢 改完即时生效" htmlFor="cfg-alive"
+        <Field label="空闲检测 (alive_time)" hint="分钟 · 🟢 改完即时生效" htmlFor="cfg-alive"
           error={!aliveValid ? "须 ≥ 0" : null}>
           <NumberInput id="cfg-alive" value={form.program.alive_time} onChange={(e) => set({ ...form.program, alive_time: num(e.target.value) })} />
         </Field>

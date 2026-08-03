@@ -79,7 +79,6 @@ def setup_logging(level: str = "INFO", log_dir: str = "logs") -> None:
 
 
 def create_app(db_path: Path | None = None, *, legacy_yaml: Path | None = None) -> FastAPI:
-    setup_logging()
     resolved_db = Path(db_path or os.environ.get("LLM_MANAGER_DB_PATH", "data/llm_manager.db"))
     db = open_db(resolved_db)
     _logs.init(db)   # 接线日志存储(幂等)
@@ -94,6 +93,7 @@ def create_app(db_path: Path | None = None, *, legacy_yaml: Path | None = None) 
     except Exception:
         db.conn.close()
         raise
+    setup_logging(level=cfg.program.log_level)   # C1:log_level 接线(此前硬编码 INFO,该参数从未生效)
     logger.info("config loaded (DB %s): %d models, %s:%d, alive %dmin",
                 resolved_db, len(cfg.models), cfg.program.host, cfg.program.port, cfg.program.alive_time)
     monitor = DeviceMonitor(ENUMERATORS, config.referenced_devices(cfg))
@@ -108,7 +108,6 @@ def create_app(db_path: Path | None = None, *, legacy_yaml: Path | None = None) 
         app.state.monitor = monitor
         app.state.clients = clients
         app.state.lifecycle = lifecycle
-        app.state.cfg = cfg
         app.state.loop = asyncio.get_running_loop()
         # === 系统日志会话:handler 任意线程 emit → capture_system → flush_loop 落库 ===
         # 崩溃/强杀残留的上次 system 会话(end_time IS NULL)先统一收口(D6),再开新会话;
@@ -186,7 +185,6 @@ def create_app(db_path: Path | None = None, *, legacy_yaml: Path | None = None) 
 
     app = FastAPI(title="LLM-Manager", lifespan=lifespan)
     register_routes(app, lifecycle, db, clients)
-    app.state.cfg = cfg
     app.state.config_store = store
     app.state.resolved_db = str(resolved_db)   # 供 system_info 算 db_size_bytes(不暴露路径键)
     app.state.boot_program = {f: str(getattr(cfg.program, f)) for f in ("host", "port", "claude_settings_path", "log_level")}
@@ -213,7 +211,7 @@ def exit_code_for(restart_requested: bool) -> int:
 def main() -> None:
     import uvicorn
     app = create_app(legacy_yaml=Path("config.yaml"))
-    cfg = app.state.cfg
+    cfg = app.state.config_store.snapshot()
     server = uvicorn.Server(
         uvicorn.Config(app, host=cfg.program.host, port=cfg.program.port, lifespan="on"))
     app.state.uvicorn_server = server
