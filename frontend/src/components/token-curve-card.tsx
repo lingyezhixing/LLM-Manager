@@ -7,11 +7,13 @@ import { fetchUsageSeries, type UsageSeriesParams } from "@/lib/api";
 import {
   chartPresetFor,
   fmtRange,
-  rangeForPreset,
+  paramsForState,
+  rangeForState,
   USAGE_PRESETS,
   USAGE_REFETCH,
   type DateRange,
   type UsagePreset,
+  type UsageRangeState,
 } from "@/lib/usage-range";
 
 /** Token 消耗 card:preset 胶囊 + 自选日历。区间/节奏/参数推导与用量页共用 lib/usage-range
@@ -20,12 +22,10 @@ export function TokenCurveCard() {
   const [preset, setPreset] = useState<UsagePreset>("7d");
   const [custom, setCustom] = useState<DateRange | null>(null);
   const [calOpen, setCalOpen] = useState(false);
-  const displayed = preset === "custom" && custom ? custom : rangeForPreset(preset as Exclude<UsagePreset, "custom">);
+  const range: UsageRangeState = { preset, custom };
 
-  const params: UsageSeriesParams =
-    preset === "custom" && custom
-      ? { start: Math.floor(custom.from.getTime() / 1000), end: Math.floor(custom.to.getTime() / 1000) }
-      : { period: preset };
+  const displayed = rangeForState(range);
+  const params: UsageSeriesParams = paramsForState(range);
 
   const { data, isLoading } = useQuery({
     queryKey: ["usage", "series", params],
