@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import {
   applyClaudePreset,
   fetchClaudeCurrent,
@@ -16,6 +16,13 @@ import {
   type ProgramUpdate,
   type WolConfig,
 } from "./api";
+
+// 配置写回后失效:config(读穿取新值)+ restart-status(顶部横幅按新状态刷新)。
+// 供 useUpdateProgram/useUpdateWol/useUpdateClaudeConfigs 共用;日志保留/应用预设语义不同,各管各的。
+function invalidateConfig(qc: QueryClient) {
+  qc.invalidateQueries({ queryKey: ["config"] });
+  qc.invalidateQueries({ queryKey: ["restart-status"] });
+}
 
 export function useSystemInfo() {
   return useQuery({ queryKey: ["system", "info"], queryFn: fetchSystemInfo });
@@ -34,10 +41,7 @@ export function useUpdateProgram() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (body: ProgramUpdate) => updateProgram(body),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["config"] });
-      qc.invalidateQueries({ queryKey: ["restart-status"] });
-    },
+    onSuccess: () => invalidateConfig(qc),
   });
 }
 
@@ -45,10 +49,7 @@ export function useUpdateWol() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (body: WolConfig) => updateWol(body),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["config"] });
-      qc.invalidateQueries({ queryKey: ["restart-status"] });
-    },
+    onSuccess: () => invalidateConfig(qc),
   });
 }
 
@@ -56,10 +57,7 @@ export function useUpdateClaudeConfigs() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (configs: Record<string, Record<string, string>>) => updateClaudeConfigs(configs),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["config"] });
-      qc.invalidateQueries({ queryKey: ["restart-status"] });
-    },
+    onSuccess: () => invalidateConfig(qc),
   });
 }
 
