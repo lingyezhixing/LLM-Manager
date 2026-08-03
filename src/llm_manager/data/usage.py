@@ -66,6 +66,21 @@ def record_runtime_end(db: Db, model_name: str, end: float) -> None:
         db.conn.commit()
 
 
+def close_open_runtime_sessions(db: Db, end: float | None = None) -> int:
+    """收口残留进行中的 model_runtime 段(崩溃/强杀遗留),返回收口数。
+
+    app 启动时调用(见 app.lifespan):把上次崩溃/强杀留下的 end_time IS NULL 的
+    运行段统一写上结束时间——否则 usage_cost 会按 now 持续计费,且与后续新段
+    重叠双重计费。启动时不可能有运行中模型(模型由本服务派生),全部收口安全。
+    与日志会话收口(log_close_open_model_sessions)同模式。"""
+    end = end if end is not None else time.time()
+    with db.write_lock:
+        cur = db.conn.execute("UPDATE model_runtime SET end_time=? WHERE end_time IS NULL", (end,))
+        n = cur.rowcount
+        db.conn.commit()
+        return n
+
+
 @dataclass(frozen=True, slots=True)
 class UsageSeries:
     buckets: list[float]            # bucket-start wall-clock epochs (the time axis)

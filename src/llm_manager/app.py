@@ -19,6 +19,7 @@ from llm_manager import config
 from llm_manager.data import logs as _logs
 from llm_manager.data.log_handler import SystemLogHandler, setup_logging
 from llm_manager.data.logs import log_close_open_model_sessions, log_close_open_system_sessions
+from llm_manager.data.usage import close_open_runtime_sessions
 from llm_manager.data.persistence import open_db
 from llm_manager.devices import ENUMERATORS, DeviceMonitor
 from llm_manager.gateway.api.config_api import RESTART_EXIT_CODE
@@ -75,6 +76,9 @@ def create_app(db_path: Path | None = None, *, legacy_yaml: Path | None = None) 
         n_residual_model = log_close_open_model_sessions(db)
         if n_residual_model:
             logger.info("closed %d crash-residual model log session(s)", n_residual_model)
+        n_residual_runtime = close_open_runtime_sessions(db)
+        if n_residual_runtime:
+            logger.info("closed %d crash-residual runtime session(s)", n_residual_runtime)
         _logs.start_system_session()
         sys_handler = SystemLogHandler(_logs.capture_system)
         logging.getLogger().addHandler(sys_handler)

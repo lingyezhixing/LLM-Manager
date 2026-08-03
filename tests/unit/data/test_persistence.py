@@ -16,6 +16,7 @@ from llm_manager.data.usage import (
     record_usage,
     record_runtime_start,
     record_runtime_end,
+    close_open_runtime_sessions,
     resolve_model_id,
     tier_cost,
     usage_cost,
@@ -221,6 +222,22 @@ def test_record_runtime_end_targets_latest_open_session(tmp_path):
         "WHERE m.original_name='m1' ORDER BY start_time").fetchall()
     assert rows[0]["end_time"] is None             # first session still open
     assert rows[1]["end_time"] == 300.0            # second closed
+
+
+def test_close_open_runtime_sessions(tmp_path):
+    """崩溃/强杀残留的进行中运行段(end_time NULL)一次性收口,返回收口数。
+    否则 usage_cost 按 now 持续计费,与后续新段重叠双重计费。"""
+    db = open_db(tmp_path / "t.db")
+    record_runtime_start(db, "m1", start=100.0)
+    record_runtime_start(db, "m1", start=200.0)   # 两条都开着(崩溃残留)
+    n = close_open_runtime_sessions(db, end=500.0)
+    assert n == 2
+    rows = db.conn.execute(
+        "SELECT start_time, end_time FROM model_runtime r JOIN models m ON r.model_id=m.id "
+        "WHERE m.original_name='m1' ORDER BY start_time").fetchall()
+    assert rows[0]["end_time"] == 500.0
+    assert rows[1]["end_time"] == 500.0
+    assert close_open_runtime_sessions(db, end=600.0) == 0  # 幂等:无残留可收
 
 
 def test_tier_cost_no_cache_matches_and_divides_by_million(tmp_path):
