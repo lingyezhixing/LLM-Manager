@@ -21,6 +21,7 @@ from llm_manager.data import logs as _logs
 from llm_manager.data.log_handler import SystemLogHandler
 from llm_manager.data.persistence import log_close_open_system_sessions, open_db
 from llm_manager.devices import ENUMERATORS, DeviceMonitor
+from llm_manager.gateway.api.config_api import RESTART_EXIT_CODE
 from llm_manager.gateway.api.models import build_models_response
 from llm_manager.gateway.routes import register_routes
 from llm_manager.probes import probe_registry
@@ -194,13 +195,8 @@ def create_app(db_path: Path | None = None, *, legacy_yaml: Path | None = None) 
 
 def create_dev_app() -> FastAPI:
     """No-arg factory for ``uvicorn --factory --reload`` (development mode)."""
-    import types
     app = create_app(legacy_yaml=Path("config.yaml"))
-    app.state.uvicorn_server = types.SimpleNamespace(should_exit=False)
     return app
-
-
-RESTART_EXIT_CODE = 81
 
 
 def exit_code_for(restart_requested: bool) -> int:

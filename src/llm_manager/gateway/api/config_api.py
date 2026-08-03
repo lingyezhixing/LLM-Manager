@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import time
 from dataclasses import replace
 from pathlib import Path
@@ -38,6 +39,9 @@ except Exception:
     _VERSION = "unknown"
 
 _RESTART_FIELDS = ("host", "port", "claude_settings_path", "log_level")
+
+# 退出码 81 契约:生产监督器与 Dev-Backend.bat 均在其上重启
+RESTART_EXIT_CODE = 81
 
 
 class ProgramUpdate(BaseModel):
@@ -324,9 +328,10 @@ def register_config_routes(api: APIRouter) -> None:
 
     @api.post("/config/restart", status_code=202)
     async def restart_app(request: Request) -> dict:
-        """请求优雅重启:置 app.state.restart_requested;若有 uvicorn server,后台延迟翻
-        should_exit(让 202 响应先冲刷)→ lifespan finally 跑 unload_all/关 DB/停 tray →
-        main() 末尾按 restart_requested 以 RESTART_EXIT_CODE 退出,监督器在其上重启。"""
+        """请求优雅重启:置 app.state.restart_requested;有 uvicorn server → 后台延迟翻
+        should_exit(让 202 先冲刷);无 server(dev --reload)→ 0.5s 后 os._exit(81),
+        Dev-Backend.bat 的 81 循环重启(os._exit 跳过 lifespan 收尾,dev 进程一次性,可接受)。
+        → main() 末尾按 restart_requested 以 RESTART_EXIT_CODE 退出,监督器在其上重启。"""
         request.app.state.restart_requested = True
         server = getattr(request.app.state, "uvicorn_server", None)
         if server is not None:
@@ -334,6 +339,11 @@ def register_config_routes(api: APIRouter) -> None:
                 await asyncio.sleep(0.5)
                 server.should_exit = True
             asyncio.create_task(_delayed_exit())
+        else:
+            async def _dev_exit() -> None:
+                await asyncio.sleep(0.5)
+                os._exit(RESTART_EXIT_CODE)
+            asyncio.create_task(_dev_exit())
         return {}
 
     @api.get("/config/models")

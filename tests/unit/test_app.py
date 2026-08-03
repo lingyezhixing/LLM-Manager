@@ -4,7 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from llm_manager import state
-from llm_manager.app import create_app
+from llm_manager.app import create_app, create_dev_app
 from llm_manager.state import ModelStatus
 
 _CFG_BODY = """
@@ -107,6 +107,11 @@ def test_log_level_from_config_applied(tmp_path, monkeypatch):
     cfg_path.write_text(_CFG_BODY.replace("log_level: INFO", "log_level: DEBUG"), encoding="utf-8")
     create_app(db_path=tmp_path / "t.db", legacy_yaml=cfg_path)
     assert levels == ["DEBUG"]
+
+
+def test_create_dev_app_leaves_no_fake_server():
+    app = create_dev_app()
+    assert getattr(app.state, "uvicorn_server", None) is None
 
 
 def test_exit_code_for_returns_sentinel_only_when_requested():
