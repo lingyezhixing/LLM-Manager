@@ -320,6 +320,21 @@ def log_close_open_system_sessions(db: Db, end: float | None = None) -> int:
         return n
 
 
+def log_close_open_model_sessions(db: Db, end: float | None = None) -> int:
+    """收口残留进行中 model 会话(崩溃/强杀遗留),返回收口数。
+
+    app 启动时调用(见 app.lifespan):把上次崩溃/强杀留下的 end_time IS NULL 的
+    model 会话统一写上结束时间,避免残留永远显示"进行中"。启动时不可能有进行中
+    的模型(模型由本服务派生),故一次性全部收口是安全的。"""
+    end = end if end is not None else time.time()
+    with db.write_lock:
+        cur = db.conn.execute(
+            "UPDATE log_sessions SET end_time=? WHERE type='model' AND end_time IS NULL", (end,))
+        n = cur.rowcount
+        db.conn.commit()
+        return n
+
+
 def log_session_exists(db: Db, session_id: int) -> bool:
     """会话行是否存在(读接口 404 校验用)。"""
     return db.conn.execute(

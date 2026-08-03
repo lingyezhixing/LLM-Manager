@@ -407,3 +407,17 @@ def test_log_close_open_system_sessions(tmp_path):
     assert by_id[resid]["end_time"] == 5000.0
     assert by_id[mid]["end_time"] is None                          # model 会话不受影响
     assert logs.log_close_open_system_sessions(db, end=6000.0) == 0  # 幂等:无残留可收
+
+
+def test_log_close_open_model_sessions(tmp_path):
+    """崩溃/强杀残留的进行中 model 会话(end_time NULL)一次性收口,返回收口数。"""
+    db = open_db(tmp_path / "t.db")
+    resid = logs.log_start_session(db, "model", "m1", "m1", 1000.0)
+    sysid = logs.log_start_session(db, "system", None, None, 2000.0)  # 非 model,不收口
+    n = logs.log_close_open_model_sessions(db, end=5000.0)
+    assert n == 1
+    rows = logs.log_sessions(db)
+    by_id = {r["id"]: r for r in rows}
+    assert by_id[resid]["end_time"] == 5000.0
+    assert by_id[sysid]["end_time"] is None                          # system 会话不受影响
+    assert logs.log_close_open_model_sessions(db, end=6000.0) == 0  # 幂等:无残留可收
