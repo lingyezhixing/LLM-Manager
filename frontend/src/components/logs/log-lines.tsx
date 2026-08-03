@@ -1,16 +1,17 @@
-import { useLogViewer } from "@/lib/use-model-logs";
+import type { useLogViewer } from "@/lib/use-model-logs";
 
 /** 级别过滤 + 搜索跳转 + 窗口化行渲染 + 返回最新药丸——ModelLogPanel 与 LogViewer 共享核心。
- * 头部(标题/会话信息)由两消费方各自渲染;h 来自 useLogViewer(useModelLogs/useSessionLogs 返回同形)。 */
-export const LOG_LEVELS = ["", "info", "ok", "warn", "error"] as const;
-export const LOG_LEVEL_LABEL: Record<string, string> = {
+ * 头部(标题/会话信息)由两消费方各自渲染;h 来自 useLogViewer(useModelLogs/useSessionLogs 返回同形)。
+ * 命名 LOG_LEVEL_FILTERS 以区别于 general-panel 的 LOG_LEVELS(后者为后端大写级别,语义不同)。 */
+const LOG_LEVEL_FILTERS = ["", "info", "ok", "warn", "error"] as const;   // "" = 全部
+const LOG_LEVEL_FILTER_LABEL: Record<string, string> = {
   "": "全部", info: "info", ok: "ok", warn: "warn", error: "error",
 };
-export const LOG_LINE_COLOR: Record<string, string> = {
+const LOG_LINE_LEVEL_COLOR: Record<string, string> = {
   info: "text-foreground/80", ok: "text-success", warn: "text-warning", error: "text-destructive",
 };
 
-export type LogLinesView = ReturnType<typeof useLogViewer>;
+type LogLinesView = ReturnType<typeof useLogViewer>;
 
 /** 过滤/搜索条 + 行区。h.mode 为 history 时显示返回最新药丸;无匹配仅在 hasSearched 后显示。 */
 export function LogLines({ h }: { h: LogLinesView }) {
@@ -23,19 +24,19 @@ export function LogLines({ h }: { h: LogLinesView }) {
   return (
     <>
       <div className="flex flex-wrap items-center gap-2 border-b border-border bg-muted/30 px-3.5 py-1.5 text-[10.5px]">
-        {LOG_LEVELS.map((lv) => (
+        {LOG_LEVEL_FILTERS.map((lv) => (
           <button key={lv} onClick={() => setLevel(lv)}
             className={`rounded border px-2 py-0.5 transition-colors ${level === lv ? "border-primary bg-primary text-primary-foreground" : "border-border bg-card text-muted-foreground hover:text-foreground"}`}>
-            {LOG_LEVEL_LABEL[lv]}
+            {LOG_LEVEL_FILTER_LABEL[lv]}
           </button>
         ))}
         <span className="mx-1 h-3 w-px bg-border" />
         <input
           value={h.input}
-          onChange={(e) => { h.setInput(e.target.value); h.onInputChange(); }}
+          onChange={(e) => h.onInput(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter") h.runSearch(h.input);
-            if (e.key === "Escape") { h.setInput(""); h.onInputChange(); }
+            if (e.key === "Escape") h.onInput("");
           }}
           placeholder="搜索本次日志…(Enter 搜索)"
           className="w-44 rounded border border-border bg-background px-2 py-0.5 text-foreground placeholder:text-muted-foreground/60 focus:border-primary focus:outline-none"
@@ -57,7 +58,7 @@ export function LogLines({ h }: { h: LogLinesView }) {
           const isCurrent = h.currentMatch === l.id;
           return (
             <div key={l.id} data-line-id={l.id}
-              className={`${LOG_LINE_COLOR[l.level]} -mx-1 whitespace-nowrap rounded px-1 ${isCurrent ? "bg-warning/30 ring-1 ring-warning" : isMatch ? "bg-warning/10" : ""}`}>
+              className={`${LOG_LINE_LEVEL_COLOR[l.level]} -mx-1 whitespace-nowrap rounded px-1 ${isCurrent ? "bg-warning/30 ring-1 ring-warning" : isMatch ? "bg-warning/10" : ""}`}>
               <span className="text-muted-foreground/50">{new Date(l.ts * 1000).toLocaleTimeString("zh-CN", { hour12: false })} </span>
               {l.text}
             </div>
