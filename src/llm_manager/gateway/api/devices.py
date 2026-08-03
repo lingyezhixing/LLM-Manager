@@ -15,6 +15,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from llm_manager.devices import DeviceInfo
+from llm_manager.gateway.api.common import sse_frame
 from llm_manager.realtime import DeviceFeed
 
 
@@ -37,19 +38,16 @@ def _to_schema(d: DeviceInfo) -> DeviceInfoResponse:
     return DeviceInfoResponse(**asdict(d))
 
 
-def _devices_event(snap: dict[str, DeviceInfo]) -> str:
-    """One SSE ``data:`` frame carrying a DevicesResponse."""
-    payload = DevicesResponse(data=[_to_schema(d) for d in snap.values()])
-    return f"data: {payload.model_dump_json()}\n\n"
-
-
 async def _device_stream(feed: DeviceFeed) -> AsyncIterator[str]:
     """Infinite SSE generator: initial current snapshot, then each refresh."""
     q = feed.subscribe()
     try:
-        yield _devices_event(feed.current_snapshot())   # immediate, so the bar isn't empty
+        snap = feed.current_snapshot()
+        # immediate frame, so the bar isn't empty
+        yield sse_frame(DevicesResponse(data=[_to_schema(d) for d in snap.values()]))
         while True:
-            yield _devices_event(await q.get())
+            snap = await q.get()
+            yield sse_frame(DevicesResponse(data=[_to_schema(d) for d in snap.values()]))
     finally:
         feed.unsubscribe(q)
 

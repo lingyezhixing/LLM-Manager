@@ -16,6 +16,8 @@ from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 
 from llm_manager import config, state
+from llm_manager.gateway.aliases import resolve_alias_checked
+from llm_manager.gateway.api.common import get_config_store, sse_frame
 from llm_manager.realtime import ModelFeed
 
 
@@ -59,32 +61,15 @@ def build_models_response(cfg: config.AppConfig) -> ModelsResponse:
     return ModelsResponse(data=items)
 
 
-def _models_event(payload: ModelsResponse) -> str:
-    return f"data: {payload.model_dump_json()}\n\n"
-
-
 async def _models_stream(feed: ModelFeed[ModelsResponse]) -> AsyncIterator[str]:
     """Infinite SSE generator: initial current snapshot, then each change."""
     q = feed.subscribe()
     try:
-        yield _models_event(feed.current_snapshot())   # immediate, so the list isn't empty
+        yield sse_frame(feed.current_snapshot())   # immediate, so the list isn't empty
         while True:
-            yield _models_event(await q.get())
+            yield sse_frame(await q.get())
     finally:
         feed.unsubscribe(q)
-
-
-def _resolve_alias(alias: str, cfg: config.AppConfig) -> str:
-    """URL 收到的是 alias(对外身份),state 以 primary_name(内部键)索引,这里先解析。"""
-    try:
-        return config.resolve_alias(cfg, alias)
-    except KeyError:
-        raise HTTPException(404, f"模型别名 '{alias}' 未在配置中找到")
-
-
-def _cfg(request: Request) -> config.AppConfig:
-    """读穿:每请求从 ConfigStore 取 fresh 快照(P2 模型 CRUD 后不重启即见)。"""
-    return request.app.state.config_store.snapshot()
 
 
 async def _do_restart(lifecycle, primary: str) -> None:
@@ -102,7 +87,7 @@ def register_models_routes(router: APIRouter, lifecycle) -> None:
 
     @router.post("/models/{alias}/start", status_code=202)
     async def start_model(alias: str, request: Request) -> Response:
-        primary = _resolve_alias(alias, _cfg(request))
+        primary = resolve_alias_checked(get_config_store(request).snapshot(), alias)
         if state.is_runnable(primary):
             raise HTTPException(409, f"model '{alias}' already routing")
         asyncio.create_task(lifecycle.ensure_running(primary))   # fire-and-forget;状态走 /api/models/stream SSE
@@ -110,12 +95,12 @@ def register_models_routes(router: APIRouter, lifecycle) -> None:
 
     @router.post("/models/{alias}/stop", status_code=202)
     async def stop_model(alias: str, request: Request) -> Response:
-        primary = _resolve_alias(alias, _cfg(request))
+        primary = resolve_alias_checked(get_config_store(request).snapshot(), alias)
         asyncio.create_task(lifecycle.stop(primary))             # 运行=停止 / 启动中=中断(协作 stop_event)
         return Response(status_code=202)
 
     @router.post("/models/{alias}/restart", status_code=202)
     async def restart_model(alias: str, request: Request) -> Response:
-        primary = _resolve_alias(alias, _cfg(request))
+        primary = resolve_alias_checked(get_config_store(request).snapshot(), alias)
         asyncio.create_task(_do_restart(lifecycle, primary))     # 读穿:lifecycle 取新配置;状态走 SSE
         return Response(status_code=202)

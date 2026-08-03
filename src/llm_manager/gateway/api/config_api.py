@@ -25,6 +25,7 @@ from llm_manager.data.config_store import (
     mutate_appconfig,
     set_settings,
 )
+from llm_manager.gateway.api.common import get_config_store, get_db
 from llm_manager.tray import claude
 
 try:
@@ -183,14 +184,6 @@ def _delete_model(cfg: AppConfig, name: str) -> AppConfig:
     return replace(cfg, models={k: v for k, v in cfg.models.items() if k != name})
 
 
-def _store(request: Request):
-    return request.app.state.config_store
-
-
-def _db(request: Request):
-    return request.app.state.db
-
-
 def _boot(request: Request) -> dict:
     return request.app.state.boot_program
 
@@ -236,7 +229,7 @@ def register_config_routes(api: APIRouter) -> None:
 
     @api.get("/config")
     def get_config(request: Request) -> dict:
-        cfg = _store(request).snapshot()
+        cfg = get_config_store(request).snapshot()
         boot = _boot(request)
         p = cfg.program
         return {
@@ -249,8 +242,8 @@ def register_config_routes(api: APIRouter) -> None:
                      "mac_address": cfg.wol.mac_address} if cfg.wol is not None else None),
             "claude": cfg.claude_configs,
             "logs": {
-                "days": int(get_setting(_db(request), "log_retention_days") or 30),
-                "count": int(get_setting(_db(request), "log_retention_count") or 10),
+                "days": int(get_setting(get_db(request), "log_retention_days") or 30),
+                "count": int(get_setting(get_db(request), "log_retention_count") or 10),
             },
             "restart_fields": _restart_fields(cfg, boot),
         }
@@ -267,8 +260,8 @@ def register_config_routes(api: APIRouter) -> None:
             if v is not None:
                 updates[f] = str(v)
         if updates:
-            set_settings(_db(request), updates)
-        cfg = _store(request).reload()
+            set_settings(get_db(request), updates)
+        cfg = get_config_store(request).reload()
         return _config_write_result(request, cfg)
 
     @api.put("/config/wol")
@@ -279,20 +272,20 @@ def register_config_routes(api: APIRouter) -> None:
         if body.mac_address is not None:
             updates["wol_mac"] = body.mac_address
         if updates:
-            set_settings(_db(request), updates)
-        cfg = _store(request).reload()
+            set_settings(get_db(request), updates)
+        cfg = get_config_store(request).reload()
         return _config_write_result(request, cfg)
 
     @api.put("/config/claude")
     def put_claude(request: Request, body: ClaudeConfigsUpdate) -> dict:
-        set_settings(_db(request), {"claude_configs": json.dumps(body.configs, ensure_ascii=False)})
-        cfg = _store(request).reload()
+        set_settings(get_db(request), {"claude_configs": json.dumps(body.configs, ensure_ascii=False)})
+        cfg = get_config_store(request).reload()
         return _config_write_result(request, cfg)
 
     @api.post("/config/claude/apply")
     def apply_claude_preset(request: Request, body: ClaudeApplyRequest) -> dict:
         """把已存预设写入 Claude settings.json(非破坏,仅更新 env 键)。404 未知预设;400 未配置路径。"""
-        cfg = _store(request).snapshot()
+        cfg = get_config_store(request).snapshot()
         preset = (cfg.claude_configs or {}).get(body.name)
         if preset is None:
             raise HTTPException(404, f"preset '{body.name}' not found")
@@ -308,7 +301,7 @@ def register_config_routes(api: APIRouter) -> None:
     @api.get("/config/claude/current")
     def current_claude_preset(request: Request) -> dict:
         """探测当前生效预设(按 ANTHROPIC_BASE_URL 子串匹配);未配置路径/读失败 → "(未知)"。"""
-        cfg = _store(request).snapshot()
+        cfg = get_config_store(request).snapshot()
         path = Path(cfg.program.claude_settings_path) if cfg.program.claude_settings_path else None
         current = claude.detect_current_preset(path, dict(cfg.claude_configs)) if path else "(未知)"
         return {"current": current}
@@ -321,13 +314,13 @@ def register_config_routes(api: APIRouter) -> None:
         if body.count is not None:
             updates["log_retention_count"] = str(body.count)
         if updates:
-            set_settings(_db(request), updates)
-        _store(request).reload()                  # 日志规则不进 AppConfig 快照,但 reload 保持新鲜
-        return _config_write_result(request, _store(request).snapshot())
+            set_settings(get_db(request), updates)
+        get_config_store(request).reload()                  # 日志规则不进 AppConfig 快照,但 reload 保持新鲜
+        return _config_write_result(request, get_config_store(request).snapshot())
 
     @api.get("/config/restart-status")
     def restart_status(request: Request) -> dict:
-        return _config_write_result(request, _store(request).snapshot())
+        return _config_write_result(request, get_config_store(request).snapshot())
 
     @api.post("/config/restart", status_code=202)
     async def restart_app(request: Request) -> dict:
@@ -345,15 +338,15 @@ def register_config_routes(api: APIRouter) -> None:
 
     @api.get("/config/models")
     def list_model_defs(request: Request) -> list[dict]:
-        cfg = _store(request).snapshot()
+        cfg = get_config_store(request).snapshot()
         return [{"name": name, "mode": m.mode, "port": m.port, "auto_start": m.auto_start,
                  "aliases": list(m.aliases), "schemes": list(m.schemes)}
                 for name, m in cfg.models.items()]
 
     @api.post("/config/models", status_code=201)
     def create_model_def(request: Request, body: ModelDefInput) -> dict:
-        db = _db(request)
-        store = _store(request)
+        db = get_db(request)
+        store = get_config_store(request)
         try:
             mutate_appconfig(db, lambda c: _create_model(c, body))
         except ModelExists:
@@ -367,7 +360,7 @@ def register_config_routes(api: APIRouter) -> None:
 
     @api.get("/config/models/{name}")
     def get_model_def(name: str, request: Request) -> dict:
-        cfg = _store(request).snapshot()
+        cfg = get_config_store(request).snapshot()
         if name not in cfg.models:
             raise HTTPException(404, f"model '{name}' not found")
         m = cfg.models[name]
@@ -384,8 +377,8 @@ def register_config_routes(api: APIRouter) -> None:
 
     @api.put("/config/models/{name}")
     def put_model_def(name: str, request: Request, body: ModelDefInput) -> dict:
-        db = _db(request)
-        store = _store(request)
+        db = get_db(request)
+        store = get_config_store(request)
         try:
             new_cfg = mutate_appconfig(db, lambda c: _update_model(c, name, body))
         except ModelNotFound:
@@ -400,7 +393,7 @@ def register_config_routes(api: APIRouter) -> None:
 
     @api.delete("/config/models/{name}")
     def delete_model_def(name: str, request: Request) -> dict:
-        store = _store(request)
+        store = get_config_store(request)
         cfg = store.snapshot()
         if name not in cfg.models:
             raise HTTPException(404, f"model '{name}' not found")
@@ -409,7 +402,7 @@ def register_config_routes(api: APIRouter) -> None:
         if state.get_status(name) == ModelStatus.ROUTING:
             raise HTTPException(409, f"model '{name}' is routing; stop it before deleting")
         try:
-            mutate_appconfig(_db(request), lambda c: _delete_model(c, name))
+            mutate_appconfig(get_db(request), lambda c: _delete_model(c, name))
         except ModelNotFound:
             raise HTTPException(404, f"model '{name}' not found")
         store.reload()

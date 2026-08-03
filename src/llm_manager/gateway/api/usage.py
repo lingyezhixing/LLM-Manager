@@ -20,6 +20,7 @@ from pydantic import BaseModel
 
 from llm_manager.data import session
 from llm_manager.data.persistence import usage_by_model, usage_cost, usage_cost_series, usage_series, usage_summary
+from llm_manager.gateway.api.common import get_config_store, get_db
 
 
 class SessionUsageResponse(BaseModel):
@@ -122,7 +123,7 @@ def register_usage_routes(router: APIRouter) -> None:
         start: float | None = None,
         end: float | None = None,
     ) -> UsageSeriesResponse:
-        db = request.app.state.db
+        db = get_db(request)
         start_ts, end_ts, bucket = _resolve_range(range, start, end)
         result = usage_series(db, start_ts=start_ts, end_ts=end_ts, bucket_seconds=bucket)
         return UsageSeriesResponse(buckets=result.buckets, total=result.total, models=result.models)
@@ -134,7 +135,7 @@ def register_usage_routes(router: APIRouter) -> None:
         start: float | None = None,
         end: float | None = None,
     ) -> UsageSummaryResponse:
-        db = request.app.state.db
+        db = get_db(request)
         s_ts, e_ts = _resolve_window(range, start, end)
         s = usage_summary(db, start_ts=s_ts, end_ts=e_ts)
         return UsageSummaryResponse(
@@ -153,7 +154,7 @@ def register_usage_routes(router: APIRouter) -> None:
         start: float | None = None,
         end: float | None = None,
     ) -> list[ByModelEntryResponse]:
-        db = request.app.state.db
+        db = get_db(request)
         s_ts, e_ts = _resolve_window(range, start, end)
         rows = usage_by_model(db, start_ts=s_ts, end_ts=e_ts)
         return [
@@ -177,8 +178,8 @@ def register_usage_routes(router: APIRouter) -> None:
         start: float | None = None,
         end: float | None = None,
     ) -> CostSummaryResponse:
-        db = request.app.state.db
-        cfg = request.app.state.config_store.snapshot()
+        db = get_db(request)
+        cfg = get_config_store(request).snapshot()
         s_ts, e_ts = _resolve_window(range, start, end)
         s = usage_cost(db, cfg, start_ts=s_ts, end_ts=e_ts)
         return CostSummaryResponse(
@@ -194,8 +195,8 @@ def register_usage_routes(router: APIRouter) -> None:
         start: float | None = None,
         end: float | None = None,
     ) -> UsageSeriesResponse:
-        db = request.app.state.db
-        cfg = request.app.state.config_store.snapshot()
+        db = get_db(request)
+        cfg = get_config_store(request).snapshot()
         s_ts, e_ts, bucket = _resolve_range(range, start, end)
         result = usage_cost_series(db, cfg, start_ts=s_ts, end_ts=e_ts, bucket_seconds=bucket)
         return UsageSeriesResponse(buckets=result.buckets, total=result.total, models=result.models)

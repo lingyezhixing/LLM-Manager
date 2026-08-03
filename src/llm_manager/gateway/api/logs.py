@@ -4,7 +4,7 @@ Sessions list (with line counts), per-session line paging (backfill/before),
 SSE live stream (DB backfill then broadcaster tail), and cross-session text
 search. ``model`` query param accepts alias (resolved to primary_name via
 config.resolve_alias, falling back to session history for deleted-model
-residuals); logs API reads ``request.app.state.db``.
+residuals); logs API reads ``get_db(request)``.
 """
 from __future__ import annotations
 
@@ -17,14 +17,11 @@ from fastapi.responses import StreamingResponse
 from llm_manager import config
 from llm_manager.data import logs as _logs
 from llm_manager.data import persistence as _p
+from llm_manager.gateway.api.common import get_config_store, get_db, sse_frame
 from llm_manager.gateway.api.logs_schemas import (
     LogLineResponse, LogSearchMatch, LogSearchResponse, LogSessionResponse,
     _to_line, _to_session,
 )
-
-
-def _db(request: Request):
-    return request.app.state.db
 
 
 def _resolve_model(request: Request, model: str | None) -> str | None:
@@ -34,12 +31,12 @@ def _resolve_model(request: Request, model: str | None) -> str | None:
     过滤查看,见 §8 下拉选项来源);配置与会话历史都无 → 404。"""
     if model is None:
         return None
-    cfg = request.app.state.config_store.snapshot()
+    cfg = get_config_store(request).snapshot()
     try:
         return config.resolve_alias(cfg, model)
     except KeyError:
         pass
-    name = _p.log_resolve_model_name(_db(request), model)
+    name = _p.log_resolve_model_name(get_db(request), model)
     if name is None:
         raise HTTPException(404, f"模型别名 '{model}' 未在配置中找到")
     return name
@@ -52,11 +49,11 @@ async def _session_stream(session_id: int, level: str | None, db, q) -> AsyncIte
     不会转成 404,响应头已发)。finally 里 unsubscribe 与端点 subscribe 对称。"""
     try:
         for r in _p.log_lines_backfill(db, session_id, limit=2048, level=level):
-            yield f"data: {_to_line(r).model_dump_json()}\n\n"
+            yield sse_frame(_to_line(r))
         while True:
             line = await q.get()
             if level is None or line.level == level:
-                yield f"data: {_to_line(line).model_dump_json()}\n\n"
+                yield sse_frame(_to_line(line))
     finally:
         _logs.unsubscribe(session_id, q)
 
@@ -67,7 +64,7 @@ def register_logs_routes(api: APIRouter) -> None:
                       model: str | None = None, limit: int = 50,
                       before: int | None = None) -> list[LogSessionResponse]:
         m = _resolve_model(request, model)
-        rows = _p.log_sessions(_db(request), type_=type, model_name=m,
+        rows = _p.log_sessions(get_db(request), type_=type, model_name=m,
                                limit=limit, before_id=before)
         return [_to_session(r) for r in rows]
 
@@ -77,11 +74,11 @@ def register_logs_routes(api: APIRouter) -> None:
                       level: Literal["info", "ok", "warn", "error"] | None = None
                       ) -> list[LogLineResponse]:
         limit = max(1, min(limit, 5000))
-        if not _p.log_session_exists(_db(request), session_id):
+        if not _p.log_session_exists(get_db(request), session_id):
             raise HTTPException(404, "会话不存在")
-        rows = (_p.log_lines_before(_db(request), session_id, before, limit, level)
+        rows = (_p.log_lines_before(get_db(request), session_id, before, limit, level)
                 if before is not None
-                else _p.log_lines_backfill(_db(request), session_id, limit, level))
+                else _p.log_lines_backfill(get_db(request), session_id, limit, level))
         return [_to_line(r) for r in rows]
 
     @api.get("/logs/sessions/{session_id}/stream")
@@ -92,7 +89,7 @@ def register_logs_routes(api: APIRouter) -> None:
         if q is None:
             raise HTTPException(404, "会话不存在")
         return StreamingResponse(
-            _session_stream(session_id, level, _db(request), q),
+            _session_stream(session_id, level, get_db(request), q),
             media_type="text/event-stream")
 
     @api.get("/logs/search", response_model=LogSearchResponse)
@@ -102,7 +99,7 @@ def register_logs_routes(api: APIRouter) -> None:
                     level: Literal["info", "ok", "warn", "error"] | None = None,
                     limit: int = 500) -> LogSearchResponse:
         m = _resolve_model(request, model)
-        total, rows = _p.log_search(_db(request), q, type_=type, model_name=m,
+        total, rows = _p.log_search(get_db(request), q, type_=type, model_name=m,
                                     session_id=session_id, level=level, limit=limit)
         return LogSearchResponse(
             total=total,

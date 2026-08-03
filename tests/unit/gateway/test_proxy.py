@@ -10,6 +10,7 @@ from llm_manager import state
 from llm_manager.config import AppConfig, Command, ModelConfig, ProgramConfig, Scheme
 from llm_manager.data.persistence import open_db
 from llm_manager.gateway import proxy
+from llm_manager.gateway.aliases import resolve_alias_checked
 from llm_manager.state import ModelStatus
 
 
@@ -73,21 +74,21 @@ def test_reserialize_roundtrip():
     assert json.loads(proxy._reserialize(body)) == body
 
 
-# ---------- _resolve_alias / _get_or_create_client ----------
+# ---------- resolve_alias_checked / _get_or_create_client ----------
 def test_resolve_alias_unknown_raises_404():
     with pytest.raises(HTTPException) as ei:
-        proxy._resolve_alias(_cfg(), "nope")
+        resolve_alias_checked(_cfg(), "nope")
     assert ei.value.status_code == 404
 
 
 def test_resolve_alias_missing_model_raises_400():
     with pytest.raises(HTTPException) as ei:
-        proxy._resolve_alias(_cfg(), None)
+        resolve_alias_checked(_cfg(), None)
     assert ei.value.status_code == 400
 
 
 def test_resolve_alias_normal():
-    assert proxy._resolve_alias(_cfg(), "alias1") == "m1"
+    assert resolve_alias_checked(_cfg(), "alias1") == "m1"
 
 
 def test_get_or_create_client_lazy_and_reuse():

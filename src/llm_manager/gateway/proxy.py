@@ -16,7 +16,7 @@ import httpx
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import Response, StreamingResponse
 
-from llm_manager import config
+from llm_manager.gateway.aliases import resolve_alias_checked
 
 logger = logging.getLogger(__name__)
 
@@ -55,15 +55,6 @@ async def _read_body(request: Request):
         except Exception:
             return await request.body()
     return await request.body()
-
-
-def _resolve_alias(cfg, alias: str | None) -> str:
-    if not alias:
-        raise HTTPException(400, "请求体(JSON)中缺少 'model' 字段")
-    try:
-        return config.resolve_alias(cfg, alias)
-    except KeyError:
-        raise HTTPException(404, f"模型别名 '{alias}' 未在配置中找到")
 
 
 def _get_or_create_client(pool: dict, port: int) -> httpx.AsyncClient:
@@ -125,7 +116,7 @@ async def forward(request: Request, path: str, lifecycle, cfg, db, client_pool) 
     t0 = time.monotonic()
     body = await _read_body(request)
     alias = _extract_model_alias(body)
-    primary = _resolve_alias(cfg, alias)
+    primary = resolve_alias_checked(cfg, alias)
     logger.info("REQ %s /%s model=%s", request.method, path, primary)
     served = cfg.models[primary].aliases[0]  # aliases[0]=主别名=下游 served name
     if isinstance(body, dict):
