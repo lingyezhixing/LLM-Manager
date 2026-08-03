@@ -27,7 +27,7 @@ from llm_manager.probes import probe_registry
 from llm_manager.realtime import DeviceFeed, ModelFeed
 from llm_manager.runtime.lifecycle import Lifecycle
 from llm_manager.runtime import background
-from llm_manager.runtime.log_retention import log_retention_loop, retention_settings
+from llm_manager.runtime.log_retention import log_retention_loop
 from llm_manager.supervisor import Supervisor
 from llm_manager.tray import host as tray_host
 
@@ -116,7 +116,9 @@ def create_app(db_path: Path | None = None, *, legacy_yaml: Path | None = None) 
         log_stop = asyncio.Event()
         flush_task = asyncio.create_task(_logs.flush_loop(log_stop))
         retention_task = asyncio.create_task(
-            log_retention_loop(db, lambda: retention_settings(db), log_stop))
+            log_retention_loop(db, lambda: (store.snapshot().program.log_retention_days,
+                                            store.snapshot().program.log_retention_count),
+                               log_stop))
         await asyncio.to_thread(monitor.refresh)
         online = sorted(monitor.online_devices())
         logger.info("devices online: %s", ", ".join(online) if online else "(none)")

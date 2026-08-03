@@ -7,6 +7,13 @@ from pathlib import Path
 
 import yaml
 
+PROGRAM_DEFAULTS: dict[str, str] = {
+    "host": "0.0.0.0",
+    "port": "8080",
+    "alive_time": "60",
+    "log_level": "INFO",
+}
+
 
 class ModelMode(str, Enum):
     """Probe selector; string values are config/registry keys."""
@@ -71,6 +78,8 @@ class ProgramConfig:
     alive_time: int
     log_level: str
     claude_settings_path: str | None = None
+    log_retention_days: int = 30
+    log_retention_count: int = 10
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,10 +104,10 @@ def load(path: Path) -> AppConfig:
     raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     p = raw.get("program", {})
     program = ProgramConfig(
-        host=p.get("host", "0.0.0.0"),
-        port=int(p.get("port", 8080)),
-        alive_time=int(p.get("alive_time", 60)),
-        log_level=p.get("log_level", "INFO"),
+        host=p.get("host", PROGRAM_DEFAULTS["host"]),
+        port=int(p.get("port", int(PROGRAM_DEFAULTS["port"]))),
+        alive_time=int(p.get("alive_time", int(PROGRAM_DEFAULTS["alive_time"]))),
+        log_level=p.get("log_level", PROGRAM_DEFAULTS["log_level"]),
         claude_settings_path=p.get("claude_settings_path"),
     )
     models: dict[str, ModelConfig] = {}

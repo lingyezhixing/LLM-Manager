@@ -62,12 +62,11 @@ def test_write_appconfig_persists_program_wol_claude_and_model_world(tmp_path):
     aliases = [r["alias"] for r in db.conn.execute(
         "SELECT alias FROM model_aliases WHERE model_id=? ORDER BY ord", (mid,))]
     assert aliases == ["Qwen3-4B", "q4"]
-    sc = db.conn.execute("SELECT config_source, required_devices, memory_mb FROM model_schemes").fetchone()
+    sc = db.conn.execute("SELECT config_source, required_devices, memory_mb, command FROM model_schemes").fetchone()
     assert sc["config_source"] == "RTX4060"
     assert json.loads(sc["required_devices"]) == ["rtx 4060"]
     assert json.loads(sc["memory_mb"]) == {"rtx 4060": 5120}
-    row = db.conn.execute("SELECT command FROM model_scripts").fetchone()
-    cmd = json.loads(row["command"])
+    cmd = json.loads(sc["command"])
     assert cmd["exe"] == "q"
     assert cmd["args"] == ["echo", "hi"]
 
@@ -135,6 +134,7 @@ def test_read_appconfig_empty_db_returns_defaults(tmp_path):
     assert out.wol is None
     assert out.claude_configs == {}
     assert out.program.host == "0.0.0.0" and out.program.port == 8080
+    assert out.program.log_retention_days == 30 and out.program.log_retention_count == 10
 
 
 def test_config_store_snapshot_and_reload(tmp_path):
@@ -415,3 +415,25 @@ def test_pricing_survives_unrelated_model_world_rewrite(tmp_path):
     out = read_appconfig(db)
     assert out.models["M"].pricing.tiers[0].input_price == 5.0   # pricing survived
     assert out.program.port == 9999
+
+
+def test_retention_keys_round_trip_through_appconfig(tmp_path):
+    db = open_db(tmp_path / "t.db")
+    write_appconfig(db, _sample_cfg())
+    set_setting(db, "log_retention_days", "7")
+    set_setting(db, "log_retention_count", "3")
+    out = read_appconfig(db)
+    assert out.program.log_retention_days == 7
+    assert out.program.log_retention_count == 3
+    write_appconfig(db, out)                     # 全量往返:快照含 retention → 写回不丢
+    out2 = read_appconfig(db)
+    assert (out2.program.log_retention_days, out2.program.log_retention_count) == (7, 3)
+
+
+def test_retention_bad_values_fall_back_to_defaults(tmp_path):
+    db = open_db(tmp_path / "t.db")
+    write_appconfig(db, _sample_cfg())
+    set_setting(db, "log_retention_days", "abc")
+    out = read_appconfig(db)
+    assert out.program.log_retention_days == 30      # 回退默认
+    assert out.program.log_retention_count == 10

@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from collections.abc import Callable
 from pathlib import Path
 
 from llm_manager import config
 from llm_manager.config import (
+    PROGRAM_DEFAULTS,
     AppConfig,
     Command,
     ModelConfig,
@@ -19,6 +21,8 @@ from llm_manager.config import (
     WakeOnLanConfig,
 )
 from llm_manager.data.persistence import Db
+
+logger = logging.getLogger(__name__)
 
 
 def _upsert_locked(db: Db, key: str, value: str) -> None:
@@ -57,8 +61,20 @@ def get_all_settings(db: Db) -> dict[str, str]:
     return {row["key"]: row["value"] for row in db.conn.execute("SELECT key, value FROM system_settings")}
 
 
+def _int_setting(s: dict[str, str], key: str, default: int) -> int:
+    """防御手改 DB:非整数回退默认,防 read_appconfig 的 int() 崩溃 boot-loop。"""
+    raw = s.get(key)
+    if raw is None:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        logger.warning("invalid setting %s=%r, falling back to %d", key, raw, default)
+        return default
+
+
 def _delete_model_world_locked(db: Db) -> None:
-    """清空模型世界(model_defs CASCADE 级联清 aliases/schemes/scripts/pricing/tiers)。caller 持锁。"""
+    """清空模型世界(model_defs CASCADE 级联清 aliases/schemes/tiers)。caller 持锁。"""
     db.conn.execute("DELETE FROM model_defs")
 
 
@@ -71,6 +87,8 @@ def _write_appconfig_locked(db: Db, cfg: AppConfig) -> None:
         _upsert_locked(db, "port", str(p.port))
         _upsert_locked(db, "alive_time", str(p.alive_time))
         _upsert_locked(db, "log_level", p.log_level)
+        _upsert_locked(db, "log_retention_days", str(p.log_retention_days))
+        _upsert_locked(db, "log_retention_count", str(p.log_retention_count))
         if p.claude_settings_path is not None:
             _upsert_locked(db, "claude_settings_path", p.claude_settings_path)
         if cfg.wol is not None:
@@ -81,8 +99,10 @@ def _write_appconfig_locked(db: Db, cfg: AppConfig) -> None:
         _delete_model_world_locked(db)
         for ord_idx, (name, m) in enumerate(cfg.models.items()):
             cur = db.conn.execute(
-                "INSERT INTO model_defs (name, mode, port, auto_start, ord) VALUES (?,?,?,?,?)",
-                (name, m.mode, m.port, int(m.auto_start), ord_idx),
+                "INSERT INTO model_defs (name, mode, port, auto_start, pricing_type, hourly_price, support_cache, ord) "
+                "VALUES (?,?,?,?,?,?,?,?)",
+                (name, m.mode, m.port, int(m.auto_start),
+                 m.pricing.pricing_type, m.pricing.hourly_price, int(m.pricing.support_cache), ord_idx),
             )
             mid = cur.lastrowid
             assert mid is not None
@@ -92,29 +112,15 @@ def _write_appconfig_locked(db: Db, cfg: AppConfig) -> None:
                     (mid, alias, a_ord),
                 )
             for s_ord, (src, scheme) in enumerate(m.schemes.items()):
-                scur = db.conn.execute(
-                    "INSERT INTO model_schemes (model_id, config_source, required_devices, memory_mb, ord) "
-                    "VALUES (?,?,?,?,?)",
-                    (mid, src, json.dumps(sorted(scheme.required_devices)),
-                     json.dumps(scheme.memory_mb), s_ord),
-                )
-                sid = scur.lastrowid
-                assert sid is not None
                 c = scheme.command
                 command_json = json.dumps({"exe": c.exe, "args": list(c.args), "env": c.env,
                                            "cwd": c.cwd, "conda_env": c.conda_env})
-                db.conn.execute(
-                    "INSERT INTO model_scripts (scheme_id, command) VALUES (?,?)",
-                    (sid, command_json),
+                scur = db.conn.execute(
+                    "INSERT INTO model_schemes (model_id, config_source, required_devices, memory_mb, command, ord) "
+                    "VALUES (?,?,?,?,?,?)",
+                    (mid, src, json.dumps(sorted(scheme.required_devices)),
+                     json.dumps(scheme.memory_mb), command_json, s_ord),
                 )
-            db.conn.execute(
-                "INSERT INTO model_pricing (model_id, pricing_type, hourly_price, support_cache) "
-                "VALUES (?,?,?,?) "
-                "ON CONFLICT(model_id) DO UPDATE SET "
-                "pricing_type=excluded.pricing_type, hourly_price=excluded.hourly_price, "
-                "support_cache=excluded.support_cache",
-                (mid, m.pricing.pricing_type, m.pricing.hourly_price, int(m.pricing.support_cache)),
-            )
             db.conn.execute("DELETE FROM pricing_tiers WHERE pricing_id=?", (mid,))
             for t in m.pricing.tiers:
                 db.conn.execute(
@@ -142,11 +148,13 @@ def _read_appconfig_locked(db: Db) -> AppConfig:
     """caller MUST hold db.write_lock(与 _write_appconfig_locked 共用一把锁 → 多 SELECT 天然一致)。"""
     s = get_all_settings(db)
     program = ProgramConfig(
-        host=s.get("host", "0.0.0.0"),
-        port=int(s.get("port", "8080")),
-        alive_time=int(s.get("alive_time", "60")),
-        log_level=s.get("log_level", "INFO"),
+        host=s.get("host", PROGRAM_DEFAULTS["host"]),
+        port=int(s.get("port", PROGRAM_DEFAULTS["port"])),
+        alive_time=int(s.get("alive_time", PROGRAM_DEFAULTS["alive_time"])),
+        log_level=s.get("log_level", PROGRAM_DEFAULTS["log_level"]),
         claude_settings_path=s.get("claude_settings_path"),
+        log_retention_days=_int_setting(s, "log_retention_days", 30),
+        log_retention_count=_int_setting(s, "log_retention_count", 10),
     )
     wol = None
     if "wol_broadcast" in s and "wol_mac" in s:
@@ -154,18 +162,18 @@ def _read_appconfig_locked(db: Db) -> AppConfig:
     claude_configs: dict = json.loads(s.get("claude_configs", "{}"))
 
     models: dict[str, ModelConfig] = {}
-    for row in db.conn.execute("SELECT id, name, mode, port, auto_start FROM model_defs ORDER BY ord"):
+    for row in db.conn.execute(
+            "SELECT id, name, mode, port, auto_start, pricing_type, hourly_price, support_cache "
+            "FROM model_defs ORDER BY ord"):
         mid = row["id"]
         aliases = tuple(r["alias"] for r in db.conn.execute(
             "SELECT alias FROM model_aliases WHERE model_id = ? ORDER BY ord", (mid,)))
         schemes: dict[str, Scheme] = {}
         for srow in db.conn.execute(
-                "SELECT id, config_source, required_devices, memory_mb "
+                "SELECT id, config_source, required_devices, memory_mb, command "
                 "FROM model_schemes WHERE model_id = ? ORDER BY ord", (mid,)):
             sid = srow["id"]
-            script_row = db.conn.execute(
-                "SELECT command FROM model_scripts WHERE scheme_id = ?", (sid,)).fetchone()
-            d = json.loads(script_row["command"]) if (script_row and script_row["command"]) else {}
+            d = json.loads(srow["command"] or "{}")
             command = Command(exe=d.get("exe", ""), args=tuple(d.get("args", [])),
                               env=dict(d.get("env", {})), cwd=d.get("cwd"), conda_env=d.get("conda_env"))
             schemes[srow["config_source"]] = Scheme(
@@ -174,9 +182,6 @@ def _read_appconfig_locked(db: Db) -> AppConfig:
                 command=command,
                 memory_mb=dict(json.loads(srow["memory_mb"])),
             )
-        prow = db.conn.execute(
-            "SELECT pricing_type, hourly_price, support_cache FROM model_pricing WHERE model_id=?",
-            (mid,)).fetchone()
         tiers = tuple(
             PricingTier(
                 tier_index=tr["tier_index"], min_input=tr["min_input"], max_input=tr["max_input"],
@@ -188,9 +193,9 @@ def _read_appconfig_locked(db: Db) -> AppConfig:
                 "input_price, output_price, cache_write_price, cache_read_price "
                 "FROM pricing_tiers WHERE pricing_id=? ORDER BY tier_index", (mid,)))
         pricing = Pricing(
-            pricing_type=prow["pricing_type"] if prow else "tier",
-            hourly_price=prow["hourly_price"] if prow else 0.0,
-            support_cache=bool(prow["support_cache"]) if prow else False,
+            pricing_type=row["pricing_type"],
+            hourly_price=row["hourly_price"],
+            support_cache=bool(row["support_cache"]),
             tiers=tiers,
         )
         models[row["name"]] = ModelConfig(
@@ -267,10 +272,7 @@ ENV_MAP: dict[str, str] = {
 }
 
 DEFAULTS: dict[str, str] = {
-    "host": "0.0.0.0",
-    "port": "8080",
-    "alive_time": "60",
-    "log_level": "INFO",
+    **PROGRAM_DEFAULTS,
     "log_retention_days": "30",
     "log_retention_count": "10",
     "claude_configs": "{}",

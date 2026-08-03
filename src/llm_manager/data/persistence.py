@@ -61,6 +61,9 @@ def open_db(path: Path) -> Db:
             mode TEXT NOT NULL,
             port INTEGER NOT NULL,
             auto_start INTEGER NOT NULL DEFAULT 0,
+            pricing_type TEXT NOT NULL DEFAULT 'tier',
+            hourly_price REAL NOT NULL DEFAULT 0,
+            support_cache INTEGER NOT NULL DEFAULT 0,
             ord INTEGER NOT NULL DEFAULT 0,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
@@ -77,21 +80,10 @@ def open_db(path: Path) -> Db:
             config_source TEXT NOT NULL,
             required_devices TEXT NOT NULL DEFAULT '[]',
             memory_mb TEXT NOT NULL DEFAULT '{}',
+            command TEXT NOT NULL DEFAULT '{}',
             ord INTEGER NOT NULL DEFAULT 0,
             FOREIGN KEY (model_id) REFERENCES model_defs(id) ON DELETE CASCADE,
             UNIQUE(model_id, config_source)
-        );
-        CREATE TABLE IF NOT EXISTS model_scripts (
-            scheme_id INTEGER PRIMARY KEY,
-            command TEXT NOT NULL,
-            FOREIGN KEY (scheme_id) REFERENCES model_schemes(id) ON DELETE CASCADE
-        );
-        CREATE TABLE IF NOT EXISTS model_pricing (
-            model_id INTEGER PRIMARY KEY,
-            pricing_type TEXT NOT NULL DEFAULT 'tier',
-            hourly_price REAL NOT NULL DEFAULT 0,
-            support_cache INTEGER NOT NULL DEFAULT 0,
-            FOREIGN KEY (model_id) REFERENCES model_defs(id) ON DELETE CASCADE
         );
         CREATE TABLE IF NOT EXISTS pricing_tiers (
             pricing_id INTEGER NOT NULL,
@@ -100,7 +92,7 @@ def open_db(path: Path) -> Db:
             min_output INTEGER, max_output INTEGER,
             input_price REAL, output_price REAL,
             cache_write_price REAL, cache_read_price REAL,
-            FOREIGN KEY (pricing_id) REFERENCES model_pricing(model_id) ON DELETE CASCADE,
+            FOREIGN KEY (pricing_id) REFERENCES model_defs(id) ON DELETE CASCADE,
             PRIMARY KEY (pricing_id, tier_index)
         );
         CREATE TABLE IF NOT EXISTS model_runtime (
@@ -149,12 +141,55 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE model_requests DROP COLUMN ts")
     # P4 回改:support_cache 从阶梯级上移到模型级(model_pricing)。
     # 旧库:model_pricing 无该列则补;pricing_tiers 有该列则删(SQLite ≥3.35 支持 DROP COLUMN)。
-    mp_cols = {row[1] for row in conn.execute("PRAGMA table_info(model_pricing)")}
-    if "support_cache" not in mp_cols:
-        conn.execute("ALTER TABLE model_pricing ADD COLUMN support_cache INTEGER NOT NULL DEFAULT 0")
+    # 新库已无 model_pricing(代码优化 2026-08-03 并入 model_defs)→ 存在性判定防 no such table。
+    if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='model_pricing'").fetchone():
+        mp_cols = {row[1] for row in conn.execute("PRAGMA table_info(model_pricing)")}
+        if "support_cache" not in mp_cols:
+            conn.execute("ALTER TABLE model_pricing ADD COLUMN support_cache INTEGER NOT NULL DEFAULT 0")
     pt_cols = {row[1] for row in conn.execute("PRAGMA table_info(pricing_tiers)")}
     if "support_cache" in pt_cols:
         conn.execute("ALTER TABLE pricing_tiers DROP COLUMN support_cache")
+    # === 代码优化(2026-08-03):model_scripts → model_schemes.command 列 ===
+    if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='model_schemes'").fetchone():
+        sc_cols = {row[1] for row in conn.execute("PRAGMA table_info(model_schemes)")}
+        if "command" not in sc_cols:
+            conn.execute("ALTER TABLE model_schemes ADD COLUMN command TEXT")
+            conn.execute(
+                "UPDATE model_schemes SET command = "
+                "(SELECT s.command FROM model_scripts s WHERE s.scheme_id = model_schemes.id)")
+            conn.execute("DROP TABLE IF EXISTS model_scripts")
+    # === model_pricing → model_defs 3 列 ===
+    md_cols = {row[1] for row in conn.execute("PRAGMA table_info(model_defs)")}
+    if "pricing_type" not in md_cols:
+        conn.execute("ALTER TABLE model_defs ADD COLUMN pricing_type TEXT")
+        conn.execute("ALTER TABLE model_defs ADD COLUMN hourly_price REAL")
+        conn.execute("ALTER TABLE model_defs ADD COLUMN support_cache INTEGER")
+        if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='model_pricing'").fetchone():
+            conn.execute(
+                "UPDATE model_defs SET "
+                "pricing_type = COALESCE((SELECT pricing_type FROM model_pricing WHERE model_id = model_defs.id), 'tier'), "
+                "hourly_price = COALESCE((SELECT hourly_price FROM model_pricing WHERE model_id = model_defs.id), 0), "
+                "support_cache = COALESCE((SELECT support_cache FROM model_pricing WHERE model_id = model_defs.id), 0)")
+    # === pricing_tiers 重建改 FK → model_defs(id)(必须在 DROP model_pricing 前 COPY) ===
+    pt_fks = {row[2] for row in conn.execute("PRAGMA foreign_key_list(pricing_tiers)")}
+    if "model_pricing" in pt_fks:
+        conn.execute("""
+            CREATE TABLE pricing_tiers_new (
+                pricing_id INTEGER NOT NULL,
+                tier_index INTEGER NOT NULL,
+                min_input INTEGER, max_input INTEGER,
+                min_output INTEGER, max_output INTEGER,
+                input_price REAL, output_price REAL,
+                cache_write_price REAL, cache_read_price REAL,
+                FOREIGN KEY (pricing_id) REFERENCES model_defs(id) ON DELETE CASCADE,
+                PRIMARY KEY (pricing_id, tier_index)
+            )""")
+        conn.execute("INSERT INTO pricing_tiers_new SELECT * FROM pricing_tiers")
+        conn.execute("DROP TABLE pricing_tiers")
+        conn.execute("ALTER TABLE pricing_tiers_new RENAME TO pricing_tiers")
+    # === 旧 model_pricing 表删除(数据已搬,此时 tiers 已重建) ===
+    if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='model_pricing'").fetchone():
+        conn.execute("DROP TABLE model_pricing")
 
 
 def _resolve_model_id_locked(db: Db, model_name: str) -> int:

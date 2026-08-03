@@ -18,19 +18,6 @@ def _seed(db):
     return sid, sid2
 
 
-def test_retention_settings_defaults(db):
-    days, count = log_retention.retention_settings(db)
-    assert days == 30 and count == 10
-
-
-def test_retention_settings_reads_db(db):
-    from llm_manager.data.config_store import set_setting
-    set_setting(db, "log_retention_days", "7")
-    set_setting(db, "log_retention_count", "3")
-    days, count = log_retention.retention_settings(db)
-    assert (days, count) == (7, 3)
-
-
 def test_loop_cleans_by_time(db):
     old, new = _seed(db)
     stop = asyncio.Event()
@@ -129,11 +116,3 @@ def test_loop_disabled_gate(db):
         await asyncio.wait_for(loop, timeout=1.0)
     asyncio.run(go())
     assert len(_p.log_sessions(db)) == 2
-
-
-def test_retention_settings_invalid_falls_back(db):
-    from llm_manager.data.config_store import set_setting
-    set_setting(db, "log_retention_days", "abc")
-    set_setting(db, "log_retention_count", "3")
-    days, count = log_retention.retention_settings(db)
-    assert (days, count) == (30, 3)
