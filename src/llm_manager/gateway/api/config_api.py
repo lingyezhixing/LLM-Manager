@@ -331,7 +331,7 @@ def register_config_routes(api: APIRouter) -> None:
         """请求优雅重启:置 app.state.restart_requested;有 uvicorn server → 后台延迟翻
         should_exit(让 202 先冲刷);无 server(dev --reload)→ 0.5s 后 os._exit(81),
         Dev-Backend.bat 的 81 循环重启(os._exit 跳过 lifespan 收尾,dev 进程一次性,可接受)。
-        → main() 末尾按 restart_requested 以 RESTART_EXIT_CODE 退出,监督器在其上重启。"""
+        生产路径:main() 末尾按 restart_requested 以 RESTART_EXIT_CODE 退出,监督器在其上重启。"""
         request.app.state.restart_requested = True
         server = getattr(request.app.state, "uvicorn_server", None)
         if server is not None:

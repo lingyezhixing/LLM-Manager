@@ -109,7 +109,10 @@ def test_log_level_from_config_applied(tmp_path, monkeypatch):
     assert levels == ["DEBUG"]
 
 
-def test_create_dev_app_leaves_no_fake_server():
+def test_create_dev_app_leaves_no_fake_server(tmp_path, monkeypatch):
+    monkeypatch.setenv("LLM_MANAGER_DB_PATH", str(tmp_path / "t.db"))
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "config.yaml").write_text("program: {}\n", encoding="utf-8")
     app = create_dev_app()
     assert getattr(app.state, "uvicorn_server", None) is None
 

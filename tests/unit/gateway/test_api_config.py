@@ -5,7 +5,6 @@ import types
 from fastapi import APIRouter, FastAPI
 from fastapi.testclient import TestClient
 
-from llm_manager.app import create_app
 from llm_manager.data.config_store import ConfigStore, is_initialized, seed_defaults
 from llm_manager.data.persistence import open_db
 from llm_manager.gateway.api.config_api import register_config_routes
@@ -397,12 +396,13 @@ def test_restart_without_server_exits_81_after_flush(monkeypatch, tmp_path):
     """dev(--reload)模式无真实 uvicorn server:0.5s 冲刷延迟后 os._exit(81)(Dev-Backend.bat 81 循环重启)。"""
     calls: list[int] = []
     monkeypatch.setattr("llm_manager.gateway.api.config_api.os._exit", lambda code: calls.append(code))
-    app = create_app(db_path=tmp_path / "t.db")   # 不设 uvicorn_server
-    client = TestClient(app)
+    client = TestClient(_app(tmp_path))   # _app 不设 uvicorn_server(dev 模式等价)
     with client:
         r = client.post("/api/config/restart")
         assert r.status_code == 202
-        time.sleep(0.7)   # 0.5s 延迟任务触发
+        deadline = time.monotonic() + 2          # 内部 0.5s 延迟,2s 余量
+        while not calls and time.monotonic() < deadline:
+            time.sleep(0.05)
     assert calls == [81]
 
 
