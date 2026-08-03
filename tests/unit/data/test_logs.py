@@ -296,7 +296,6 @@ def test_log_search_matches_across_sessions_and_filters(tmp_path):
 def test_log_insert_lines_rolls_back_partial_chunks_on_failure(tmp_path):
     """分块插入任一块失败(重复 seq → IntegrityError)→ 整体回滚,不留部分行;
     同连接后续无关 commit 也不得把残留行带落盘。"""
-    import pytest
     import sqlite3
     p = tmp_path / "t.db"
     db = open_db(p)

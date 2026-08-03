@@ -309,8 +309,8 @@ def log_close_open_system_sessions(db: Db, end: float | None = None) -> int:
 
     app 启动时调用(在开新系统会话之前,见 app.lifespan):把上次崩溃/强杀
     留下的 end_time IS NULL 的 system 会话统一写上结束时间,避免残留永远
-    显示"进行中"。刻意放在 app 接线而非 logs.start_system_session——
-    保持 logs 模块的测试隔离(模块不隐式写库)。"""
+    显示"进行中"。刻意放在 app 接线而非 start_system_session 隐式收口
+    (模块不隐式写库)。"""
     end = end if end is not None else time.time()
     with db.write_lock:
         cur = db.conn.execute(
@@ -462,7 +462,7 @@ def log_cleanup(db: Db, days: int, count: int, now: float | None = None,
 
     live_session_ids = 模块内存中仍在运行的会话 id(flusher 正在接收行)——两规则都
     排除,绝不删除"正在直播"的会话行(belt-and-braces:行被删后 flush 落库 FK 失败,
-    logs.flush 已有兜底丢弃,但首选是不删)。
+    本模块 flush 已有兜底丢弃,但首选是不删)。
 
     IN 子句按 INSERT_CHUNK_SIZE id 分块(同 log_insert_lines:参数数限制见常量注释),
     行/会话数跨块累计;全程同一 write_lock、一次 commit,失败 rollback 整体回滚后

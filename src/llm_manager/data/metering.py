@@ -2,7 +2,7 @@
 total exception safety (a raise in stream-finally truncates the client stream).
 Ported from legacy core/token_parsers.py (behavior preserved verbatim)。
 
-另含共享用量指标 helper(hit_rate),供 session/persistence 引用。"""
+另含共享用量指标 helper(hit_rate),供 session/usage 引用。"""
 from __future__ import annotations
 
 import json
