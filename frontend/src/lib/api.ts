@@ -491,6 +491,8 @@ export interface StorageStats {
   size_bytes: number | null;
   total_requests: number;
   total_models_with_data: number;
+  log_sessions: number;
+  log_lines: number;
   models_data: Record<string, ModelDataStats>;
 }
 export interface OrphanedModelsResponse {

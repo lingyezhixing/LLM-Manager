@@ -65,10 +65,12 @@ export function DatabasePanel() {
   return (
     <div className="flex flex-col gap-6">
       {/* 存储统计 */}
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
         <StatTile label="数据库大小" value={formatBytes(s.size_bytes)} />
         <StatTile label="有数据模型数" value={String(s.total_models_with_data)} />
         <StatTile label="总请求数" value={s.total_requests.toLocaleString()} />
+        <StatTile label="日志会话数" value={s.log_sessions.toLocaleString()} />
+        <StatTile label="日志行数" value={s.log_lines.toLocaleString()} />
         <StatTile label="孤立模型数" value={String(orphans.length)} danger={orphans.length > 0} />
       </div>
 

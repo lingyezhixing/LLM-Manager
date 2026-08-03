@@ -27,18 +27,30 @@ export default function LogsPage() {
       .catch(() => { /* 后端不可达:保留原选项 */ });
   }, [tab]);
 
-  // 会话列表:随 Tab / 模型筛选变化。404(如选项取到后会话被保留策略清掉)走 catch → 空列表。
+  // 会话列表:随 Tab / 模型筛选变化,每 8s 轮询刷新(新会话/行数/状态实时感)。
+  // 选中会话保持(仍存在则不动;被保留策略清掉或首载时选第一个)。
+  // 404(如选项取到后会话被保留策略清掉)走 catch → 空列表。
   useEffect(() => {
+    let cancelled = false;
+    const load = () => {
+      fetchSessions(tab === "system" ? { type: "system", limit: 50 }
+        : { type: "model", model: model || undefined, limit: 50 })
+        .then((s) => {
+          if (cancelled) return;
+          setSessions(s);
+          setSelectedId((prev) => {
+            if (prev != null && s.some((x) => x.id === prev)) return prev;
+            return s.length > 0 ? s[0].id : null;
+          });
+        })
+        .catch(() => { /* 后端不可达或未知 alias 404:留空列表 */ })
+        .finally(() => { if (!cancelled) setLoading(false); });
+    };
     setSessions([]); setSelectedId(null);
     setLoading(true);
-    fetchSessions(tab === "system" ? { type: "system", limit: 50 }
-      : { type: "model", model: model || undefined, limit: 50 })
-      .then((s) => {
-        setSessions(s);
-        if (s.length > 0) setSelectedId(s[0].id);
-      })
-      .catch(() => { /* 后端不可达或未知 alias 404:留空列表 */ })
-      .finally(() => setLoading(false));
+    load();
+    const timer = setInterval(load, 8000);
+    return () => { cancelled = true; clearInterval(timer); };
   }, [tab, model]);
 
   const selected = useMemo(
