@@ -1,7 +1,7 @@
 import type { LucideIcon } from "lucide-react";
 import { BarChart3, Boxes, LayoutDashboard, ScrollText, Settings, Wrench } from "lucide-react";
 
-export interface NavItem {
+interface NavItem {
   /** Full label shown in the expanded sidebar (讨论简写的扩充版). */
   label: string;
   /** Route path. */

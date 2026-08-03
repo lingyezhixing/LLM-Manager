@@ -71,7 +71,7 @@ function cleanPayload(m: ModelDef): ModelDef {
   };
 }
 
-export interface ModelDefFormProps {
+interface ModelDefFormProps {
   // 编辑态:服务端 ModelDef(非空)。创建态:null。
   model: ModelDef | null;
   // 保存成功回调(向上传递写结果与模型名;创建态 result 为空)。

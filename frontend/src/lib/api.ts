@@ -42,7 +42,7 @@ export async function fetchSessionUsage(): Promise<SessionUsage> {
   return (await res.json()) as SessionUsage;
 }
 
-export interface HealthResponse {
+interface HealthResponse {
   status: string;
 }
 
@@ -87,7 +87,7 @@ export async function fetchUsageSummary(params: UsageSeriesParams): Promise<Usag
   return (await res.json()) as UsageSummary;
 }
 
-export interface ByModelEntry {
+interface ByModelEntry {
   model: string;
   input_tokens: number;
   output_tokens: number;
@@ -109,12 +109,12 @@ export async function fetchUsageByModel(params: UsageSeriesParams): Promise<ByMo
 
 // 计费成本 — cost 汇总 + cost 时间序列(序列与 usage/series 同形)。Match gateway/api/usage.py
 // 的 CostSummaryResponse / UsageSeriesResponse。
-export interface CostByModel {
+interface CostByModel {
   model: string;
   pricing_type: "tier" | "hourly";
   cost: number;
 }
-export interface CostSummary {
+interface CostSummary {
   total_cost: number;
   by_model: CostByModel[];
 }
@@ -396,7 +396,7 @@ export interface ModelWriteResult {
 
 // 模型 CRUD 422 有三种 detail 形态:config.validate 的 list[str]、ValueError 的 str、
 // Pydantic 字段错的 list[{loc,msg,...}];409 detail 为 str。统一解析为一句可读消息。
-export async function parseApiError(res: Response): Promise<Error> {
+async function parseApiError(res: Response): Promise<Error> {
   let msg = `请求失败: ${res.status}`;
   try {
     const body = await res.json() as { detail?: unknown };
@@ -459,7 +459,7 @@ export async function restartModel(alias: string): Promise<void> {
 }
 
 // 数据管理 — storage stats / orphaned / delete (gateway/api/data_api.py)
-export interface ModelDataStats {
+interface ModelDataStats {
   request_count: number;
   has_runtime_data: boolean;
 }

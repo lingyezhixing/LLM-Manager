@@ -7,7 +7,7 @@
 // - 拆分器不必完美:args 列表始终可手改(高级区),作为解析歧义的安全回退。
 // - 程序仍以 shell=False 跑拆出的 argv,kill_tree / 跨平台 / conda 包装保障不变。
 
-export interface ParsedCommand {
+interface ParsedCommand {
   exe: string;
   args: string[];
 }

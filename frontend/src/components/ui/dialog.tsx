@@ -11,7 +11,7 @@ import { createPortal } from "react-dom";
 import { Button } from "@/components/ui/button";
 
 // ---------- 底层 Dialog:portal + Esc + 点遮罩关 + focus trap + 焦点还原 + aria ----------
-export function Dialog({
+function Dialog({
   open, onClose, children, labelledBy,
 }: {
   open: boolean;
@@ -83,7 +83,7 @@ export function Dialog({
 }
 
 // ---------- 命令式 confirm ----------
-export interface ConfirmOptions {
+interface ConfirmOptions {
   title: string;
   description?: string;
   confirmText?: string;

@@ -13,7 +13,7 @@ const MAX_PREFIX = 5000;      // historyPrefix 上限(防卡顿;超过丢最旧)
  * 注意:传给 useLogViewer 的 api 对象必须身份稳定(包装层 useMemo 按 alias/sessionId
  * 缓存),否则 SSE 订阅 effect 会随每次渲染重跑。
  */
-export interface LogApi {
+interface LogApi {
   streamUrl: (level?: string) => string;
   fetchPage: (before: number, limit: number, level?: string) => Promise<LogLine[]>;
   search: (q: string, level?: string) => Promise<LogSearch>;

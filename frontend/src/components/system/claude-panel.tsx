@@ -42,7 +42,7 @@ interface ClaudePresetCardProps {
   onCancelNew?: () => void;                         // 新建卡「取消」
 }
 
-export function ClaudePresetCard({
+function ClaudePresetCard({
   presets,
   name,
   preset,

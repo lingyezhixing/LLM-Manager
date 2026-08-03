@@ -22,7 +22,7 @@ interface ToastItem {
   message: string;
 }
 
-export interface ToastApi {
+interface ToastApi {
   success: (message: string) => void;
   error: (message: string) => void;
   info: (message: string) => void;

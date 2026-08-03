@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 import { useEventStream } from "@/lib/use-event-stream";
-import { useNowTick } from "@/lib/use-now";
+import { useNowTick } from "@/lib/use-now-tick";
 import type { ModelInfo, ModelsResponse } from "@/lib/api";
 
 function Stat({ label, value }: { label: string; value: number }) {

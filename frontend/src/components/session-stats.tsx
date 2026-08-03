@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { fetchSessionUsage } from "@/lib/api";
-import { useNowTick } from "@/lib/use-now";
+import { useNowTick } from "@/lib/use-now-tick";
 
 function fmt(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
