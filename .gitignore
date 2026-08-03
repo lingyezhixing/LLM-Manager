@@ -13,9 +13,6 @@
 # 忽略整个backend文件夹
 /backend/
 
-# 忽略Model_startup_script文件夹
-/Model_startup_script/
-
 # 忽略config.json文件
 # /config.json'
 
@@ -99,7 +96,6 @@ openai_api_manual.md
 data_manager（数据管理器）使用说明.md
 API接口文档.md
 API_DOCUMENTATION.md
-config.yaml
 
 # 忽略所有数据库文件
 *.db
@@ -114,10 +110,6 @@ config.yaml
 # 忽略代码统计工具
 quick_stats.py
 QUICK_STATS_README.md
-
-# 忽略AI上下文生成器
-generate_ai_context.py
-ai_context.md
 
 # 忽略docs设计文档
 docs/

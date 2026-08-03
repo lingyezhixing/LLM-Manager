@@ -4,14 +4,8 @@
 
 > **⚠️ 重要说明**：
 > 本项目为个人开发工具，适用于本地实验环境。
-> 不包含任何模型文件。用户需自行准备模型启动脚本（如 `.bat` 或 `.sh`）。
+> 不包含任何模型文件。模型启动命令在系统配置中定义（结构化命令，无需准备启动脚本）。
 > 使用前需具备 Python 和本地 LLM 部署的基础能力。
-
-> **🚧 重构进行中（未发布，请勿直接 clone 使用）**：
-> 后端正从旧的「插件化 `core/` + React WebUI」架构迁移到函数式轻量框架 [`src/llm_manager/`](src/llm_manager/)。
-> - **已迁移**：统一 API 代理转发、多端点 Token 追踪、模型生命周期与调度、NVIDIA + AMD 780M 设备监控、系统托盘 / 网络唤醒 / Claude 配置切换。
-> - **待迁移**：计费系统（阶梯 / 按时租赁）、分析看板、数据管理（删模型 + VACUUM）、运行时间追踪、WebUI 前端、CPU 监控。
-> - 旧代码冻结在 [`_legacy/`](_legacy/)，仅供历史参考，新框架不引用。
 
 ---
 
@@ -46,18 +40,17 @@
    - **网络唤醒（WOL）**：托盘菜单支持唤醒远程设备（如飞牛 NAS）。
    - **Claude 配置切换**：在预设的 Claude API 配置间一键切换（如 GLM / Local），子菜单显示当前配置。
 
----
+6. **计费与用量统计**
+   - **计费系统**：阶梯 token 计费 + 按时租赁，混合计费汇总。
+   - **分析看板**：成本趋势 / Token 趋势 / 单模型统计 / 使用量汇总（WebUI 用量统计页）。
 
-## 规划中（待从旧架构迁移）
+7. **数据管理与日志**
+   - **数据管理**：删除模型数据（级联 + VACUUM 回收）、孤立模型检测、存储统计。
+   - **日志查看**：系统 / 模型日志全部落库（SQLite），WebUI 双 Tab 日志页（会话列表 + 实时行详情），保留规则自动清理（按时间 / 按条数）。
 
-以下能力仍存在于 [`_legacy/`](_legacy/)，尚未迁移到新框架：
-
-- **计费系统**：阶梯 token 计费 + 按时租赁，混合计费汇总（`_legacy/core/data_manager.py`）。
-- **分析看板 API**：成本趋势 / Token 趋势 / 单模型统计 / 使用量汇总。
-- **数据管理**：删除模型 + VACUUM 回收、孤立模型检测、存储统计。
-- **运行时间追踪**：程序 / 模型运行时间记录与心跳。
-- **WebUI 前端**：React + TypeScript 实时监控界面（旧版在 [`_legacy/webui/`](_legacy/webui/)）。
-- **CPU/RAM 监控**：CPU 占用、内存、温度（无 Admin 权限时降级读核显温度）。
+8. **WebUI 前端**
+   - React + TypeScript 实时监控界面：概览、模型管理（启停 + 实时日志）、用量统计、日志查看、系统配置（模型定义 CRUD / 计费 / WOL / Claude 预设 / 日志保留）、数据库管理。
+   - 配置修改即时生效或提示重启（需重启字段自动检测 + 一键自重启，退出码 81 契约）。
 
 ---
 
@@ -79,9 +72,6 @@ pip install -e ".[monitoring,tray,dev]"
 # 仅运行（不含开发工具）：pip install -e ".[monitoring,tray]"
 ```
 
-> **配置文件**：
-> 项目不提供 `config.yaml` 示例。用户需**自行创建** `config.yaml` 文件于项目根目录，结构参考下文。
-
 ### 3. 启动服务
 ```bash
 python -m llm_manager
@@ -91,11 +81,18 @@ python -m llm_manager
 
 ---
 
-## 配置文件 (`config.yaml`)
+## 系统配置（SQLite DB 化）
 
-请在项目根目录手动创建 `config.yaml` 文件。该文件为 YAML 格式，包含程序基础配置与模型定义。
+全部配置存储在 SQLite 数据库（默认 `data/llm_manager.db`）中，通过 WebUI「系统配置」页或 `/api/config/*` 修改，无需编辑配置文件：
 
-### 程序基础配置
+- **程序配置**：监听地址 / 端口、日志级别、空闲回收间隔（分钟）、Claude settings 路径、WOL、Claude 预设、日志保留规则。
+- **模型定义**：名称、别名、模式、端口、自动启动、设备方案（scheme: required_devices / memory_mb / **结构化启动命令** exe + args + env）、计费（阶梯 / 按时）。
+- **环境变量**（可选，启动时覆写并持久化）：`LLM_MANAGER_HOST` / `LLM_MANAGER_PORT` / `LLM_MANAGER_ALIVE_TIME` / `LLM_MANAGER_LOG_LEVEL` / `LLM_MANAGER_DB_PATH`。
+
+首次启动（空库）时，若项目根目录存在 `config.yaml`（旧版 YAML 配置，结构参考下方），会作为一次性引导导入；否则使用默认配置。导入后配置以 DB 为准，`config.yaml` 不再被读取。
+
+### 旧版 YAML 导入格式（可选）
+
 ```yaml
 program:
   host: "0.0.0.0"
@@ -103,35 +100,22 @@ program:
   log_level: "INFO"
   alive_time: 60          # 模型空闲超时时间（分钟），超时后自动关闭
   claude_settings_path: "C:\\Users\\<you>\\.claude\\settings.json"  # 可选：托盘 Claude 配置切换的目标文件
-```
 
-### 模型配置 (`Local-Models`)
-
-每个模型需定义唯一标识、运行模式、端口及启动脚本。支持多配置（scheme）：优先使用靠前的配置，设备不满足时依次向下回退。
-
-```yaml
 Local-Models:
   Qwen-14B-Chat:
-    aliases: ["gpt-3.5-turbo", "qwen-14b"]  # API 调用时使用的模型名称映射；aliases[0]=主别名=下游 served name
-    mode: "Chat"                            # 模式：Chat / Base / Embedding / Reranker
-    port: 10001                             # 模型服务监听端口
-    auto_start: false                       # 是否随服务启动
+    aliases: ["gpt-3.5-turbo", "qwen-14b"]  # aliases[0]=主别名=下游 served name
+    mode: "Chat"                            # Chat / Embedding / Reranker
+    port: 10001
+    auto_start: false
 
-    Config1:
-      required_devices: ["rtx 4060", "v100"] # 必须同时在线的设备
-      script_path: "scripts/qwen_dual.bat"   # 启动脚本路径（Windows）或 .sh（Linux）
-      memory_mb:
-        "rtx 4060": 8000
-        "v100": 16000
-
-    Config2:
-      required_devices: ["v100"]
-      script_path: "scripts/qwen_single.bat"
-      memory_mb:
-        "v100": 24000
+    RTX4060:                                # scheme 名 = config_source
+      required_devices: ["rtx 4060"]        # 需与系统识别名称一致（nvidia-smi）
+      memory_mb: {"rtx 4060": 8000}
+      command:                              # 结构化启动命令（替代旧版 script_path）
+        exe: "lmdeploy"
+        args: ["serve", "api_server", "E:/models/Qwen-14B", "--server-port", "10001"]
+        env: {"CUDA_VISIBLE_DEVICES": "0"}
+        conda_env: "lmdeploy"               # 可选：conda 环境
 ```
 
-> ✅ **说明**：
-> - `script_path` 需指向用户自行编写的启动脚本，确保其可执行并正确绑定指定端口。
-> - `required_devices` 中的设备名称需与系统识别名称一致（如通过 `nvidia-smi` 查看）。
-> - 程序按顺序匹配 `Config1` 和 `Config2`，若设备不满足 `Config1`，则回退至 `Config2`。以此实现多 GPU 模型启动的灵活性。
+> ✅ **说明**：设备不满足前一个 scheme 时自动回退到下一个（多 GPU 启动灵活性）。
