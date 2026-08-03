@@ -1,11 +1,10 @@
-import logging
 import time
 
 import pytest
 from fastapi.testclient import TestClient
 
 from llm_manager import state
-from llm_manager.app import create_app, setup_logging as _real_setup_logging
+from llm_manager.app import create_app
 from llm_manager.state import ModelStatus
 
 _CFG_BODY = """
@@ -98,15 +97,16 @@ def test_crud_then_catalog_reflects_without_restart(tmp_path, monkeypatch):
 
 
 def test_log_level_from_config_applied(tmp_path, monkeypatch):
-    """C1:cfg.program.log_level 真正接入 setup_logging(此前硬编码 INFO 从未生效)。"""
-    import logging
-    # conftest 全测试 stub 了 setup_logging(防污染生产日志);本测恢复真实实现才能验证接线。
-    monkeypatch.setattr("llm_manager.app.setup_logging", _real_setup_logging)
+    """C1:cfg.program.log_level 真正传入 setup_logging(此前硬编码 INFO 从未生效)。
+    只捕获调用参数,不触发真实 logging 副作用(conftest _isolate_logging 隔离)。"""
     monkeypatch.setattr("llm_manager.devices.is_lhm_available", lambda: False)
+    levels: list[str] = []
+    monkeypatch.setattr("llm_manager.app.setup_logging",
+                        lambda level="INFO", **kw: levels.append(level))
     cfg_path = tmp_path / "config.yaml"
     cfg_path.write_text(_CFG_BODY.replace("log_level: INFO", "log_level: DEBUG"), encoding="utf-8")
     create_app(db_path=tmp_path / "t.db", legacy_yaml=cfg_path)
-    assert logging.getLogger().level == logging.DEBUG
+    assert levels == ["DEBUG"]
 
 
 def test_exit_code_for_returns_sentinel_only_when_requested():
