@@ -39,9 +39,6 @@ class FakeSupervisor:
         self.alive_pids.discard(pid)
         return True
 
-    async def terminate(self, pid, timeout=10.0):
-        return await self.kill_tree(pid)
-
     def alive(self, pid):
         return pid in self.alive_pids
 

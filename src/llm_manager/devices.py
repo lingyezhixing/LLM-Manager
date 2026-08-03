@@ -12,7 +12,7 @@ import subprocess
 import threading
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Iterator, NamedTuple, Protocol, runtime_checkable
+from typing import Callable, Iterator, NamedTuple
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,12 +30,6 @@ class DeviceInfo:
 def _tokens(name: str) -> set[str]:
     """小写 + 按非字母数字拆 token。'RTX 4060 Ti'→{rtx,4060,ti};'V100-SXM2'→{v100,sxm2}。"""
     return set(re.findall(r"[a-z0-9]+", name.lower()))
-
-
-def _match_score(config_name: str, detected_tokens: set[str]) -> float:
-    """config token 与实测 token 的交集占比;1.0 = 全子集。空 config→0。"""
-    ct = _tokens(config_name)
-    return len(ct & detected_tokens) / len(ct) if ct else 0.0
 
 
 def match_devices(
@@ -263,13 +257,6 @@ def _lhm_cpu_temp() -> float | None:
     except Exception:
         return None
     return None
-
-
-@runtime_checkable
-class DeviceSource(Protocol):
-    def online_devices(self) -> set[str]: ...
-    def snapshot(self) -> dict[str, DeviceInfo]: ...
-    def refresh(self) -> None: ...
 
 
 class DeviceMonitor:

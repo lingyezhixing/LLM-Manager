@@ -140,6 +140,7 @@ def _forget_session(s: _Session) -> None:
 
 
 def current_system_session_id() -> int | None:
+    """当前系统会话 id(任意线程安全);无 → None。系统会话状态的观测入口。"""
     with _pending_lock:
         return _system_session_id
 
@@ -266,5 +267,5 @@ def unsubscribe(session_id: int, q) -> None:
 
 
 def resolve_session(alias: str) -> int | None:
-    """alias → 当前内存中正在进行的会话 id;无进行中会话 → None(现仅测试使用)。"""
+    """alias → 当前内存中正在进行的会话 id;无进行中会话 → None。测试与后续调用方的观测入口。"""
     return _alias_to_session.get(alias)

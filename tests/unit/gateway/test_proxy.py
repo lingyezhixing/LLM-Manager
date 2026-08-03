@@ -8,9 +8,16 @@ from fastapi import HTTPException
 
 from llm_manager import state
 from llm_manager.config import AppConfig, Command, ModelConfig, ProgramConfig, Scheme
-from llm_manager.data.persistence import fetch_usage, open_db
+from llm_manager.data.persistence import open_db
 from llm_manager.gateway import proxy
 from llm_manager.state import ModelStatus
+
+
+def _usage_rows(db, name="m1"):
+    """fetch_usage 已删(死代码):测试用等价直查。"""
+    return db.conn.execute(
+        "SELECT input_tokens FROM model_requests r JOIN models m ON r.model_id = m.id "
+        "WHERE m.original_name = ?", (name,)).fetchall()
 
 
 def _cfg():
@@ -114,7 +121,7 @@ def test_record_usage_writes_row():
         db = open_db(Path(":memory:"))
         body = b'{"usage":{"prompt_tokens":5,"completion_tokens":10,"total_tokens":15}}'
         await proxy._record_usage(db, "m1", "v1/chat/completions", body, 1.0, 2.0)
-        rows = fetch_usage(db, "m1", 0.0, 1e20)
+        rows = _usage_rows(db)
         assert len(rows) == 1 and rows[0]["input_tokens"] == 5
     asyncio.run(main())
 
@@ -124,7 +131,7 @@ def test_record_usage_no_usage_no_row():
         db = open_db(Path(":memory:"))
         body = b'{"choices":[{"message":{"content":"hi"}}]}'
         await proxy._record_usage(db, "m1", "v1/chat/completions", body, 1.0, 2.0)
-        assert len(fetch_usage(db, "m1", 0.0, 1e20)) == 0
+        assert len(_usage_rows(db)) == 0
     asyncio.run(main())
 
 
@@ -161,7 +168,7 @@ async def test_stream_wrapper_forwards_chunks_records_usage_ends_request():
     db = open_db(Path(":memory:"))
     out = [c async for c in proxy._stream_wrapper(FakeResp(), "v1/chat/completions", "m1", db, 1.0)]
     assert len(out) == 2
-    rows = fetch_usage(db, "m1", 0.0, 1e20)
+    rows = _usage_rows(db)
     assert len(rows) == 1 and rows[0]["input_tokens"] == 3
     assert state.pending_count("m1") == 0
 
@@ -204,7 +211,7 @@ async def test_forward_non_stream_records_usage_and_ends_request():
     req = _make_request("POST", "v1/chat/completions", {"model": "m1", "stream": False})
     resp = await proxy.forward(req, "v1/chat/completions", FakeLifecycle(), _cfg(), db, {8000: client})
     assert resp.status_code == 200
-    rows = fetch_usage(db, "m1", 0.0, 1e20)
+    rows = _usage_rows(db)
     assert len(rows) == 1 and rows[0]["input_tokens"] == 4
     assert state.pending_count("m1") == 0
     await client.aclose()
@@ -223,7 +230,7 @@ async def test_forward_stream_returns_streaming_and_records_on_consume():
     assert resp.status_code == 200
     consumed = b"".join([chunk async for chunk in resp.body_iterator])
     assert b"usage" in consumed
-    rows = fetch_usage(db, "m1", 0.0, 1e20)
+    rows = _usage_rows(db)
     assert len(rows) == 1
     assert state.pending_count("m1") == 0
     await client.aclose()

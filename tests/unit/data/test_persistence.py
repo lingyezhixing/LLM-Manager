@@ -1,7 +1,7 @@
 """model_requests persistence: open_db (PRAGMAs + schema), record_usage (wall-clock
-start/end), resolve_model_id, lock-serialized concurrency, fetch_usage, usage_series
-(bucketed by end_time), and the legacy ``ts`` migration. Consolidated here to mirror the
-src layout (src/llm_manager/data/persistence.py)."""
+start/end), resolve_model_id, lock-serialized concurrency, usage_series (bucketed by
+end_time), and the legacy ``ts`` migration. Consolidated here to mirror the src layout
+(src/llm_manager/data/persistence.py)."""
 import json
 import sqlite3
 import threading
@@ -10,7 +10,6 @@ from pathlib import Path
 from llm_manager.data import persistence as _p
 from llm_manager.data.persistence import (
     delete_model_data,
-    fetch_usage,
     open_db,
     orphaned_models,
     record_usage,
@@ -45,12 +44,14 @@ def test_record_usage_writes_start_end_tokens(tmp_path):
     assert row["input_tokens"] == 5
 
 
-def test_record_usage_auto_creates_model_and_fetch_round_trips(tmp_path):
+def test_record_usage_auto_creates_model_round_trips(tmp_path):
     db = open_db(tmp_path / "t.db")
     record_usage(db, "Qwen3-4B", start=1.0, end=2.0, input_tokens=100, output_tokens=50, cache_n=20, prompt_n=80)
-    rows = fetch_usage(db, "Qwen3-4B", 0.0, 5.0)
-    assert len(rows) == 1
-    assert (rows[0]["input_tokens"], rows[0]["output_tokens"]) == (100, 50)
+    row = db.conn.execute(
+        "SELECT r.input_tokens, r.output_tokens FROM model_requests r "
+        "JOIN models m ON r.model_id = m.id WHERE m.original_name = 'Qwen3-4B'"
+    ).fetchone()
+    assert (row["input_tokens"], row["output_tokens"]) == (100, 50)
 
 
 def test_resolve_model_id_is_stable(tmp_path):
@@ -77,7 +78,8 @@ def test_concurrent_writes_serialized_by_lock(tmp_path):
     for t in threads:
         t.join()
     assert not errors
-    assert len(fetch_usage(db, "M", 0.0, 5.0)) == 80
+    n = db.conn.execute("SELECT COUNT(*) AS n FROM model_requests").fetchone()["n"]
+    assert n == 80
 
 
 def test_usage_series_buckets_per_model_and_total(tmp_path):

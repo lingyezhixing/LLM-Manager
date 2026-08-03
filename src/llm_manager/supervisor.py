@@ -35,7 +35,6 @@ class ProcessRunner(Protocol):
         env: dict[str, str] | None = None,
         cwd: str | None = None,
     ) -> ProcessRecord: ...
-    async def terminate(self, pid: int, timeout: float = 10.0) -> bool: ...
     async def kill_tree(self, pid: int) -> bool: ...
     def alive(self, pid: int) -> bool: ...
     def on_exit(self, pid: int, cb: Callable[[int], None]) -> None: ...
@@ -126,18 +125,6 @@ class Supervisor:
         except Exception:
             return False
 
-    async def terminate(self, pid: int, timeout: float = 10.0) -> bool:
-        try:
-            p = psutil.Process(pid)
-            await asyncio.to_thread(p.terminate)
-            try:
-                await asyncio.to_thread(p.wait, min(timeout, 5.0))
-                return True
-            except psutil.TimeoutExpired:
-                return await self.kill_tree(pid)
-        except psutil.NoSuchProcess:
-            return True
-
     async def kill_tree(self, pid: int) -> bool:
         try:
             try:
@@ -179,7 +166,3 @@ class Supervisor:
             # 清理进程表(_wait 自清 _wait_tasks):Popen 句柄/cb 条目不随 start/stop 循环累积(#5)
             self._procs.pop(pid, None)
             self._exit_cbs.pop(pid, None)
-
-    async def cleanup(self) -> None:
-        for pid in list(self._procs):
-            await self.kill_tree(pid)

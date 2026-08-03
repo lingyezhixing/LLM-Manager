@@ -83,11 +83,6 @@ class SystemTray:
         self._icon = None
         self._thread: threading.Thread | None = None
 
-    # ---------- availability ----------
-    @staticmethod
-    def is_tray_available() -> bool:
-        return is_tray_available()
-
     # ---------- lifecycle ----------
     def start(self) -> None:
         if not is_tray_available():

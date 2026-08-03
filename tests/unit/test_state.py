@@ -2,7 +2,7 @@ import asyncio
 import pytest
 
 from llm_manager.state import (
-    ModelStatus, set_status, get_status, is_starting, is_runnable, is_failed,
+    ModelStatus, set_status, get_status, is_runnable, is_failed,
     record_failure, pending_count, inc_pending, dec_pending,
     begin_request, end_request, claim_start, finish_start, _reset,
 )
@@ -40,8 +40,7 @@ def test_failure_transition_sets_reason():
 def test_failed_to_start_retry_is_legal():
     set_status("M", ModelStatus.STARTING)
     set_status("M", ModelStatus.FAILED, reason="x")
-    set_status("M", ModelStatus.STARTING)
-    assert is_starting("M")
+    set_status("M", ModelStatus.STARTING)   # 不抛 = 合法
 
 
 def test_illegal_transition_raises():

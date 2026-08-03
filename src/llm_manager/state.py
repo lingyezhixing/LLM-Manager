@@ -80,10 +80,6 @@ def set_status(name: str, status: ModelStatus, *, reason: str | None = None, for
         rec.started_at = None   # uptime only while ROUTING
 
 
-def is_starting(name: str) -> bool:
-    return get_status(name) in (ModelStatus.STARTING, ModelStatus.INIT_SCRIPT, ModelStatus.HEALTH_CHECK)
-
-
 def is_runnable(name: str) -> bool:
     return get_status(name) == ModelStatus.ROUTING
 

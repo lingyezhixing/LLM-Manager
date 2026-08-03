@@ -107,21 +107,6 @@ def test_tokens_splits_alnum():
     assert _tokens("") == set()
 
 
-def test_match_score_full_subset_is_one():
-    from llm_manager.devices import _match_score
-    assert _match_score("rtx 4060", {"nvidia", "geforce", "rtx", "4060", "ti"}) == 1.0
-
-
-def test_match_score_partial_below_one():
-    from llm_manager.devices import _match_score
-    assert _match_score("rtx 4060", {"rtx", "3090"}) == 0.5  # only "rtx" of {rtx,4060}
-
-
-def test_match_score_empty_config_is_zero():
-    from llm_manager.devices import _match_score
-    assert _match_score("", {"rtx", "4060"}) == 0.0
-
-
 def _di(name):
     """测试用 DeviceInfo 构造器(仅 device_name 重要,其余置零)。"""
     from llm_manager.devices import DeviceInfo

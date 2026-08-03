@@ -262,14 +262,6 @@ def record_runtime_end(db: Db, model_name: str, end: float) -> None:
         db.conn.commit()
 
 
-def fetch_usage(db: Db, model_name: str, start: float, end: float) -> list[sqlite3.Row]:
-    return db.conn.execute(
-        """SELECT r.* FROM model_requests r JOIN models m ON r.model_id = m.id
-           WHERE m.original_name = ? AND r.end_time >= ? AND r.end_time <= ? ORDER BY r.end_time""",
-        (model_name, start, end),
-    ).fetchall()
-
-
 @dataclass(frozen=True, slots=True)
 class UsageSeries:
     buckets: list[float]            # bucket-start wall-clock epochs (the time axis)
