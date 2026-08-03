@@ -40,7 +40,8 @@ def test_failure_transition_sets_reason():
 def test_failed_to_start_retry_is_legal():
     set_status("M", ModelStatus.STARTING)
     set_status("M", ModelStatus.FAILED, reason="x")
-    set_status("M", ModelStatus.STARTING)   # 不抛 = 合法
+    set_status("M", ModelStatus.STARTING)
+    assert get_status("M") == ModelStatus.STARTING
 
 
 def test_illegal_transition_raises():

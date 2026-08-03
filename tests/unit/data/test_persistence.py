@@ -47,11 +47,12 @@ def test_record_usage_writes_start_end_tokens(tmp_path):
 def test_record_usage_auto_creates_model_round_trips(tmp_path):
     db = open_db(tmp_path / "t.db")
     record_usage(db, "Qwen3-4B", start=1.0, end=2.0, input_tokens=100, output_tokens=50, cache_n=20, prompt_n=80)
-    row = db.conn.execute(
+    rows = db.conn.execute(
         "SELECT r.input_tokens, r.output_tokens FROM model_requests r "
         "JOIN models m ON r.model_id = m.id WHERE m.original_name = 'Qwen3-4B'"
-    ).fetchone()
-    assert (row["input_tokens"], row["output_tokens"]) == (100, 50)
+    ).fetchall()
+    assert len(rows) == 1
+    assert (rows[0]["input_tokens"], rows[0]["output_tokens"]) == (100, 50)
 
 
 def test_resolve_model_id_is_stable(tmp_path):

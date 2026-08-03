@@ -14,7 +14,7 @@ from llm_manager.state import ModelStatus
 
 
 def _usage_rows(db, name="m1"):
-    """fetch_usage 已删(死代码):测试用等价直查。"""
+    """model_requests JOIN models 按 original_name 直查(测试用;与已删 fetch_usage 查询同构)。"""
     return db.conn.execute(
         "SELECT input_tokens FROM model_requests r JOIN models m ON r.model_id = m.id "
         "WHERE m.original_name = ?", (name,)).fetchall()

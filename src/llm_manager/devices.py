@@ -35,7 +35,7 @@ def _tokens(name: str) -> set[str]:
 def match_devices(
     referenced: set[str], candidates: list[DeviceInfo]
 ) -> tuple[dict[str, DeviceInfo], list[DeviceInfo]]:
-    """每个 config 名取全子集(score==1.0)的候选;并列去歧义键=(精确等同, -多余 token 数, -索引)
+    """每个 config 名取全子集(required ⊆ online)的候选;并列去歧义键=(精确等同, -多余 token 数, -索引)
     取最大。多余 token 数 = |detected − config|(越少越贴近 config)。一个候选只配一个 config 名(used 集)。
     返回 (config 键控匹配 dict, 未引用候选 list)。遍历 referenced 按 sorted() 保证赋值决定性。"""
     matched: dict[str, DeviceInfo] = {}
@@ -50,7 +50,7 @@ def match_devices(
             if i in used:
                 continue
             dt = _tokens(cand.device_name)
-            if not ct <= dt:  # 要求全子集(score==1.0)
+            if not ct <= dt:  # 要求全子集
                 continue
             key = (ct == dt, -len(dt - ct), -i)  # 精确等同优先 → 多余 token 最少 → 索引最小
             if best_key is None or key > best_key:
