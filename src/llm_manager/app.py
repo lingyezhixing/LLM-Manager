@@ -128,7 +128,7 @@ def create_app(db_path: Path | None = None, *, legacy_yaml: Path | None = None) 
         app.state.device_feed = DeviceFeed(monitor)  # 概览设备栏 SSE 源(订阅门控 2s 刷新)
         app.state.model_feed = ModelFeed(lambda: build_models_response(store.snapshot()))  # 模型 SSE 源(读穿:变更检测推送)
         stop_event = asyncio.Event()
-        auto_models = [n for n, m in cfg.models.items() if m.auto_start]
+        auto_models = config.auto_start_models(cfg)
         auto_task = asyncio.create_task(
             background.auto_start(lifecycle, auto_models, cfg, monitor,
                                   timeout=lifecycle.startup_timeout + background.AUTO_START_MARGIN,

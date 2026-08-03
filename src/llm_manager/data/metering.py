@@ -30,6 +30,12 @@ def _safe(parser: Callable[[bytes], TokenUsage]) -> Callable[[bytes], TokenUsage
     return wrapped
 
 
+def hit_rate(hits: int, misses: int) -> float:
+    """缓存命中率:hits / (hits + misses);无分母 → 0.0。"""
+    denom = hits + misses
+    return hits / denom if denom else 0.0
+
+
 def _body_str(body: bytes) -> str:
     return body.decode("utf-8", errors="replace")
 

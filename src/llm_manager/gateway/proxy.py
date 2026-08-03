@@ -3,8 +3,8 @@ SSE/non-SSE branch → token record. No facade Protocol — calls lifecycle + st
 
 end_request 分布三处(非 stream return 前 / 各 except / _stream_wrapper finally)
 防 pending 泄漏。_record_usage best-effort(写库失败不污染透传、不短路 end_request)。
-响应头 _strip_response_headers 去 content-length/transfer-encoding/connection/
-content-encoding(proxy 是 response 方向 hop-by-hop 参与者)。"""
+响应头 _strip_headers(extra=connection/content-encoding) 去 hop-by-hop 头
+(proxy 是 response 方向 hop-by-hop 参与者)。"""
 from __future__ import annotations
 
 import asyncio
@@ -20,16 +20,14 @@ from llm_manager.gateway.aliases import resolve_alias_checked
 
 logger = logging.getLogger(__name__)
 
-_RESP_HOP_BY_HOP = {"content-length", "transfer-encoding", "connection", "content-encoding"}
+_STRIP_BASE = {"content-length", "transfer-encoding"}
 
 
-def _strip_headers(headers) -> dict:
-    bad = {"host", "content-length", "transfer-encoding"}
+def _strip_headers(headers, extra=()):
+    """剥离基集(hop-by-hop 通用)+ 每侧额外键:request 侧 +host,response 侧
+    +connection/content-encoding。剥离集合与原两个函数逐项一致。"""
+    bad = _STRIP_BASE | set(extra)
     return {k: v for k, v in headers.items() if k.lower() not in bad}
-
-
-def _strip_response_headers(headers) -> dict:
-    return {k: v for k, v in headers.items() if k.lower() not in _RESP_HOP_BY_HOP}
 
 
 def _detect_sse(resp) -> bool:
@@ -138,21 +136,22 @@ async def forward(request: Request, path: str, lifecycle, cfg, db, client_pool) 
         client = _get_or_create_client(client_pool, port)
         resp = await client.send(
             client.build_request(request.method, path,
-                headers=_strip_headers(request.headers), content=request_data,
+                headers=_strip_headers(request.headers, extra=("host",)), content=request_data,
                 params=request.query_params),
             stream=True)
         if _detect_sse(resp):
             logger.info("RESP %d stream model=%s %.2fs", resp.status_code, primary, time.monotonic() - t0)
             return StreamingResponse(
                 _stream_wrapper(resp, path, primary, db, request_start),
-                status_code=resp.status_code, headers=_strip_response_headers(resp.headers))
+                status_code=resp.status_code,
+                headers=_strip_headers(resp.headers, extra=("connection", "content-encoding")))
         content = await resp.aread()
         await resp.aclose()
         await _record_usage(db, primary, path, content, request_start, time.time())
         state.end_request(primary)
         logger.info("RESP %d model=%s %.2fs", resp.status_code, primary, time.monotonic() - t0)
         return Response(content=content, status_code=resp.status_code,
-                        headers=_strip_response_headers(resp.headers))
+                        headers=_strip_headers(resp.headers, extra=("connection", "content-encoding")))
     except HTTPException:
         state.end_request(primary)
         raise

@@ -11,10 +11,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from llm_manager.data.metering import hit_rate
+
 if TYPE_CHECKING:
     from llm_manager.config import AppConfig, Pricing, PricingTier
 
 logger = logging.getLogger(__name__)
+
+# SQLITE_MAX_VARIABLE_NUMBER 999 → 每语句 ≤166 行,按 150 分块
+INSERT_CHUNK_SIZE = 150
 
 
 @dataclass(frozen=True, slots=True)
@@ -345,13 +350,12 @@ def usage_summary(db: Db, *, start_ts: float, end_ts: float) -> UsageSummary:
     ).fetchone()
     cache_hit = int(row["s_cache"])
     cache_miss = int(row["s_miss"])
-    denom = cache_hit + cache_miss
     return UsageSummary(
         input_tokens=int(row["s_in"]),
         output_tokens=int(row["s_out"]),
         cache_hit=cache_hit,
         cache_miss=cache_miss,
-        hit_rate=cache_hit / denom if denom else 0.0,
+        hit_rate=hit_rate(cache_hit, cache_miss),
         request_count=int(row["n"]),
     )
 
@@ -391,18 +395,22 @@ def usage_by_model(db: Db, *, start_ts: float, end_ts: float) -> list[ByModelRow
     for r in rows:
         cache_hit = int(r["s_cache"])
         cache_miss = int(r["s_miss"])
-        denom = cache_hit + cache_miss
         out.append(ByModelRow(
             model=r["model"],
             input_tokens=int(r["s_in"]),
             output_tokens=int(r["s_out"]),
             cache_n=cache_hit,
             request_count=int(r["n"]),
-            hit_rate=cache_hit / denom if denom else 0.0,
+            hit_rate=hit_rate(cache_hit, cache_miss),
             share=int(r["s_in"]) / total_in if total_in else 0.0,
             latency_ms=float(r["s_lat"] or 0) * 1000,
         ))
     return out
+
+
+def _overlap(a_start: float, a_end: float, b_start: float, b_end: float) -> float:
+    """两段时间窗口 [a_start,a_end) 与 [b_start,b_end) 的重叠秒数。"""
+    return max(0.0, min(a_end, b_end) - max(a_start, b_start))
 
 
 def _tier_matches(t: "PricingTier", inp: int, out: int) -> bool:  # type: ignore[name-defined]
@@ -504,7 +512,7 @@ def usage_cost(
             if not rate:
                 continue
             sess_end = row["end_time"] if row["end_time"] is not None else now_ts
-            overlap = max(0.0, min(end_ts, sess_end) - max(start_ts, row["start_time"]))
+            overlap = _overlap(start_ts, end_ts, row["start_time"], sess_end)
             if overlap > 0:
                 acc[row["model"]] = acc.get(row["model"], 0.0) + overlap * rate / 3600.0
 
@@ -571,7 +579,7 @@ def usage_cost_series(
                 sess_end = row["end_time"] if row["end_time"] is not None else now_ts
                 for i in range(n):
                     b_start = first + i * bucket_seconds
-                    ov = max(0.0, min(b_start + bucket_seconds, sess_end) - max(b_start, row["start_time"]))
+                    ov = _overlap(b_start, b_start + bucket_seconds, row["start_time"], sess_end)
                     if ov > 0:
                         cost = ov * rate
                         models.setdefault(name, [0.0] * n)[i] += cost
@@ -713,13 +721,12 @@ def log_insert_lines(db: Db, session_id: int, rows: list[tuple[int, float, str, 
     """批量插行。rows = [(seq, ts, stream, level, text), ...];返回全局行 id(RETURNING)。
 
     注意:CPython 的 executemany 不能用于带 RETURNING 的语句(sqlite3.InterfaceError),
-    故用单条 execute + 多行 VALUES。语句参数数受 SQLITE_MAX_VARIABLE_NUMBER 限制
-    (stock CPython 为 999 → 每语句 ≤166 行),因此按 150 行分块插入,累积各块行 id
-    (全局自增,天然保持插入序);全程同一 write_lock、一次 commit。任一块失败则
-    rollback 整体回滚(不落盘部分行)后重新抛出。"""
+    故用单条 execute + 多行 VALUES,按 INSERT_CHUNK_SIZE 行分块(参数数限制见常量注释);
+    累积各块行 id(全局自增,天然保持插入序);全程同一 write_lock、一次 commit。任一块
+    失败则 rollback 整体回滚(不落盘部分行)后重新抛出。"""
     if not rows:
         return []
-    chunk_size = 150
+    chunk_size = INSERT_CHUNK_SIZE
     ids: list[int] = []
     with db.write_lock:
         try:
@@ -832,9 +839,9 @@ def log_cleanup(db: Db, days: int, count: int, now: float | None = None,
     排除,绝不删除"正在直播"的会话行(belt-and-braces:行被删后 flush 落库 FK 失败,
     logs.flush 已有兜底丢弃,但首选是不删)。
 
-    IN 子句按 150 id 分块(同 log_insert_lines:语句参数数受 SQLITE_MAX_VARIABLE_NUMBER
-    限制,stock CPython 为 999),行/会话数跨块累计;全程同一 write_lock、一次 commit,
-    失败 rollback 整体回滚后重新抛出。"""
+    IN 子句按 INSERT_CHUNK_SIZE id 分块(同 log_insert_lines:参数数限制见常量注释),
+    行/会话数跨块累计;全程同一 write_lock、一次 commit,失败 rollback 整体回滚后
+    重新抛出。"""
     now = now if now is not None else time.time()
     with db.write_lock:
         doomed: set[int] = set()
@@ -851,7 +858,7 @@ def log_cleanup(db: Db, days: int, count: int, now: float | None = None,
         if not doomed:
             return 0, 0
         ids = list(doomed)
-        chunk_size = 150
+        chunk_size = INSERT_CHUNK_SIZE
         removed_l = 0
         removed_s = 0
         try:

@@ -208,3 +208,8 @@ def resolve_alias(cfg: AppConfig, alias: str) -> str:
         if alias == name or alias in m.aliases:
             return name
     raise KeyError(alias)
+
+
+def auto_start_models(cfg: AppConfig) -> list[str]:
+    """配置中 auto_start=True 的模型名列表(app 启动与托盘自动启动共用)。"""
+    return [n for n, m in cfg.models.items() if m.auto_start]

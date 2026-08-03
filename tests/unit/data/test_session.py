@@ -11,7 +11,7 @@ def test_add_accumulates_across_calls() -> None:
     session._reset()
     session.add(100, 50, 30, 70)
     session.add(200, 10, 150, 50)
-    s = session.snapshot()
+    s = session.snapshot(123.0)
     assert s.input_tokens == 300
     assert s.output_tokens == 60
     assert s.cache_hit == 180       # 30 + 150
@@ -21,21 +21,21 @@ def test_add_accumulates_across_calls() -> None:
 
 def test_hit_rate_zero_when_no_input() -> None:
     session._reset()
-    assert session.snapshot().hit_rate == 0.0
+    assert session.snapshot(123.0).hit_rate == 0.0
 
 
 def test_reset_clears_counters() -> None:
     session.add(1000, 0, 0, 1000)
     session._reset()
-    s = session.snapshot()
+    s = session.snapshot(123.0)
     assert s.input_tokens == 0
     assert s.hit_rate == 0.0
 
 
 def test_snapshot_includes_started_at_epoch() -> None:
-    """started_at = process start (wall-clock epoch); stable across snapshots, not a counter."""
+    """started_at = caller-provided wall-clock epoch; echoed verbatim across snapshots."""
     session._reset()
-    s = session.snapshot()
+    s = session.snapshot(123.0)
     assert isinstance(s.started_at, float)
-    assert s.started_at > 0
-    assert session.snapshot().started_at == s.started_at
+    assert s.started_at == 123.0
+    assert session.snapshot(123.0).started_at == s.started_at

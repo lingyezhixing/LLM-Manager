@@ -31,16 +31,17 @@ def _cfg():
 
 # ---------- helpers ----------
 def test_strip_headers_removes_hop_by_hop():
-    out = proxy._strip_headers({"host": "x", "content-length": "3", "transfer-encoding": "chunked", "authorization": "Bearer t"})
+    out = proxy._strip_headers({"host": "x", "content-length": "3", "transfer-encoding": "chunked", "authorization": "Bearer t"},
+                               extra=("host",))
     assert "host" not in out and "content-length" not in out and "transfer-encoding" not in out
     assert out["authorization"] == "Bearer t"
 
 
-def test_strip_response_headers_drops_length_encoding():
-    out = proxy._strip_response_headers({
+def test_strip_headers_response_side_drops_length_encoding():
+    out = proxy._strip_headers({
         "content-length": "9", "content-encoding": "gzip",
         "transfer-encoding": "chunked", "connection": "keep-alive",
-        "content-type": "application/json"})
+        "content-type": "application/json"}, extra=("connection", "content-encoding"))
     for bad in ("content-length", "content-encoding", "transfer-encoding", "connection"):
         assert bad not in out
     assert out["content-type"] == "application/json"

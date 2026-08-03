@@ -17,6 +17,7 @@ def _app(db=None, cfg=None) -> FastAPI:
     register_usage_routes(api)
     app.include_router(api)
     app.state.db = db if db is not None else open_db(Path(":memory:"))
+    app.state.started_at = 123.0   # 生产由 create_app 设置(与 /api/system/info 单源)
     if cfg is not None:
         class _Stub:
             def __init__(self, c): self._c = c

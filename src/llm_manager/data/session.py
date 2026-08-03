@@ -4,15 +4,16 @@ Fed by the proxy's ``_record_usage`` path (same token parse as the persisted row
 ``data/metering``). Exposed via ``GET /api/usage/session`` for the 概览 session-stats card.
 Module-level singleton (like ``state.py``) — asyncio single-thread → increments need no lock.
 
-``started_at`` is the process-start wall-clock epoch (captured once at import); the
+``started_at`` is the process-start wall-clock epoch, passed in by the caller; the
 frontend fetches it and ticks uptime locally rather than the backend computing a duration.
 Metering semantics (all parsers): ``cache_tokens`` = hit, ``prompt_tokens`` = miss,
 ``input_tokens`` = cache + prompt → hit_rate = cache_hit / (cache_hit + cache_miss).
 """
 from __future__ import annotations
 
-import time
 from dataclasses import dataclass
+
+from llm_manager.data.metering import hit_rate
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,7 +34,6 @@ class _Counters:
     prompt_tokens: int = 0   # misses
 
 
-_STARTED_AT: float = time.time()   # module import ≈ gateway boot
 _c: _Counters = _Counters()
 
 
@@ -50,15 +50,15 @@ def add(input_tokens: int, output_tokens: int, cache_tokens: int, prompt_tokens:
     _c.prompt_tokens += prompt_tokens
 
 
-def snapshot() -> SessionTotals:
+def snapshot(started_at: float) -> SessionTotals:
+    """started_at 由调用方传入(app 实例级,与 /api/system/info 单源)。"""
     hit = _c.cache_tokens
     miss = _c.prompt_tokens
-    denom = hit + miss
     return SessionTotals(
-        started_at=_STARTED_AT,
+        started_at=started_at,
         input_tokens=_c.input_tokens,
         output_tokens=_c.output_tokens,
         cache_hit=hit,
         cache_miss=miss,
-        hit_rate=hit / denom if denom else 0.0,
+        hit_rate=hit_rate(hit, miss),
     )

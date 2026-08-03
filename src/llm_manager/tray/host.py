@@ -22,6 +22,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from llm_manager import config
 from llm_manager.runtime import background
 from llm_manager.tray import claude, wol
 
@@ -205,7 +206,7 @@ class SystemTray:
         logger.info("重启自启模型...")
         await self._lifecycle.unload_all()
         cfg = self._get_cfg()
-        auto_models = [n for n, m in cfg.models.items() if m.auto_start]
+        auto_models = config.auto_start_models(cfg)
         stop_event = asyncio.Event()
         await background.auto_start(
             self._lifecycle, auto_models, cfg, self._monitor,
