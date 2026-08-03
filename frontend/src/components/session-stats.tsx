@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { ErrorState } from "@/components/ui/error-state";
 import { InfoTile } from "@/components/ui/info-tile";
 import { fetchSessionUsage } from "@/lib/api";
 import { formatTokens } from "@/lib/format";
@@ -17,13 +18,14 @@ function formatUptime(sec: number): string {
 
 /** Session stats (since gateway start). Totals refetch every 3s; uptime ticks locally. */
 export function SessionStats() {
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["usage", "session"],
     queryFn: fetchSessionUsage,
     refetchInterval: 3000,
   });
   const now = useNowTick(1000);
 
+  if (isError) return <ErrorState message={(error as Error).message} onRetry={() => refetch()} />;
   if (isLoading || !data) return <p className="text-sm text-muted-foreground">加载中…</p>;
 
   const pct = Math.round(data.hit_rate * 1000) / 10;  // 1 decimal place

@@ -50,6 +50,7 @@ export function useLogViewer(api: LogApi | null, runKey: number | null) {
   const [following, setFollowing] = useState(true);
   const [newCount, setNewCount] = useState(0);
   const [matches, setMatches] = useState<number[]>([]);
+  const [matchTotal, setMatchTotal] = useState(0);   // F9:后端全量检索的真实匹配数(matches 可能被 500 截断)
   const [matchIdx, setMatchIdx] = useState(-1);
   const [hasSearched, setHasSearched] = useState(false);   // bug1:跟踪搜索执行,而非输入框内容
   const [searching, setSearching] = useState(false);
@@ -62,6 +63,7 @@ export function useLogViewer(api: LogApi | null, runKey: number | null) {
 
   const scroller = useRef<HTMLDivElement | null>(null);
   const pendingTopFixRef = useRef<{ h: number; t: number } | null>(null); // prepend 视口维持基准
+  const loadingTopRef = useRef(false);   // F5:向上加载重入守卫(同步 ref,防触顶连续滚动在 state 更新生效前重入)
   const followingRef = useRef(true);
   const liveRef = useRef(true);
   useEffect(() => { followingRef.current = following; }, [following]);
@@ -78,7 +80,7 @@ export function useLogViewer(api: LogApi | null, runKey: number | null) {
   // 避免与重连后的回填重复。onmessage 里的 id 守卫兜底防重复追加(回退与回填交错时)。
   useEffect(() => {
     setLiveLines([]); setHistoryPrefix([]); setHistoryPage(null); setFollowing(true); setNewCount(0);
-    setMatches([]); setMatchIdx(-1); setHasSearched(false); setAtOldest(false);
+    setMatches([]); setMatchTotal(0); setMatchIdx(-1); setHasSearched(false); setAtOldest(false);
     if (!api) return;   // 无会话(模型未启动 / 定位中):视图已重置,保持空态
     let receivedAny = false;   // 本次订阅是否收到过行
     const es = new EventSource(api.streamUrl(levelParam));
@@ -131,14 +133,17 @@ export function useLogViewer(api: LogApi | null, runKey: number | null) {
   }, [displayed, scrollTargetId]);
 
   // bug2:向上加载更早日志——prepend 到 historyPrefix,维持视口,防抖,上限,到顶。
+  // F5:重入守卫用 ref(同步置位),非 state——state 从 setLoadingTop(true) 到新闭包生效有窗口,
+  // 触顶连续滚动会用旧闭包(loadingTop 仍 false)重入,导致同页历史重复 prepend + key 冲突。
   const loadMoreAbove = useCallback(async () => {
-    if (!api || loadingTop || mode !== "live") return;
+    if (!api || loadingTopRef.current || mode !== "live") return;
     const firstId = historyPrefix.length > 0 ? historyPrefix[0].id
       : (liveLines.length > 0 ? liveLines[0].id : null);
     if (firstId == null || firstId <= 1) { setAtOldest(true); return; }   // 已到最早(id 从 1 起)
     const el = scroller.current;
     if (el) pendingTopFixRef.current = { h: el.scrollHeight, t: el.scrollTop }; // prepend 前基准
-    setLoadingTop(true);
+    loadingTopRef.current = true;                 // 同步置位 ref 守卫
+    setLoadingTop(true);                          // state 仅驱动 UI
     try {
       const page = await api.fetchPage(firstId, WINDOW, levelParam);
       const newer = page.filter((l) => l.id < firstId);   // 去重(后端返回 id<firstId 的最近 WINDOW 行)
@@ -149,9 +154,10 @@ export function useLogViewer(api: LogApi | null, runKey: number | null) {
       });
       if (newer[0].id <= 1) setAtOldest(true);             // 加载到最早(id=1)
     } catch { /* best-effort */ } finally {
+      loadingTopRef.current = false;
       setLoadingTop(false);
     }
-  }, [api, levelParam, loadingTop, mode, historyPrefix, liveLines]);
+  }, [api, levelParam, mode, historyPrefix, liveLines]);
 
   const onScroll = useCallback(() => {
     if (mode === "history") return;          // 历史页不自动跟进/加载
@@ -180,11 +186,12 @@ export function useLogViewer(api: LogApi | null, runKey: number | null) {
   const runSearch = useCallback(async (q: string) => {
     if (!api) return;
     setHasSearched(true);                    // bug1:标记已执行搜索(无论 q 是否空)
-    if (!q.trim()) { setMatches([]); setMatchIdx(-1); return; }
+    if (!q.trim()) { setMatches([]); setMatchTotal(0); setMatchIdx(-1); return; }
     setSearching(true);
     try {
       const res = await api.search(q, levelParam);
       setMatches(res.matches);
+      setMatchTotal(res.total);              // F9:真实总数;matches 可能被后端 500 截断
       const idx = res.matches.length ? 0 : -1;
       setMatchIdx(idx);
       if (idx >= 0) jumpToMatch(res.matches, idx);
@@ -196,6 +203,7 @@ export function useLogViewer(api: LogApi | null, runKey: number | null) {
   const onInput = useCallback((v: string) => {
     setInput(v);
     setMatches([]);
+    setMatchTotal(0);
     setMatchIdx(-1);
     setHasSearched(false);
     setScrollTargetId(null);
@@ -229,7 +237,7 @@ export function useLogViewer(api: LogApi | null, runKey: number | null) {
 
   return {
     displayed, mode, newCount, scroller, onScroll,
-    matches, matchIdx, searching, hasSearched, matchSet, currentMatch,
+    matches, matchTotal, matchIdx, searching, hasSearched, matchSet, currentMatch,
     runSearch, onInput, nextMatch, prevMatch, backToLive,
     loadingTop, atOldest,
     level, setLevel, input,

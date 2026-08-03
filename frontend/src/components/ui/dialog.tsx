@@ -127,7 +127,11 @@ function ConfirmBody({ opts, onConfirm, onCancel }: {
   );
 }
 
-/** 单例:同时只渲染一个确认框。第二次 confirm() 排队,等当前 resolve 后显示。 */
+/** 单例:同时只渲染一个确认框。第二次 confirm() 排队,等当前 resolve 后显示。
+ * 不变量:shown === (queue[0] ?? null) 恒成立——据此可读 queue[0] 作当前项。
+ * setState updater 必须纯(只读 queue,无 shift/resolve 副作用):React dev StrictMode
+ * 双调用 updater 并取第二次返回值,旧代码在 updater 内 shift() 会丢队首、resolve 永不触发
+ * → 删除/清除等 confirm 流在 dev 下永久挂起(F2)。副作用移到 callback body(仅跑一次)。 */
 export function ConfirmProvider({ children }: { children: ReactNode }) {
   const queue = useRef<Pending[]>([]);
   const [shown, setShown] = useState<Pending | null>(null);
@@ -135,15 +139,19 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
   const confirm = useCallback<ConfirmFn>((opts) => {
     return new Promise<boolean>((resolve) => {
       queue.current.push({ opts, resolve });
-      setShown((cur) => cur ?? queue.current.shift() ?? null);
+      // updater 纯读:当前无显示项时推进队首(刚 push 的项 = queue[0])。
+      setShown((cur) => cur ?? queue.current[0] ?? null);
     });
   }, []);
 
   const settle = useCallback((ok: boolean) => {
-    setShown((cur) => {
-      cur?.resolve(ok);
-      return queue.current.shift() ?? null;
-    });
+    // 副作用(resolve + 出队)在 callback body 内执行一次,不进 updater。
+    const cur = queue.current[0];
+    if (cur) {
+      queue.current.shift();
+      cur.resolve(ok);
+    }
+    setShown(queue.current[0] ?? null);
   }, []);
 
   return (

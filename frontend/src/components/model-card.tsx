@@ -1,6 +1,7 @@
 import type { ModelInfo } from "@/lib/api";
 import { startModel, stopModel } from "@/lib/api";
 import { formatIdle } from "@/lib/format";
+import { useToast } from "@/components/ui/toast";
 
 // 状态点用主题 token 的 CSS 变量(success/primary/destructive/muted-foreground),随主题变、不荧光。
 const DOT: Record<string, string> = {
@@ -19,6 +20,7 @@ const STAGE_LABEL: Record<string, string> = {
 export function ModelCard({ m, selected, nowMs, onSelect }: {
   m: ModelInfo; selected: boolean; nowMs: number; onSelect: () => void;
 }) {
+  const toast = useToast();
   const starting = ["starting", "init_script", "health_check"].includes(m.status);
   const routing = m.status === "routing";
   const idleSec = m.last_access > 0 ? Math.max(0, Math.floor((nowMs - m.last_access * 1000) / 1000)) : 0;
@@ -50,7 +52,7 @@ export function ModelCard({ m, selected, nowMs, onSelect }: {
           {statusText}
         </div>
       </div>
-      <button onClick={(e) => { e.stopPropagation(); btn.fn(); }}
+      <button onClick={(e) => { e.stopPropagation(); btn.fn().catch((err: unknown) => toast.error((err as Error).message)); }}
         className={`shrink-0 rounded-md border px-3 py-1.5 text-[10.5px] font-medium transition-colors ${
           btn.cls === "go" ? "border-primary bg-primary text-primary-foreground hover:opacity-90"
           : btn.cls === "stop" ? "border-destructive bg-destructive text-destructive-foreground hover:opacity-90"

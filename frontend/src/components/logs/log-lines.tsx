@@ -47,6 +47,11 @@ export function LogLines({ h }: { h: LogLinesView }) {
               <button onClick={h.prevMatch} className="rounded border border-border bg-card px-1.5 py-0.5 text-muted-foreground hover:text-foreground">‹</button>
               <span className="text-muted-foreground tabular-nums">{h.matchIdx + 1}/{h.matches.length}</span>
               <button onClick={h.nextMatch} className="rounded border border-border bg-card px-1.5 py-0.5 text-muted-foreground hover:text-foreground">›</button>
+              {h.matchTotal > h.matches.length && (
+                <span className="text-muted-foreground/70" title="后端硬限 500 条,超出部分不可跳转">
+                  共{h.matchTotal}条
+                </span>
+              )}
             </div>
           ) : h.hasSearched ? <span className="text-muted-foreground">无匹配</span> : null}
       </div>

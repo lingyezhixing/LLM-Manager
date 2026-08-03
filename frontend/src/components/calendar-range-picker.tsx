@@ -135,8 +135,10 @@ export function CalendarRangePicker({
       setEnd(null);
       return;
     }
-    setEnd(d);
-    onChange({ from: start, to: d });
+    // F4:to 取所选日 23:59:59.999。后端时间窗右开 [start,end),若用 00:00 会漏掉结束日全天。
+    const endOfDay = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999);
+    setEnd(endOfDay);
+    onChange({ from: start, to: endOfDay });
     onClose();
   };
 

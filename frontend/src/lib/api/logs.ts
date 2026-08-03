@@ -22,13 +22,12 @@ export interface LogSession {
 }
 
 export async function fetchSessions(
-  opts: { type?: "system" | "model"; model?: string; limit?: number; before?: number } = {},
+  opts: { type?: "system" | "model"; model?: string; limit?: number } = {},
 ): Promise<LogSession[]> {
   const qs = new URLSearchParams();
   if (opts.type) qs.set("type", opts.type);
   if (opts.model) qs.set("model", opts.model);
   if (opts.limit) qs.set("limit", String(opts.limit));
-  if (opts.before) qs.set("before", String(opts.before));
   const res = await fetch(`/api/logs/sessions?${qs}`);
   if (!res.ok) throw new Error(`/api/logs/sessions failed: ${res.status}`);
   return (await res.json()) as LogSession[];

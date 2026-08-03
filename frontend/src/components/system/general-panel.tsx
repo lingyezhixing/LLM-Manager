@@ -165,6 +165,7 @@ export function GeneralPanel() {
             syncedRef.current = initial;
             setForm(initial);
           }}
+          saveDisabled={!portValid || !aliveValid || form.logs.days < 1 || form.logs.count < 1}
         />
       )}
     </div>

@@ -12,7 +12,7 @@ export function UsageKpiRow({
   params: UsageSeriesParams;
   refetch: number | false;
 }) {
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, error, refetch: refetchSummary } = useQuery({
     queryKey: ["usage", "summary", params],
     queryFn: () => fetchUsageSummary(params),
     refetchInterval: refetch,
@@ -22,6 +22,9 @@ export function UsageKpiRow({
     queryFn: () => fetchUsageCost(params),
     refetchInterval: refetch,
   });
+  if (isError) {
+    return <ErrorState message={(error as Error).message} onRetry={() => refetchSummary()} />;
+  }
   if (isLoading || !data) {
     return (
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-7">

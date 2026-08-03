@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { ErrorState } from "@/components/ui/error-state";
 import { Field, TextArea, TextInput } from "@/components/ui/form";
 import { useConfirm } from "@/components/ui/dialog";
 import { useToast } from "@/components/ui/toast";
+import { type ConfigResponse } from "@/lib/api";
 import {
   useApplyClaudePreset,
   useClaudeCurrent,
@@ -33,7 +35,6 @@ function parseEnvJson(text: string): { ok: true; value: Record<string, string> }
 // mode="new":新建卡,名字可输入、自动展开、不可折叠,保存成功后 onCreated。
 // 折叠只隐藏身体(组件保持挂载),编辑不丢失;脏且折叠时头部显示「未保存」。
 interface ClaudePresetCardProps {
-  presets: Record<string, Record<string, string>>; // 全部预设(保存/删除 = 整组 PUT)
   name?: string;                                    // edit 模式:预设名(只读)
   preset?: Record<string, string>;                  // edit 模式:预设内容
   names: string[];                                  // 全部预设名(新建时查重)
@@ -44,7 +45,6 @@ interface ClaudePresetCardProps {
 }
 
 function ClaudePresetCard({
-  presets,
   name,
   preset,
   names,
@@ -54,11 +54,16 @@ function ClaudePresetCard({
   onCancelNew,
 }: ClaudePresetCardProps) {
   const isNew = mode === "new";
-  const update = useUpdateClaudeConfigs();   // 保存
-  const del = useUpdateClaudeConfigs();      // 删除
+  const update = useUpdateClaudeConfigs();   // 保存 / 删除均整组 PUT(同一 mutation)
   const apply = useApplyClaudePreset();
   const confirm = useConfirm();
   const toast = useToast();
+  const queryClient = useQueryClient();
+
+  // F6:保存/删除时从查询缓存读最新 presets 构造 payload,而非用父级传入的 presets 快照——
+  // 两卡连续保存时,后保存者的快照可能不含先保存者的改动 → 整组 PUT 覆盖丢失(lost update)。
+  const latestPresets = (): Record<string, Record<string, string>> =>
+    (queryClient.getQueryData<ConfigResponse>(["config"])?.claude) ?? {};
 
   // 默认:生效中的卡展开,其余收起;新建卡必展开。
   const [expanded, setExpanded] = useState(isNew || isCurrent);
@@ -76,11 +81,11 @@ function ClaudePresetCard({
   const saveEnabled = dirty && nameOk && !collision && !jsonErr && !update.isPending;
   const applyEnabled = !isNew && !dirty && !isCurrent && !jsonErr;
   const deleteEnabled = !isNew && !dirty;
-  const mutError = update.error ?? del.error ?? apply.error;
+  const mutError = update.error ?? apply.error;
 
   const onSave = () => {
     if (!parsed?.ok || !editName) return;
-    const next = { ...presets, [editName]: parsed.value };
+    const next = { ...latestPresets(), [editName]: parsed.value };
     update.mutate(next, {
       onSuccess: () => {
         setBaselineJson(json);
@@ -104,9 +109,9 @@ function ClaudePresetCard({
       danger: true,
     });
     if (!ok) return;
-    const next = { ...presets };
+    const next = { ...latestPresets() };
     delete next[editName];
-    del.mutate(next, { onSuccess: () => toast.success(`已删除预设「${editName}」`) });
+    update.mutate(next, { onSuccess: () => toast.success(`已删除预设「${editName}」`) });
   };
 
   const onApply = () => {
@@ -152,9 +157,9 @@ function ClaudePresetCard({
           variant="ghost"
           className="text-destructive"
           onClick={onDelete}
-          disabled={(!isNew && !deleteEnabled) || del.isPending}
+          disabled={(!isNew && !deleteEnabled) || update.isPending}
         >
-          {del.isPending ? "删除中…" : isNew ? "取消" : "删除"}
+          {update.isPending ? "删除中…" : isNew ? "取消" : "删除"}
         </Button>
       </div>
 
@@ -246,7 +251,6 @@ export function ClaudePanel() {
       {names.map((n) => (
         <ClaudePresetCard
           key={n}
-          presets={serverPresets}
           name={n}
           preset={serverPresets[n]}
           names={names}
@@ -257,7 +261,6 @@ export function ClaudePanel() {
       {newNonce > 0 && (
         <ClaudePresetCard
           key={`new-${newNonce}`}
-          presets={serverPresets}
           mode="new"
           names={names}
           isCurrent={false}

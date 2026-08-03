@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
 import { CalendarRangePicker } from "@/components/calendar-range-picker";
+import { ErrorState } from "@/components/ui/error-state";
 import { TokenChart } from "@/components/token-chart";
 import { fetchUsageSeries, type UsageSeriesParams } from "@/lib/api";
 import {
@@ -27,7 +28,7 @@ export function TokenCurveCard() {
   const displayed = rangeForState(range);
   const params: UsageSeriesParams = paramsForState(range);
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["usage", "series", params],
     queryFn: () => fetchUsageSeries(params),
     refetchInterval: USAGE_REFETCH[preset],
@@ -75,7 +76,11 @@ export function TokenCurveCard() {
           )}
         </div>
       </div>
-      {isLoading || !data ? (
+      {isError ? (
+        <div className="flex h-[200px] items-center justify-center">
+          <ErrorState message={(error as Error).message} onRetry={() => refetch()} />
+        </div>
+      ) : isLoading || !data ? (
         <div className="flex h-[200px] items-center justify-center text-sm text-muted-foreground">加载中…</div>
       ) : (
         <TokenChart data={data} preset={chartPresetFor(preset)} />

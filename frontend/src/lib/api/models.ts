@@ -30,14 +30,16 @@ export interface DeviceInfo {
 export interface DevicesResponse { data: DeviceInfo[]; }
 
 // 模型控制:start/stop/restart。restart = stop→ensure_running(读穿取新配置)。202 异步;
-// 运行态经 SSE 反映,无需失效查询键。
+// 运行态经 SSE 反映,无需失效查询键。错误统一走 parseApiError(F7);start 对 409(已运行)
+// 幂等放行——启动一个已在运行的模型对用户不是错误。
 export async function startModel(alias: string): Promise<void> {
   const res = await fetch(`/api/models/${encodeURIComponent(alias)}/start`, { method: "POST" });
-  if (!res.ok && res.status !== 409) throw new Error(`/start failed: ${res.status}`);
+  if (res.status === 409) return;
+  if (!res.ok) throw await parseApiError(res);
 }
 export async function stopModel(alias: string): Promise<void> {
   const res = await fetch(`/api/models/${encodeURIComponent(alias)}/stop`, { method: "POST" });
-  if (!res.ok) throw new Error(`/stop failed: ${res.status}`);
+  if (!res.ok) throw await parseApiError(res);
 }
 export async function restartModel(alias: string): Promise<void> {
   const res = await fetch(`/api/models/${encodeURIComponent(alias)}/restart`, { method: "POST" });

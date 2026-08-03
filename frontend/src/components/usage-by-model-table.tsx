@@ -15,7 +15,7 @@ export function UsageByModelTable({
   params: UsageSeriesParams;
   refetch: number | false;
 }) {
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, error, refetch: refetchByModel } = useQuery({
     queryKey: ["usage", "by-model", params],
     queryFn: () => fetchUsageByModel(params),
     refetchInterval: refetch,
@@ -29,6 +29,7 @@ export function UsageByModelTable({
   const [sortKey, setSortKey] = useState<SortKey>("input_tokens");
   const [desc, setDesc] = useState(true);
 
+  if (isError) return <Card><ErrorState message={(error as Error).message} onRetry={() => refetchByModel()} /></Card>;
   if (isLoading) return <Card>加载中…</Card>;
   if (!data || data.length === 0) return <Card><Empty /></Card>;
 

@@ -20,7 +20,7 @@ export function UsageChartCard({
   refetch: number | false;
 }) {
   const [view, setView] = useState<View>("models");
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, error, refetch: refetchSeries } = useQuery({
     queryKey: ["usage", "series", params],
     queryFn: () => fetchUsageSeries(params),
     refetchInterval: refetch,
@@ -74,6 +74,10 @@ export function UsageChartCard({
         ) : (
           <TokenChart data={costSeriesQ.data} preset={chartPreset} formatY={formatCost} />
         )
+      ) : isError ? (
+        <div className="flex h-[240px] items-center justify-center">
+          <ErrorState message={(error as Error).message} onRetry={() => refetchSeries()} />
+        </div>
       ) : isLoading || !data ? (
         <div className="flex h-[240px] items-center justify-center text-sm text-muted-foreground">加载中…</div>
       ) : data.buckets.length === 0 ? (

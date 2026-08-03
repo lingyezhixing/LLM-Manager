@@ -124,13 +124,22 @@ export function ModelDefForm({ model, onSaved, onDirtyChange }: ModelDefFormProp
   const onSave = () => {
     const payload = cleanPayload(form);
     setForm(payload);
-    setBaseline(clone(payload));
+    // F1:baseline 仅在保存成功后推进。原代码 mutate 前就 setBaseline → 失败时 dirty 立即
+    // 变 false → 保存条(含错误)卸载、切模型守卫失效,用户以为已保存实则丢失。
     if (isCreate) {
       create.mutate(payload, {
-        onSuccess: () => onSaved({ affected_routing: [], hint: null }, payload.name),
+        onSuccess: () => {
+          setBaseline(clone(payload));
+          onSaved({ affected_routing: [], hint: null }, payload.name);
+        },
       });
     } else {
-      update.mutate(payload, { onSuccess: (result) => onSaved(result, model!.name) });
+      update.mutate(payload, {
+        onSuccess: (result) => {
+          setBaseline(clone(payload));
+          onSaved(result, model!.name);
+        },
+      });
     }
   };
 
