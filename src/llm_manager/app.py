@@ -5,7 +5,6 @@ closes them on shutdown. Plan 3 fills the proxy + lifecycle wiring."""
 from __future__ import annotations
 
 import asyncio
-import datetime
 import logging
 import os
 import sys
@@ -18,7 +17,7 @@ from fastapi import FastAPI
 
 from llm_manager import config
 from llm_manager.data import logs as _logs
-from llm_manager.data.log_handler import SystemLogHandler
+from llm_manager.data.log_handler import SystemLogHandler, setup_logging
 from llm_manager.data.logs import log_close_open_system_sessions
 from llm_manager.data.persistence import open_db
 from llm_manager.devices import ENUMERATORS, DeviceMonitor
@@ -29,55 +28,11 @@ from llm_manager.probes import probe_registry
 from llm_manager.realtime import DeviceFeed, ModelFeed
 from llm_manager.runtime.lifecycle import Lifecycle
 from llm_manager.runtime import background
-from llm_manager.runtime.log_retention import log_retention_loop
+from llm_manager.runtime.log_retention import log_retention_loop, retention_from_store
 from llm_manager.supervisor import Supervisor
 from llm_manager.tray import host as tray_host
 
 logger = logging.getLogger(__name__)
-
-
-def _cleanup_old_logs(log_dir: str, keep: int = 10) -> None:
-    """保留最近 keep 个 llm-manager_*.log(按 mtime),删旧的。"""
-    files = sorted(Path(log_dir).glob("llm-manager_*.log"),
-                   key=lambda p: p.stat().st_mtime, reverse=True)
-    for stale in files[keep:]:
-        try:
-            stale.unlink()
-        except OSError:
-            pass
-
-
-def _retention_from_store(store) -> tuple[int, int]:
-    """retention 接线:单次快照取 days/count(log_retention_loop 每轮注入)。"""
-    p = store.snapshot().program
-    return p.log_retention_days, p.log_retention_count
-
-
-def setup_logging(level: str = "INFO", log_dir: str = "logs") -> None:
-    """配置 root logger(可重配):控制台 + 每次启动一个时间戳文件(留 10 个)。
-    每次启动 = 新文件 logs/llm-manager_{ts}.log(非按天轮换,避免长期堆一个文件)。"""
-    numeric = getattr(logging, level.upper(), logging.INFO)
-    root = logging.getLogger()
-    root.setLevel(numeric)
-    for h in list(root.handlers):
-        root.removeHandler(h)
-    fmt = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s", "%H:%M:%S")
-    console = logging.StreamHandler(sys.stdout)
-    console.setLevel(numeric)
-    console.setFormatter(fmt)
-    root.addHandler(console)
-    try:
-        Path(log_dir).mkdir(parents=True, exist_ok=True)
-        log_file = Path(log_dir) / f"llm-manager_{datetime.datetime.now().strftime('%Y%m%d-%H%M%S')}.log"
-        fh = logging.FileHandler(log_file, encoding="utf-8")
-        fh.setLevel(numeric)
-        fh.setFormatter(fmt)
-        root.addHandler(fh)
-        _cleanup_old_logs(log_dir, keep=10)
-        logger.info("logging to %s", log_file)
-    except OSError:
-        pass
-    logging.getLogger("httpx").setLevel(logging.WARNING)  # 降噪:每请求一行太吵,REQ/RESP 已覆盖
 
 
 def create_app(db_path: Path | None = None, *, legacy_yaml: Path | None = None) -> FastAPI:
@@ -123,7 +78,7 @@ def create_app(db_path: Path | None = None, *, legacy_yaml: Path | None = None) 
         log_stop = asyncio.Event()
         flush_task = asyncio.create_task(_logs.flush_loop(log_stop))
         retention_task = asyncio.create_task(
-            log_retention_loop(db, lambda: _retention_from_store(store), log_stop))
+            log_retention_loop(db, lambda: retention_from_store(store), log_stop))
         await asyncio.to_thread(monitor.refresh)
         online = sorted(monitor.online_devices())
         logger.info("devices online: %s", ", ".join(online) if online else "(none)")

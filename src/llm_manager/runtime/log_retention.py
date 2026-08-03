@@ -17,6 +17,12 @@ from llm_manager.data import logs as _logs
 logger = logging.getLogger(__name__)
 
 
+def retention_from_store(store) -> tuple[int, int]:
+    """retention 接线:单次快照取 days/count(log_retention_loop 每轮注入)。"""
+    p = store.snapshot().program
+    return p.log_retention_days, p.log_retention_count
+
+
 async def log_retention_loop(db, get_settings, stop_event: asyncio.Event,
                              *, period: float = 60.0, now: float | None = None) -> None:
     """每轮取 fresh 保留规则执行 log_cleanup。get_settings 注入(可测)。"""
