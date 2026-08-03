@@ -19,7 +19,7 @@ interface LogApi {
   search: (q: string, level?: string) => Promise<LogSearch>;
 }
 
-export function sessionLogApi(sessionId: number): LogApi {
+function sessionLogApi(sessionId: number): LogApi {
   return {
     streamUrl: (level) => `/api/logs/sessions/${sessionId}/stream${level ? `?level=${level}` : ""}`,
     fetchPage: (before, limit, level) => fetchSessionLines(sessionId, before, limit, level),
@@ -42,7 +42,7 @@ export function sessionLogApi(sessionId: number): LogApi {
  * EventSource 不重连、重启后新日志进不来,须手动切换模型才重置)。会话日志恒传 null(父级
  * key={sessionId} 重建组件)。
  */
-export function useLogViewer(api: LogApi | null, level: string, runKey: number | null) {
+function useLogViewer(api: LogApi | null, level: string, runKey: number | null) {
   const levelParam = level || undefined;
   const [liveLines, setLiveLines] = useState<LogLine[]>([]);
   const [historyPrefix, setHistoryPrefix] = useState<LogLine[]>([]);     // live 模式顶部加载的历史(旧→新)
