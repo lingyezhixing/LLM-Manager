@@ -60,39 +60,6 @@ def _app(tmp_path, life=None):
     return app
 
 
-def test_api_models_maps_state_and_config(tmp_path):
-    state._reset()
-    app = _app(tmp_path)
-    state.set_status("internal-qwen-key", ModelStatus.ROUTING, force=True)
-    state.record_pid("internal-qwen-key", 12840)
-    state.inc_pending("internal-qwen-key")
-    with TestClient(app) as c:
-        r = c.get("/api/models")
-    assert r.status_code == 200
-    m = r.json()["data"][0]
-    assert m["alias"] == "qwen2.5-32b"                 # aliases[0], not internal key
-    assert m["status"] == "routing"
-    assert m["pid"] == 12840
-    assert m["pending"] == 1
-    assert m["mode"] == "Chat" and m["port"] == 8001 and m["auto_start"] is False
-    assert m["started_at"] is not None and m["started_at"] > 0   # routing → uptime start
-    assert m["last_access"] > 0                                   # routing touched activity
-    assert m["failure_reason"] is None
-    state._reset()
-
-
-def test_api_models_defaults_when_never_accessed(tmp_path):
-    state._reset()
-    app = _app(tmp_path)
-    with TestClient(app) as c:
-        r = c.get("/api/models")
-    m = r.json()["data"][0]
-    assert m["started_at"] is None   # not routing
-    assert m["last_access"] == 0.0   # never accessed
-    assert m["status"] == "stopped"
-    state._reset()
-
-
 async def test_models_stream_yields_initial_then_on_change(tmp_path):
     """Drive the SSE generator directly (TestClient hangs on infinite streams)."""
     state._reset()
@@ -164,7 +131,7 @@ def test_stop_accepted_202_and_fires_stop(tmp_path):
 
 
 def test_api_models_reflects_store_reload(tmp_path):
-    """读穿:store.reload() 后 /api/models 反映新模型,无需重启/重注册。"""
+    """读穿:store.reload() 后 /api/config/models 反映新模型,无需重启/重注册。"""
     state._reset()
     app = _app(tmp_path)
     with TestClient(app) as c:
@@ -175,9 +142,9 @@ def test_api_models_reflects_store_reload(tmp_path):
         cur = app.state.config_store.snapshot()
         write_appconfig(app.state.db, replace(cur, models={**cur.models, "m2-key": m2}))
         app.state.config_store.reload()
-        r = c.get("/api/models")
-    aliases = {m["alias"] for m in r.json()["data"]}
-    assert "qwen2.5-32b" in aliases and "m2-served" in aliases
+        r = c.get("/api/config/models")
+    names = {m["name"] for m in r.json()}
+    assert "m2-key" in names
     state._reset()
 
 

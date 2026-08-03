@@ -68,7 +68,7 @@ def test_create_app_closes_db_on_bootstrap_error(tmp_path):
 
 
 def test_crud_then_catalog_reflects_without_restart(tmp_path, monkeypatch):
-    """P2 核心契约:POST /api/config/models 后,不重启即见 /v1/models + /api/models(读穿)。"""
+    """P2 核心契约:POST /api/config/models 后,不重启即见 /v1/models + /api/config/models(读穿)。"""
     monkeypatch.setattr("llm_manager.devices.is_lhm_available", lambda: False)  # 隔离 LHM 慢枚举
     cfg_path = tmp_path / "config.yaml"
     cfg_path.write_text(
@@ -86,10 +86,10 @@ def test_crud_then_catalog_reflects_without_restart(tmp_path, monkeypatch):
             "schemes": [{"config_source": "S", "required_devices": ["gpu"],
                          "command": {"exe": "b.bat"}, "memory_mb": {"gpu": 1}}]})
         assert r.status_code == 201
-        # 不重启即见 B(读穿:/v1/models 与 /api/models 都走 config_store.snapshot)
+        # 不重启即见 B(读穿:/v1/models 与 /api/config/models 都走 config_store.snapshot)
         v1 = {m["id"] for m in c.get("/v1/models").json()["data"]}
-        api = {m["alias"] for m in c.get("/api/models").json()["data"]}
-        assert "b" in v1 and "b" in api
+        api = {m["name"] for m in c.get("/api/config/models").json()}
+        assert "b" in v1 and "B" in api     # v1 用 alias "b";config 列表用 name "B"
         # CRUD 删 A → 反映
         c.delete("/api/config/models/A")
         v1b = {m["id"] for m in c.get("/v1/models").json()["data"]}

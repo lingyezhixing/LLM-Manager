@@ -5,11 +5,10 @@ paging (level filter / before), SSE live stream (DB backfill + broadcaster tail)
 cross-session text search, deleted-model alias resolution from session history,
 unknown-alias 404, unknown-session 404.
 
-SSE 测试直接驱动 _session_stream 生成器(同 test_api_logs.py 的 _logs_stream
-模式):starlette TestClient 与 httpx ASGITransport 都会 await app(...) 到 ASGI
-应用跑完才返回 —— 无限 SSE 流永不结束,任何客户端传输层都会死锁。生成器单循环
-测试覆盖真实逻辑(DB 回填 + 广播实时行);HTTP 层路由/404 由 test_session_404
-经同步 TestClient 覆盖。
+SSE 测试直接驱动 _session_stream 生成器:starlette TestClient 与 httpx ASGITransport
+都会 await app(...) 到 ASGI 应用跑完才返回 —— 无限 SSE 流永不结束,任何客户端
+传输层都会死锁。生成器单循环测试覆盖真实逻辑(DB 回填 + 广播实时行);HTTP 层
+路由/404 由 test_session_404 经同步 TestClient 覆盖。
 """
 import asyncio
 import json

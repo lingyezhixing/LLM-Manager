@@ -109,7 +109,7 @@ def test_non_get_catchall_forwards_to_proxy(tmp_path):
 
 
 def test_spa_served_and_api_unaffected_when_dist_exists(tmp_path, monkeypatch):
-    """StaticFiles+SPA fallback:GET / → index.html;既有 /health、/api/models 不受影响;
+    """StaticFiles+SPA fallback:GET / → index.html;既有 /health、/api/config/models 不受影响;
     未命中 GET 路径回退 index.html(SPA 前端路由)。"""
     import llm_manager.gateway.spa as spa_mod
 
@@ -125,7 +125,7 @@ def test_spa_served_and_api_unaffected_when_dist_exists(tmp_path, monkeypatch):
         assert c.get("/").status_code == 200                     # index.html
         assert "SPA" in c.get("/").text
         assert c.get("/health").status_code == 200               # 既有路由仍在
-        assert c.get("/api/models").status_code == 200           # 管理接口仍在
+        assert c.get("/api/config/models").status_code == 200    # 管理接口仍在
         assert c.get("/models").status_code == 200               # SPA 路由回退 index.html
         assert c.get("/assets/app.js").status_code == 200        # 静态资源
 

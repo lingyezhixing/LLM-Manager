@@ -1,10 +1,9 @@
-"""GET /api/devices (one-shot snapshot) + GET /api/devices/stream (SSE live push).
+"""GET /api/devices/stream (SSE live push) for the device bar.
 
-The stream is the device bar's live source: on connect it sends the current snapshot
-immediately, then each refresh from the subscriber-gated ``DeviceFeed`` (2s). The
-one-shot endpoint serves initial load / tests. Pydantic schemas → OpenAPI (types
-hand-mirrored in ``frontend/src/lib/api.ts``). The SSE generator is extracted
-(``_device_stream``) so it can be unit-tested directly without the HTTP stack.
+On connect it sends the current snapshot immediately, then each refresh from the
+subscriber-gated ``DeviceFeed`` (2s). Pydantic schemas → OpenAPI (types hand-mirrored
+in ``frontend/src/lib/api.ts``). The SSE generator is extracted (``_device_stream``)
+so it can be unit-tested directly without the HTTP stack.
 """
 from __future__ import annotations
 
@@ -56,12 +55,6 @@ async def _device_stream(feed: DeviceFeed) -> AsyncIterator[str]:
 
 
 def register_devices_routes(router: APIRouter) -> None:
-    @router.get("/devices", response_model=DevicesResponse)
-    def list_devices(request: Request) -> DevicesResponse:
-        feed: DeviceFeed = request.app.state.device_feed
-        snap = feed.current_snapshot()
-        return DevicesResponse(data=[_to_schema(d) for d in snap.values()])
-
     @router.get("/devices/stream")
     async def stream_devices(request: Request) -> StreamingResponse:
         feed: DeviceFeed = request.app.state.device_feed

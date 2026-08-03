@@ -111,21 +111,6 @@ def test_put_logs_updates_retention_rules(tmp_path):
     }
 
 
-def test_reload_no_longer_hot_applies_log_level(tmp_path, monkeypatch):
-    """L1: log_level 归重启类,reload 不再调 setup_logging(消除 handler 重复/log_dir 矛盾 bug 面)。"""
-    import llm_manager.app as appmod
-    captured: dict = {}
-    def fake_setup(*a, **k):
-        captured["called"] = True
-    monkeypatch.setattr(appmod, "setup_logging", fake_setup)
-    with TestClient(_app(tmp_path)) as c:
-        c.put("/api/config/program", json={"log_level": "DEBUG"})
-        r = c.post("/api/config/reload")
-    assert r.status_code == 200
-    assert captured.get("called") is not True          # reload 不再触发热重配
-    assert "log_level" in c.get("/api/config/restart-status").json()["restart_fields"]
-
-
 def test_restart_status_no_change_no_serving(tmp_path):
     with TestClient(_app(tmp_path)) as c:
         r = c.get("/api/config/restart-status")

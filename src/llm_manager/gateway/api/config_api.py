@@ -322,13 +322,6 @@ def register_config_routes(api: APIRouter) -> None:
         _store(request).reload()                  # 日志规则不进 AppConfig 快照,但 reload 保持新鲜
         return {"needs_restart": False, "restart_fields": [], "serving": _serving()}
 
-    @api.post("/config/reload")
-    def reload_config(request: Request) -> dict:
-        # log_level 已归重启类(L1):reload 仅刷快照,不再热重配 logging。
-        cfg = _store(request).reload()
-        rf = _restart_fields(cfg, _boot(request))
-        return {"needs_restart": bool(rf), "restart_fields": rf, "serving": _serving()}
-
     @api.get("/config/restart-status")
     def restart_status(request: Request) -> dict:
         cfg = _store(request).snapshot()
