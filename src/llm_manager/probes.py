@@ -1,5 +1,7 @@
 """Health probes by model mode. 2-phase (shallow /v1/models + deep per-mode),
-shared start_time/timeout budget. httpx (no openai SDK). Never raises."""
+shared start_time/timeout budget. httpx (no openai SDK). Never raises:未知 mode
+返回失败结果(不抛),所有路径产出 ProbeResult。预算用 time.monotonic()(墙钟跳变
+如 NTP 校时不扭曲超时预算)。"""
 from __future__ import annotations
 
 import time
@@ -19,24 +21,25 @@ def _make_client(port: int) -> httpx.Client:
     return httpx.Client(base_url=f"http://127.0.0.1:{port}/v1", timeout=5.0)
 
 
-def _deep_request(mode: str) -> tuple[str, dict]:
-    """Pure: (path, json_body_template_without_model) relative to base /v1."""
+def _deep_request(mode: str) -> tuple[str, dict] | None:
+    """Pure: (path, json_body_template_without_model) relative to base /v1。
+    未知 mode 返回 None(_probe 转失败结果,不抛——契约 Never raises)。"""
     if mode == "Chat":
         return "/chat/completions", {"messages": [{"role": "user", "content": "hello"}], "max_tokens": 1, "stream": False}
     if mode == "Embedding":
         return "/embeddings", {"input": "hello", "encoding_format": "float"}
     if mode == "Reranker":
         return "/rerank", {"query": "hello", "documents": ["hello world", "test document"], "top_n": 1}
-    raise ValueError(f"unknown mode {mode}")
+    return None
 
 
 def _probe(mode: str, label: str, alias: str, port: int, start_time: float | None, timeout: float) -> ProbeResult:
     if start_time is None:
-        start_time = time.time()
+        start_time = time.monotonic()
     client = _make_client(port)
     try:
         ok = False
-        while time.time() - start_time < timeout:
+        while time.monotonic() - start_time < timeout:
             try:
                 if client.get("/models", timeout=3.0).status_code < 400:
                     ok = True
@@ -46,8 +49,11 @@ def _probe(mode: str, label: str, alias: str, port: int, start_time: float | Non
             time.sleep(2)
         if not ok:
             return ProbeResult(False, f"{label}探测器浅层检查超时: 服务在 {timeout:.0f} 秒内不可用")
-        path, body = _deep_request(mode)
-        while time.time() - start_time < timeout:
+        deep = _deep_request(mode)
+        if deep is None:
+            return ProbeResult(False, f"{label}探测器不支持的模式: {mode}")
+        path, body = deep
+        while time.monotonic() - start_time < timeout:
             try:
                 resp = client.post(path, json={**body, "model": alias}, timeout=5.0)
                 if resp.status_code < 400:

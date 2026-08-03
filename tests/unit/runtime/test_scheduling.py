@@ -96,3 +96,10 @@ def test_check_and_free_never_evicts_pending():
 def test_check_and_free_returns_empty_when_no_evictable():
     snap = {"d": _dev("d", 0)}
     assert check_and_free({"d": 4096}, snap, {}, now=0.0) == []
+
+
+def test_check_and_free_returns_empty_when_partial_eviction_cannot_satisfy():
+    # 可驱逐模型只能凑 2048,deficit 4096 仍欠 → 不应白停它(B5:返回 [] 交 lifecycle 判 FAILED)
+    snap = {"d": _dev("d", 0)}
+    runnable = {"a": RunnableInfo(mem_mb={"d": 2048}, pending=0, last_access=0.0)}
+    assert check_and_free({"d": 4096}, snap, runnable, now=0.0) == []

@@ -152,6 +152,59 @@ def test_record_usage_best_effort_swallows_exception(monkeypatch):
 
 
 # ---------- _stream_wrapper ----------
+def test_stream_sample_keeps_head_and_tail_drops_middle():
+    s = proxy._StreamSample(head_max=16, tail_max=16)
+    s.feed(b"H" * 20)      # head 截到 16
+    s.feed(b"M" * 100)     # 中间全丢
+    s.feed(b"T" * 20)      # tail 截到 16
+    out = s.sample()
+    assert out.startswith(b"H" * 16)
+    assert out.endswith(b"T" * 16)
+    assert b"M" not in out
+    assert len(out) == 32
+
+
+def test_stream_sample_small_stream_returns_head_only_no_dup():
+    s = proxy._StreamSample(head_max=64, tail_max=64)
+    s.feed(b"abcdef")
+    assert s.sample() == b"abcdef"   # 全流 < head → 不拼接 tail(无重复)
+
+
+async def test_stream_wrapper_long_stream_parses_usage_from_head_and_tail():
+    """长流(中间远超 head+tail)中间被丢弃,但头部 message_start(input)+ 尾部
+    message_delta(output)仍在 → metering 解析用量正确(头尾双缓冲契约)。"""
+    state._reset()
+    state.set_status("m1", ModelStatus.ROUTING, force=True)
+    state.begin_request("m1")
+    head = (b'event: message_start\ndata: {"type":"message_start","message":'
+            b'{"usage":{"input_tokens":42,"cache_read_input_tokens":0,'
+            b'"cache_creation_input_tokens":0}}}\n\n')
+    middle = (b'event: content_block_delta\ndata: {"type":"content_block_delta",'
+              b'"delta":{"text":"x"}}\n\n') * 4000   # ~340KB ≫ head(16K)+tail(128K)
+    tail = (b'event: message_delta\ndata: {"type":"message_delta",'
+            b'"usage":{"output_tokens":99}}\n\n')
+
+    class FakeResp:
+        headers = {"content-type": "text/event-stream"}
+
+        async def aiter_bytes(self):
+            for c in [head, middle, tail]:
+                yield c
+
+        async def aclose(self):
+            pass
+
+    db = open_db(Path(":memory:"))
+    out = [c async for c in proxy._stream_wrapper(FakeResp(), "v1/messages", "m1", db, 1.0)]
+    assert b"".join(out) == head + middle + tail        # 透传完整(不截断客户端流)
+    assert len(_usage_rows(db)) == 1
+    row = db.conn.execute(
+        "SELECT input_tokens, output_tokens FROM model_requests r JOIN models m ON r.model_id = m.id "
+        "WHERE m.original_name = ?", ("m1",)).fetchone()
+    assert row["input_tokens"] == 42
+    assert row["output_tokens"] == 99
+
+
 async def test_stream_wrapper_forwards_chunks_records_usage_ends_request():
     state._reset()
     state.set_status("m1", ModelStatus.ROUTING, force=True)

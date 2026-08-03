@@ -189,6 +189,32 @@ def test_get_failure_reason():
     assert state.get_failure_reason("m1") == "exited code=1"
 
 
+def test_failure_reason_cleared_on_restart():
+    """B3:失败后再启动成功,陈旧 failure_reason 必须清除(SSE 不再携带上次失败原因)。"""
+    from llm_manager import state
+    from llm_manager.state import ModelStatus
+    state._reset()
+    state.record_failure("m1", "probe failed")
+    assert state.get_failure_reason("m1") == "probe failed"
+    # claim_start(FAILED→STARTING)清 reason
+    asyncio.run(_claim_and_check_cleared())
+
+
+async def _claim_and_check_cleared():
+    from llm_manager import state
+    from llm_manager.state import ModelStatus
+    fut, won = state.claim_start("m1")
+    assert won
+    assert state.get_failure_reason("m1") is None          # 新一轮启动已清
+    state.finish_start("m1", ModelStatus.ROUTING)
+    assert state.get_failure_reason("m1") is None
+    # 再次失败 → reason 重新设置;再重启 → 再清
+    state.record_failure("m1", "second crash")
+    assert state.get_failure_reason("m1") == "second crash"
+    fut2, _ = state.claim_start("m1")
+    assert state.get_failure_reason("m1") is None
+
+
 def test_routing_names_returns_only_routing():
     from llm_manager import state
     state._reset()

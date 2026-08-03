@@ -56,7 +56,12 @@ def check_and_free(
     now: float,
 ) -> list[str]:
     """Simulate eviction until deficit satisfied or no evictable candidate.
-    Returns model names to stop (in eviction order). Pure."""
+    Returns model names to stop (in eviction order). Pure.
+
+    若驱逐所有可驱逐模型后 deficit 仍非空(资源根本不足),返回 []——lifecycle 随后
+    _deficit_satisfied 判 FAILED。这样不会「白停一批正在跑的模型后才失败」(B5)。
+    注:真实停模型后重快照可能因实际占用 ≠ 声明 memory_mb 而更乐观,但不应以此不确定性
+    赌注杀运行中模型;配置应保证 memory_mb 准确(见 config.scheme_memory_warnings)。"""
     working = _available(snap)
     deficit_devs = set(compute_deficit(required, working))
     stopped: list[str] = []
@@ -69,4 +74,6 @@ def check_and_free(
         for dev, mb in runnable[victim].mem_mb.items():
             working[dev] = working.get(dev, 0) + mb
         deficit_devs = set(compute_deficit(required, working))
+    if deficit_devs:
+        return []      # 模拟无可满足:不返回部分驱逐名单(白停),交由 lifecycle 判 FAILED
     return stopped

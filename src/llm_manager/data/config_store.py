@@ -150,8 +150,8 @@ def _read_appconfig_locked(db: Db) -> AppConfig:
     s = get_all_settings(db)
     program = ProgramConfig(
         host=s.get("host", PROGRAM_DEFAULTS["host"]),
-        port=int(s.get("port", PROGRAM_DEFAULTS["port"])),
-        alive_time=int(s.get("alive_time", PROGRAM_DEFAULTS["alive_time"])),
+        port=_int_setting(s, "port", int(PROGRAM_DEFAULTS["port"])),
+        alive_time=_int_setting(s, "alive_time", int(PROGRAM_DEFAULTS["alive_time"])),
         log_level=s.get("log_level", PROGRAM_DEFAULTS["log_level"]),
         claude_settings_path=s.get("claude_settings_path"),
         log_retention_days=_int_setting(s, "log_retention_days", int(RETENTION_DEFAULTS["log_retention_days"])),
@@ -238,6 +238,8 @@ def mutate_appconfig(db: Db, fn: Callable[[AppConfig], AppConfig]) -> AppConfig:
         errors = config.validate(new_cfg)
         if errors:
             raise ConfigValidationFailed(errors)
+        for w in config.scheme_memory_warnings(new_cfg):
+            logger.warning("config: %s", w)
         _write_appconfig_locked(db, new_cfg)
         return new_cfg
 

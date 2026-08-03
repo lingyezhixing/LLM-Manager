@@ -47,6 +47,8 @@ def create_app(db_path: Path | None = None, *, legacy_yaml: Path | None = None) 
         errors = config.validate(cfg)
         if errors:
             raise ValueError("Invalid config:\n" + "\n".join(f"  - {e}" for e in errors))
+        for w in config.scheme_memory_warnings(cfg):
+            logger.warning("config: %s", w)
     except Exception:
         db.conn.close()
         raise

@@ -95,16 +95,47 @@ async def _record_usage(db, model, path, body_bytes, start, end) -> None:
         logger.exception("record_usage failed for model=%s path=%s", model, path)
 
 
+class _StreamSample:
+    """头尾双缓冲:只保留首 HEAD_MAX 字节 + 末 TAIL_MAX 字节供 metering 解析用量,
+    避免长流式响应(推理模型几分钟输出)整条缓冲导致内存随流时长无界增长、N 个并发流
+    = N 份无界缓冲。
+
+    metering 三解析器的用量字段仅出现在头部(Anthropic message_start 的 input 用量)
+    或尾部(OpenAI usage / Anthropic message_delta / Responses response.completed)——
+    中间内容增量不含用量,可安全丢弃。解析器对头尾拼接串容忍:拼接处的半行被
+    _try_json 回退跳过,完整的 head/tail 事件照常解析(parse_anthropic 需头+尾,
+    parse_openai/responses 仅需尾)。"""
+
+    def __init__(self, head_max: int = 16 * 1024, tail_max: int = 128 * 1024) -> None:
+        self._head_max = head_max
+        self._tail_max = tail_max
+        self._head = bytearray()
+        self._tail = bytearray()
+
+    def feed(self, chunk: bytes) -> None:
+        if len(self._head) < self._head_max:
+            self._head.extend(chunk[: self._head_max - len(self._head)])
+        self._tail.extend(chunk)
+        if len(self._tail) > self._tail_max:
+            del self._tail[: len(self._tail) - self._tail_max]
+
+    def sample(self) -> bytes:
+        # 全流 ≤ head 时 head 已含全部,直接返回(避免与 tail 重复拼接致事件重复)。
+        if len(self._head) < self._head_max:
+            return bytes(self._head)
+        return bytes(self._head) + bytes(self._tail)
+
+
 async def _stream_wrapper(resp, path, model, db, request_start):
     from llm_manager import state
-    chunks: list[bytes] = []
+    sample = _StreamSample()
     try:
         async for chunk in resp.aiter_bytes():
-            chunks.append(chunk)
+            sample.feed(chunk)
             yield chunk
     finally:
         await resp.aclose()
-        await _record_usage(db, model, path, b"".join(chunks), request_start, time.time())
+        await _record_usage(db, model, path, sample.sample(), request_start, time.time())
         state.end_request(model)
 
 

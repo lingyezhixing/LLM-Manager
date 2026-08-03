@@ -272,6 +272,7 @@ class Lifecycle:
         alive = pid is not None and self._supervisor.alive(pid)
         if s == ModelStatus.ROUTING and not alive:
             self._runtime_end(alias)   # exit cb 漏触发时兜底关会话(无开会话则 0 行 UPDATE,幂等)
+            self._log_end(alias)       # 与 _on_crash 对称:exit cb 漏触发时也收口日志会话,防滞留直播集
             state.record_failure(alias, f"reconcile: process dead (pid={pid})")
         elif s in (ModelStatus.STARTING, ModelStatus.INIT_SCRIPT, ModelStatus.HEALTH_CHECK) \
                 and not state.has_inflight(alias):

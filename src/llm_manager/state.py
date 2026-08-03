@@ -71,6 +71,8 @@ def set_status(name: str, status: ModelStatus, *, reason: str | None = None, for
     rec.status = status
     if status == ModelStatus.FAILED:
         rec.failure_reason = reason
+    else:
+        rec.failure_reason = None   # 离开 FAILED(成功重启/停止)→ 清陈旧原因(B3);失败原因只在 FAILED 态有意义
     if status == ModelStatus.ROUTING:
         now_wall = time.time()
         rec.last_access = time.monotonic()
@@ -174,7 +176,9 @@ def claim_start(name: str) -> tuple[asyncio.Future, bool]:
     loop = asyncio.get_running_loop()
     fut: asyncio.Future = loop.create_future()
     _inflight[name] = fut
-    _rec(name).status = ModelStatus.STARTING
+    rec = _rec(name)
+    rec.status = ModelStatus.STARTING
+    rec.failure_reason = None   # 新一轮启动:清上次失败原因(B3),防 SSE 携带陈旧 reason
     return fut, True
 
 
@@ -191,8 +195,11 @@ def finish_start(name: str, status: ModelStatus, *, owner: asyncio.Future | None
         return
     fut = _inflight.pop(name, None)
     rec.status = status
-    if status == ModelStatus.FAILED and rec.failure_reason is None:
-        rec.failure_reason = "startup failed"
+    if status == ModelStatus.FAILED:
+        if rec.failure_reason is None:
+            rec.failure_reason = "startup failed"
+    else:
+        rec.failure_reason = None   # 成功(ROUTING)/STOPPED → 清陈旧失败原因(B3)
     if fut is not None and not fut.done():
         fut.set_result(status)
 

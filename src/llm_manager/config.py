@@ -146,10 +146,17 @@ def load(path: Path) -> AppConfig:
 
 def validate(cfg: AppConfig) -> list[str]:
     errors: list[str] = []
+    # 程序级:端口范围(YAML 导入/config.load 的 int() 不查范围,在此兜底)
+    if not 1 <= cfg.program.port <= 65535:
+        errors.append(f"Program port {cfg.program.port} out of range (1-65535)")
     seen_ports: dict[int, str] = {}
     seen_aliases: dict[str, str] = {}
     valid_modes = {m.value for m in ModelMode}
     for name, m in cfg.models.items():
+        if not name or not name.strip():                       # 空模型名
+            errors.append("Model name is empty/blank")
+        if not 1 <= m.port <= 65535:                           # 模型端口范围
+            errors.append(f"Model '{name}' port {m.port} out of range (1-65535)")
         if m.port in seen_ports:
             errors.append(f"Port {m.port} shared by models '{seen_ports[m.port]}' and '{name}'")
         else:
@@ -157,8 +164,15 @@ def validate(cfg: AppConfig) -> list[str]:
         if not m.aliases:
             errors.append(f"Model '{name}' has no aliases")  # aliases[0]=下游 served name 必须
         for a in m.aliases:
+            if not a or not a.strip():                         # 空串别名
+                errors.append(f"Model '{name}' has empty alias")
+                continue
             if a in seen_aliases:
-                errors.append(f"Alias '{a}' shared by models '{seen_aliases[a]}' and '{name}'")
+                # 区分同模型内重复(误填)vs 跨模型共用(冲突)
+                if seen_aliases[a] == name:
+                    errors.append(f"Model '{name}' has duplicate alias '{a}'")
+                else:
+                    errors.append(f"Alias '{a}' shared by models '{seen_aliases[a]}' and '{name}'")
             else:
                 seen_aliases[a] = name
         if m.mode not in valid_modes:
@@ -183,6 +197,24 @@ def validate(cfg: AppConfig) -> list[str]:
         if m.pricing.hourly_price < 0:
             errors.append(f"Model '{name}' has negative price hourly_price")
     return errors
+
+
+def scheme_memory_warnings(cfg: AppConfig) -> list[str]:
+    """软告警(非 fatal):scheme 声明了 required_devices 但缺对应 memory_mb → 调度时该设备
+    按 0 需求,显存检查被架空(check_and_free 收到空 required → 无 deficit → 直接放行)。
+
+    作 WARNING 而非 error:部分合法配置刻意不填(如多设备备用方案/用户暂不启用驱逐),
+    硬性报错会阻止已运行的配置启动。启动期 + 模型 CRUD 时日志告警,提示用户按需补全。
+    详见 round3 审查 B4③。"""
+    warnings: list[str] = []
+    for name, m in cfg.models.items():
+        for sname, scheme in m.schemes.items():
+            missing = set(scheme.required_devices) - set(scheme.memory_mb)
+            if missing:
+                warnings.append(
+                    f"Model '{name}' scheme '{sname}': required_devices {sorted(missing)} "
+                    f"have no memory_mb entry → memory check bypassed for those devices")
+    return warnings
 
 
 def select_adaptive(model: ModelConfig, online: set[str]) -> Scheme | None:
