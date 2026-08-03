@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Field, TextArea, TextInput } from "@/components/ui/form";
 import { KeyValueEditor, StringListEditor } from "@/components/ui/repeatable-fields";
-import { joinCommandLine, previewCommand, splitCommandLine } from "@/lib/split-command";
+import { hasUnterminatedQuote, joinCommandLine, previewCommand, splitCommandLine } from "@/lib/split-command";
 import type { CommandDef } from "@/lib/api";
 
 // 命令编辑:顺序=环境变量 → conda 环境 → 命令行 → 预览 → 高级(折叠 exe/args/cwd)。
@@ -76,6 +76,12 @@ export function CommandEditor({
           rows={4}
         />
       </Field>
+
+      {hasUnterminatedQuote(line) && (
+        <p className="-mt-2 mb-3 text-xs text-warning">
+          引号未闭合:含空格的参数可能被错误切分(可在下方「高级」区手改 args)
+        </p>
+      )}
 
       {preview && (
         <div className="mb-3 rounded-md bg-muted px-3 py-2">

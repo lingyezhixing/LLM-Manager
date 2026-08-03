@@ -59,3 +59,19 @@ export function previewCommand(c: {
     ? `conda run -n ${c.conda_env} --no-capture-output ${base}`
     : base;
 }
+
+/** 命令行是否存在未闭合的引号(扫到末尾仍处在引号内)。用于 CommandEditor 提示用户:
+ *  未闭合时含空格的参数会被错误切分(可在「高级」区手改 args 作回退)。与 splitCommandLine
+ *  同源规则(只认成对引号、不转义反斜杠),不重复解析逻辑而是独立轻量扫描。 */
+export function hasUnterminatedQuote(line: string): boolean {
+  let quote: '"' | "'" | null = null;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (quote) {
+      if (ch === quote) quote = null;
+    } else if (ch === '"' || ch === "'") {
+      quote = ch;
+    }
+  }
+  return quote !== null;
+}
