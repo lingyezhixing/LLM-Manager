@@ -89,6 +89,21 @@ def test_sessions_list(client):
     assert [d["id"] for d in r3.json()] == [sid_m]
 
 
+def test_running_session_status_survives_heartbeat(client):
+    """心跳把运行中会话的 end_time 写成非 NULL(每 30s),status 仍应为 running。
+
+    回归 7279319 解耦语义:运行中由内存 live 集合判定,end_time 只管时间——
+    API 响应层的 status 必须用 SQL 算好的 status 字段,不能回退到 end_time 判断
+    (否则心跳一写 end_time,日志页「运行中」就消失)。"""
+    c, db, sid_sys, sid_m = client
+    _logs.log_heartbeat_live(db, 2500.0)   # 模拟一次心跳:live 会话 end_time 被推到现在
+    r = c.get("/api/logs/sessions")
+    by_id = {d["id"]: d for d in r.json()}
+    assert by_id[sid_m]["end_time"] == 2500.0       # 心跳确实写了 end_time
+    assert by_id[sid_m]["status"] == "running"      # 但在内存 live 集合 → 仍运行中
+    assert by_id[sid_m]["duration_s"] is None       # 运行中不展示时长
+
+
 def test_sessions_before_pagination(client):
     c, db, sid_sys, sid_m = client
     r = c.get("/api/logs/sessions?before=2")

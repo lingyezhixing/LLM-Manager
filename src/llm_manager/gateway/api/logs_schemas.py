@@ -52,11 +52,14 @@ def _to_line(r) -> LogLineResponse:
 
 
 def _to_session(r) -> LogSessionResponse:
-    ended = r["end_time"] is not None
+    """SQL 层的 status 由内存 live_session_ids 计算(运行中=直播会话,end_time 只管时间,
+    心跳会把它推到 now)——响应必须透传该字段,不能再按 end_time 判运行中(7279319 解耦
+    语义;否则心跳一写 end_time,日志页「运行中」就消失)。"""
+    status = r["status"]
     return LogSessionResponse(
         id=r["id"], type=r["type"], model_name=r["model_name"], alias=r["alias"],
         start_time=r["start_time"], end_time=r["end_time"],
-        status="ended" if ended else "running",
-        duration_s=(r["end_time"] - r["start_time"]) if ended else None,
+        status=status,
+        duration_s=(r["end_time"] - r["start_time"]) if status == "ended" else None,
         line_count=r["line_count"],
     )
