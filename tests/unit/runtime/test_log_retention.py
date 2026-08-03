@@ -1,7 +1,7 @@
 import asyncio
 import pytest
+from llm_manager.data import logs as _logs
 from llm_manager.data.persistence import open_db
-from llm_manager.data import persistence as _p
 from llm_manager.runtime import log_retention
 
 
@@ -11,10 +11,10 @@ def db(tmp_path):
 
 
 def _seed(db):
-    sid = _p.log_start_session(db, "system", None, None, 1000.0)   # 超期
-    _p.log_insert_lines(db, sid, [(1, 1000.1, "sys", "info", "old")])
-    sid2 = _p.log_start_session(db, "model", "m1", "m1", 5000.0)   # 新
-    _p.log_insert_lines(db, sid2, [(1, 5000.1, "out", "info", "new")])
+    sid = _logs.log_start_session(db, "system", None, None, 1000.0)   # 超期
+    _logs.log_insert_lines(db, sid, [(1, 1000.1, "sys", "info", "old")])
+    sid2 = _logs.log_start_session(db, "model", "m1", "m1", 5000.0)   # 新
+    _logs.log_insert_lines(db, sid2, [(1, 5000.1, "out", "info", "new")])
     return sid, sid2
 
 
@@ -31,7 +31,7 @@ def test_loop_cleans_by_time(db):
         stop.set()
         await asyncio.wait_for(loop, timeout=1.0)
     asyncio.run(go())
-    rows = _p.log_sessions(db)
+    rows = _logs.log_sessions(db)
     assert [r["id"] for r in rows] == [new]
 
 
@@ -46,7 +46,7 @@ def test_loop_count_rule(db):
         stop.set()
         await asyncio.wait_for(loop, timeout=1.0)
     asyncio.run(go())
-    rows = _p.log_sessions(db)
+    rows = _logs.log_sessions(db)
     assert len(rows) == 1 and rows[0]["start_time"] == 5000.0
 
 
@@ -93,13 +93,13 @@ def test_loop_reads_fresh_settings_each_round(db):
         loop = asyncio.create_task(log_retention.log_retention_loop(
             db, getter, stop, period=0.02, now=6000.0))
         await asyncio.wait_for(second_read.wait(), timeout=1.0)
-        assert len(_p.log_sessions(db)) == 2      # 旧值两轮确实未清理
+        assert len(_logs.log_sessions(db)) == 2      # 旧值两轮确实未清理
         settings[0] = (9999, 1)                    # 换新规则
         await asyncio.wait_for(new_read.wait(), timeout=1.0)
         stop.set()
         await asyncio.wait_for(loop, timeout=1.0)  # 等新值那轮的清理收尾
     asyncio.run(go())
-    rows = _p.log_sessions(db)
+    rows = _logs.log_sessions(db)
     assert len(rows) == 1 and rows[0]["start_time"] == 5000.0
 
 
@@ -115,4 +115,4 @@ def test_loop_disabled_gate(db):
         stop.set()
         await asyncio.wait_for(loop, timeout=1.0)
     asyncio.run(go())
-    assert len(_p.log_sessions(db)) == 2
+    assert len(_logs.log_sessions(db)) == 2

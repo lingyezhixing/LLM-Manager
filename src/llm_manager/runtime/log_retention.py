@@ -13,7 +13,6 @@ import logging
 # 否则其 DB 行被删后 logs.flush 落库 FK 失败)。导入安全无环:logs 仅依赖
 # persistence / realtime(→devices),均不依赖 runtime.log_retention。
 from llm_manager.data import logs as _logs
-from llm_manager.data import persistence as _p
 
 logger = logging.getLogger(__name__)
 
@@ -26,8 +25,8 @@ async def log_retention_loop(db, get_settings, stop_event: asyncio.Event,
             days, count = get_settings()
             if days > 0 and count > 0:
                 removed_s, removed_l = await asyncio.to_thread(
-                    _p.log_cleanup, db, days, count, now,
-                    live_session_ids=set(_logs._sessions))
+                    _logs.log_cleanup, db, days, count, now,
+                    live_session_ids=_logs.live_session_ids())
                 if removed_s:
                     logger.info("log retention cleaned %d sessions / %d lines",
                                 removed_s, removed_l)

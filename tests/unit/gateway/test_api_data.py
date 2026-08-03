@@ -8,12 +8,9 @@ from types import SimpleNamespace
 from fastapi import APIRouter, FastAPI
 from fastapi.testclient import TestClient
 
-from llm_manager.data.persistence import (
-    log_insert_lines,
-    log_start_session,
-    open_db,
-    record_usage,
-)
+from llm_manager.data.logs import log_insert_lines, log_start_session
+from llm_manager.data.persistence import open_db
+from llm_manager.data.usage import record_usage
 from llm_manager.gateway.api.data_api import register_data_routes
 
 

@@ -139,13 +139,13 @@ def test_record_usage_no_usage_no_row():
 
 def test_record_usage_best_effort_swallows_exception(monkeypatch):
     import sqlite3
-    from llm_manager.data import persistence
+    from llm_manager.data import usage
     async def main():
         db = open_db(Path(":memory:"))
 
         def boom(*a, **kw):
             raise sqlite3.OperationalError("disk full")
-        monkeypatch.setattr(persistence, "record_usage", boom)
+        monkeypatch.setattr(usage, "record_usage", boom)
         body = b'{"usage":{"prompt_tokens":5,"completion_tokens":10}}'
         await proxy._record_usage(db, "m1", "v1/chat/completions", body, 1.0, 2.0)  # 不抛
     asyncio.run(main())
@@ -292,12 +292,12 @@ async def test_forward_upstream_5xx_passes_through_raw():
 
 async def test_forward_record_usage_failure_does_not_pollute_passthrough(monkeypatch):
     import sqlite3
-    from llm_manager.data import persistence
+    from llm_manager.data import usage
     state._reset()
 
     def boom(*a, **kw):
         raise sqlite3.OperationalError("boom")
-    monkeypatch.setattr(persistence, "record_usage", boom)
+    monkeypatch.setattr(usage, "record_usage", boom)
 
     def handler(req):
         return httpx.Response(200, json={"id": "x", "usage": {"prompt_tokens": 4, "completion_tokens": 6, "total_tokens": 10}},

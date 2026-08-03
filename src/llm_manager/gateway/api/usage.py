@@ -19,7 +19,7 @@ from fastapi import APIRouter, Request
 from pydantic import BaseModel
 
 from llm_manager.data import session
-from llm_manager.data.persistence import usage_by_model, usage_cost, usage_cost_series, usage_series, usage_summary
+from llm_manager.data.usage import usage_by_model, usage_cost, usage_cost_series, usage_series, usage_summary
 from llm_manager.gateway.api.common import get_config_store, get_db
 
 

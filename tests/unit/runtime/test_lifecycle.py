@@ -7,7 +7,6 @@ import pytest
 from llm_manager import state
 from llm_manager.config import AppConfig, Command, ModelConfig, ProgramConfig, Scheme
 from llm_manager.data import logs
-from llm_manager.data import persistence as _p
 from llm_manager.devices import DeviceInfo
 from llm_manager.probes import ProbeResult
 from llm_manager.runtime.lifecycle import Lifecycle
@@ -493,7 +492,7 @@ async def test_pipeline_wires_on_output_to_logs_capture(tmp_path):
         cap.on_output("server listening on :8000", "out")
         cap.on_output("error: boom", "err")
         await logs.flush()
-        lines = _p.log_lines_backfill(db, sid, limit=10)
+        lines = logs.log_lines_backfill(db, sid, limit=10)
         assert [line["text"] for line in lines] == ["server listening on :8000", "error: boom"]
         assert [line["level"] for line in lines] == ["ok", "error"]
     finally:
@@ -516,12 +515,12 @@ async def test_stop_ends_log_session(tmp_path):
         assert sid is not None
         await lc.stop("m1")
         assert logs.resolve_session("m1") is None
-        rows = _p.log_sessions(db, type_="model", model_name="m1")
+        rows = logs.log_sessions(db, type_="model", model_name="m1")
         assert len(rows) == 1 and rows[0]["end_time"] is not None
         # stop 后 capture 无进行中会话可入 → 丢弃(行数不变,不污染历史)
         logs.capture("m1", "dropped after stop", "out")
         await logs.flush()
-        lines = _p.log_lines_backfill(db, sid, limit=10)
+        lines = logs.log_lines_backfill(db, sid, limit=10)
         assert [line["text"] for line in lines] == ["old session line"]
     finally:
         logs.reset()
@@ -635,18 +634,18 @@ async def test_model_log_session_open_on_spawn_closed_on_stop(tmp_path):
         await life.ensure_running("m1")
         sid = logs.resolve_session("m1")
         assert sid is not None
-        rows = _p.log_sessions(db, type_="model", model_name="m1")
+        rows = logs.log_sessions(db, type_="model", model_name="m1")
         assert len(rows) == 1 and rows[0]["end_time"] is None   # 进行中
         assert rows[0]["alias"] == "m1"                          # alias=aliases[0](served name)
         # spawn 输出 → 该会话的日志行(接线 on_output → capture 按 alias 关联)
         logs.capture("m1", "server listening on :8000", "out")
         await logs.flush()
-        lines = _p.log_lines_backfill(db, sid, limit=10)
+        lines = logs.log_lines_backfill(db, sid, limit=10)
         assert [ll["text"] for ll in lines] == ["server listening on :8000"]
 
         await life.stop("m1")
         assert logs.resolve_session("m1") is None
-        rows = _p.log_sessions(db, type_="model", model_name="m1")
+        rows = logs.log_sessions(db, type_="model", model_name="m1")
         assert rows[0]["end_time"] is not None   # stop 收口(旧 bug:end_session 收到字符串静默 no-op)
     finally:
         logs.reset()
@@ -664,7 +663,7 @@ async def test_model_log_session_closed_on_crash(tmp_path):
         assert logs.resolve_session("m1") is not None
         sup.trigger_exit(1000, code=1)
         assert logs.resolve_session("m1") is None
-        rows = _p.log_sessions(db, type_="model", model_name="m1")
+        rows = logs.log_sessions(db, type_="model", model_name="m1")
         assert len(rows) == 1 and rows[0]["end_time"] is not None
     finally:
         logs.reset()
@@ -684,7 +683,7 @@ async def test_model_log_session_restart_opens_new_session_closes_old(tmp_path):
         await life.ensure_running("m1")
         sid2 = logs.resolve_session("m1")
         assert sid1 != sid2 and sid2 is not None
-        rows = _p.log_sessions(db, type_="model", model_name="m1")   # id 降序:最新在前
+        rows = logs.log_sessions(db, type_="model", model_name="m1")   # id 降序:最新在前
         assert len(rows) == 2
         assert rows[0]["end_time"] is None       # 新会话进行中
         assert rows[1]["end_time"] is not None   # 旧会话已收口
@@ -704,7 +703,7 @@ async def test_model_log_session_closed_on_probe_failure(tmp_path):
         status = await life.ensure_running("m1")
         assert status == ModelStatus.FAILED
         assert logs.resolve_session("m1") is None
-        rows = _p.log_sessions(db, type_="model", model_name="m1")
+        rows = logs.log_sessions(db, type_="model", model_name="m1")
         assert len(rows) == 1 and rows[0]["end_time"] is not None
     finally:
         logs.reset()
@@ -733,7 +732,7 @@ async def test_stop_during_spawn_closes_log_session(tmp_path):
         assert status == ModelStatus.STOPPED
         assert 1000 in sup.killed                   # orphan 被 kill
         assert logs.resolve_session("m1") is None
-        rows = _p.log_sessions(db, type_="model", model_name="m1")
+        rows = logs.log_sessions(db, type_="model", model_name="m1")
         assert len(rows) == 1 and rows[0]["end_time"] is not None   # 无泄漏:orphan 分支已收口
     finally:
         logs.reset()
@@ -756,8 +755,8 @@ async def test_model_log_sessions_tracked_per_alias(tmp_path):
         await life.stop("m1")
         assert logs.resolve_session("m1") is None
         assert logs.resolve_session("m2") is not None     # m2 会话不受影响
-        rows1 = _p.log_sessions(db, type_="model", model_name="m1")
-        rows2 = _p.log_sessions(db, type_="model", model_name="m2")
+        rows1 = logs.log_sessions(db, type_="model", model_name="m1")
+        rows2 = logs.log_sessions(db, type_="model", model_name="m2")
         assert rows1[0]["end_time"] is not None
         assert rows2[0]["end_time"] is None
     finally:

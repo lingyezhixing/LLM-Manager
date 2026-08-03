@@ -9,6 +9,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
 
+from llm_manager.data import logs as _logs
 from llm_manager.data import persistence as _p
 from llm_manager.gateway.api.common import get_config_store, get_db
 
@@ -22,7 +23,7 @@ def register_data_routes(api: APIRouter) -> None:
         size = db_path.stat().st_size if db_path.exists() else None
         cfg = get_config_store(request).snapshot()
         s = _p.storage_stats(db, configured=set(cfg.models.keys()), size_bytes=size)
-        log_sessions, log_lines = _p.log_counts(db)
+        log_sessions, log_lines = _logs.log_counts(db)
         return {
             "size_bytes": s.size_bytes,
             "total_requests": s.total_requests,

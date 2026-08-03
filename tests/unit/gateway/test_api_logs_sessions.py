@@ -19,7 +19,6 @@ from fastapi.testclient import TestClient
 
 from llm_manager import config
 from llm_manager.data import logs as _logs
-from llm_manager.data import persistence as _p
 from llm_manager.data.config_store import ConfigStore, write_appconfig
 from llm_manager.data.persistence import open_db
 from llm_manager.gateway.api.logs import _session_stream
@@ -60,10 +59,10 @@ def _build(tmp_path):
     app.state.db = db
     _logs.reset()
     _logs.init(db)
-    sid_sys = _p.log_start_session(db, "system", None, None, 1000.0)
-    _p.log_insert_lines(db, sid_sys, [(1, 1000.1, "sys", "info", "boot"),
+    sid_sys = _logs.log_start_session(db, "system", None, None, 1000.0)
+    _logs.log_insert_lines(db, sid_sys, [(1, 1000.1, "sys", "info", "boot"),
                                       (2, 1000.2, "sys", "error", "boom")])
-    _p.log_end_session(db, sid_sys, 1500.0)
+    _logs.log_end_session(db, sid_sys, 1500.0)
     sid_m = _logs.start_session("model", "m1", "m1a", 2000.0)
     return app, db, sid_sys, sid_m
 
@@ -131,7 +130,7 @@ def test_search_total_is_true_count_uncut_by_limit(client):
     """真 total:limit 截断行数但 total 是满足条件的全部匹配数。"""
     c, db, sid_sys, sid_m = client
     for i in range(600):
-        _p.log_insert_lines(db, sid_sys, [(100 + i, 1000.0 + i, "sys", "info", f"x {i}")])
+        _logs.log_insert_lines(db, sid_sys, [(100 + i, 1000.0 + i, "sys", "info", f"x {i}")])
     r = c.get("/api/logs/search?q=x&limit=500")
     j = r.json()
     assert j["total"] == 600 and len(j["matches"]) == 500
@@ -156,9 +155,9 @@ def test_deleted_model_alias_resolves_from_session_history(client):
     §8 承诺模型下拉含"已删除模型的残留会话";删模型后 config 无此 alias,
     需回退到 log_sessions 历史按 alias/原名解析。"""
     c, db, sid_sys, sid_m = client
-    sid_del = _p.log_start_session(db, "model", "deleted_model", "gone", 3000.0)
-    _p.log_insert_lines(db, sid_del, [(1, 3000.1, "model", "info", "residual")])
-    _p.log_end_session(db, sid_del, 3500.0)
+    sid_del = _logs.log_start_session(db, "model", "deleted_model", "gone", 3000.0)
+    _logs.log_insert_lines(db, sid_del, [(1, 3000.1, "model", "info", "residual")])
+    _logs.log_end_session(db, sid_del, 3500.0)
     # 按历史 alias 过滤
     r = c.get("/api/logs/sessions?type=model&model=gone")
     assert r.status_code == 200

@@ -119,8 +119,8 @@ class Lifecycle:
         if self._db is None:
             return
         try:
-            from llm_manager.data import persistence as _p
-            _p.record_runtime_start(self._db, alias, time.time())
+            from llm_manager.data import usage as _u
+            _u.record_runtime_start(self._db, alias, time.time())
         except Exception:
             logger.warning("record_runtime_start failed for %s", alias, exc_info=True)
 
@@ -128,8 +128,8 @@ class Lifecycle:
         if self._db is None:
             return
         try:
-            from llm_manager.data import persistence as _p
-            _p.record_runtime_end(self._db, alias, time.time())
+            from llm_manager.data import usage as _u
+            _u.record_runtime_end(self._db, alias, time.time())
         except Exception:
             logger.warning("record_runtime_end failed for %s", alias, exc_info=True)
 

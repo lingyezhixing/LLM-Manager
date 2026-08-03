@@ -16,7 +16,6 @@ from fastapi.responses import StreamingResponse
 
 from llm_manager import config
 from llm_manager.data import logs as _logs
-from llm_manager.data import persistence as _p
 from llm_manager.gateway.api.common import get_config_store, get_db, sse_frame
 from llm_manager.gateway.api.logs_schemas import (
     LogLineResponse, LogSearchMatch, LogSearchResponse, LogSessionResponse,
@@ -36,7 +35,7 @@ def _resolve_model(request: Request, model: str | None) -> str | None:
         return config.resolve_alias(cfg, model)
     except KeyError:
         pass
-    name = _p.log_resolve_model_name(get_db(request), model)
+    name = _logs.log_resolve_model_name(get_db(request), model)
     if name is None:
         raise HTTPException(404, f"模型别名 '{model}' 未在配置中找到")
     return name
@@ -48,7 +47,7 @@ async def _session_stream(session_id: int, level: str | None, db, q) -> AsyncIte
     q 由端点先 subscribe(存在性校验,None → 404——生成器内 raise HTTPException
     不会转成 404,响应头已发)。finally 里 unsubscribe 与端点 subscribe 对称。"""
     try:
-        for r in _p.log_lines_backfill(db, session_id, limit=2048, level=level):
+        for r in _logs.log_lines_backfill(db, session_id, limit=2048, level=level):
             yield sse_frame(_to_line(r))
         while True:
             line = await q.get()
@@ -64,7 +63,7 @@ def register_logs_routes(api: APIRouter) -> None:
                       model: str | None = None, limit: int = 50,
                       before: int | None = None) -> list[LogSessionResponse]:
         m = _resolve_model(request, model)
-        rows = _p.log_sessions(get_db(request), type_=type, model_name=m,
+        rows = _logs.log_sessions(get_db(request), type_=type, model_name=m,
                                limit=limit, before_id=before)
         return [_to_session(r) for r in rows]
 
@@ -74,11 +73,11 @@ def register_logs_routes(api: APIRouter) -> None:
                       level: Literal["info", "ok", "warn", "error"] | None = None
                       ) -> list[LogLineResponse]:
         limit = max(1, min(limit, 5000))
-        if not _p.log_session_exists(get_db(request), session_id):
+        if not _logs.log_session_exists(get_db(request), session_id):
             raise HTTPException(404, "会话不存在")
-        rows = (_p.log_lines_before(get_db(request), session_id, before, limit, level)
+        rows = (_logs.log_lines_before(get_db(request), session_id, before, limit, level)
                 if before is not None
-                else _p.log_lines_backfill(get_db(request), session_id, limit, level))
+                else _logs.log_lines_backfill(get_db(request), session_id, limit, level))
         return [_to_line(r) for r in rows]
 
     @api.get("/logs/sessions/{session_id}/stream")
@@ -99,7 +98,7 @@ def register_logs_routes(api: APIRouter) -> None:
                     level: Literal["info", "ok", "warn", "error"] | None = None,
                     limit: int = 500) -> LogSearchResponse:
         m = _resolve_model(request, model)
-        total, rows = _p.log_search(get_db(request), q, type_=type, model_name=m,
+        total, rows = _logs.log_search(get_db(request), q, type_=type, model_name=m,
                                     session_id=session_id, level=level, limit=limit)
         return LogSearchResponse(
             total=total,

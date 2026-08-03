@@ -7,7 +7,8 @@ from fastapi import APIRouter, FastAPI
 from fastapi.testclient import TestClient
 
 from llm_manager.data import session
-from llm_manager.data.persistence import open_db, record_usage
+from llm_manager.data.persistence import open_db
+from llm_manager.data.usage import record_usage
 from llm_manager.gateway.api.usage import register_usage_routes
 
 
@@ -123,7 +124,7 @@ def test_usage_cost_endpoint_tier_and_hourly(tmp_path):
     from llm_manager.config import AppConfig, Command, ModelConfig, Pricing, PricingTier, ProgramConfig, Scheme
     db = open_db(tmp_path / "t.db")
     record_usage(db, "m1", start=5.0, end=10.0, input_tokens=1000, output_tokens=500, cache_n=0, prompt_n=1000)
-    from llm_manager.data.persistence import record_runtime_start, record_runtime_end
+    from llm_manager.data.usage import record_runtime_start, record_runtime_end
     record_runtime_start(db, "m2", start=0.0)
     record_runtime_end(db, "m2", end=3600.0)
     cfg = AppConfig(program=ProgramConfig("0.0.0.0", 8080, 60, "INFO"), models={

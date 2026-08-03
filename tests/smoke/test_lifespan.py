@@ -5,7 +5,6 @@ from fastapi.testclient import TestClient
 
 from llm_manager.app import create_app
 from llm_manager.data import logs
-from llm_manager.data import persistence as _p
 from llm_manager.data.persistence import open_db
 
 _CFG_BODY = """
@@ -40,12 +39,12 @@ def test_lifespan_opens_and_closes_system_session(tmp_path):
     with TestClient(app):
         sid = logs.current_system_session_id()
         assert sid is not None                        # lifespan 已开系统会话
-        rows = _p.log_sessions(app.state.db, type_="system")
+        rows = logs.log_sessions(app.state.db, type_="system")
         assert rows[0]["end_time"] is None            # 进行中
     # shutdown 后连接已关:重开检查 end_time 落库
     db2 = open_db(tmp_path / "t.db")
     try:
-        rows = _p.log_sessions(db2, type_="system")
+        rows = logs.log_sessions(db2, type_="system")
         assert rows[0]["end_time"] is not None        # shutdown 收口
     finally:
         db2.conn.close()
@@ -57,12 +56,12 @@ def test_lifespan_closes_crash_residual_system_sessions(tmp_path):
     db_path = tmp_path / "t.db"
     db = open_db(db_path)
     try:
-        resid = _p.log_start_session(db, "system", None, None, time.time() - 100)
+        resid = logs.log_start_session(db, "system", None, None, time.time() - 100)
     finally:
         db.conn.close()
     app = create_app(db_path=db_path)
     with TestClient(app):
-        rows = _p.log_sessions(app.state.db, type_="system")
+        rows = logs.log_sessions(app.state.db, type_="system")
         by_id = {r["id"]: r for r in rows}
         assert by_id[resid]["end_time"] is not None       # 残留已收口
         current = logs.current_system_session_id()
@@ -71,7 +70,7 @@ def test_lifespan_closes_crash_residual_system_sessions(tmp_path):
     # shutdown 收口新会话
     db2 = open_db(db_path)
     try:
-        rows = _p.log_sessions(db2, type_="system")
+        rows = logs.log_sessions(db2, type_="system")
         assert all(r["end_time"] is not None for r in rows)
     finally:
         db2.conn.close()

@@ -7,7 +7,6 @@
 import asyncio
 
 from llm_manager.data import logs
-from llm_manager.data import persistence as _p
 from llm_manager.data.persistence import open_db
 from llm_manager.runtime import log_retention
 
@@ -20,9 +19,9 @@ def test_flush_survives_deleted_session(tmp_path):
     try:
         sid = logs.start_session("system", None, None, start=1000.0)   # live(最旧)
         for i in range(12):
-            _p.log_start_session(db, "model", f"m{i}", f"m{i}", float(2000 + i))
-        removed_s, removed_l = _p.log_cleanup(db, days=9999, count=10, now=99999.0)
-        assert sid not in [r["id"] for r in _p.log_sessions(db)]       # live 行已被删
+            logs.log_start_session(db, "model", f"m{i}", f"m{i}", float(2000 + i))
+        removed_s, removed_l = logs.log_cleanup(db, days=9999, count=10, now=99999.0)
+        assert sid not in [r["id"] for r in logs.log_sessions(db)]       # live 行已被删
         assert removed_s == 3 and removed_l == 0
 
         logs.capture_system("x", 1.0, "INFO")                          # 排入死会话行
@@ -34,7 +33,7 @@ def test_flush_survives_deleted_session(tmp_path):
         sid2 = logs.start_session("model", "m2", "m2")
         logs.capture("m2", "alive", "out")
         asyncio.run(logs.flush())
-        rows = _p.log_lines_backfill(db, sid2, limit=10)
+        rows = logs.log_lines_backfill(db, sid2, limit=10)
         assert [r["text"] for r in rows] == ["alive"]
         assert db.conn.execute("SELECT COUNT(*) FROM log_lines").fetchone()[0] == 1
     finally:
@@ -45,12 +44,12 @@ def test_flush_survives_deleted_session(tmp_path):
 def test_log_cleanup_skips_live_sessions(tmp_path):
     """count 规则排除 live_session_ids:live 会话行幸存,最旧结束会话被删。"""
     db = open_db(tmp_path / "t.db")
-    live = _p.log_start_session(db, "system", None, None, 1000.0)
+    live = logs.log_start_session(db, "system", None, None, 1000.0)
     for i in range(12):
-        _p.log_start_session(db, "model", f"m{i}", f"m{i}", float(2000 + i))
-    removed_s, removed_l = _p.log_cleanup(db, days=9999, count=10, now=99999.0,
+        logs.log_start_session(db, "model", f"m{i}", f"m{i}", float(2000 + i))
+    removed_s, removed_l = logs.log_cleanup(db, days=9999, count=10, now=99999.0,
                                           live_session_ids={live})
-    rows = [r["id"] for r in _p.log_sessions(db)]
+    rows = [r["id"] for r in logs.log_sessions(db)]
     assert live in rows
     assert sorted(rows) == [live] + list(range(4, 14))   # 删了最旧 3 个中的 2 个(非 live)
     assert (removed_s, removed_l) == (2, 0)
@@ -60,11 +59,11 @@ def test_log_cleanup_skips_live_sessions(tmp_path):
 def test_log_cleanup_time_rule_skips_live(tmp_path):
     """时间规则同样排除 live_session_ids(belt-and-braces 两规则都生效)。"""
     db = open_db(tmp_path / "t.db")
-    live = _p.log_start_session(db, "system", None, None, 1000.0)
-    old = _p.log_start_session(db, "model", "m", "m", 1005.0)
-    removed_s, _ = _p.log_cleanup(db, days=2, count=100, now=200000.0,   # cutoff=27200
+    live = logs.log_start_session(db, "system", None, None, 1000.0)
+    old = logs.log_start_session(db, "model", "m", "m", 1005.0)
+    removed_s, _ = logs.log_cleanup(db, days=2, count=100, now=200000.0,   # cutoff=27200
                                   live_session_ids={live})
-    assert [r["id"] for r in _p.log_sessions(db)] == [live]
+    assert [r["id"] for r in logs.log_sessions(db)] == [live]
     assert removed_s == 1
     db.conn.close()
 
@@ -77,7 +76,7 @@ def test_loop_skips_live_sessions_in_module(tmp_path):
     try:
         live = logs.start_session("system", None, None, start=1000.0)
         for i in range(5):
-            _p.log_start_session(db, "model", f"m{i}", f"m{i}", float(2000 + i))
+            logs.log_start_session(db, "model", f"m{i}", f"m{i}", float(2000 + i))
         stop = asyncio.Event()
 
         async def go():
@@ -90,7 +89,7 @@ def test_loop_skips_live_sessions_in_module(tmp_path):
         asyncio.run(go())
         # 6 会话、count=1 → 删最旧 5 个(id 1..5):live(id 1)被排除幸存,
         # 最新结束会话(id 6)按规则幸存。无 wiring 时 live 会被删 → 回归可测。
-        assert sorted(r["id"] for r in _p.log_sessions(db)) == [1, 6]
+        assert sorted(r["id"] for r in logs.log_sessions(db)) == [1, 6]
     finally:
         logs.reset()
         db.conn.close()

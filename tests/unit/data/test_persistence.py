@@ -1,22 +1,22 @@
-"""model_requests persistence: open_db (PRAGMAs + schema), record_usage (wall-clock
-start/end), resolve_model_id, lock-serialized concurrency, usage_series (bucketed by
-end_time), and the legacy ``ts`` migration. Consolidated here to mirror the src layout
-(src/llm_manager/data/persistence.py)."""
+"""DB schema/migration + 存储管理(data/persistence.py)与 usage 域聚合
+(record_usage / record_runtime / usage_series / usage_cost 等,data/usage.py)的测试;
+日志 SQL 存储层测试在 tests/unit/data/test_logs.py(与 src 布局对齐)。"""
 import json
 import sqlite3
 import threading
 from pathlib import Path
 
-from llm_manager.data import persistence as _p
 from llm_manager.data.persistence import (
     delete_model_data,
     open_db,
     orphaned_models,
+    storage_stats,
+)
+from llm_manager.data.usage import (
     record_usage,
     record_runtime_start,
     record_runtime_end,
     resolve_model_id,
-    storage_stats,
     tier_cost,
     usage_cost,
     usage_cost_series,
@@ -456,212 +456,6 @@ def test_delete_model_data_in_memory_db_no_crash():
     db = open_db(Path(":memory:"))
     record_usage(db, "m1", 1, 2, input_tokens=1, output_tokens=1, cache_n=0, prompt_n=0)
     assert delete_model_data(db, "m1") is True  # VACUUM 异常被吞,不阻塞删除
-
-
-# ---- log_sessions / log_lines ----
-
-
-def test_log_session_crud(tmp_path):
-    db = open_db(tmp_path / "t.db")
-    sid = _p.log_start_session(db, "system", None, None, 1000.0)
-    sid2 = _p.log_start_session(db, "model", "m1", "m1-alias", 2000.0)
-    rows = _p.log_sessions(db)
-    assert [r["id"] for r in rows] == [sid2, sid]  # 倒序
-    assert rows[0]["type"] == "model" and rows[0]["alias"] == "m1-alias"
-    _p.log_end_session(db, sid, 1500.0)
-    rows = _p.log_sessions(db, type_="system")
-    assert rows[0]["end_time"] == 1500.0 and rows[0]["status"] == "ended"
-
-
-def test_log_lines_insert_and_query(tmp_path):
-    db = open_db(tmp_path / "t.db")
-    sid = _p.log_start_session(db, "system", None, None, 1000.0)
-    ids = _p.log_insert_lines(db, sid, [
-        (1, 1000.1, "sys", "info", "boot line"),
-        (2, 1000.2, "sys", "warn", "warning"),
-        (3, 1000.3, "sys", "error", "boom"),
-    ])
-    assert len(ids) == 3 and ids[0] < ids[1] < ids[2]
-    bf = _p.log_lines_backfill(db, sid, limit=2)
-    assert [r["text"] for r in bf] == ["warning", "boom"]
-    page = _p.log_lines_before(db, sid, before_id=ids[2], limit=1)
-    assert [r["id"] for r in page] == [ids[1]]
-    errs = _p.log_lines_backfill(db, sid, limit=10, level="error")
-    assert [r["text"] for r in errs] == ["boom"]
-
-
-def test_log_session_line_count(tmp_path):
-    db = open_db(tmp_path / "t.db")
-    sid = _p.log_start_session(db, "system", None, None, 1000.0)
-    _p.log_insert_lines(db, sid, [(1, 1000.1, "sys", "info", "a")])
-    _p.log_insert_lines(db, sid, [(2, 1000.2, "sys", "info", "b")])
-    rows = _p.log_sessions(db)
-    assert rows[0]["line_count"] == 2
-
-
-def test_log_insert_lines_empty_returns_empty(tmp_path):
-    db = open_db(tmp_path / "t.db")
-    assert _p.log_insert_lines(db, 123, []) == []  # 空列表守卫,不触发任何写
-
-
-def test_log_insert_lines_chunks_large_batches(tmp_path):
-    db = open_db(tmp_path / "t.db")
-    sid = _p.log_start_session(db, "system", None, None, 1000.0)
-    rows = [(i, 1000.0 + i, "sys", "info", f"line {i}") for i in range(1, 400)]  # 399 行 → 3 块(150+150+99)
-    ids = _p.log_insert_lines(db, sid, rows)
-    assert len(ids) == 399
-    assert ids == sorted(ids)  # 分块后仍全局自增、保持插入序
-    back = _p.log_lines_backfill(db, sid, limit=5000)
-    assert [r["text"] for r in back] == [f"line {i}" for i in range(1, 400)]
-
-
-def test_log_sessions_model_filter_and_before_pagination(tmp_path):
-    db = open_db(tmp_path / "t.db")
-    s1 = _p.log_start_session(db, "model", "m1", "m1a", 1000.0)
-    s2 = _p.log_start_session(db, "model", "m2", "m2a", 2000.0)
-    s3 = _p.log_start_session(db, "system", None, None, 3000.0)
-    rows = _p.log_sessions(db, model_name="m1")
-    assert [r["id"] for r in rows] == [s1]
-    rows = _p.log_sessions(db, limit=2)
-    assert [r["id"] for r in rows] == [s3, s2]
-    rows = _p.log_sessions(db, limit=2, before_id=s3)
-    assert [r["id"] for r in rows] == [s2, s1]
-
-
-def test_log_search_matches_across_sessions_and_filters(tmp_path):
-    db = open_db(tmp_path / "t.db")
-    s1 = _p.log_start_session(db, "system", None, None, 1000.0)
-    s2 = _p.log_start_session(db, "model", "m1", "m1-alias", 2000.0)
-    _p.log_insert_lines(db, s1, [(1, 1000.1, "sys", "info", "boot Error")])
-    _p.log_insert_lines(db, s2, [(1, 2000.1, "stdout", "warn", "model startup error")])
-    total, rows = _p.log_search(db, "error")
-    assert total == 2
-    assert [r["text"] for r in rows] == ["boot Error", "model startup error"]  # 跨会话 + ASCII 大小写不敏感
-    assert rows[0]["session_type"] == "system" and rows[1]["session_type"] == "model"
-    total, rows = _p.log_search(db, "error", session_id=s1)
-    assert total == 1 and [r["text"] for r in rows] == ["boot Error"]
-    total, rows = _p.log_search(db, "error", type_="model")
-    assert total == 1 and [r["text"] for r in rows] == ["model startup error"]
-    # 真 total:limit 截断行数但 total 是满足条件的全部匹配数
-    total, rows = _p.log_search(db, "error", limit=1)
-    assert total == 2 and len(rows) == 1
-
-
-def test_log_insert_lines_rolls_back_partial_chunks_on_failure(tmp_path):
-    """分块插入任一块失败(重复 seq → IntegrityError)→ 整体回滚,不留部分行;
-    同连接后续无关 commit 也不得把残留行带落盘。"""
-    import pytest
-    import sqlite3
-    p = tmp_path / "t.db"
-    db = open_db(p)
-    sid = _p.log_start_session(db, "system", None, None, 1000.0)
-    rows = [(i, 1000.0 + i, "sys", "info", f"line {i}") for i in range(1, 201)]  # seq 1..200
-    rows.append((151, 3000.0, "sys", "info", "dup seq 151"))                     # 201 行 → 第 2 块内重复
-    with pytest.raises(sqlite3.IntegrityError):
-        _p.log_insert_lines(db, sid, rows)
-    _p.log_end_session(db, sid, 5000.0)  # 同连接后续 commit —— 若残留事务会误提交部分行
-    db.conn.close()
-    db2 = open_db(p)  # 全新连接读盘,验证零泄漏
-    assert db2.conn.execute("SELECT COUNT(*) FROM log_lines").fetchone()[0] == 0
-    assert db2.conn.execute("SELECT COUNT(*) FROM log_sessions").fetchone()[0] == 1
-    assert db2.conn.execute("SELECT end_time FROM log_sessions").fetchone()[0] == 5000.0
-
-
-def test_log_cleanup_time_and_count(tmp_path):
-    """时间规则:now=200000,days=2 → cutoff 27200;全部早于 cutoff → 清光。
-    3 个会话:旧系统会话(1000s,3 行)、旧模型会话(1005s,2 行)、新系统会话(5000s,1 行)。"""
-    db = open_db(tmp_path / "t.db")
-    old_sys = _p.log_start_session(db, "system", None, None, 1000.0)
-    _p.log_insert_lines(db, old_sys, [(1, 1000.1, "sys", "info", "a"), (2, 1000.2, "sys", "info", "b"),
-                                      (3, 1000.3, "sys", "info", "c")])
-    old_mod = _p.log_start_session(db, "model", "m1", "m1", 1005.0)
-    _p.log_insert_lines(db, old_mod, [(1, 1005.1, "out", "info", "d"), (2, 1005.2, "out", "info", "e")])
-    new_sys = _p.log_start_session(db, "system", None, None, 5000.0)
-    _p.log_insert_lines(db, new_sys, [(1, 5000.1, "sys", "info", "f")])
-
-    removed_s, removed_l = _p.log_cleanup(db, days=2, count=10, now=200000.0)
-    assert removed_s == 3 and removed_l == 6
-    assert _p.log_sessions(db) == []
-    assert _p.log_lines_backfill(db, old_sys, limit=10) == []
-
-
-def test_log_cleanup_count_keeps_newest(tmp_path):
-    db = open_db(tmp_path / "t.db")
-    for i in range(3):
-        sid = _p.log_start_session(db, "system", None, None, float(1000 + i))
-        _p.log_insert_lines(db, sid, [(1, float(1000 + i) + 0.1, "sys", "info", f"l{i}")])
-    removed_s, removed_l = _p.log_cleanup(db, days=9999, count=2, now=10000.0)
-    assert removed_s == 1 and removed_l == 1           # 最旧 1 会话(1 行)
-    rows = _p.log_sessions(db)
-    assert [r["start_time"] for r in rows] == [1002.0, 1001.0]
-
-
-def test_log_cleanup_both_rules_independent(tmp_path):
-    db = open_db(tmp_path / "t.db")
-    sid1 = _p.log_start_session(db, "system", None, None, 100.0)   # 超期 且 最旧
-    _p.log_insert_lines(db, sid1, [(1, 100.1, "sys", "info", "a")])
-    sid2 = _p.log_start_session(db, "system", None, None, 5000.0)  # 不超期
-    _p.log_insert_lines(db, sid2, [(1, 5000.1, "sys", "info", "b")])
-    removed_s, removed_l = _p.log_cleanup(db, days=1, count=10, now=90000.0)  # 仅时间规则触发
-    assert removed_s == 1 and removed_l == 1
-    assert [r["id"] for r in _p.log_sessions(db)] == [sid2]
-
-
-def test_log_cleanup_both_rules_fire_simultaneously(tmp_path):
-    """两规则同时触发:时间规则删 {100, 200}(cutoff=3600),条数规则(3>2)补最旧 1 会话(100,
-    已含)→ 并集去重 → 删 {100, 200}。"""
-    db = open_db(tmp_path / "t.db")
-    sid1 = _p.log_start_session(db, "system", None, None, 100.0)   # 超期,且最旧
-    _p.log_insert_lines(db, sid1, [(1, 100.1, "sys", "info", "a")])
-    sid2 = _p.log_start_session(db, "system", None, None, 200.0)   # 超期
-    _p.log_insert_lines(db, sid2, [(1, 200.1, "sys", "info", "b")])
-    sid3 = _p.log_start_session(db, "system", None, None, 5000.0)  # 新鲜
-    _p.log_insert_lines(db, sid3, [(1, 5000.1, "sys", "info", "c")])
-    removed_s, removed_l = _p.log_cleanup(db, days=1, count=2, now=90000.0)
-    assert removed_s == 2 and removed_l == 2
-    rows = _p.log_sessions(db)
-    assert [r["id"] for r in rows] == [sid3]
-    assert [r["start_time"] for r in rows] == [5000.0]
-
-
-def test_log_cleanup_no_doomed_returns_zero(tmp_path):
-    """无到期会话且条数未超 → 早退 (0, 0),数据原样。"""
-    db = open_db(tmp_path / "t.db")
-    sid = _p.log_start_session(db, "system", None, None, 1000.0)
-    _p.log_insert_lines(db, sid, [(1, 1000.1, "sys", "info", "a")])
-    assert _p.log_cleanup(db, days=9999, count=10, now=10000.0) == (0, 0)
-    rows = _p.log_sessions(db)
-    assert [r["id"] for r in rows] == [sid]
-    assert rows[0]["line_count"] == 1
-
-
-def test_log_cleanup_chunks_large_doomed_sets(tmp_path):
-    """IN 子句按 150 分块:把 SQLITE_LIMIT_VARIABLE_NUMBER 降到 999(模拟 stock CPython
-    的编译默认;conda 构建默认 250000 会掩盖该问题)→ >999 会话在册时不触发
-    too many SQL variables;行/会话数跨块累计精确。"""
-    import sqlite3
-    db = open_db(tmp_path / "t.db")
-    db.conn.setlimit(sqlite3.SQLITE_LIMIT_VARIABLE_NUMBER, 999)
-    sids = [_p.log_start_session(db, "system", None, None, float(1000 + i)) for i in range(1000)]
-    for sid in sids[:200]:  # 200 会话带行 → 行删除跨 2 块
-        _p.log_insert_lines(db, sid, [(1, 1001.0, "sys", "info", "x")])
-    removed_s, removed_l = _p.log_cleanup(db, days=2, count=10000, now=200000.0)
-    assert removed_s == 1000 and removed_l == 200
-    assert _p.log_sessions(db) == []
-
-
-def test_log_close_open_system_sessions(tmp_path):
-    """崩溃/强杀残留的进行中 system 会话(end_time NULL)一次性收口,返回收口数。"""
-    db = open_db(tmp_path / "t.db")
-    resid = _p.log_start_session(db, "system", None, None, 1000.0)
-    mid = _p.log_start_session(db, "model", "m1", "m1", 2000.0)   # 非 system,不收口
-    n = _p.log_close_open_system_sessions(db, end=5000.0)
-    assert n == 1
-    rows = _p.log_sessions(db)
-    by_id = {r["id"]: r for r in rows}
-    assert by_id[resid]["end_time"] == 5000.0
-    assert by_id[mid]["end_time"] is None                          # model 会话不受影响
-    assert _p.log_close_open_system_sessions(db, end=6000.0) == 0  # 幂等:无残留可收
 
 
 # ---- 代码优化(2026-08-03):model_scripts/model_pricing 并入父表 ----
