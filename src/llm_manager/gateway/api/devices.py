@@ -43,7 +43,7 @@ async def _device_stream(feed: DeviceFeed) -> AsyncIterator[str]:
     q = feed.subscribe()
     try:
         snap = feed.current_snapshot()
-        # immediate frame, so the bar isn't empty
+        # immediate, so the list isn't empty
         yield sse_frame(DevicesResponse(data=[_to_schema(d) for d in snap.values()]))
         while True:
             snap = await q.get()
