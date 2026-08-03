@@ -266,5 +266,5 @@ def unsubscribe(session_id: int, q) -> None:
 
 
 def resolve_session(alias: str) -> int | None:
-    """alias → 当前进行中会话 id(旧端点兼容用)。"""
+    """alias → 当前内存中正在进行的会话 id;无进行中会话 → None(现仅测试使用)。"""
     return _alias_to_session.get(alias)

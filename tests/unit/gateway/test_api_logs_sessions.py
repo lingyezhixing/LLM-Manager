@@ -127,6 +127,23 @@ def test_logs_search(client):
     assert r4.json()["total"] == 0
 
 
+def test_search_total_is_true_count_uncut_by_limit(client):
+    """真 total:limit 截断行数但 total 是满足条件的全部匹配数。"""
+    c, db, sid_sys, sid_m = client
+    for i in range(600):
+        _p.log_insert_lines(db, sid_sys, [(100 + i, 1000.0 + i, "sys", "info", f"x {i}")])
+    r = c.get("/api/logs/search?q=x&limit=500")
+    j = r.json()
+    assert j["total"] == 600 and len(j["matches"]) == 500
+
+
+def test_search_invalid_level_422(client):
+    c, db, sid_sys, sid_m = client
+    assert c.get("/api/logs/search?q=x&level=bogus").status_code == 422
+    assert c.get("/api/logs/sessions?type=bogus").status_code == 422
+    assert c.get(f"/api/logs/sessions/{sid_sys}/lines?level=bogus").status_code == 422
+
+
 def test_unknown_model_alias_404(client):
     c, db, sid_sys, sid_m = client
     # 真正未知的 alias(配置与会话历史都无)→ 仍 404

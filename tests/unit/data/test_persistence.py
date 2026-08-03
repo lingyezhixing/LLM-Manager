@@ -531,13 +531,17 @@ def test_log_search_matches_across_sessions_and_filters(tmp_path):
     s2 = _p.log_start_session(db, "model", "m1", "m1-alias", 2000.0)
     _p.log_insert_lines(db, s1, [(1, 1000.1, "sys", "info", "boot Error")])
     _p.log_insert_lines(db, s2, [(1, 2000.1, "stdout", "warn", "model startup error")])
-    rows = _p.log_search(db, "error")
+    total, rows = _p.log_search(db, "error")
+    assert total == 2
     assert [r["text"] for r in rows] == ["boot Error", "model startup error"]  # 跨会话 + ASCII 大小写不敏感
     assert rows[0]["session_type"] == "system" and rows[1]["session_type"] == "model"
-    rows = _p.log_search(db, "error", session_id=s1)
-    assert [r["text"] for r in rows] == ["boot Error"]
-    rows = _p.log_search(db, "error", type_="model")
-    assert [r["text"] for r in rows] == ["model startup error"]
+    total, rows = _p.log_search(db, "error", session_id=s1)
+    assert total == 1 and [r["text"] for r in rows] == ["boot Error"]
+    total, rows = _p.log_search(db, "error", type_="model")
+    assert total == 1 and [r["text"] for r in rows] == ["model startup error"]
+    # 真 total:limit 截断行数但 total 是满足条件的全部匹配数
+    total, rows = _p.log_search(db, "error", limit=1)
+    assert total == 2 and len(rows) == 1
 
 
 def test_log_insert_lines_rolls_back_partial_chunks_on_failure(tmp_path):

@@ -205,6 +205,12 @@ def _serving() -> list[str]:
     return [n for n in state.routing_names() if state.pending_count(n) > 0]
 
 
+def _config_write_result(request: Request, cfg: AppConfig) -> dict:
+    """写回/查询的共享响应:needs_restart/restart_fields/serving(原 5 处内联)。"""
+    rf = _restart_fields(cfg, _boot(request))
+    return {"needs_restart": bool(rf), "restart_fields": rf, "serving": _serving()}
+
+
 def _routing_served(primary: str, cfg: AppConfig) -> list[str]:
     """操作触及的模型若当前 ROUTING,返回其 served name(aliases[0]);用于 PUT 的 restart 提示。
     DELETE 的 ROUTING 拦截在端点处(404/409 之前)。"""
@@ -263,8 +269,7 @@ def register_config_routes(api: APIRouter) -> None:
         if updates:
             set_settings(_db(request), updates)
         cfg = _store(request).reload()
-        rf = _restart_fields(cfg, _boot(request))
-        return {"needs_restart": bool(rf), "restart_fields": rf, "serving": _serving()}
+        return _config_write_result(request, cfg)
 
     @api.put("/config/wol")
     def put_wol(request: Request, body: WolUpdate) -> dict:
@@ -276,15 +281,13 @@ def register_config_routes(api: APIRouter) -> None:
         if updates:
             set_settings(_db(request), updates)
         cfg = _store(request).reload()
-        rf = _restart_fields(cfg, _boot(request))
-        return {"needs_restart": bool(rf), "restart_fields": rf, "serving": _serving()}
+        return _config_write_result(request, cfg)
 
     @api.put("/config/claude")
     def put_claude(request: Request, body: ClaudeConfigsUpdate) -> dict:
         set_settings(_db(request), {"claude_configs": json.dumps(body.configs, ensure_ascii=False)})
         cfg = _store(request).reload()
-        rf = _restart_fields(cfg, _boot(request))
-        return {"needs_restart": bool(rf), "restart_fields": rf, "serving": _serving()}
+        return _config_write_result(request, cfg)
 
     @api.post("/config/claude/apply")
     def apply_claude_preset(request: Request, body: ClaudeApplyRequest) -> dict:
@@ -320,13 +323,11 @@ def register_config_routes(api: APIRouter) -> None:
         if updates:
             set_settings(_db(request), updates)
         _store(request).reload()                  # 日志规则不进 AppConfig 快照,但 reload 保持新鲜
-        return {"needs_restart": False, "restart_fields": [], "serving": _serving()}
+        return _config_write_result(request, _store(request).snapshot())
 
     @api.get("/config/restart-status")
     def restart_status(request: Request) -> dict:
-        cfg = _store(request).snapshot()
-        rf = _restart_fields(cfg, _boot(request))
-        return {"needs_restart": bool(rf), "restart_fields": rf, "serving": _serving()}
+        return _config_write_result(request, _store(request).snapshot())
 
     @api.post("/config/restart", status_code=202)
     async def restart_app(request: Request) -> dict:

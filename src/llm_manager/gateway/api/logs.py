@@ -9,6 +9,7 @@ residuals); logs API reads ``request.app.state.db``.
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
@@ -18,7 +19,7 @@ from llm_manager.data import logs as _logs
 from llm_manager.data import persistence as _p
 from llm_manager.gateway.api.logs_schemas import (
     LogLineResponse, LogSearchMatch, LogSearchResponse, LogSessionResponse,
-    _level_param, _to_line, _to_session,
+    _to_line, _to_session,
 )
 
 
@@ -62,20 +63,20 @@ async def _session_stream(session_id: int, level: str | None, db, q) -> AsyncIte
 
 def register_logs_routes(api: APIRouter) -> None:
     @api.get("/logs/sessions", response_model=list[LogSessionResponse])
-    def list_sessions(request: Request, type: str | None = None,
+    def list_sessions(request: Request, type: Literal["system", "model"] | None = None,
                       model: str | None = None, limit: int = 50,
                       before: int | None = None) -> list[LogSessionResponse]:
-        t = type if type in ("system", "model") else None
         m = _resolve_model(request, model)
-        rows = _p.log_sessions(_db(request), type_=t, model_name=m,
+        rows = _p.log_sessions(_db(request), type_=type, model_name=m,
                                limit=limit, before_id=before)
         return [_to_session(r) for r in rows]
 
     @api.get("/logs/sessions/{session_id}/lines", response_model=list[LogLineResponse])
     def session_lines(session_id: int, request: Request, before: int | None = None,
-                      limit: int = 1500) -> list[LogLineResponse]:
+                      limit: int = 1500,
+                      level: Literal["info", "ok", "warn", "error"] | None = None
+                      ) -> list[LogLineResponse]:
         limit = max(1, min(limit, 5000))
-        level = _level_param(request)
         if not _p.log_session_exists(_db(request), session_id):
             raise HTTPException(404, "会话不存在")
         rows = (_p.log_lines_before(_db(request), session_id, before, limit, level)
@@ -84,24 +85,26 @@ def register_logs_routes(api: APIRouter) -> None:
         return [_to_line(r) for r in rows]
 
     @api.get("/logs/sessions/{session_id}/stream")
-    async def stream_session(session_id: int, request: Request) -> StreamingResponse:
+    async def stream_session(session_id: int, request: Request,
+                             level: Literal["info", "ok", "warn", "error"] | None = None
+                             ) -> StreamingResponse:
         q = _logs.subscribe(session_id)
         if q is None:
             raise HTTPException(404, "会话不存在")
         return StreamingResponse(
-            _session_stream(session_id, _level_param(request), _db(request), q),
+            _session_stream(session_id, level, _db(request), q),
             media_type="text/event-stream")
 
     @api.get("/logs/search", response_model=LogSearchResponse)
-    def search_logs(request: Request, q: str = "", type: str | None = None,
+    def search_logs(request: Request, q: str = "",
+                    type: Literal["system", "model"] | None = None,
                     model: str | None = None, session_id: int | None = None,
+                    level: Literal["info", "ok", "warn", "error"] | None = None,
                     limit: int = 500) -> LogSearchResponse:
-        t = type if type in ("system", "model") else None
         m = _resolve_model(request, model)
-        level = _level_param(request)
-        rows = _p.log_search(_db(request), q, type_=t, model_name=m,
-                             session_id=session_id, level=level, limit=limit)
+        total, rows = _p.log_search(_db(request), q, type_=type, model_name=m,
+                                    session_id=session_id, level=level, limit=limit)
         return LogSearchResponse(
-            total=len(rows),
+            total=total,
             matches=[LogSearchMatch(session_id=r["session_id"], line=_to_line(r)) for r in rows],
         )
