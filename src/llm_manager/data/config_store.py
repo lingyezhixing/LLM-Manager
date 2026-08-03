@@ -11,6 +11,7 @@ from pathlib import Path
 from llm_manager import config
 from llm_manager.config import (
     PROGRAM_DEFAULTS,
+    RETENTION_DEFAULTS,
     AppConfig,
     Command,
     ModelConfig,
@@ -62,7 +63,7 @@ def get_all_settings(db: Db) -> dict[str, str]:
 
 
 def _int_setting(s: dict[str, str], key: str, default: int) -> int:
-    """防御手改 DB:非整数回退默认,防 read_appconfig 的 int() 崩溃 boot-loop。"""
+    """防御手改 DB:retention 键非整数回退默认,防 retention 读取崩溃。"""
     raw = s.get(key)
     if raw is None:
         return default
@@ -115,7 +116,7 @@ def _write_appconfig_locked(db: Db, cfg: AppConfig) -> None:
                 c = scheme.command
                 command_json = json.dumps({"exe": c.exe, "args": list(c.args), "env": c.env,
                                            "cwd": c.cwd, "conda_env": c.conda_env})
-                scur = db.conn.execute(
+                db.conn.execute(
                     "INSERT INTO model_schemes (model_id, config_source, required_devices, memory_mb, command, ord) "
                     "VALUES (?,?,?,?,?,?)",
                     (mid, src, json.dumps(sorted(scheme.required_devices)),
@@ -153,8 +154,8 @@ def _read_appconfig_locked(db: Db) -> AppConfig:
         alive_time=int(s.get("alive_time", PROGRAM_DEFAULTS["alive_time"])),
         log_level=s.get("log_level", PROGRAM_DEFAULTS["log_level"]),
         claude_settings_path=s.get("claude_settings_path"),
-        log_retention_days=_int_setting(s, "log_retention_days", 30),
-        log_retention_count=_int_setting(s, "log_retention_count", 10),
+        log_retention_days=_int_setting(s, "log_retention_days", int(RETENTION_DEFAULTS["log_retention_days"])),
+        log_retention_count=_int_setting(s, "log_retention_count", int(RETENTION_DEFAULTS["log_retention_count"])),
     )
     wol = None
     if "wol_broadcast" in s and "wol_mac" in s:
@@ -273,8 +274,7 @@ ENV_MAP: dict[str, str] = {
 
 DEFAULTS: dict[str, str] = {
     **PROGRAM_DEFAULTS,
-    "log_retention_days": "30",
-    "log_retention_count": "10",
+    **RETENTION_DEFAULTS,
     "claude_configs": "{}",
 }
 

@@ -14,6 +14,11 @@ PROGRAM_DEFAULTS: dict[str, str] = {
     "log_level": "INFO",
 }
 
+RETENTION_DEFAULTS: dict[str, str] = {
+    "log_retention_days": "30",
+    "log_retention_count": "10",
+}
+
 
 class ModelMode(str, Enum):
     """Probe selector; string values are config/registry keys."""
@@ -78,8 +83,8 @@ class ProgramConfig:
     alive_time: int
     log_level: str
     claude_settings_path: str | None = None
-    log_retention_days: int = 30
-    log_retention_count: int = 10
+    log_retention_days: int = int(RETENTION_DEFAULTS["log_retention_days"])
+    log_retention_count: int = int(RETENTION_DEFAULTS["log_retention_count"])
 
 
 @dataclass(frozen=True, slots=True)

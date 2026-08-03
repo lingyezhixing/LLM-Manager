@@ -45,6 +45,12 @@ def _cleanup_old_logs(log_dir: str, keep: int = 10) -> None:
             pass
 
 
+def _retention_from_store(store) -> tuple[int, int]:
+    """retention 接线:单次快照取 days/count(log_retention_loop 每轮注入)。"""
+    p = store.snapshot().program
+    return p.log_retention_days, p.log_retention_count
+
+
 def setup_logging(level: str = "INFO", log_dir: str = "logs") -> None:
     """配置 root logger(可重配):控制台 + 每次启动一个时间戳文件(留 10 个)。
     每次启动 = 新文件 logs/llm-manager_{ts}.log(非按天轮换,避免长期堆一个文件)。"""
@@ -116,9 +122,7 @@ def create_app(db_path: Path | None = None, *, legacy_yaml: Path | None = None) 
         log_stop = asyncio.Event()
         flush_task = asyncio.create_task(_logs.flush_loop(log_stop))
         retention_task = asyncio.create_task(
-            log_retention_loop(db, lambda: (store.snapshot().program.log_retention_days,
-                                            store.snapshot().program.log_retention_count),
-                               log_stop))
+            log_retention_loop(db, lambda: _retention_from_store(store), log_stop))
         await asyncio.to_thread(monitor.refresh)
         online = sorted(monitor.online_devices())
         logger.info("devices online: %s", ", ".join(online) if online else "(none)")
