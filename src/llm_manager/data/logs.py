@@ -286,11 +286,12 @@ def resolve_session(alias: str) -> int | None:
 
 
 def log_start_session(db: Db, type_: str, model_name: str | None, alias: str | None, start: float) -> int:
-    """开新日志会话(系统或模型);返回会话 id。last_active 初始=start(心跳的初始基准)。"""
+    """开新日志会话(系统或模型);返回会话 id。会话 id 由 start_session 记入内存 _sessions
+    (状态/心跳/retention 用);end_time 由心跳维持,不兼任「运行中」标识。"""
     with db.write_lock:
         cur = db.conn.execute(
-            "INSERT INTO log_sessions (type, model_name, alias, start_time, last_active) VALUES (?,?,?,?,?)",
-            (type_, model_name, alias, start, start),
+            "INSERT INTO log_sessions (type, model_name, alias, start_time) VALUES (?,?,?,?)",
+            (type_, model_name, alias, start),
         )
         db.conn.commit()
         assert cur.lastrowid is not None
@@ -298,57 +299,29 @@ def log_start_session(db: Db, type_: str, model_name: str | None, alias: str | N
 
 
 def log_heartbeat_live(db: Db, now: float) -> int:
-    """心跳落库:给所有进行中(end_time IS NULL)会话写 last_active。返回触及行数。
+    """心跳:把所有进行中会话的 end_time 推到 now(从内存 live_session_ids 选会话)。
 
-    由 heartbeat_loop 每 30s 调用。崩溃/强杀后,启动收口以 last_active(≈死亡时刻,
-    误差 ≤ 心跳间隔)而非收口时刻作 end_time——时长/展示不歪到启动时刻。"""
+    由 heartbeat_loop 每 30s 调用。崩溃/强杀后 end_time 停在最后一次心跳(≈死亡时刻,
+    误差 ≤ 心跳间隔);下次启动 live_session_ids 为空,残留会话天然 status=ended、
+    end_time≈死亡时刻——无需启动收口。运行中状态由 live_session_ids(_sessions)表达,
+    end_time 只管时间。"""
+    ids = live_session_ids()
+    if not ids:
+        return 0
+    placeholders = ",".join("?" * len(ids))
     with db.write_lock:
-        cur = db.conn.execute("UPDATE log_sessions SET last_active=? WHERE end_time IS NULL", (now,))
+        cur = db.conn.execute(
+            f"UPDATE log_sessions SET end_time=? WHERE id IN ({placeholders})", (now, *ids))
         n = cur.rowcount
         db.conn.commit()
         return n
 
 
 def log_end_session(db: Db, session_id: int, end: float) -> None:
-    """关闭会话:写入 end_time。"""
+    """关闭会话:写入 end_time(精确)。心跳期间 end_time 已被推到接近 now;此处写最终值。"""
     with db.write_lock:
         db.conn.execute("UPDATE log_sessions SET end_time=? WHERE id=?", (end, session_id))
         db.conn.commit()
-
-
-def log_close_open_system_sessions(db: Db, end: float | None = None) -> int:
-    """收口残留进行中 system 会话(崩溃/强杀遗留),返回收口数。
-
-    app 启动时调用(在开新系统会话之前,见 app.lifespan):把上次崩溃/强杀
-    留下的 end_time IS NULL 的 system 会话统一写上结束时间,避免残留永远
-    显示"进行中"。end_time = 最后一次心跳 last_active(≈死亡时刻,误差 ≤
-    心跳间隔;无心跳数据的旧行回落收口时刻)。刻意放在 app 接线而非
-    start_system_session 隐式收口(模块不隐式写库)。"""
-    end = end if end is not None else time.time()
-    with db.write_lock:
-        cur = db.conn.execute(
-            "UPDATE log_sessions SET end_time=COALESCE(last_active, ?) "
-            "WHERE type='system' AND end_time IS NULL", (end,))
-        n = cur.rowcount
-        db.conn.commit()
-        return n
-
-
-def log_close_open_model_sessions(db: Db, end: float | None = None) -> int:
-    """收口残留进行中 model 会话(崩溃/强杀遗留),返回收口数。
-
-    app 启动时调用(见 app.lifespan):把上次崩溃/强杀留下的 end_time IS NULL 的
-    model 会话统一写上结束时间,避免残留永远显示"进行中"。end_time = 最后一次
-    心跳 last_active(≈死亡时刻,误差 ≤ 心跳间隔;无心跳数据的旧行回落收口时刻)。
-    启动时不可能有进行中的模型(模型由本服务派生),故一次性全部收口是安全的。"""
-    end = end if end is not None else time.time()
-    with db.write_lock:
-        cur = db.conn.execute(
-            "UPDATE log_sessions SET end_time=COALESCE(last_active, ?) "
-            "WHERE type='model' AND end_time IS NULL", (end,))
-        n = cur.rowcount
-        db.conn.commit()
-        return n
 
 
 def log_session_exists(db: Db, session_id: int) -> bool:
@@ -405,12 +378,19 @@ def log_insert_lines(db: Db, session_id: int, rows: list[tuple[int, float, str, 
 
 def log_sessions(db: Db, *, type_: str | None = None, model_name: str | None = None,
                  limit: int = 50, before_id: int | None = None) -> list[sqlite3.Row]:
-    """会话列表倒序(id 降序)。line_count 一次 GROUP BY 算出;status 由 end_time 计算。
+    """会话列表倒序(id 降序)。line_count 一次 GROUP BY 算出;status 由内存 live_session_ids
+    计算(运行中 = 当前 _sessions 里的会话;end_time 已不兼任此标识,心跳会维持它到 now)。
     before_id = id < before_id 的翻页。"""
-    sql = ("SELECT s.*, COUNT(l.id) AS line_count, "
-           "CASE WHEN s.end_time IS NULL THEN 'running' ELSE 'ended' END AS status "
+    live = live_session_ids()
+    status_args: list[int] = list(live)
+    if live:
+        placeholders = ",".join("?" * len(live))
+        status_sql = f"CASE WHEN s.id IN ({placeholders}) THEN 'running' ELSE 'ended' END"
+    else:
+        status_sql = "'ended'"   # 无运行中会话(如刚启动)→ 全 ended
+    sql = ("SELECT s.*, COUNT(l.id) AS line_count, " + status_sql + " AS status "
            "FROM log_sessions s LEFT JOIN log_lines l ON l.session_id = s.id WHERE 1=1")
-    args: list = []
+    args: list = status_args   # SELECT 里的 IN 占位符在 SQL 中最先出现
     if type_ is not None:
         sql += " AND s.type = ?"
         args.append(type_)

@@ -18,8 +18,6 @@ from fastapi import FastAPI
 from llm_manager import config
 from llm_manager.data import logs as _logs
 from llm_manager.data.log_handler import SystemLogHandler, setup_logging
-from llm_manager.data.logs import log_close_open_model_sessions, log_close_open_system_sessions
-from llm_manager.data.usage import close_open_runtime_sessions
 from llm_manager.data.persistence import open_db
 from llm_manager.devices import ENUMERATORS, DeviceMonitor
 from llm_manager.gateway.api.config_api import RESTART_EXIT_CODE
@@ -69,17 +67,8 @@ def create_app(db_path: Path | None = None, *, legacy_yaml: Path | None = None) 
         app.state.lifecycle = lifecycle
         app.state.loop = asyncio.get_running_loop()
         # === 系统日志会话:handler 任意线程 emit → capture_system → flush_loop 落库 ===
-        # 崩溃/强杀残留的上次 system 会话(end_time IS NULL)先统一收口,再开新会话;
-        # 收口刻意放在 app 接线而非 logs.start_system_session:保持 logs 模块测试隔离。
-        n_residual = log_close_open_system_sessions(db)
-        if n_residual:
-            logger.info("closed %d crash-residual system log session(s)", n_residual)
-        n_residual_model = log_close_open_model_sessions(db)
-        if n_residual_model:
-            logger.info("closed %d crash-residual model log session(s)", n_residual_model)
-        n_residual_runtime = close_open_runtime_sessions(db)
-        if n_residual_runtime:
-            logger.info("closed %d crash-residual runtime session(s)", n_residual_runtime)
+        # 无需启动收口:心跳(heartbeat_loop)已把上次运行中会话/运行段的 end_time 维持到
+        # ≈死亡时刻;新进程 live_session_ids/live_segment_ids 为空 → 残留天然 status=ended。
         _logs.start_system_session()
         sys_handler = SystemLogHandler(_logs.capture_system)
         logging.getLogger().addHandler(sys_handler)

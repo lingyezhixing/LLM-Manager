@@ -113,3 +113,4 @@ QUICK_STATS_README.md
 
 # 忽略docs设计文档
 docs/
+.playwright-cli/

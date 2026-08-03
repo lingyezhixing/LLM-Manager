@@ -395,52 +395,25 @@ def test_log_cleanup_chunks_large_doomed_sets(tmp_path):
     assert logs.log_sessions(db) == []
 
 
-def test_log_close_open_system_sessions(tmp_path):
-    """崩溃/强杀残留的进行中 system 会话(end_time NULL)一次性收口,返回收口数。
-    end_time 取最后一次心跳(last_active),而非收口时刻。"""
-    db = open_db(tmp_path / "t.db")
-    resid = logs.log_start_session(db, "system", None, None, 1000.0)
-    mid = logs.log_start_session(db, "model", "m1", "m1", 2000.0)   # 非 system,不收口
-    n = logs.log_close_open_system_sessions(db, end=5000.0)
-    assert n == 1
-    rows = logs.log_sessions(db)
-    by_id = {r["id"]: r for r in rows}
-    assert by_id[resid]["end_time"] == 1000.0   # COALESCE(last_active=start, end)
-    assert by_id[mid]["end_time"] is None                          # model 会话不受影响
-    assert logs.log_close_open_system_sessions(db, end=6000.0) == 0  # 幂等:无残留可收
+def test_log_heartbeat_live_writes_end_time(store):
+    """心跳把 live_session_ids 中会话的 end_time 推到 now;已结束会话不动。
+    运行中标识=内存 _sessions,与 end_time 解耦——心跳直写 end_time 不破坏状态。"""
+    live = logs.start_session("model", "m1", "m1")
+    ended = logs.start_session("model", "m2", "m2")
+    logs.end_session(ended)
+    assert logs.log_heartbeat_live(store, 5_000_000_000.0) == 1
+    rows = {r["id"]: r for r in logs.log_sessions(store)}
+    assert rows[live]["end_time"] == 5_000_000_000.0   # 进行中 → end_time 推到心跳值
+    assert rows[ended]["end_time"] is not None          # 已结束保留 end_session 写的精确值
+    assert rows[ended]["end_time"] != 5_000_000_000.0   # 不被心跳覆盖
 
 
-def test_log_close_open_model_sessions(tmp_path):
-    """崩溃/强杀残留的进行中 model 会话(end_time NULL)一次性收口;end_time 取最后心跳。"""
-    db = open_db(tmp_path / "t.db")
-    resid = logs.log_start_session(db, "model", "m1", "m1", 1000.0)
-    sysid = logs.log_start_session(db, "system", None, None, 2000.0)  # 非 model,不收口
-    logs.log_heartbeat_live(db, 1200.0)   # 心跳:last_active=1200(≈死亡时刻)
-    n = logs.log_close_open_model_sessions(db, end=5000.0)
-    assert n == 1
-    rows = logs.log_sessions(db)
-    by_id = {r["id"]: r for r in rows}
-    assert by_id[resid]["end_time"] == 1200.0       # 取心跳时刻,而非收口时刻 5000
-    assert by_id[sysid]["end_time"] is None         # system 会话不受影响
-    # 无心跳数据的旧行(迁移前残留)→ 回落收口时刻
-    legacy = logs.log_start_session(db, "model", "m2", "m2", 3000.0)
-    db.conn.execute("UPDATE log_sessions SET last_active=NULL WHERE id=?", (legacy,))
-    db.conn.commit()
-    assert logs.log_close_open_model_sessions(db, end=7000.0) == 1
-    by_id2 = {r["id"]: r for r in logs.log_sessions(db)}
-    assert by_id2[legacy]["end_time"] == 7000.0
-    assert logs.log_close_open_model_sessions(db, end=8000.0) == 0  # 幂等:无残留可收
-
-
-def test_log_heartbeat_live_updates_only_live(tmp_path):
-    """心跳只触及进行中(end_time NULL)会话;已结束不动。"""
-    db = open_db(tmp_path / "t.db")
-    live = logs.log_start_session(db, "model", "m1", "m1", 1000.0)
-    ended = logs.log_start_session(db, "model", "m2", "m2", 2000.0)
-    logs.log_end_session(db, ended, 2500.0)
-    assert logs.log_heartbeat_live(db, 3000.0) == 1
-    rows = logs.log_sessions(db)
-    by_id = {r["id"]: r for r in rows}
-    assert by_id[live]["last_active"] == 3000.0
-    assert by_id[ended]["last_active"] == 2000.0   # 已结束不动
-    assert logs.log_heartbeat_live(db, 4000.0) == 1  # 幂等:仍只一条进行中
+def test_log_sessions_status_uses_live_set(store):
+    """status 由内存 live_session_ids 判定,不看 end_time(心跳后 live 会话 end_time 非 NULL 仍 running)。"""
+    live = logs.start_session("model", "m1", "m1")
+    logs.log_heartbeat_live(store, 5_000_000_000.0)   # live 的 end_time → 非 NULL
+    rows = {r["id"]: r for r in logs.log_sessions(store)}
+    assert rows[live]["status"] == "running"          # 在 _sessions,虽 end_time 非 NULL
+    logs.end_session(live)                            # 移出 _sessions
+    rows2 = {r["id"]: r for r in logs.log_sessions(store)}
+    assert rows2[live]["status"] == "ended"

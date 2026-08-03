@@ -42,58 +42,61 @@ def record_usage(db: Db, model_name: str, start: float, end: float,
         db.conn.commit()
 
 
-def record_runtime_start(db: Db, model_name: str, start: float) -> None:
-    """Begin a model-loaded billing session (model reached ROUTING). end_time stays NULL
-    until record_runtime_end. Auto-creates the models row (a model can load before any request).
-    last_active 初始=start(心跳的初始基准)。"""
+# 进行中(已 start 未 end)的运行段 id——内存态,与 logs._sessions 对称。
+# 心跳据此选段写 end_time;record_runtime_end 据此 discard;崩溃随进程消失。
+# 不依赖 end_time IS NULL 定位运行段(心跳会持续把运行段 end_time 推到 now)。
+_live_segments: set[int] = set()
+
+
+def live_segment_ids() -> set[int]:
+    """公开只读:当前内存中所有进行中运行段 id(心跳/lifecycle 用)。"""
+    return set(_live_segments)
+
+
+def record_runtime_start(db: Db, model_name: str, start: float) -> int:
+    """Begin a model-loaded billing session (model reached ROUTING);返回段 id。
+    Auto-creates the models row (a model can load before any request)。段 id 记入
+    _live_segments(心跳/关闭用);end_time 由心跳维持,不兼任「运行中」标识。"""
     with db.write_lock:
         mid = _resolve_model_id_locked(db, model_name)
-        db.conn.execute(
-            "INSERT INTO model_runtime (model_id, start_time, end_time, last_active) VALUES (?,?,NULL,?)",
-            (mid, start, start),
+        cur = db.conn.execute(
+            "INSERT INTO model_runtime (model_id, start_time, end_time) VALUES (?,?,NULL)",
+            (mid, start),
         )
         db.conn.commit()
+        assert cur.lastrowid is not None
+        sid = cur.lastrowid
+        _live_segments.add(sid)
+        return sid
 
 
 def runtime_heartbeat_live(db: Db, now: float) -> int:
-    """心跳落库:给所有进行中(end_time IS NULL)计费运行段写 last_active。返回触及行数。
+    """心跳:把所有进行中运行段的 end_time 推到 now(从内存 _live_segments 选段)。
 
-    由 heartbeat_loop 每 30s 调用。崩溃/强杀后,启动收口以 last_active(≈死亡时刻,
-    误差 ≤ 心跳间隔)作 end_time——usage_cost 不再按 now 持续计费,也不含停机时长。"""
-    with db.write_lock:
-        cur = db.conn.execute("UPDATE model_runtime SET last_active=? WHERE end_time IS NULL", (now,))
-        n = cur.rowcount
-        db.conn.commit()
-        return n
-
-
-def record_runtime_end(db: Db, model_name: str, end: float) -> None:
-    """Close the latest still-open session for the model (cooperative stop or crash)."""
-    with db.write_lock:
-        mid = _resolve_model_id_locked(db, model_name)
-        db.conn.execute(
-            "UPDATE model_runtime SET end_time=? WHERE id=("
-            "SELECT id FROM model_runtime WHERE model_id=? AND end_time IS NULL ORDER BY id DESC LIMIT 1)",
-            (end, mid),
-        )
-        db.conn.commit()
-
-
-def close_open_runtime_sessions(db: Db, end: float | None = None) -> int:
-    """收口残留进行中的 model_runtime 段(崩溃/强杀遗留),返回收口数。
-
-    app 启动时调用(见 app.lifespan):把上次崩溃/强杀留下的 end_time IS NULL 的
-    运行段统一写上结束时间——否则 usage_cost 会按 now 持续计费,且与后续新段
-    重叠双重计费。end_time = 最后一次心跳 last_active(≈死亡时刻,误差 ≤ 心跳
-    间隔;无心跳数据的旧行回落收口时刻)。启动时不可能有运行中模型(模型由本
-    服务派生),全部收口安全。与日志会话收口(log_close_open_model_sessions)同模式。"""
-    end = end if end is not None else time.time()
+    由 heartbeat_loop 每 30s 调用。崩溃/强杀后 end_time 停在最后一次心跳(≈死亡时刻,
+    误差 ≤ 心跳间隔)——usage_cost 直接读 end_time,不再按 now 持续计费、不含停机时长,
+    也无需启动收口。"""
+    ids = live_segment_ids()
+    if not ids:
+        return 0
+    placeholders = ",".join("?" * len(ids))
     with db.write_lock:
         cur = db.conn.execute(
-            "UPDATE model_runtime SET end_time=COALESCE(last_active, ?) WHERE end_time IS NULL", (end,))
+            f"UPDATE model_runtime SET end_time=? WHERE id IN ({placeholders})", (now, *ids))
         n = cur.rowcount
         db.conn.commit()
         return n
+
+
+def record_runtime_end(db: Db, segment_id: int, end: float) -> None:
+    """Close a billing session by id(模型停止/崩溃;lifecycle 持 alias→segment_id 映射)。
+    幂等:segment_id 不在 _live_segments(已关/未知)→ no-op。"""
+    if segment_id not in _live_segments:
+        return
+    with db.write_lock:
+        db.conn.execute("UPDATE model_runtime SET end_time=? WHERE id=?", (end, segment_id))
+        db.conn.commit()
+    _live_segments.discard(segment_id)
 
 
 @dataclass(frozen=True, slots=True)

@@ -51,8 +51,10 @@ def test_lifespan_opens_and_closes_system_session(tmp_path):
     assert logs.current_system_session_id() is None   # 内存登记已清除
 
 
-def test_lifespan_closes_crash_residual_system_sessions(tmp_path):
-    """崩溃残留(system,end_time NULL)在下次启动收口,再开新的运行会话。"""
+def test_lifespan_new_system_session_after_crash(tmp_path):
+    """崩溃残留会话(SQL 直插模拟)在新进程 live_session_ids 之外 → status=ended,无需启动收口;
+    同时开新 system 会话,shutdown 时被正常关闭。注:真实崩溃残留经心跳维持 end_time(≈死亡时刻),
+    本测用 SQL 直插仅验「运行中」状态已与 end_time 解耦。"""
     db_path = tmp_path / "t.db"
     db = open_db(db_path)
     try:
@@ -63,14 +65,14 @@ def test_lifespan_closes_crash_residual_system_sessions(tmp_path):
     with TestClient(app):
         rows = logs.log_sessions(app.state.db, type_="system")
         by_id = {r["id"]: r for r in rows}
-        assert by_id[resid]["end_time"] is not None       # 残留已收口
+        assert by_id[resid]["status"] == "ended"        # 不在 live_session_ids → ended(无需收口)
         current = logs.current_system_session_id()
         assert current is not None and current != resid   # 新会话已开
-        assert by_id[current]["end_time"] is None         # 新会话进行中
-    # shutdown 收口新会话
+        assert by_id[current]["status"] == "running"
+    # shutdown 关闭新会话(current 的 end_time 被写;resid 是 SQL 直插假残留,end_time 未经心跳)
     db2 = open_db(db_path)
     try:
-        rows = logs.log_sessions(db2, type_="system")
-        assert all(r["end_time"] is not None for r in rows)
+        rows = {r["id"]: r for r in logs.log_sessions(db2, type_="system")}
+        assert rows[current]["end_time"] is not None    # 新会话 shutdown 时关闭
     finally:
         db2.conn.close()

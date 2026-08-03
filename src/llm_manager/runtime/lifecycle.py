@@ -52,6 +52,7 @@ class Lifecycle:
         self._active_schemes: dict[str, Scheme] = {}
         self._spawn_lock = asyncio.Lock()   # Plan 7:全局 spawn 锁(spec §3.2)
         self._log_session_ids: dict[str, int] = {}   # alias → 进行中模型日志会话 id(多模型并发,按 alias 独立追踪)
+        self._runtime_seg_ids: dict[str, int] = {}   # alias → 进行中计费运行段 id(record_runtime_end 按关,不再靠 end_time IS NULL 定位)
 
     # ---------- public ----------
     async def ensure_running(self, alias: str, *, inc_pending: bool = False) -> ModelStatus:
@@ -92,7 +93,7 @@ class Lifecycle:
         if state.get_status(alias) in (ModelStatus.STOPPED, ModelStatus.FAILED):
             return state.get_status(alias)
         state.set_status(alias, ModelStatus.STOPPED, force=True, reason="user stop")
-        self._runtime_end(alias)   # 关 runtime 会话:必须在首个 await 前(防并发 restart 抢先开新会话,record_runtime_end 只关最新一条)
+        self._runtime_end(alias)   # 关 runtime 段:必须在首个 await 前 pop alias→seg_id(防并发 restart 抢先开新段覆盖映射;按 id 关,幂等)
         self._stop_events.setdefault(alias, asyncio.Event()).set()
         pid = state.get_pid(alias)
         if pid is not None:
@@ -120,16 +121,20 @@ class Lifecycle:
             return
         try:
             from llm_manager.data import usage as _u
-            _u.record_runtime_start(self._db, alias, time.time())
+            seg_id = _u.record_runtime_start(self._db, alias, time.time())
+            self._runtime_seg_ids[alias] = seg_id
         except Exception:
             logger.warning("record_runtime_start failed for %s", alias, exc_info=True)
 
     def _runtime_end(self, alias: str) -> None:
         if self._db is None:
             return
+        seg_id = self._runtime_seg_ids.pop(alias, None)
+        if seg_id is None:
+            return   # 未开过段(exit cb 兜底重复触发)→ 幂等 no-op
         try:
             from llm_manager.data import usage as _u
-            _u.record_runtime_end(self._db, alias, time.time())
+            _u.record_runtime_end(self._db, seg_id, time.time())
         except Exception:
             logger.warning("record_runtime_end failed for %s", alias, exc_info=True)
 

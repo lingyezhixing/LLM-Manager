@@ -1,9 +1,10 @@
-"""30s 心跳:运行中日志会话/计费运行段的 last_active 定期落库。
+"""30s 心跳:把运行中日志会话/计费运行段的 end_time 定期推到 now。
 
-崩溃/强杀(如直接关机)后,启动收口(log_close_open_model_sessions /
-close_open_runtime_sessions)以 last_active(≈死亡时刻,误差 ≤ 心跳间隔)
-作 end_time——时长与计费不歪到启动时刻。end_time 仍仅退出时写(NULL=运行中,
-前端状态语义不变);last_active 是独立心跳列,不与状态耦合。"""
+运行中标识由内存态表达(logs._sessions / usage._live_segments),end_time 只管时间、
+不兼任状态——故心跳可直接写 end_time 而不破坏「运行中」语义。崩溃/强杀(如直接
+关机)后 end_time 停在最后一次心跳(≈死亡时刻,误差 ≤ 心跳间隔);新进程内存集合
+为空,残留会话/段天然 status=ended,无需启动收口。模型正常停止时 lifecycle 再写
+一次精确 end_time(最终值)。"""
 from __future__ import annotations
 
 import asyncio
@@ -21,7 +22,7 @@ HEARTBEAT_INTERVAL = 30.0  # 秒:老项目同款节奏,崩溃最多丢最后 30s
 
 async def heartbeat_loop(db: "Db", stop_event: asyncio.Event,
                          interval: float = HEARTBEAT_INTERVAL) -> None:
-    """常驻心跳任务:每 interval 给所有进行中会话/运行段写 last_active。"""
+    """常驻心跳任务:每 interval 把所有进行中会话/运行段的 end_time 推到 now。"""
     while not stop_event.is_set():
         try:
             await asyncio.wait_for(stop_event.wait(), timeout=interval)

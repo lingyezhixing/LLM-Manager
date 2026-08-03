@@ -6,6 +6,8 @@ import sqlite3
 import threading
 from pathlib import Path
 
+import pytest
+
 from llm_manager.data.persistence import (
     delete_model_data,
     open_db,
@@ -17,7 +19,6 @@ from llm_manager.data.usage import (
     record_runtime_start,
     record_runtime_end,
     runtime_heartbeat_live,
-    close_open_runtime_sessions,
     resolve_model_id,
     tier_cost,
     usage_cost,
@@ -26,6 +27,16 @@ from llm_manager.data.usage import (
     usage_series,
     usage_summary,
 )
+
+
+@pytest.fixture(autouse=True)
+def _clear_live_segments():
+    """record_runtime_start 把段 id 加入模块全局 _live_segments(心跳/关闭用)。
+    清空它防跨测试残留污染(配对 start/end 的测试本身干净,不配对的会残留)。"""
+    from llm_manager.data.usage import _live_segments
+    _live_segments.clear()
+    yield
+    _live_segments.clear()
 
 
 def test_open_db_sets_pragmas_and_creates_schema(tmp_path):
@@ -204,8 +215,8 @@ def test_open_db_creates_model_runtime_table(tmp_path):
 
 def test_record_runtime_start_end_round_trip(tmp_path):
     db = open_db(tmp_path / "t.db")
-    record_runtime_start(db, "m1", start=100.0)
-    record_runtime_end(db, "m1", end=250.0)
+    seg = record_runtime_start(db, "m1", start=100.0)
+    record_runtime_end(db, seg, end=250.0)
     row = db.conn.execute(
         "SELECT start_time, end_time FROM model_runtime r JOIN models m ON r.model_id=m.id "
         "WHERE m.original_name='m1'").fetchone()
@@ -213,57 +224,45 @@ def test_record_runtime_start_end_round_trip(tmp_path):
     assert row["end_time"] == 250.0
 
 
-def test_record_runtime_end_targets_latest_open_session(tmp_path):
+def test_record_runtime_end_closes_by_segment_id(tmp_path):
+    """record_runtime_end 按 segment_id 关段(不再靠 end_time IS NULL 找最新)。
+    开两段拿 id,只关指定段;另一段仍开;已关段再关幂等 no-op。"""
     db = open_db(tmp_path / "t.db")
-    record_runtime_start(db, "m1", start=100.0)
-    record_runtime_start(db, "m1", start=200.0)   # second load (first still open)
-    record_runtime_end(db, "m1", end=300.0)        # closes the LATEST open session
+    seg1 = record_runtime_start(db, "m1", start=100.0)
+    seg2 = record_runtime_start(db, "m1", start=200.0)
+    record_runtime_end(db, seg2, end=300.0)        # 按 id 只关 seg2
     rows = db.conn.execute(
         "SELECT start_time, end_time FROM model_runtime r JOIN models m ON r.model_id=m.id "
         "WHERE m.original_name='m1' ORDER BY start_time").fetchall()
-    assert rows[0]["end_time"] is None             # first session still open
-    assert rows[1]["end_time"] == 300.0            # second closed
+    assert rows[0]["end_time"] is None             # seg1 仍开
+    assert rows[1]["end_time"] == 300.0            # seg2 已关
+    record_runtime_end(db, seg2, end=999.0)        # 幂等:seg2 已移出 _live_segments → no-op
+    again = db.conn.execute("SELECT end_time FROM model_runtime WHERE id=?", (seg2,)).fetchone()
+    assert again["end_time"] == 300.0              # 未被二次覆盖
 
 
-def test_close_open_runtime_sessions(tmp_path):
-    """崩溃/强杀残留的进行中运行段(end_time NULL)一次性收口;end_time 取最后心跳。
-    否则 usage_cost 按 now 持续计费,与后续新段重叠双重计费。"""
+def test_runtime_heartbeat_live_writes_end_time(tmp_path):
+    """心跳把进行中运行段(_live_segments)的 end_time 推到 now;已结束段不动。"""
     db = open_db(tmp_path / "t.db")
-    record_runtime_start(db, "m1", start=100.0)
-    record_runtime_start(db, "m1", start=200.0)   # 两条都开着(崩溃残留)
-    runtime_heartbeat_live(db, 150.0)             # 心跳:last_active=150(≈死亡时刻)
-    n = close_open_runtime_sessions(db, end=500.0)
-    assert n == 2
-    rows = db.conn.execute(
-        "SELECT start_time, end_time FROM model_runtime r JOIN models m ON r.model_id=m.id "
-        "WHERE m.original_name='m1' ORDER BY start_time").fetchall()
-    assert rows[0]["end_time"] == 150.0           # 取心跳时刻,而非收口时刻 500
-    assert rows[1]["end_time"] == 150.0
-    assert close_open_runtime_sessions(db, end=600.0) == 0  # 幂等:无残留可收
-
-
-def test_runtime_heartbeat_live_updates_only_live(tmp_path):
-    """心跳只触及进行中(end_time NULL)运行段;已结束不动。"""
-    db = open_db(tmp_path / "t.db")
-    record_runtime_start(db, "m1", start=100.0)
-    record_runtime_end(db, "m1", end=200.0)
-    record_runtime_start(db, "m2", start=300.0)
+    seg1 = record_runtime_start(db, "m1", start=100.0)
+    record_runtime_end(db, seg1, end=200.0)
+    record_runtime_start(db, "m2", start=300.0)    # 仍开(在 _live_segments)
     assert runtime_heartbeat_live(db, 500.0) == 1
     rows = db.conn.execute(
-        "SELECT m.original_name AS name, last_active FROM model_runtime r "
+        "SELECT m.original_name AS name, r.end_time AS end_time FROM model_runtime r "
         "JOIN models m ON r.model_id=m.id ORDER BY r.start_time").fetchall()
-    by_name = {r["name"]: r["last_active"] for r in rows}
-    assert by_name["m2"] == 500.0                 # 进行中 → 心跳更新
-    assert by_name["m1"] == 100.0                 # 已结束 → 保持初始值
-    assert runtime_heartbeat_live(db, 600.0) == 1  # 幂等:仍只一条进行中
+    by_name = {r["name"]: r["end_time"] for r in rows}
+    assert by_name["m2"] == 500.0                  # 进行中 → end_time 推到心跳值
+    assert by_name["m1"] == 200.0                  # 已结束 → 精确值不动
+    assert runtime_heartbeat_live(db, 600.0) == 1  # 仍只一条进行中
 
 
-def test_open_db_adds_last_active_columns(tmp_path):
-    """迁移:log_sessions 与 model_runtime 均有 last_active 心跳列。"""
+def test_open_db_has_no_last_active_column(tmp_path):
+    """last_active 列已移除(解耦重构:end_time 由心跳直接维持,不再需独立心跳列)。"""
     db = open_db(tmp_path / "t.db")
     for tbl in ("log_sessions", "model_runtime"):
         cols = {r[1] for r in db.conn.execute(f"PRAGMA table_info({tbl})")}
-        assert "last_active" in cols
+        assert "last_active" not in cols
 
 
 def test_tier_cost_no_cache_matches_and_divides_by_million(tmp_path):
@@ -338,8 +337,8 @@ def test_usage_cost_tier_model_sums_requests(tmp_path):
 def test_usage_cost_hourly_model_uses_runtime_overlap(tmp_path):
     from llm_manager.config import Pricing
     db = open_db(tmp_path / "t.db")
-    record_runtime_start(db, "m1", start=0.0)
-    record_runtime_end(db, "m1", end=7200.0)            # 2 hours loaded
+    seg = record_runtime_start(db, "m1", start=0.0)
+    record_runtime_end(db, seg, end=7200.0)            # 2 hours loaded
     cfg = _cfg_with(Pricing(pricing_type="hourly", hourly_price=10.0))
     s = usage_cost(db, cfg, start_ts=0.0, end_ts=3600.0, now=9999.0)   # window = 1 hour
     assert s.total_cost == 10.0                          # 1h × 10/h
@@ -384,8 +383,8 @@ def test_usage_cost_series_buckets_tier_cost_by_end_time(tmp_path):
 def test_usage_cost_series_hourly_spreads_across_buckets(tmp_path):
     from llm_manager.config import Pricing
     db = open_db(tmp_path / "t.db")
-    record_runtime_start(db, "m1", start=0.0)
-    record_runtime_end(db, "m1", end=120.0)               # 2 minutes loaded
+    seg = record_runtime_start(db, "m1", start=0.0)
+    record_runtime_end(db, seg, end=120.0)               # 2 minutes loaded
     cfg = _cfg_with(Pricing(pricing_type="hourly", hourly_price=3600.0))  # 1 元/s
     res = usage_cost_series(db, cfg, start_ts=0, end_ts=120, bucket_seconds=60, now=9999.0)
     assert res.buckets == [0, 60]
@@ -445,8 +444,8 @@ def test_storage_stats_counts_requests_and_runtime(tmp_path):
     db = open_db(tmp_path / "t.db")
     record_usage(db, "m1", 100, 200, input_tokens=5, output_tokens=5, cache_n=0, prompt_n=0)
     record_usage(db, "m1", 300, 400, input_tokens=1, output_tokens=1, cache_n=0, prompt_n=0)
-    record_runtime_start(db, "m2", 500)
-    record_runtime_end(db, "m2", 600)
+    seg_m2 = record_runtime_start(db, "m2", 500)
+    record_runtime_end(db, seg_m2, 600)
     s = storage_stats(db, configured=set(), size_bytes=99)
     assert s.total_requests == 2
     assert s.total_models_with_data == 2
