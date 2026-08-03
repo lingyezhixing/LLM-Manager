@@ -74,9 +74,9 @@ export function useLogViewer(api: LogApi | null, level: string, runKey: number |
   // (翻页/搜索/向上加载照常)。瞬时错误(运行中会话)EventSource 自行重连;若先收到过行则不回退,
   // 避免与重连后的回填重复。onmessage 里的 id 守卫兜底防重复追加(回退与回填交错时)。
   useEffect(() => {
-    if (!api) return;   // 无会话(模型未启动 / 定位中):保持空态
     setLiveLines([]); setHistoryPrefix([]); setHistoryPage(null); setFollowing(true); setNewCount(0);
     setMatches([]); setMatchIdx(-1); setHasSearched(false); setAtOldest(false);
+    if (!api) return;   // 无会话(模型未启动 / 定位中):视图已重置,保持空态
     let receivedAny = false;   // 本次订阅是否收到过行
     const es = new EventSource(api.streamUrl(levelParam));
     es.onmessage = (ev) => {
