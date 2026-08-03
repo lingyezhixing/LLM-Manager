@@ -345,42 +345,55 @@ def usage_cost_series(
     models: dict[str, list[float]] = {}
     total = [0.0] * n
 
-    for name, m in cfg.models.items():
-        if m.pricing.pricing_type == "tier":
-            rows = db.conn.execute(
-                "SELECT r.end_time, r.input_tokens, r.output_tokens, r.cache_n, r.prompt_n "
-                "FROM model_requests r JOIN models mm ON r.model_id=mm.id "
-                "WHERE mm.original_name=? AND r.end_time>=? AND r.end_time<?",
-                (name, start_ts, end_ts),
-            ).fetchall()
-            for row in rows:
-                c = tier_cost(
-                    m.pricing,
-                    int(row["input_tokens"]),
-                    int(row["output_tokens"]),
-                    int(row["cache_n"]),
-                    int(row["prompt_n"]),
-                )
-                if c <= 0:
-                    continue
-                idx = int((row["end_time"] - first) // bucket_seconds)
-                if 0 <= idx < n:
-                    models.setdefault(name, [0.0] * n)[idx] += c
-                    total[idx] += c
-        elif m.pricing.pricing_type == "hourly" and m.pricing.hourly_price > 0:
-            rate = m.pricing.hourly_price / 3600.0
-            rows = db.conn.execute(
-                "SELECT r.start_time, r.end_time FROM model_runtime r JOIN models mm ON r.model_id=mm.id "
-                "WHERE mm.original_name=? AND r.start_time < ? AND (r.end_time IS NULL OR r.end_time > ?)",
-                (name, end_ts, start_ts),
-            ).fetchall()
-            for row in rows:
-                sess_end = row["end_time"] if row["end_time"] is not None else now_ts
-                for i in range(n):
-                    b_start = first + i * bucket_seconds
-                    ov = _overlap(b_start, b_start + bucket_seconds, row["start_time"], sess_end)
-                    if ov > 0:
-                        cost = ov * rate
-                        models.setdefault(name, [0.0] * n)[i] += cost
-                        total[i] += cost
+    # tier:单次批量查询所有 tier 模型的请求,逐行 tier_cost + 按 end_time 落桶(原 O(N) 查询 → 1 次)。
+    # 镜像同文件 usage_cost 的批量模式;original_name 与 cfg 模型键同源,行为不变。
+    tier_models = {n: m for n, m in cfg.models.items() if m.pricing.pricing_type == "tier"}
+    if tier_models:
+        names = list(tier_models)
+        placeholders = ",".join("?" * len(names))
+        rows = db.conn.execute(
+            f"SELECT mm.original_name AS model, r.end_time, r.input_tokens, r.output_tokens, r.cache_n, r.prompt_n "
+            f"FROM model_requests r JOIN models mm ON r.model_id=mm.id "
+            f"WHERE mm.original_name IN ({placeholders}) AND r.end_time>=? AND r.end_time<?",
+            (*names, start_ts, end_ts),
+        ).fetchall()
+        for row in rows:
+            mc = tier_models.get(row["model"])
+            if mc is None:
+                continue
+            c = tier_cost(mc.pricing, int(row["input_tokens"]), int(row["output_tokens"]),
+                          int(row["cache_n"]), int(row["prompt_n"]))
+            if c <= 0:
+                continue
+            idx = int((row["end_time"] - first) // bucket_seconds)
+            if 0 <= idx < n:
+                models.setdefault(row["model"], [0.0] * n)[idx] += c
+                total[idx] += c
+
+    # hourly:单次批量查询所有 hourly 模型的运行段,逐桶摊重叠时长(原 O(N) 查询 → 1 次)。
+    hourly_rates = {n: m.pricing.hourly_price / 3600.0
+                    for n, m in cfg.models.items()
+                    if m.pricing.pricing_type == "hourly" and m.pricing.hourly_price > 0}
+    if hourly_rates:
+        names = list(hourly_rates)
+        placeholders = ",".join("?" * len(names))
+        rows = db.conn.execute(
+            f"SELECT mm.original_name AS model, r.start_time, r.end_time "
+            f"FROM model_runtime r JOIN models mm ON r.model_id=mm.id "
+            f"WHERE mm.original_name IN ({placeholders}) AND r.start_time < ? AND (r.end_time IS NULL OR r.end_time > ?)",
+            (*names, end_ts, start_ts),
+        ).fetchall()
+        for row in rows:
+            rate = hourly_rates.get(row["model"])
+            if not rate:
+                continue
+            sess_end = row["end_time"] if row["end_time"] is not None else now_ts
+            for i in range(n):
+                b_start = first + i * bucket_seconds
+                ov = _overlap(b_start, b_start + bucket_seconds, row["start_time"], sess_end)
+                if ov > 0:
+                    cost = ov * rate
+                    models.setdefault(row["model"], [0.0] * n)[i] += cost
+                    total[i] += cost
+
     return UsageSeries(buckets=buckets, models=models, total=total)
