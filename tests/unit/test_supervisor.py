@@ -113,3 +113,21 @@ def test_kill_cleans_all_tables():
         assert sup._readers == {}
 
     asyncio.run(main())
+
+
+def test_fast_kill_does_not_leak_wait_tasks():
+    """spawn→立即 kill:_wait 早退路径自清 _wait_tasks(修复快杀循环残留)。"""
+    async def main():
+        sup = Supervisor()
+        for _ in range(3):
+            proc = await sup.spawn([sys.executable, "-c", "import time; time.sleep(60)"])
+            assert await sup.kill_tree(proc.pid)
+        for _ in range(100):   # _wait 早退在 kill_tree 同步 finally 后执行,轮询等收敛
+            if not sup._wait_tasks:
+                break
+            await asyncio.sleep(0.02)
+        assert sup._wait_tasks == {}
+        assert sup._procs == {}
+        assert sup._readers == {}
+
+    asyncio.run(main())

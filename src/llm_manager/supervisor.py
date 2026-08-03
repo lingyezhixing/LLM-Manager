@@ -103,6 +103,8 @@ class Supervisor:
     async def _wait(self, pid: int) -> None:
         popen = self._procs.get(pid)
         if popen is None:
+            # kill_tree 已清理 _procs(快杀路径):本任务自清表项,防 start/stop 循环累积。
+            self._wait_tasks.pop(pid, None)
             return
         rc = await asyncio.to_thread(popen.wait)
         cb = self._exit_cbs.get(pid)
