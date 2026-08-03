@@ -2,22 +2,26 @@
 sessions) over log_sessions. Both rules run independently every period — whichever
 fires first cleans first. Reads fresh days/count from the injected get_settings
 each round, mirrors idle_reclamation_loop (stop_event-interruptible sleep,
-error-guarded).
+error-guarded). ``retention_from_store`` 提供 store→get_settings 适配(loop 每轮注入)。
 """
 from __future__ import annotations
 
 import asyncio
 import logging
+from typing import TYPE_CHECKING
 
 # 取模块级 live 会话传给 log_cleanup 排除(I1 belt-and-braces:保留规则不删直播会话,
 # 否则其 DB 行被删后 logs.flush 落库 FK 失败)。导入安全无环:logs 仅依赖
 # persistence / realtime(→devices),均不依赖 runtime.log_retention。
 from llm_manager.data import logs as _logs
 
+if TYPE_CHECKING:
+    from llm_manager.data.config_store import ConfigStore
+
 logger = logging.getLogger(__name__)
 
 
-def retention_from_store(store) -> tuple[int, int]:
+def retention_from_store(store: ConfigStore) -> tuple[int, int]:
     """retention 接线:单次快照取 days/count(log_retention_loop 每轮注入)。"""
     p = store.snapshot().program
     return p.log_retention_days, p.log_retention_count

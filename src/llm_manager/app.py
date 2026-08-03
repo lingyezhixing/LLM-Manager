@@ -50,7 +50,7 @@ def create_app(db_path: Path | None = None, *, legacy_yaml: Path | None = None) 
     except Exception:
         db.conn.close()
         raise
-    setup_logging(level=cfg.program.log_level)   # C1:log_level 接线(此前硬编码 INFO,该参数从未生效)
+    setup_logging(level=cfg.program.log_level)   # log_level 接线(此前硬编码 INFO,该参数从未生效)
     logger.info("config loaded (DB %s): %d models, %s:%d, alive %dmin",
                 resolved_db, len(cfg.models), cfg.program.host, cfg.program.port, cfg.program.alive_time)
     monitor = DeviceMonitor(ENUMERATORS, config.referenced_devices(cfg))
