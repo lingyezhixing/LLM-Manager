@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from "react";
+import { Button } from "@/components/ui/button";
 import { ConfigSaveBar } from "@/components/config-save-bar";
+import { useConfirm } from "@/components/ui/dialog";
 import { ErrorState } from "@/components/ui/error-state";
 import { Field, TextInput } from "@/components/ui/form";
 import { useToast } from "@/components/ui/toast";
 import type { WolConfig } from "@/lib/api";
-import { useConfig, useUpdateWol } from "@/lib/use-config";
+import { useConfig, useDeleteWol, useUpdateWol } from "@/lib/use-config";
 
 function shallowEqual(a: WolConfig, b: WolConfig): boolean {
   return a.broadcast_address === b.broadcast_address && a.mac_address === b.mac_address;
@@ -14,10 +16,13 @@ function shallowEqual(a: WolConfig, b: WolConfig): boolean {
 export function WolPanel() {
   const { data, isLoading, isError, error, refetch } = useConfig();
   const update = useUpdateWol();
+  const del = useDeleteWol();
+  const confirm = useConfirm();
   const toast = useToast();
   const serverWol: WolConfig = data?.wol ?? { broadcast_address: "", mac_address: "" };
   const [form, setForm] = useState<WolConfig>(serverWol);
   const syncedRef = useRef<WolConfig>(serverWol);
+  const hasConfig = serverWol.broadcast_address !== "" || serverWol.mac_address !== "";
 
   // 外部刷新跟随:未编辑(与 synced 一致)才采纳,编辑中保留。
   useEffect(() => {
@@ -39,6 +44,26 @@ export function WolPanel() {
   const dirty = !shallowEqual(form, syncedRef.current);
   const macOk = form.mac_address.trim() !== "";
   const set = (k: keyof WolConfig, v: string) => setForm({ ...form, [k]: v });
+
+  const onClear = async () => {
+    const ok = await confirm({
+      title: "清除网络唤醒配置?",
+      description: "清除后需重新填写才能使用网络唤醒(托盘「🔔 网络唤醒」将提示未配置)。",
+      confirmText: "清除",
+      cancelText: "取消",
+      danger: true,
+    });
+    if (!ok) return;
+    del.mutate(undefined, {
+      onSuccess: () => {
+        const empty: WolConfig = { broadcast_address: "", mac_address: "" };
+        syncedRef.current = empty;
+        setForm(empty);
+        toast.success("网络唤醒配置已清除");
+      },
+      onError: (e: unknown) => toast.error((e as Error).message),
+    });
+  };
 
   return (
     <div>
@@ -69,6 +94,14 @@ export function WolPanel() {
           onReset={() => setForm(syncedRef.current)}
           saveDisabled={!macOk}
         />
+      )}
+      {hasConfig && (
+        <div className="mt-4">
+          <Button type="button" size="sm" variant="ghost" className="text-destructive"
+            onClick={onClear} disabled={del.isPending}>
+            {del.isPending ? "清除中…" : "清除配置"}
+          </Button>
+        </div>
       )}
     </div>
   );

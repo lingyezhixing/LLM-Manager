@@ -280,6 +280,17 @@ def register_config_routes(api: APIRouter) -> None:
         cfg = get_config_store(request).reload()
         return _config_write_result(request, cfg)
 
+    @api.delete("/config/wol")
+    def delete_wol(request: Request) -> dict:
+        """清除 WOL 配置(删双键 → snapshot.wol=None,托盘动作提示未配置)。
+        与 put_wol 对称:WOL 是双键一对,清除必须整对删,不留孤儿键。"""
+        db = get_db(request)
+        with db.write_lock:
+            db.conn.execute("DELETE FROM system_settings WHERE key IN ('wol_broadcast', 'wol_mac')")
+            db.conn.commit()
+        cfg = get_config_store(request).reload()
+        return _config_write_result(request, cfg)
+
     @api.put("/config/claude")
     def put_claude(request: Request, body: ClaudeConfigsUpdate) -> dict:
         set_settings(get_db(request), {"claude_configs": json.dumps(body.configs, ensure_ascii=False)})

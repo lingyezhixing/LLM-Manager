@@ -95,6 +95,20 @@ def test_put_wol_rejects_partial_update(tmp_path):
     assert r.status_code == 422
 
 
+def test_delete_wol_clears_config(tmp_path):
+    # 清除 = 删双键 → snapshot.wol=None(与 put_wol 对称,不留孤儿键)
+    with TestClient(_app(tmp_path)) as c:
+        c.put("/api/config/wol", json={"broadcast_address": "10.0.0.255", "mac_address": "aa:bb:cc:dd:ee:ff"})
+        assert c.get("/api/config").json()["wol"] is not None
+        r = c.delete("/api/config/wol")
+        assert r.status_code == 200
+        assert r.json()["needs_restart"] is False
+        assert c.get("/api/config").json()["wol"] is None
+    # 同库二次启动(warm-start)→ 读到未配置
+    with TestClient(_app(tmp_path)) as c:
+        assert c.get("/api/config").json()["wol"] is None
+
+
 def test_put_claude_replaces_configs(tmp_path):
     with TestClient(_app(tmp_path)) as c:
         r = c.put("/api/config/claude", json={"configs": {"GLM": {"ANTHROPIC_BASE_URL": "http://x"}}})

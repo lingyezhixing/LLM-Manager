@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import {
   applyClaudePreset,
+  deleteWol,
   fetchClaudeCurrent,
   fetchConfig,
   fetchHealth,
@@ -49,6 +50,14 @@ export function useUpdateWol() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (body: WolConfig) => updateWol(body),
+    onSuccess: () => invalidateConfig(qc),
+  });
+}
+
+export function useDeleteWol() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => deleteWol(),
     onSuccess: () => invalidateConfig(qc),
   });
 }

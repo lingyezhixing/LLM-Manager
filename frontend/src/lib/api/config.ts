@@ -53,6 +53,13 @@ export async function updateWol(body: WolConfig): Promise<ConfigWriteResult> {
   return (await res.json()) as ConfigWriteResult;
 }
 
+// 清除 WOL 配置(DELETE /api/config/wol:删双键 → wol=null,托盘动作提示未配置)。
+export async function deleteWol(): Promise<ConfigWriteResult> {
+  const res = await fetch("/api/config/wol", { method: "DELETE" });
+  if (!res.ok) throw await parseApiError(res);
+  return (await res.json()) as ConfigWriteResult;
+}
+
 // Claude 预设:整组全量替换(PUT /api/config/claude)。
 export async function updateClaudeConfigs(configs: Record<string, Record<string, string>>): Promise<ConfigWriteResult> {
   const res = await fetch("/api/config/claude", {
