@@ -16,6 +16,7 @@ from llm_manager.data.usage import (
     record_usage,
     record_runtime_start,
     record_runtime_end,
+    runtime_heartbeat_live,
     close_open_runtime_sessions,
     resolve_model_id,
     tier_cost,
@@ -225,19 +226,44 @@ def test_record_runtime_end_targets_latest_open_session(tmp_path):
 
 
 def test_close_open_runtime_sessions(tmp_path):
-    """崩溃/强杀残留的进行中运行段(end_time NULL)一次性收口,返回收口数。
+    """崩溃/强杀残留的进行中运行段(end_time NULL)一次性收口;end_time 取最后心跳。
     否则 usage_cost 按 now 持续计费,与后续新段重叠双重计费。"""
     db = open_db(tmp_path / "t.db")
     record_runtime_start(db, "m1", start=100.0)
     record_runtime_start(db, "m1", start=200.0)   # 两条都开着(崩溃残留)
+    runtime_heartbeat_live(db, 150.0)             # 心跳:last_active=150(≈死亡时刻)
     n = close_open_runtime_sessions(db, end=500.0)
     assert n == 2
     rows = db.conn.execute(
         "SELECT start_time, end_time FROM model_runtime r JOIN models m ON r.model_id=m.id "
         "WHERE m.original_name='m1' ORDER BY start_time").fetchall()
-    assert rows[0]["end_time"] == 500.0
-    assert rows[1]["end_time"] == 500.0
+    assert rows[0]["end_time"] == 150.0           # 取心跳时刻,而非收口时刻 500
+    assert rows[1]["end_time"] == 150.0
     assert close_open_runtime_sessions(db, end=600.0) == 0  # 幂等:无残留可收
+
+
+def test_runtime_heartbeat_live_updates_only_live(tmp_path):
+    """心跳只触及进行中(end_time NULL)运行段;已结束不动。"""
+    db = open_db(tmp_path / "t.db")
+    record_runtime_start(db, "m1", start=100.0)
+    record_runtime_end(db, "m1", end=200.0)
+    record_runtime_start(db, "m2", start=300.0)
+    assert runtime_heartbeat_live(db, 500.0) == 1
+    rows = db.conn.execute(
+        "SELECT m.original_name AS name, last_active FROM model_runtime r "
+        "JOIN models m ON r.model_id=m.id ORDER BY r.start_time").fetchall()
+    by_name = {r["name"]: r["last_active"] for r in rows}
+    assert by_name["m2"] == 500.0                 # 进行中 → 心跳更新
+    assert by_name["m1"] == 100.0                 # 已结束 → 保持初始值
+    assert runtime_heartbeat_live(db, 600.0) == 1  # 幂等:仍只一条进行中
+
+
+def test_open_db_adds_last_active_columns(tmp_path):
+    """迁移:log_sessions 与 model_runtime 均有 last_active 心跳列。"""
+    db = open_db(tmp_path / "t.db")
+    for tbl in ("log_sessions", "model_runtime"):
+        cols = {r[1] for r in db.conn.execute(f"PRAGMA table_info({tbl})")}
+        assert "last_active" in cols
 
 
 def test_tier_cost_no_cache_matches_and_divides_by_million(tmp_path):

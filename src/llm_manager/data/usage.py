@@ -44,14 +44,27 @@ def record_usage(db: Db, model_name: str, start: float, end: float,
 
 def record_runtime_start(db: Db, model_name: str, start: float) -> None:
     """Begin a model-loaded billing session (model reached ROUTING). end_time stays NULL
-    until record_runtime_end. Auto-creates the models row (a model can load before any request)."""
+    until record_runtime_end. Auto-creates the models row (a model can load before any request).
+    last_active 初始=start(心跳的初始基准)。"""
     with db.write_lock:
         mid = _resolve_model_id_locked(db, model_name)
         db.conn.execute(
-            "INSERT INTO model_runtime (model_id, start_time, end_time) VALUES (?,?,NULL)",
-            (mid, start),
+            "INSERT INTO model_runtime (model_id, start_time, end_time, last_active) VALUES (?,?,NULL,?)",
+            (mid, start, start),
         )
         db.conn.commit()
+
+
+def runtime_heartbeat_live(db: Db, now: float) -> int:
+    """心跳落库:给所有进行中(end_time IS NULL)计费运行段写 last_active。返回触及行数。
+
+    由 heartbeat_loop 每 30s 调用。崩溃/强杀后,启动收口以 last_active(≈死亡时刻,
+    误差 ≤ 心跳间隔)作 end_time——usage_cost 不再按 now 持续计费,也不含停机时长。"""
+    with db.write_lock:
+        cur = db.conn.execute("UPDATE model_runtime SET last_active=? WHERE end_time IS NULL", (now,))
+        n = cur.rowcount
+        db.conn.commit()
+        return n
 
 
 def record_runtime_end(db: Db, model_name: str, end: float) -> None:
@@ -71,11 +84,13 @@ def close_open_runtime_sessions(db: Db, end: float | None = None) -> int:
 
     app 启动时调用(见 app.lifespan):把上次崩溃/强杀留下的 end_time IS NULL 的
     运行段统一写上结束时间——否则 usage_cost 会按 now 持续计费,且与后续新段
-    重叠双重计费。启动时不可能有运行中模型(模型由本服务派生),全部收口安全。
-    与日志会话收口(log_close_open_model_sessions)同模式。"""
+    重叠双重计费。end_time = 最后一次心跳 last_active(≈死亡时刻,误差 ≤ 心跳
+    间隔;无心跳数据的旧行回落收口时刻)。启动时不可能有运行中模型(模型由本
+    服务派生),全部收口安全。与日志会话收口(log_close_open_model_sessions)同模式。"""
     end = end if end is not None else time.time()
     with db.write_lock:
-        cur = db.conn.execute("UPDATE model_runtime SET end_time=? WHERE end_time IS NULL", (end,))
+        cur = db.conn.execute(
+            "UPDATE model_runtime SET end_time=COALESCE(last_active, ?) WHERE end_time IS NULL", (end,))
         n = cur.rowcount
         db.conn.commit()
         return n

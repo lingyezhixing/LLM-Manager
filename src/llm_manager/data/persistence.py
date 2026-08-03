@@ -193,6 +193,12 @@ def _migrate(conn: sqlite3.Connection) -> None:
         # === 旧 model_pricing 表删除(数据已搬,此时 tiers 已重建) ===
         if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='model_pricing'").fetchone():
             conn.execute("DROP TABLE model_pricing")
+        # === 心跳列(2026-08-03):崩溃残留收口用 last_active(≈死亡时刻)而非收口时刻 ===
+        # 运行中会话每 30s 由 heartbeat_loop 落库;end_time 仍仅退出时写(NULL=运行中)。
+        for tbl in ("log_sessions", "model_runtime"):
+            hb_cols = {row[1] for row in conn.execute(f"PRAGMA table_info({tbl})")}
+            if "last_active" not in hb_cols:
+                conn.execute(f"ALTER TABLE {tbl} ADD COLUMN last_active REAL")
     except Exception:
         try:
             conn.execute("ROLLBACK")

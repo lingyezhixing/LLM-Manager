@@ -286,15 +286,27 @@ def resolve_session(alias: str) -> int | None:
 
 
 def log_start_session(db: Db, type_: str, model_name: str | None, alias: str | None, start: float) -> int:
-    """开新日志会话(系统或模型);返回会话 id。"""
+    """开新日志会话(系统或模型);返回会话 id。last_active 初始=start(心跳的初始基准)。"""
     with db.write_lock:
         cur = db.conn.execute(
-            "INSERT INTO log_sessions (type, model_name, alias, start_time) VALUES (?,?,?,?)",
-            (type_, model_name, alias, start),
+            "INSERT INTO log_sessions (type, model_name, alias, start_time, last_active) VALUES (?,?,?,?,?)",
+            (type_, model_name, alias, start, start),
         )
         db.conn.commit()
         assert cur.lastrowid is not None
         return cur.lastrowid
+
+
+def log_heartbeat_live(db: Db, now: float) -> int:
+    """心跳落库:给所有进行中(end_time IS NULL)会话写 last_active。返回触及行数。
+
+    由 heartbeat_loop 每 30s 调用。崩溃/强杀后,启动收口以 last_active(≈死亡时刻,
+    误差 ≤ 心跳间隔)而非收口时刻作 end_time——时长/展示不歪到启动时刻。"""
+    with db.write_lock:
+        cur = db.conn.execute("UPDATE log_sessions SET last_active=? WHERE end_time IS NULL", (now,))
+        n = cur.rowcount
+        db.conn.commit()
+        return n
 
 
 def log_end_session(db: Db, session_id: int, end: float) -> None:
@@ -309,12 +321,14 @@ def log_close_open_system_sessions(db: Db, end: float | None = None) -> int:
 
     app 启动时调用(在开新系统会话之前,见 app.lifespan):把上次崩溃/强杀
     留下的 end_time IS NULL 的 system 会话统一写上结束时间,避免残留永远
-    显示"进行中"。刻意放在 app 接线而非 start_system_session 隐式收口
-    (模块不隐式写库)。"""
+    显示"进行中"。end_time = 最后一次心跳 last_active(≈死亡时刻,误差 ≤
+    心跳间隔;无心跳数据的旧行回落收口时刻)。刻意放在 app 接线而非
+    start_system_session 隐式收口(模块不隐式写库)。"""
     end = end if end is not None else time.time()
     with db.write_lock:
         cur = db.conn.execute(
-            "UPDATE log_sessions SET end_time=? WHERE type='system' AND end_time IS NULL", (end,))
+            "UPDATE log_sessions SET end_time=COALESCE(last_active, ?) "
+            "WHERE type='system' AND end_time IS NULL", (end,))
         n = cur.rowcount
         db.conn.commit()
         return n
@@ -324,12 +338,14 @@ def log_close_open_model_sessions(db: Db, end: float | None = None) -> int:
     """收口残留进行中 model 会话(崩溃/强杀遗留),返回收口数。
 
     app 启动时调用(见 app.lifespan):把上次崩溃/强杀留下的 end_time IS NULL 的
-    model 会话统一写上结束时间,避免残留永远显示"进行中"。启动时不可能有进行中
-    的模型(模型由本服务派生),故一次性全部收口是安全的。"""
+    model 会话统一写上结束时间,避免残留永远显示"进行中"。end_time = 最后一次
+    心跳 last_active(≈死亡时刻,误差 ≤ 心跳间隔;无心跳数据的旧行回落收口时刻)。
+    启动时不可能有进行中的模型(模型由本服务派生),故一次性全部收口是安全的。"""
     end = end if end is not None else time.time()
     with db.write_lock:
         cur = db.conn.execute(
-            "UPDATE log_sessions SET end_time=? WHERE type='model' AND end_time IS NULL", (end,))
+            "UPDATE log_sessions SET end_time=COALESCE(last_active, ?) "
+            "WHERE type='model' AND end_time IS NULL", (end,))
         n = cur.rowcount
         db.conn.commit()
         return n
