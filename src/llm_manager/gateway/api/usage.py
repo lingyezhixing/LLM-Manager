@@ -70,7 +70,7 @@ class CostSummaryResponse(BaseModel):
 
 
 def _bucket_for_span(span: float) -> int:
-    """Auto bucket size for a custom range, chosen by span (matches preset granularities)."""
+    """Auto bucket size for a custom window, chosen by span (matches preset granularities)."""
     if span <= 3600:
         return 10           # ≤1h → 10s
     if span <= 86_400:
