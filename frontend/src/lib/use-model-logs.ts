@@ -36,14 +36,14 @@ function sessionLogApi(sessionId: number): LogApi {
  * 搜索:后端全量检索 → 匹配行 id;‹/› 在匹配间跳转,目标不在当前窗口则翻页载入后滚动定位。
  * hasSearched 跟踪「是否真的执行过搜索」(runSearch 调用过),而非「输入框是否有字」——
  * 输入未按 Enter 时不显示「无匹配」,避免误导。
- * level 为后端查询参数(SSE/搜索/翻页/向上加载均带),变更时重订阅 + 清搜索。
+ * level/input 由本 hook 自持(返回给共享 LogLines 只读):level 为后端查询参数(SSE/搜索/
+ * 翻页/向上加载均带),变更时重订阅 + 清搜索;input 为搜索输入框文本。
  * runKey 为运行实例标识(模型日志传 pid):停止(null)或重启(新进程)时变化 → 重订阅并清空,
  * 使同一 alias 的停止/重启能正确清旧日志、加载新日志(否则 alias/level 不变,旧缓冲残留、
  * EventSource 不重连、重启后新日志进不来,须手动切换模型才重置)。会话日志恒传 null(父级
  * key={sessionId} 重建组件)。
  */
-function useLogViewer(api: LogApi | null, level: string, runKey: number | null) {
-  const levelParam = level || undefined;
+export function useLogViewer(api: LogApi | null, runKey: number | null) {
   const [liveLines, setLiveLines] = useState<LogLine[]>([]);
   const [historyPrefix, setHistoryPrefix] = useState<LogLine[]>([]);     // live 模式顶部加载的历史(旧→新)
   const [historyPage, setHistoryPage] = useState<LogLine[] | null>(null); // 搜索跳转载入的历史页(history 模式)
@@ -56,6 +56,9 @@ function useLogViewer(api: LogApi | null, level: string, runKey: number | null) 
   const [scrollTargetId, setScrollTargetId] = useState<number | null>(null);
   const [loadingTop, setLoadingTop] = useState(false);     // 向上加载防抖
   const [atOldest, setAtOldest] = useState(false);         // 已加载到最早(id=1)
+  const [level, setLevel] = useState<string>("");   // 级别过滤(后端查询参数);变更 → 重订阅 + 清搜索
+  const [input, setInput] = useState("");           // 搜索输入框文本(LogLines 只读)
+  const levelParam = level || undefined;
 
   const scroller = useRef<HTMLDivElement | null>(null);
   const pendingTopFixRef = useRef<{ h: number; t: number } | null>(null); // prepend 视口维持基准
@@ -228,15 +231,16 @@ function useLogViewer(api: LogApi | null, level: string, runKey: number | null) 
     matches, matchIdx, searching, hasSearched, matchSet, currentMatch,
     runSearch, onInputChange, nextMatch, prevMatch, backToLive,
     loadingTop, atOldest,
+    level, setLevel, input, setInput,
   };
 }
 
 /**
  * 单模型日志查看器(模型管理页右栏)。api 按 alias/runKey 定位该模型最新会话:
  * 停止/重启(runKey=pid 变)时重新定位 → 新会话 id → 重订阅。模型从未启动
- * (无会话)→ api=null → 面板空态。签名不变,ModelLogPanel 零改动。
+ * (无会话)→ api=null → 面板空态。level 过滤由 useLogViewer 内部自持(ModelLogPanel 经共享 LogLines 只读)。
  */
-export function useModelLogs(alias: string, level: string, runKey: number | null) {
+export function useModelLogs(alias: string, runKey: number | null) {
   const [sessionId, setSessionId] = useState<number | null>(null);
   useEffect(() => {
     let cancelled = false;
@@ -250,11 +254,11 @@ export function useModelLogs(alias: string, level: string, runKey: number | null
     () => (sessionId == null ? null : sessionLogApi(sessionId)),
     [sessionId],
   );
-  return useLogViewer(api, level, runKey);
+  return useLogViewer(api, runKey);
 }
 
 /** 单会话日志(日志查看页)。runKey 恒 null——切会话由父级 key={sessionId} 重建组件。 */
-export function useSessionLogs(sessionId: number, level: string) {
+export function useSessionLogs(sessionId: number) {
   const api = useMemo(() => sessionLogApi(sessionId), [sessionId]);
-  return useLogViewer(api, level, null);
+  return useLogViewer(api, null);
 }
