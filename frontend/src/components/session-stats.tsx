@@ -35,6 +35,7 @@ export function SessionStats() {
         <span className="text-sm font-semibold">本次启动</span>
         <span className="text-xs text-muted-foreground">运行 {formatUptime(uptimeSec)}</span>
       </div>
+      {/* tile 更宽,2 位小数(与 kpi 行默认 1 位并存是有意的) */}
       <div className="grid grid-cols-2 gap-2">
         <InfoTile label="输入" value={formatTokens(data.input_tokens, 2)} />
         <InfoTile label="输出" value={formatTokens(data.output_tokens, 2)} />

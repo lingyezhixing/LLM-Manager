@@ -31,14 +31,13 @@ export function useCreateModelDef() {
   });
 }
 
-// 失效 list(选择带摘要刷新)+ detail(同模型再挂载时缓存新鲜);表单用 baseline,refetch 不打断编辑。
+// 前缀失效 list(含 detail);表单用 baseline,refetch 不打断编辑。
 export function useUpdateModelDef(name: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (body: ModelDef) => updateModelDef(name, body),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["model-defs"] });
-      qc.invalidateQueries({ queryKey: ["model-defs", name] });
     },
   });
 }

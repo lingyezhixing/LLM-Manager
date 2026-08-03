@@ -51,9 +51,7 @@ export function UsageByModelTable({
   return (
     <Card>
       {costQ.isError && (
-        <div className="mb-3">
-          <ErrorState prefix="成本加载失败" message={(costQ.error as Error).message} onRetry={() => costQ.refetch()} />
-        </div>
+        <ErrorState className="mb-3" prefix="成本加载失败" message={(costQ.error as Error).message} onRetry={() => costQ.refetch()} />
       )}
       <table className="w-full text-sm">
         <thead>
