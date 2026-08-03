@@ -1,5 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ui/dialog";
+import { ErrorState } from "@/components/ui/error-state";
+import { InfoTile } from "@/components/ui/info-tile";
 import { useToast } from "@/components/ui/toast";
 import { useDeleteModelData, useOrphanedModels, useStorageStats } from "@/lib/use-data";
 
@@ -10,17 +12,6 @@ function formatBytes(n: number | null): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)} MB`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)} KB`;
   return `${n} B`;
-}
-
-function StatTile({ label, value, danger }: { label: string; value: string; danger?: boolean }) {
-  return (
-    <div className="rounded-lg border border-border px-3 py-2">
-      <div className="text-xs text-muted-foreground">{label}</div>
-      <div className={`mt-0.5 break-all text-base font-semibold ${danger ? "text-destructive" : "text-foreground"}`}>
-        {value}
-      </div>
-    </div>
-  );
 }
 
 export function DatabasePanel() {
@@ -50,10 +41,10 @@ export function DatabasePanel() {
 
   if (stats.isError || orphaned.isError) {
     return (
-      <div className="flex items-center gap-2 text-sm text-destructive">
-        加载失败:{((stats.error ?? orphaned.error) as Error).message}
-        <Button size="sm" variant="ghost" onClick={() => { stats.refetch(); orphaned.refetch(); }}>重试</Button>
-      </div>
+      <ErrorState
+        message={((stats.error ?? orphaned.error) as Error).message}
+        onRetry={() => { stats.refetch(); orphaned.refetch(); }}
+      />
     );
   }
   if (stats.isLoading || orphaned.isLoading || !s) {
@@ -66,12 +57,16 @@ export function DatabasePanel() {
     <div className="flex flex-col gap-6">
       {/* 存储统计 */}
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-        <StatTile label="数据库大小" value={formatBytes(s.size_bytes)} />
-        <StatTile label="有数据模型数" value={String(s.total_models_with_data)} />
-        <StatTile label="总请求数" value={s.total_requests.toLocaleString()} />
-        <StatTile label="日志会话数" value={s.log_sessions.toLocaleString()} />
-        <StatTile label="日志行数" value={s.log_lines.toLocaleString()} />
-        <StatTile label="孤立模型数" value={String(orphans.length)} danger={orphans.length > 0} />
+        <InfoTile label="数据库大小" value={formatBytes(s.size_bytes)} valueClass="break-all text-foreground" />
+        <InfoTile label="有数据模型数" value={String(s.total_models_with_data)} valueClass="break-all text-foreground" />
+        <InfoTile label="总请求数" value={s.total_requests.toLocaleString()} valueClass="break-all text-foreground" />
+        <InfoTile label="日志会话数" value={s.log_sessions.toLocaleString()} valueClass="break-all text-foreground" />
+        <InfoTile label="日志行数" value={s.log_lines.toLocaleString()} valueClass="break-all text-foreground" />
+        <InfoTile
+          label="孤立模型数"
+          value={String(orphans.length)}
+          valueClass={`break-all ${orphans.length > 0 ? "text-destructive" : "text-foreground"}`}
+        />
       </div>
 
       {/* 孤立模型管理 */}

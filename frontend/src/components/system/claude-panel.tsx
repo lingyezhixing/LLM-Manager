@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { ErrorState } from "@/components/ui/error-state";
 import { Field, TextArea, TextInput } from "@/components/ui/form";
 import { useConfirm } from "@/components/ui/dialog";
 import { useToast } from "@/components/ui/toast";
@@ -219,12 +220,7 @@ export function ClaudePanel() {
   };
 
   if (isError) {
-    return (
-      <div className="flex items-center gap-2 text-sm text-destructive">
-        加载失败:{(error as Error).message}
-        <Button size="sm" variant="ghost" onClick={() => refetch()}>重试</Button>
-      </div>
-    );
+    return <ErrorState message={(error as Error).message} onRetry={() => refetch()} />;
   }
   if (isLoading) {
     return <div className="text-sm text-muted-foreground">加载中…</div>;

@@ -2,7 +2,7 @@ import { useState } from "react";
 
 import { useQuery } from "@tanstack/react-query";
 
-import { Button } from "@/components/ui/button";
+import { ErrorState } from "@/components/ui/error-state";
 import { TokenChart } from "@/components/token-chart";
 import { fetchUsageCostSeries, fetchUsageSeries, type UsageSeries, type UsageSeriesParams } from "@/lib/api";
 import { formatCost } from "@/lib/format";
@@ -64,9 +64,8 @@ export function UsageChartCard({
       </div>
       {view === "cost" ? (
         costSeriesQ.isError ? (
-          <div className="flex h-[240px] items-center justify-center gap-2 text-sm text-destructive">
-            加载失败:{(costSeriesQ.error as Error).message}
-            <Button size="sm" variant="ghost" onClick={() => costSeriesQ.refetch()}>重试</Button>
+          <div className="flex h-[240px] items-center justify-center">
+            <ErrorState message={(costSeriesQ.error as Error).message} onRetry={() => costSeriesQ.refetch()} />
           </div>
         ) : costSeriesQ.isLoading || !costSeriesQ.data ? (
           <div className="flex h-[240px] items-center justify-center text-sm text-muted-foreground">加载中…</div>

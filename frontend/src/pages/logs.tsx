@@ -4,7 +4,7 @@ import type { LogSession } from "@/lib/api";
 import { SessionList } from "@/components/logs/session-list";
 import { LogViewer } from "@/components/logs/log-viewer";
 
-type Tab = "system" | "model";
+type Tab = LogSession["type"];
 
 /** 日志查看页:双 Tab(系统/模型)+ 左会话列表 + 右行详情。 */
 export default function LogsPage() {

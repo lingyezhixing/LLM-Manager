@@ -1,12 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
+import { InfoTile } from "@/components/ui/info-tile";
 import { fetchSessionUsage } from "@/lib/api";
+import { formatTokens } from "@/lib/format";
 import { useNowTick } from "@/lib/use-now-tick";
-
-function fmt(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
-  return `${n}`;
-}
 
 /** Compact uptime: 45s / 12m / 3h 12m / 2d 5h. */
 function formatUptime(sec: number): string {
@@ -17,15 +13,6 @@ function formatUptime(sec: number): string {
   if (h < 24) return `${h}h ${m % 60}m`;
   const d = Math.floor(h / 24);
   return `${d}d ${h % 24}h`;
-}
-
-function Tile({ label, value, valueClass = "" }: { label: string; value: string; valueClass?: string }) {
-  return (
-    <div className="rounded-lg border border-border px-3 py-2">
-      <div className="text-xs text-muted-foreground">{label}</div>
-      <div className={`mt-0.5 text-base font-semibold ${valueClass}`}>{value}</div>
-    </div>
-  );
 }
 
 /** Session stats (since gateway start). Totals refetch every 3s; uptime ticks locally. */
@@ -49,10 +36,10 @@ export function SessionStats() {
         <span className="text-xs text-muted-foreground">运行 {formatUptime(uptimeSec)}</span>
       </div>
       <div className="grid grid-cols-2 gap-2">
-        <Tile label="输入" value={fmt(data.input_tokens)} />
-        <Tile label="输出" value={fmt(data.output_tokens)} />
-        <Tile label="缓存命中" value={fmt(data.cache_hit)} valueClass="text-success" />
-        <Tile label="缓存未命中" value={fmt(data.cache_miss)} valueClass="text-destructive" />
+        <InfoTile label="输入" value={formatTokens(data.input_tokens, 2)} />
+        <InfoTile label="输出" value={formatTokens(data.output_tokens, 2)} />
+        <InfoTile label="缓存命中" value={formatTokens(data.cache_hit, 2)} valueClass="text-success" />
+        <InfoTile label="缓存未命中" value={formatTokens(data.cache_miss, 2)} valueClass="text-destructive" />
       </div>
       <div className="mt-2 rounded-lg border border-border px-3 py-2">
         <div className="flex items-baseline justify-between">

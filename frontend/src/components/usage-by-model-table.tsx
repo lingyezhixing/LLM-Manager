@@ -2,7 +2,7 @@ import { useState, type ReactNode } from "react";
 
 import { useQuery } from "@tanstack/react-query";
 
-import { Button } from "@/components/ui/button";
+import { ErrorState } from "@/components/ui/error-state";
 import { fetchUsageByModel, fetchUsageCost, type UsageSeriesParams } from "@/lib/api";
 import { formatCost, formatCount, formatHitRate, formatLatency, formatPercent, formatTokens } from "@/lib/format";
 
@@ -51,9 +51,8 @@ export function UsageByModelTable({
   return (
     <Card>
       {costQ.isError && (
-        <div className="mb-3 flex items-center gap-2 text-sm text-destructive">
-          成本加载失败:{(costQ.error as Error).message}
-          <Button size="sm" variant="ghost" onClick={() => costQ.refetch()}>重试</Button>
+        <div className="mb-3">
+          <ErrorState prefix="成本加载失败" message={(costQ.error as Error).message} onRetry={() => costQ.refetch()} />
         </div>
       )}
       <table className="w-full text-sm">

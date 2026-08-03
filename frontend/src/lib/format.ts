@@ -1,10 +1,20 @@
 /** Number formatting helpers for the usage page (and reusable elsewhere).
  *  K/M suffix for tokens; ms/s for latency; % for rates/shares. */
 
-export function formatTokens(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+export function formatTokens(n: number, decimals = 1): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(decimals)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(decimals)}K`;
   return `${n}`;
+}
+
+/** 秒数 → 精确空闲时长(小时起):45s / 2m 5s / 1h 2m 30s。 */
+export function formatIdle(sec: number): string {
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = sec % 60;
+  if (h > 0) return `${h}h ${m}m ${s}s`;
+  if (m > 0) return `${m}m ${s}s`;
+  return `${s}s`;
 }
 
 export function formatCount(n: number): string {

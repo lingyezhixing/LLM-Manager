@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import { formatIdle } from "@/lib/format";
 import { useEventStream } from "@/lib/use-event-stream";
 import { useNowTick } from "@/lib/use-now-tick";
 import type { ModelInfo, ModelsResponse } from "@/lib/api";
@@ -10,16 +11,6 @@ function Stat({ label, value }: { label: string; value: number }) {
       <div className="text-lg font-semibold">{value}</div>
     </div>
   );
-}
-
-/** Idle duration, precise to seconds, largest unit hours: 45s / 2m 5s / 1h 2m 30s. */
-function formatIdle(sec: number): string {
-  const h = Math.floor(sec / 3600);
-  const m = Math.floor((sec % 3600) / 60);
-  const s = sec % 60;
-  if (h > 0) return `${h}h ${m}m ${s}s`;
-  if (m > 0) return `${m}m ${s}s`;
-  return `${s}s`;
 }
 
 /** Per-model trailing status line, with idle ticked locally from last_access. */

@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/ui/dialog";
+import { ErrorState } from "@/components/ui/error-state";
 import { useToast } from "@/components/ui/toast";
 import { ModelDefForm } from "@/components/system/model-def-form";
 import { useDeleteModelDef, useModelDef, useModelDefs, useRestartModel } from "@/lib/use-model-defs";
@@ -86,12 +87,7 @@ export function ModelDefPanel() {
   if (list.isLoading) {
     formArea = <div className="text-sm text-muted-foreground">加载中…</div>;
   } else if (list.isError) {
-    formArea = (
-      <div className="flex items-center gap-2 text-sm text-destructive">
-        加载失败:{(list.error as Error).message}
-        <Button size="sm" variant="ghost" onClick={() => list.refetch()}>重试</Button>
-      </div>
-    );
+    formArea = <ErrorState message={(list.error as Error).message} onRetry={() => list.refetch()} />;
   } else if (typeof effSelected === "string") {
     formArea =
       detail.isLoading || !detail.data ? (

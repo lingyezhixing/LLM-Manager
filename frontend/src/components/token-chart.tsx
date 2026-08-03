@@ -1,6 +1,7 @@
 import { useRef, useState, type MouseEvent } from "react";
 
 import type { UsageSeries } from "@/lib/api";
+import { formatTokens } from "@/lib/format";
 
 /** Hand-rolled token chart (no lib). Smooth (monotone-cubic) curves. Overlays a total
  *  area+line (primary) with thin per-model lines; legend toggles series. Theme-aware via
@@ -15,12 +16,6 @@ const PLOT_W = W - PAD.l - PAD.r;
 const PLOT_H = H - PAD.t - PAD.b;
 
 type Pt = [number, number];
-
-function fmtTokens(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${Math.round(n / 1_000)}K`;
-  return `${n}`;
-}
 
 function fmtTs(ts: number, preset: string): string {
   const d = new Date(ts * 1000);
@@ -94,7 +89,7 @@ function LegendDot({ color, label }: { color: string; label: string }) {
 export function TokenChart({
   data,
   preset,
-  formatY = fmtTokens,
+  formatY = formatTokens,
 }: {
   data: UsageSeries;
   preset: string;

@@ -1,7 +1,8 @@
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { ConfigSaveBar } from "@/components/config-save-bar";
-import { Button } from "@/components/ui/button";
+import { ErrorState } from "@/components/ui/error-state";
 import { Field, NumberInput, Select, TextInput } from "@/components/ui/form";
+import { InfoTile } from "@/components/ui/info-tile";
 import { useToast } from "@/components/ui/toast";
 import { LogRetentionEditor } from "@/components/system/log-retention-editor";
 import { type LogRetention, type ProgramConfig } from "@/lib/api";
@@ -18,16 +19,6 @@ function formatDuration(sec: number): string {
   const ss = s % 60;
   const pad = (x: number) => String(x).padStart(2, "0");
   return `${pad(h)}:${pad(m)}:${pad(ss)}`;
-}
-
-// 信息 tile:圆角边框 + label + value,与原 SystemInfoPanel 的 Tile 同款。
-function InfoTile({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-lg border border-border px-3 py-2">
-      <div className="text-xs text-muted-foreground">{label}</div>
-      <div className="mt-0.5 break-all text-base font-semibold text-foreground">{value}</div>
-    </div>
-  );
 }
 
 function sameProgram(a: ProgramConfig, b: ProgramConfig): boolean {
@@ -85,12 +76,7 @@ export function GeneralPanel() {
   }, [data]);
 
   if (isError) {
-    return (
-      <div className="flex items-center gap-2 text-sm text-destructive">
-        加载失败:{(error as Error).message}
-        <Button size="sm" variant="ghost" onClick={() => refetch()}>重试</Button>
-      </div>
-    );
+    return <ErrorState message={(error as Error).message} onRetry={() => refetch()} />;
   }
   if (isLoading || !form) {
     return <div className="text-sm text-muted-foreground">加载中…</div>;
@@ -134,9 +120,9 @@ export function GeneralPanel() {
     <div>
       {info && (
         <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-3">
-          <InfoTile label="版本" value={info.version} />
-          <InfoTile label="启动时间" value={new Date(info.started_at * 1000).toLocaleString()} />
-          <InfoTile label="运行时长" value={formatDuration(now / 1000 - info.started_at)} />
+          <InfoTile label="版本" value={info.version} valueClass="break-all text-foreground" />
+          <InfoTile label="启动时间" value={new Date(info.started_at * 1000).toLocaleString()} valueClass="break-all text-foreground" />
+          <InfoTile label="运行时长" value={formatDuration(now / 1000 - info.started_at)} valueClass="break-all text-foreground" />
         </div>
       )}
       <p className="mb-1 text-xs text-muted-foreground">

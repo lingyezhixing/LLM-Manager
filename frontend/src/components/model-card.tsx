@@ -1,5 +1,6 @@
 import type { ModelInfo } from "@/lib/api";
 import { startModel, stopModel } from "@/lib/api";
+import { formatIdle } from "@/lib/format";
 
 // 状态点用主题 token 的 CSS 变量(success/primary/destructive/muted-foreground),随主题变、不荧光。
 const DOT: Record<string, string> = {
@@ -14,13 +15,6 @@ const STAGE_LABEL: Record<string, string> = {
   stopped: "已停止", starting: "启动中 · 初始化",
   init_script: "启动中 · 启动脚本", health_check: "启动中 · 健康检查", routing: "运行中", failed: "失败",
 };
-
-function formatIdle(sec: number): string {
-  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
-  if (h > 0) return `${h}h ${m}m ${s}s`;
-  if (m > 0) return `${m}m ${s}s`;
-  return `${s}s`;
-}
 
 export function ModelCard({ m, selected, nowMs, onSelect }: {
   m: ModelInfo; selected: boolean; nowMs: number; onSelect: () => void;
