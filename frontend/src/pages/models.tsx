@@ -7,8 +7,8 @@ import type { ModelsResponse } from "@/lib/api";
 
 /**
  * 模型管理 — 操作控制台。左 1 : 右 4:左栏模型卡片(三合一启停按钮 + 状态/模式/请求数,
- * 点卡片体选中),右栏选中模型的实时日志面板。状态走 /api/models/stream SSE;日志走
- * /api/models/{alias}/logs/stream SSE;启停走 POST /start|/stop。
+ * 点卡片体选中),右栏选中模型的日志面板(数据来自持久会话 API /api/logs/*:按 alias
+ * 定位最新会话并订阅 SSE 实时尾)。状态走 /api/models/stream SSE;启停走 POST /start|/stop。
  */
 export default function ModelsPage() {
   const data = useEventStream<ModelsResponse>("/api/models/stream");

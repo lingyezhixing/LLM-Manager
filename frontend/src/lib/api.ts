@@ -14,12 +14,6 @@ export interface ModelInfo {
 }
 export interface ModelsResponse { data: ModelInfo[]; }
 
-export async function fetchModels(): Promise<ModelsResponse> {
-  const res = await fetch("/api/models");
-  if (!res.ok) throw new Error(`/api/models failed: ${res.status}`);
-  return (await res.json()) as ModelsResponse;
-}
-
 // Device + session types hand-defined (match gateway/api/devices.py + usage.py).
 export interface DeviceInfo {
   device_name: string;
@@ -144,7 +138,7 @@ export async function fetchUsageCostSeries(params: UsageSeriesParams): Promise<U
 }
 
 // 模型管理 — per-model control + structured log stream. LogLine matches the SSE frame the
-// backend emits on /api/models/{alias}/logs/stream (LogLineResponse in gateway/api/models.py;
+// backend emits on /api/logs/sessions/{id}/stream (LogLineResponse in gateway/api/logs_schemas.py;
 // captured/leveled in data/logs.py).
 export interface LogLine {
   id: number; ts: number; stream: "out" | "err" | "sys";
@@ -162,24 +156,6 @@ export async function stopModel(alias: string): Promise<void> {
 
 // 日志搜索 / 翻页(本次会话全量在后端,前端按需取一页)。
 export interface LogSearch { matches: number[]; total: number; }
-
-export async function fetchLogPage(
-  alias: string, before: number, limit = 1500, level?: string,
-): Promise<LogLine[]> {
-  const qs = new URLSearchParams({ before: String(before), limit: String(limit) });
-  if (level) qs.set("level", level);
-  const res = await fetch(`/api/models/${encodeURIComponent(alias)}/logs?${qs}`);
-  if (!res.ok) throw new Error(`/logs failed: ${res.status}`);
-  return (await res.json()) as LogLine[];
-}
-
-export async function searchLogs(alias: string, q: string, level?: string): Promise<LogSearch> {
-  const qs = new URLSearchParams({ q });
-  if (level) qs.set("level", level);
-  const res = await fetch(`/api/models/${encodeURIComponent(alias)}/logs/search?${qs}`);
-  if (!res.ok) throw new Error(`/logs/search failed: ${res.status}`);
-  return (await res.json()) as LogSearch;
-}
 
 // 日志查看页 — persistent session logs (/api/logs/*)
 export interface LogSession {
