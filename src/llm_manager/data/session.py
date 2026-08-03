@@ -51,7 +51,8 @@ def add(input_tokens: int, output_tokens: int, cache_tokens: int, prompt_tokens:
 
 
 def snapshot(started_at: float) -> SessionTotals:
-    """started_at 由调用方传入(app 实例级,与 /api/system/info 单源)。"""
+    """started_at 由调用方传入(app 实例级,与 /api/system/info 单源);
+    (进程启动时刻的 wall-clock epoch,time.time() 值)。"""
     hit = _c.cache_tokens
     miss = _c.prompt_tokens
     return SessionTotals(

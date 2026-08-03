@@ -11,6 +11,7 @@ import asyncio
 import json
 import logging
 import time
+from collections.abc import Mapping
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request
@@ -23,7 +24,7 @@ logger = logging.getLogger(__name__)
 _STRIP_BASE = {"content-length", "transfer-encoding"}
 
 
-def _strip_headers(headers, extra=()):
+def _strip_headers(headers: Mapping[str, str], extra: tuple[str, ...] = ()) -> dict[str, str]:
     """剥离基集(hop-by-hop 通用)+ 每侧额外键:request 侧 +host,response 侧
     +connection/content-encoding。剥离集合与原两个函数逐项一致。"""
     bad = _STRIP_BASE | set(extra)

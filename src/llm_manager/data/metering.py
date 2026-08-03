@@ -1,6 +1,8 @@
-"""Path-keyed token parsers. Plain-dict registry + @_safe total exception safety
-(a raise in stream-finally truncates the client stream). Ported from legacy
-core/token_parsers.py (behavior preserved verbatim)."""
+"""Path-keyed token parsers + 共享用量指标(hit_rate)。Plain-dict registry + @_safe
+total exception safety (a raise in stream-finally truncates the client stream).
+Ported from legacy core/token_parsers.py (behavior preserved verbatim)。
+
+另含共享用量指标 helper(hit_rate),供 session/persistence 引用。"""
 from __future__ import annotations
 
 import json

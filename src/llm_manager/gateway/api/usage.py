@@ -106,7 +106,7 @@ def _resolve_window(preset: str, start: float | None, end: float | None) -> tupl
 def register_usage_routes(router: APIRouter) -> None:
     @router.get("/usage/session", response_model=SessionUsageResponse)
     def session_usage(request: Request) -> SessionUsageResponse:
-        s = session.snapshot(request.app.state.started_at)
+        s = session.snapshot(getattr(request.app.state, "started_at", None) or time.time())
         return SessionUsageResponse(
             started_at=s.started_at,
             input_tokens=s.input_tokens,
