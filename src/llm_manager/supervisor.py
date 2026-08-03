@@ -111,7 +111,12 @@ class Supervisor:
                 cb(rc if rc is not None else -1)
             except Exception:
                 pass
-        self._wait_tasks.pop(pid, None)   # 自清:进程已退出,释放 task 表项(防 start/stop 循环累积)
+        # 进程已退出:三张表一并自清(读者线程随管道 EOF 自然结束;kill_tree 的
+        # finally 也清,双路径幂等 pop——防 start/stop 循环累积)。
+        self._procs.pop(pid, None)
+        self._exit_cbs.pop(pid, None)
+        self._readers.pop(pid, None)
+        self._wait_tasks.pop(pid, None)
 
     def on_exit(self, pid: int, cb: Callable[[int], None]) -> None:
         self._exit_cbs[pid] = cb
@@ -163,6 +168,7 @@ class Supervisor:
                 except Exception:
                     return False
         finally:
-            # 清理进程表(_wait 自清 _wait_tasks):Popen 句柄/cb 条目不随 start/stop 循环累积(#5)
+            # 三张表 _procs/_exit_cbs/_readers 不随 start/stop 循环累积(_wait 自清 _wait_tasks;双路径幂等)
             self._procs.pop(pid, None)
             self._exit_cbs.pop(pid, None)
+            self._readers.pop(pid, None)

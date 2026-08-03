@@ -75,3 +75,37 @@ def test_spawn_captures_stdout_and_stderr_via_on_output():
     asyncio.run(go())
     assert ("out-line", "out") in received
     assert ("err-line", "err") in received
+
+
+def test_natural_exit_cleans_all_tables():
+    """自然退出:_wait 路径清空 _procs/_exit_cbs/_readers/_wait_tasks(修复累积泄漏)。"""
+    async def main():
+        sup = Supervisor()
+        exited = asyncio.Event()
+        proc = await sup.spawn([sys.executable, "-c", "pass"], on_output=lambda _line, _s: None)
+        sup.on_exit(proc.pid, lambda _rc: exited.set())
+        await asyncio.wait_for(exited.wait(), timeout=5)
+        for _ in range(100):   # _wait 清理在回调后执行,轮询等收敛
+            if not sup._procs and not sup._readers and not sup._wait_tasks:
+                break
+            await asyncio.sleep(0.02)
+        assert sup._procs == {}
+        assert sup._exit_cbs == {}
+        assert sup._readers == {}
+        assert sup._wait_tasks == {}
+
+    asyncio.run(main())
+
+
+def test_kill_cleans_all_tables():
+    async def main():
+        sup = Supervisor()
+        proc = await sup.spawn([sys.executable, "-c", "import time; time.sleep(60)"],
+                               on_output=lambda _line, _s: None)
+        assert await sup.kill_tree(proc.pid)
+        await asyncio.sleep(0.05)
+        assert sup._procs == {}
+        assert sup._exit_cbs == {}
+        assert sup._readers == {}
+
+    asyncio.run(main())
