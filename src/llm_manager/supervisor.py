@@ -111,7 +111,7 @@ class Supervisor:
                 cb(rc if rc is not None else -1)
             except Exception:
                 pass
-        # 进程已退出:三张表一并自清(读者线程随管道 EOF 自然结束;kill_tree 的
+        # 进程已退出:四张表一并自清(读者线程随管道 EOF 自然结束;kill_tree 的
         # finally 也清,双路径幂等 pop——防 start/stop 循环累积)。
         self._procs.pop(pid, None)
         self._exit_cbs.pop(pid, None)
