@@ -165,24 +165,19 @@ def _parse_noop(body: bytes) -> TokenUsage:
     return TokenUsage(0, 0, 0, 0)
 
 
-parser_registry: dict[str, Callable[[bytes], TokenUsage]] = {
-    "v1/chat/completions": parse_openai,
-    "v1/completions": parse_openai,
-    "v1/embeddings": parse_openai,
-    "v1/rerank": parse_openai,
-    "rerank": parse_openai,
-    "v1/messages": parse_anthropic,
-    "v1/responses": parse_responses,
+# path → (parser, include_usage) 单源;parser_registry 派生保持既有 API 不变。
+_PARSER_META: dict[str, dict] = {
+    "v1/chat/completions": {"parser": parse_openai, "include_usage": True},
+    "v1/completions": {"parser": parse_openai, "include_usage": True},
+    "v1/embeddings": {"parser": parse_openai, "include_usage": False},
+    "v1/rerank": {"parser": parse_openai, "include_usage": False},
+    "rerank": {"parser": parse_openai, "include_usage": False},
+    "v1/messages": {"parser": parse_anthropic, "include_usage": False},
+    "v1/responses": {"parser": parse_responses, "include_usage": False},
 }
 
-_PATH_META: dict[str, dict] = {
-    "v1/chat/completions": {"needs_include_usage": True},
-    "v1/completions": {"needs_include_usage": True},
-    "v1/embeddings": {"needs_include_usage": False},
-    "v1/rerank": {"needs_include_usage": False},
-    "rerank": {"needs_include_usage": False},
-    "v1/messages": {"needs_include_usage": False},
-    "v1/responses": {"needs_include_usage": False},
+parser_registry: dict[str, Callable[[bytes], TokenUsage]] = {
+    k: v["parser"] for k, v in _PARSER_META.items()
 }
 
 
@@ -193,4 +188,4 @@ def parse_tokens(path: str, body: bytes) -> TokenUsage:
 
 def needs_include_usage(path: str) -> bool:
     key = path.lstrip("/").split("?")[0]
-    return _PATH_META.get(key, {}).get("needs_include_usage", False)
+    return _PARSER_META.get(key, {}).get("include_usage", False)

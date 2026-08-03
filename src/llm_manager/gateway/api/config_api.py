@@ -16,7 +16,7 @@ from typing import Literal
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from llm_manager.config import AppConfig, Command, ModelConfig, Pricing, PricingTier, Scheme, _norm_device
+from llm_manager.config import RETENTION_DEFAULTS, AppConfig, Command, ModelConfig, Pricing, PricingTier, Scheme, _norm_device
 from llm_manager.data.config_store import (
     ConfigValidationFailed,
     ModelExists,
@@ -242,8 +242,8 @@ def register_config_routes(api: APIRouter) -> None:
                      "mac_address": cfg.wol.mac_address} if cfg.wol is not None else None),
             "claude": cfg.claude_configs,
             "logs": {
-                "days": int(get_setting(get_db(request), "log_retention_days") or 30),
-                "count": int(get_setting(get_db(request), "log_retention_count") or 10),
+                "days": int(get_setting(get_db(request), "log_retention_days") or int(RETENTION_DEFAULTS["log_retention_days"])),
+                "count": int(get_setting(get_db(request), "log_retention_count") or int(RETENTION_DEFAULTS["log_retention_count"])),
             },
             "restart_fields": _restart_fields(cfg, boot),
         }
