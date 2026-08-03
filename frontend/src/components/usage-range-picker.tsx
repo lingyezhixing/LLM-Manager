@@ -1,28 +1,7 @@
 import { useState } from "react";
 
-import { CalendarRangePicker, type DateRange } from "@/components/calendar-range-picker";
-import { USAGE_PRESETS, type UsageRangeState } from "@/lib/usage-range";
-
-function rangeForPreset(preset: "10m" | "today" | "7d" | "30d"): DateRange {
-  const to = new Date();
-  const from = new Date();
-  if (preset === "10m") from.setMinutes(from.getMinutes() - 10);
-  else if (preset === "today") from.setHours(0, 0, 0, 0);
-  else if (preset === "7d") from.setDate(from.getDate() - 7);
-  else from.setDate(from.getDate() - 30); // 30d
-  return { from, to };
-}
-
-function rangeForState(state: UsageRangeState): DateRange {
-  if (state.preset === "custom" && state.custom) return state.custom;
-  return rangeForPreset(state.preset as "10m" | "today" | "7d" | "30d");
-}
-
-function fmtRange(r: DateRange): string {
-  const f = `${r.from.getMonth() + 1}-${r.from.getDate()}`;
-  const t = `${r.to.getMonth() + 1}-${r.to.getDate()}`;
-  return `${f} ~ ${t}`;
-}
+import { CalendarRangePicker } from "@/components/calendar-range-picker";
+import { fmtRange, rangeForState, USAGE_PRESETS, type UsageRangeState } from "@/lib/usage-range";
 
 /** Preset capsules + custom calendar range picker. Drives the whole usage page. */
 export function UsageRangePicker({

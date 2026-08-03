@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { TokenChart } from "@/components/token-chart";
 import { fetchUsageCostSeries, fetchUsageSeries, type UsageSeries, type UsageSeriesParams } from "@/lib/api";
 import { formatCost } from "@/lib/format";
+import { chartPresetFor, type UsagePreset } from "@/lib/usage-range";
 
 type View = "total" | "models" | "cost";
 
@@ -15,7 +16,7 @@ export function UsageChartCard({
   refetch,
 }: {
   params: UsageSeriesParams;
-  preset: string;
+  preset: UsagePreset;
   refetch: number | false;
 }) {
   const [view, setView] = useState<View>("models");
@@ -30,7 +31,7 @@ export function UsageChartCard({
     refetchInterval: refetch,
     enabled: view === "cost",
   });
-  const chartPreset = preset === "custom" ? "30d" : preset;
+  const chartPreset = chartPresetFor(preset);
   return (
     <div className="rounded-lg border border-border p-4">
       <div className="mb-3 flex items-center justify-between">

@@ -1,68 +1,36 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
-import { CalendarRangePicker, type DateRange } from "@/components/calendar-range-picker";
+import { CalendarRangePicker } from "@/components/calendar-range-picker";
 import { TokenChart } from "@/components/token-chart";
 import { fetchUsageSeries, type UsageSeriesParams } from "@/lib/api";
+import {
+  chartPresetFor,
+  fmtRange,
+  rangeForPreset,
+  USAGE_PRESETS,
+  USAGE_REFETCH,
+  type DateRange,
+  type UsagePreset,
+} from "@/lib/usage-range";
 
-type Preset = "10m" | "today" | "7d" | "30d" | "custom";
-
-const PRESETS: { key: Exclude<Preset, "custom">; label: string }[] = [
-  { key: "10m", label: "十分钟内" },
-  { key: "today", label: "今日" },
-  { key: "7d", label: "7天" },
-  { key: "30d", label: "30天" },
-];
-
-/** Refetch cadence: all live presets refresh every 10s (unified); custom (a fixed past
- *  range) does not auto-refresh. */
-const REFETCH: Record<Preset, number | false> = {
-  "10m": 10_000,
-  today: 10_000,
-  "7d": 10_000,
-  "30d": 10_000,
-  custom: false,
-};
-
-function fmtDate(d: Date): string {
-  const p = (x: number) => String(x).padStart(2, "0");
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
-}
-
-function fmtRange(r: DateRange): string {
-  return `${fmtDate(r.from)} ~ ${fmtDate(r.to)}`;
-}
-
-function startOfToday(): Date {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  return d;
-}
-
-/** Date range a preset corresponds to (day granularity) — drives the 自选 pill display. */
-function rangeForPreset(preset: Preset): DateRange {
-  const today = startOfToday();
-  if (preset === "7d") return { from: new Date(today.getTime() - 7 * 86_400_000), to: today };
-  if (preset === "30d") return { from: new Date(today.getTime() - 30 * 86_400_000), to: today };
-  return { from: today, to: today }; // 10m, today
-}
-
-/** Token 消耗 card: preset bar (+ 自选 calendar) in the header, hand-rolled chart below. */
+/** Token 消耗 card:preset 胶囊 + 自选日历。区间/节奏/参数推导与用量页共用 lib/usage-range
+ * (语义与后端 _resolve_range 一致:当前时刻,非日界)。 */
 export function TokenCurveCard() {
-  const [preset, setPreset] = useState<Preset>("7d");
-  const [custom, setCustom] = useState<DateRange>(() => rangeForPreset("7d"));
+  const [preset, setPreset] = useState<UsagePreset>("7d");
+  const [custom, setCustom] = useState<DateRange | null>(null);
   const [calOpen, setCalOpen] = useState(false);
-  const displayedRange = preset === "custom" ? custom : rangeForPreset(preset);
+  const displayed = preset === "custom" && custom ? custom : rangeForPreset(preset as Exclude<UsagePreset, "custom">);
 
   const params: UsageSeriesParams =
     preset === "custom" && custom
       ? { start: Math.floor(custom.from.getTime() / 1000), end: Math.floor(custom.to.getTime() / 1000) }
-      : { range: preset };
+      : { period: preset };
 
   const { data, isLoading } = useQuery({
     queryKey: ["usage", "series", params],
     queryFn: () => fetchUsageSeries(params),
-    refetchInterval: REFETCH[preset],
+    refetchInterval: USAGE_REFETCH[preset],
   });
 
   return (
@@ -70,7 +38,7 @@ export function TokenCurveCard() {
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
         <span className="text-sm font-semibold">Token 消耗</span>
         <div className="relative flex flex-wrap items-center gap-1">
-          {PRESETS.map((p) => (
+          {USAGE_PRESETS.map((p) => (
             <button
               key={p.key}
               type="button"
@@ -92,11 +60,11 @@ export function TokenCurveCard() {
               preset === "custom" ? "bg-muted font-medium text-foreground" : "text-muted-foreground hover:text-foreground"
             }`}
           >
-            {fmtRange(displayedRange)}
+            {fmtRange(displayed)}
           </button>
           {calOpen && (
             <CalendarRangePicker
-              value={displayedRange}
+              value={displayed}
               onChange={(r) => {
                 setCustom(r);
                 setPreset("custom");
@@ -110,7 +78,7 @@ export function TokenCurveCard() {
       {isLoading || !data ? (
         <div className="flex h-[200px] items-center justify-center text-sm text-muted-foreground">加载中…</div>
       ) : (
-        <TokenChart data={data} preset={preset === "custom" ? "30d" : preset} />
+        <TokenChart data={data} preset={chartPresetFor(preset)} />
       )}
     </div>
   );

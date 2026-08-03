@@ -58,11 +58,11 @@ export interface UsageSeries {
   models: Record<string, number[]>;        // model name → tokens per bucket
 }
 
-export type UsageSeriesParams = { range: string } | { start: number; end: number };
+export type UsageSeriesParams = { period: string } | { start: number; end: number };
 
 export async function fetchUsageSeries(params: UsageSeriesParams): Promise<UsageSeries> {
   const qs = new URLSearchParams(
-    "range" in params ? { range: params.range } : { start: String(params.start), end: String(params.end) },
+    "period" in params ? { period: params.period } : { start: String(params.start), end: String(params.end) },
   );
   const res = await fetch(`/api/usage/series?${qs.toString()}`);
   if (!res.ok) throw new Error(`/api/usage/series failed: ${res.status}`);
@@ -80,7 +80,7 @@ export interface UsageSummary {
 
 export async function fetchUsageSummary(params: UsageSeriesParams): Promise<UsageSummary> {
   const qs = new URLSearchParams(
-    "range" in params ? { range: params.range } : { start: String(params.start), end: String(params.end) },
+    "period" in params ? { period: params.period } : { start: String(params.start), end: String(params.end) },
   );
   const res = await fetch(`/api/usage/summary?${qs.toString()}`);
   if (!res.ok) throw new Error(`/api/usage/summary failed: ${res.status}`);
@@ -100,7 +100,7 @@ interface ByModelEntry {
 
 export async function fetchUsageByModel(params: UsageSeriesParams): Promise<ByModelEntry[]> {
   const qs = new URLSearchParams(
-    "range" in params ? { range: params.range } : { start: String(params.start), end: String(params.end) },
+    "period" in params ? { period: params.period } : { start: String(params.start), end: String(params.end) },
   );
   const res = await fetch(`/api/usage/by-model?${qs.toString()}`);
   if (!res.ok) throw new Error(`/api/usage/by-model failed: ${res.status}`);
@@ -121,7 +121,7 @@ interface CostSummary {
 
 export async function fetchUsageCost(params: UsageSeriesParams): Promise<CostSummary> {
   const qs = new URLSearchParams(
-    "range" in params ? { range: params.range } : { start: String(params.start), end: String(params.end) },
+    "period" in params ? { period: params.period } : { start: String(params.start), end: String(params.end) },
   );
   const res = await fetch(`/api/usage/cost?${qs.toString()}`);
   if (!res.ok) throw new Error(`/api/usage/cost failed: ${res.status}`);
@@ -130,7 +130,7 @@ export async function fetchUsageCost(params: UsageSeriesParams): Promise<CostSum
 
 export async function fetchUsageCostSeries(params: UsageSeriesParams): Promise<UsageSeries> {
   const qs = new URLSearchParams(
-    "range" in params ? { range: params.range } : { start: String(params.start), end: String(params.end) },
+    "period" in params ? { period: params.period } : { start: String(params.start), end: String(params.end) },
   );
   const res = await fetch(`/api/usage/cost-series?${qs.toString()}`);
   if (!res.ok) throw new Error(`/api/usage/cost-series failed: ${res.status}`);
@@ -270,7 +270,7 @@ export async function updateClaudeConfigs(configs: Record<string, Record<string,
   return (await res.json()) as ConfigWriteResult;
 }
 
-// 日志保留规则写回(PUT /api/config/logs;不进 AppConfig 快照,恒不触发重启)。
+// 日志保留规则写回(PUT /api/config/logs;日志规则已并入 AppConfig 快照,恒不触发重启)。
 export async function updateLogRetention(body: LogRetention): Promise<ConfigWriteResult> {
   const res = await fetch("/api/config/logs", {
     method: "PUT",

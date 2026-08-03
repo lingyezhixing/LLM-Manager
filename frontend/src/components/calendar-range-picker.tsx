@@ -1,13 +1,10 @@
 import { useState } from "react";
 
+import type { DateRange } from "@/lib/usage-range";
+
 /** Hand-rolled two-month range picker (no lib — offline, matches the locked mockup).
  *  Each month navigates independently, so a range can span more than two months.
  *  Click a start day, then an end day; the range commits and the popover closes. */
-
-export interface DateRange {
-  from: Date;
-  to: Date;
-}
 
 const WEEKDAYS = ["一", "二", "三", "四", "五", "六", "日"];
 
