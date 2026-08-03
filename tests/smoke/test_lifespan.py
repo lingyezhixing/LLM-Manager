@@ -52,7 +52,7 @@ def test_lifespan_opens_and_closes_system_session(tmp_path):
 
 
 def test_lifespan_closes_crash_residual_system_sessions(tmp_path):
-    """崩溃残留(system,end_time NULL)在下次启动收口(D6),再开新的运行会话。"""
+    """崩溃残留(system,end_time NULL)在下次启动收口,再开新的运行会话。"""
     db_path = tmp_path / "t.db"
     db = open_db(db_path)
     try:

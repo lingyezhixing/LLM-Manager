@@ -358,7 +358,7 @@ def test_usage_cost_series_empty_range_returns_no_buckets(tmp_path):
 
 
 def test_migrate_moves_support_cache_to_model_pricing(tmp_path):
-    """P4 回改迁移:旧库(model_pricing 无 support_cache、pricing_tiers 有)→ 开库后上移到模型级。
+    """回改迁移:旧库(model_pricing 无 support_cache、pricing_tiers 有)→ 开库后上移到模型级。
     叠加 2026-08-03 代码优化迁移:model_pricing 随后并入 model_defs、pricing_tiers 重建改 FK、
     旧表删除——最终 support_cache 落在 model_defs 上。"""
     import sqlite3

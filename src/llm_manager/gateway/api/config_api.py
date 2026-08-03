@@ -2,7 +2,7 @@
 
 校验层 = Pydantic 请求模型(FastAPI 自动 422)。写经 set_settings(多键原子)→ store.reload()。
 restart 检测:对比 snapshot.program 的 host/port/claude_settings_path/log_level 与 app.state.boot_program(启动期捕获)。
-读穿仅 system_settings 影响的消费方(idle 循环/tray/logging)——lifecycle/catalog/models 随 P2 模型 CRUD。
+读穿仅 system_settings 影响的消费方(idle 循环/tray/logging)——lifecycle/catalog/models 随模型 CRUD。
 """
 from __future__ import annotations
 
@@ -319,7 +319,7 @@ def register_config_routes(api: APIRouter) -> None:
             updates["log_retention_count"] = str(body.count)
         if updates:
             set_settings(get_db(request), updates)
-        get_config_store(request).reload()                  # 日志规则不进 AppConfig 快照,但 reload 保持新鲜
+        get_config_store(request).reload()                  # 日志规则已并入 AppConfig 快照;reload 保持新鲜
         return _config_write_result(request, get_config_store(request).snapshot())
 
     @api.get("/config/restart-status")

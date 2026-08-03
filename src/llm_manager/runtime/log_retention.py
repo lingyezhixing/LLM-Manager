@@ -10,7 +10,7 @@ import asyncio
 import logging
 from typing import TYPE_CHECKING
 
-# 取模块级 live 会话传给 log_cleanup 排除(I1 belt-and-braces:保留规则不删直播会话,
+# 取模块级 live 会话传给 log_cleanup 排除(belt-and-braces:保留规则不删直播会话,
 # 否则其 DB 行被删后 logs.flush 落库 FK 失败)。导入安全无环:logs 仅依赖
 # persistence / realtime(→devices),均不依赖 runtime.log_retention。
 from llm_manager.data import logs as _logs

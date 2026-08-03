@@ -340,7 +340,7 @@ def test_illegal_transition_raises_value_error():
         state.set_status("m1", ModelStatus.ROUTING)     # INIT_SCRIPT→ROUTING 非法
 
 
-# ---------- Task 12: unload_all + I1 tolerance ----------
+# ---------- Task 12: unload_all + tolerance ----------
 async def test_unload_all_stops_running_models():
     life, sup, dev, cfg = _make(models=[_model("m1", port=8000), _model("m2", port=8001)])
     await life.ensure_running("m1")
@@ -358,7 +358,7 @@ async def test_unload_all_skips_already_stopped():
 
 
 async def test_unload_all_tolerates_one_stop_failure():
-    # I1 容错:某模型 stop 抛异常时,unload_all 不整体失败、只返回成功的
+    # 容错:某模型 stop 抛异常时,unload_all 不整体失败、只返回成功的
     life, sup, dev, cfg = _make(models=[_model("m1", port=8000), _model("m2", port=8001)])
     await life.ensure_running("m1")
     await life.ensure_running("m2")
@@ -544,9 +544,9 @@ async def test_pipeline_conda_env_wraps_with_cmd_on_windows():
     assert "-n" in spawned and "lmdeploy" in spawned  # conda env passed
 
 
-# ---------- P2: get_cfg read-through ----------
+# ---------- get_cfg read-through ----------
 async def test_lifecycle_reads_fresh_cfg_each_call():
-    """get_cfg 返回值变化后,_cfg_model/_runnable/unload_all 反映新模型集(P2 读穿)。"""
+    """get_cfg 返回值变化后,_cfg_model/_runnable/unload_all 反映新模型集(读穿)。"""
     current = {"cfg": _cfg(_model("m1", port=8000))}
     life = Lifecycle(get_cfg=lambda: current["cfg"], supervisor=FakeSupervisor(),
                      devices=FakeDevices(), probes={"Chat": _ok_probe})

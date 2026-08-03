@@ -173,7 +173,7 @@ def register_proxy_routes(
     各自独立 operationId(单 api_route 4 方法会撞同 operationId,产生重复键破坏
     OpenAPI 消费者如前端 codegen)。读穿:_forward 每请求从 ConfigStore 取 fresh cfg。"""
     async def _forward(path: str, request: Request) -> Response:
-        cfg = request.app.state.config_store.snapshot()   # 读穿:每请求 fresh(P2 CRUD 后新别名可路由)
+        cfg = request.app.state.config_store.snapshot()   # 读穿:每请求 fresh(CRUD 后新别名可路由)
         return await forward(request, path, lifecycle, cfg, db, client_pool)
 
     @app.post("/{path:path}", operation_id="catch_all__path__post")

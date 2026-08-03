@@ -105,7 +105,7 @@ def _resolve_window(preset: str, start: float | None, end: float | None) -> tupl
 
 def register_usage_routes(router: APIRouter) -> None:
     @router.get("/usage/session", response_model=SessionUsageResponse)
-    def session_usage(request: Request) -> SessionUsageResponse:
+    def session_usage_endpoint(request: Request) -> SessionUsageResponse:
         s = session.snapshot(getattr(request.app.state, "started_at", None) or time.time())
         return SessionUsageResponse(
             started_at=s.started_at,
@@ -119,24 +119,24 @@ def register_usage_routes(router: APIRouter) -> None:
     @router.get("/usage/series", response_model=UsageSeriesResponse)
     def usage_series_endpoint(
         request: Request,
-        range: str = "7d",
+        period: str = "7d",
         start: float | None = None,
         end: float | None = None,
     ) -> UsageSeriesResponse:
         db = get_db(request)
-        start_ts, end_ts, bucket = _resolve_range(range, start, end)
+        start_ts, end_ts, bucket = _resolve_range(period, start, end)
         result = usage_series(db, start_ts=start_ts, end_ts=end_ts, bucket_seconds=bucket)
         return UsageSeriesResponse(buckets=result.buckets, total=result.total, models=result.models)
 
     @router.get("/usage/summary", response_model=UsageSummaryResponse)
     def usage_summary_endpoint(
         request: Request,
-        range: str = "7d",
+        period: str = "7d",
         start: float | None = None,
         end: float | None = None,
     ) -> UsageSummaryResponse:
         db = get_db(request)
-        s_ts, e_ts = _resolve_window(range, start, end)
+        s_ts, e_ts = _resolve_window(period, start, end)
         s = usage_summary(db, start_ts=s_ts, end_ts=e_ts)
         return UsageSummaryResponse(
             input_tokens=s.input_tokens,
@@ -150,12 +150,12 @@ def register_usage_routes(router: APIRouter) -> None:
     @router.get("/usage/by-model", response_model=list[ByModelEntryResponse])
     def usage_by_model_endpoint(
         request: Request,
-        range: str = "7d",
+        period: str = "7d",
         start: float | None = None,
         end: float | None = None,
     ) -> list[ByModelEntryResponse]:
         db = get_db(request)
-        s_ts, e_ts = _resolve_window(range, start, end)
+        s_ts, e_ts = _resolve_window(period, start, end)
         rows = usage_by_model(db, start_ts=s_ts, end_ts=e_ts)
         return [
             ByModelEntryResponse(
@@ -174,13 +174,13 @@ def register_usage_routes(router: APIRouter) -> None:
     @router.get("/usage/cost", response_model=CostSummaryResponse)
     def usage_cost_endpoint(
         request: Request,
-        range: str = "7d",
+        period: str = "7d",
         start: float | None = None,
         end: float | None = None,
     ) -> CostSummaryResponse:
         db = get_db(request)
         cfg = get_config_store(request).snapshot()
-        s_ts, e_ts = _resolve_window(range, start, end)
+        s_ts, e_ts = _resolve_window(period, start, end)
         s = usage_cost(db, cfg, start_ts=s_ts, end_ts=e_ts)
         return CostSummaryResponse(
             total_cost=s.total_cost,
@@ -191,12 +191,12 @@ def register_usage_routes(router: APIRouter) -> None:
     @router.get("/usage/cost-series", response_model=UsageSeriesResponse)
     def usage_cost_series_endpoint(
         request: Request,
-        range: str = "7d",
+        period: str = "7d",
         start: float | None = None,
         end: float | None = None,
     ) -> UsageSeriesResponse:
         db = get_db(request)
         cfg = get_config_store(request).snapshot()
-        s_ts, e_ts, bucket = _resolve_range(range, start, end)
+        s_ts, e_ts, bucket = _resolve_range(period, start, end)
         result = usage_cost_series(db, cfg, start_ts=s_ts, end_ts=e_ts, bucket_seconds=bucket)
         return UsageSeriesResponse(buckets=result.buckets, total=result.total, models=result.models)

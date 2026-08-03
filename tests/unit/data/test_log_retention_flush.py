@@ -1,4 +1,4 @@
-"""I1 回归:retention 删除 live 会话 DB 行 与 flush 的相互防御。
+"""回归:retention 删除 live 会话 DB 行 与 flush 的相互防御。
 
 - flush 遇会话落库失败(FK:会话行已被 retention 删除)→ 丢会话不炸管线;
 - log_cleanup 的 live_session_ids 排除参数(两个规则都生效);

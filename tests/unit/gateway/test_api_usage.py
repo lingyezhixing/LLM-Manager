@@ -62,7 +62,7 @@ def test_usage_series_endpoint_custom_range(tmp_path) -> None:
 
 def test_usage_series_endpoint_preset_returns_aligned_shape() -> None:
     with TestClient(_app()) as c:
-        r = c.get("/api/usage/series?range=10m")
+        r = c.get("/api/usage/series?period=10m")
     assert r.status_code == 200
     j = r.json()
     assert len(j["buckets"]) == len(j["total"]) >= 1

@@ -40,7 +40,7 @@ class ModelsResponse(BaseModel):
 
 def build_models_response(cfg: config.AppConfig) -> ModelsResponse:
     """Current model snapshot from module-level state + cfg. Shared by ModelFeed snapshot
-    + SSE first frame (GET /api/models 已删)。
+    + SSE first frame.
 
     No time-derived fields (idle/uptime) — the frontend derives those from the wall-clock
     timestamps so the SSE change-detect only fires on real state changes."""

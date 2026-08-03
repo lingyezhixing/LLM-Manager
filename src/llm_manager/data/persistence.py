@@ -138,7 +138,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
             # SQLite refuses DROP COLUMN while an index references it; drop the index first.
             conn.execute("DROP INDEX IF EXISTS idx_model_requests_ts")
             conn.execute("ALTER TABLE model_requests DROP COLUMN ts")
-        # P4 回改:support_cache 从阶梯级上移到模型级(model_pricing)。
+        # 回改:support_cache 从阶梯级上移到模型级(model_pricing)。
         # 旧库:model_pricing 无该列则补;pricing_tiers 有该列则删(SQLite ≥3.35 支持 DROP COLUMN)。
         # 新库已无 model_pricing(代码优化 2026-08-03 并入 model_defs)→ 存在性判定防 no such table。
         if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='model_pricing'").fetchone():

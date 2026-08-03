@@ -1,10 +1,9 @@
 """Test-wide fixtures.
 
-create_app() calls setup_logging(), which attaches a TimedRotatingFileHandler to
-logs/llm-manager.log on the root logger. Without isolation, every test that
-builds the app pollutes the production log file with pytest output (which then
-shows up when the real app runs and appends to the same file). Stub setup_logging
-for the whole suite so tests never touch the real log file.
+create_app() 调用 setup_logging(),它每次启动挂一个时间戳文件
+logs/llm-manager_{ts}.log(保留最近 10 个)到 root logger。不加隔离:
+每个建 app 的测试都会把 pytest 输出混进生产日志文件,真实 app 运行时
+也 append 同一批文件。Stub setup_logging 整个套件,测试永不触碰真实日志文件。
 """
 import pytest
 

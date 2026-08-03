@@ -68,7 +68,7 @@ def test_create_app_closes_db_on_bootstrap_error(tmp_path):
 
 
 def test_crud_then_catalog_reflects_without_restart(tmp_path, monkeypatch):
-    """P2 核心契约:POST /api/config/models 后,不重启即见 /v1/models + /api/config/models(读穿)。"""
+    """核心契约:POST /api/config/models 后,不重启即见 /v1/models + /api/config/models(读穿)。"""
     monkeypatch.setattr("llm_manager.devices.is_lhm_available", lambda: False)  # 隔离 LHM 慢枚举
     cfg_path = tmp_path / "config.yaml"
     cfg_path.write_text(
@@ -97,7 +97,7 @@ def test_crud_then_catalog_reflects_without_restart(tmp_path, monkeypatch):
 
 
 def test_log_level_from_config_applied(tmp_path, monkeypatch):
-    """C1:cfg.program.log_level 真正传入 setup_logging(此前硬编码 INFO 从未生效)。
+    """cfg.program.log_level 真正传入 setup_logging(此前硬编码 INFO 从未生效)。
     只捕获调用参数,不触发真实 logging 副作用(conftest _isolate_logging 隔离)。"""
     monkeypatch.setattr("llm_manager.devices.is_lhm_available", lambda: False)
     levels: list[str] = []

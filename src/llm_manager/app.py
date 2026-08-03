@@ -67,7 +67,7 @@ def create_app(db_path: Path | None = None, *, legacy_yaml: Path | None = None) 
         app.state.lifecycle = lifecycle
         app.state.loop = asyncio.get_running_loop()
         # === 系统日志会话:handler 任意线程 emit → capture_system → flush_loop 落库 ===
-        # 崩溃/强杀残留的上次 system 会话(end_time IS NULL)先统一收口(D6),再开新会话;
+        # 崩溃/强杀残留的上次 system 会话(end_time IS NULL)先统一收口,再开新会话;
         # 收口刻意放在 app 接线而非 logs.start_system_session:保持 logs 模块测试隔离。
         n_residual = log_close_open_system_sessions(db)
         if n_residual:
