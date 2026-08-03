@@ -23,21 +23,23 @@ Local-Models:
 
 
 def test_lifespan_starts_and_stops_background(tmp_path, monkeypatch):
-    # enumerate_lhm_gpus 内部职责,app.py 不再注册 780m;但 lifespan refresh 仍调真 LHM(慢 + 硬件依赖,
-    # 经 _lhm_computer),干扰本测 m1 时序断言。mock devices.is_lhm_available=False → _lhm_computer 返 None,
-    # 等效隔离 LHM 慢调用,聚焦 lifespan+background。
+    # enumerate_lhm_gpus 内部职责;mock devices.is_lhm_available=False → 等效隔离 LHM 慢调用,聚焦 lifespan+background。
     monkeypatch.setattr("llm_manager.devices.is_lhm_available", lambda: False)
+    # 探针秒失败(跳过真实 60s 重试循环):仍证明 auto_start 后台真起 + 失败容错(不抛)+ 不阻塞 /health。
+    # 测试的真实契约是「后台任务起 + 失败路径走通 + /health 不阻塞」,「重试 60s」只是 startup_timeout 的副作用。
+    from llm_manager.probes import probe_registry, ProbeResult
+    monkeypatch.setitem(
+        probe_registry, "Chat",
+        lambda alias, port, start_time=None, timeout=300: ProbeResult(False, "test fast-fail"),
+    )
     cfg_path = tmp_path / "config.yaml"
     cfg_path.write_text(_CFG_BODY, encoding="utf-8")
     app = create_app(db_path=tmp_path / "t.db", legacy_yaml=cfg_path)
     with TestClient(app) as c:
         assert c.get("/health").status_code == 200   # fire-and-forget:就绪不等 auto_start
-        # 轮询:auto_start 后台真跑(spawn nonexistent.cmd → 不起服务 → probe 重试 startup_timeout=60s → FAILED)。
-        # deadline 须 > startup_timeout(60s):装 monitoring 后 probe/on_exit 时序使 m1 走完整 probe 重试才 FAILED。
-        # 证明 create_task 真起 + _one try/except 容错(不抛)+ 不阻塞 /health。
-        deadline = time.monotonic() + 75
+        deadline = time.monotonic() + 10              # 秒失败探针:m1 应 <2s FAILED(留余量)
         while time.monotonic() < deadline and state.get_status("m1") != ModelStatus.FAILED:
-            time.sleep(0.1)
+            time.sleep(0.05)
         assert state.get_status("m1") == ModelStatus.FAILED
     # with 退出 → lifespan finally:stop_event.set() + unload_all + cancel+gather,干净关闭无异常
 
