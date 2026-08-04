@@ -11,9 +11,10 @@ interface SidebarProps {
  * glass surface (blur 只在壳层). Active item: primary-accent 12% bg + accent text +
  * right dot. Bottom: theme toggle pill.
  *
- * 折叠动画统一 200ms:文字不条件渲染,改用 grid-template-columns 1fr→0fr 收缩 + overflow-hidden
- * 裁剪(opacity 同步淡出)。若用 {!collapsed && <span>} 会在宽度过渡前瞬间移除文字、瞬间跳中
- * 图标,造成"先闪一下再收窄"。gap 同理不可残留(折叠时 0 宽元素仍占 gap),间距一律用 margin。
+ * 折叠动画统一 200ms,三条铁律:① 文字不条件渲染,grid-template-columns 1fr→0fr 收缩 +
+ * overflow-hidden 裁剪(条件渲染 = 宽度过渡前文字瞬间消失);② 禁用 justify-content 切换
+ * (立即生效不可过渡,图标瞬跳中间再被收缩拉回),居中一律用 padding 过渡(calc 精确值);
+ * ③ gap 不可残留(0 宽元素仍占 gap),间距用 margin 且折叠态显式归零。
  */
 export function Sidebar({ collapsed }: SidebarProps) {
   return (
@@ -22,7 +23,10 @@ export function Sidebar({ collapsed }: SidebarProps) {
     >
       <div
         className={`flex items-center px-4 pb-6 pt-5 transition-[padding] duration-200 ${
-          collapsed ? "justify-center px-0" : ""
+          // 折叠态左右 padding 居中。三禁令:① justify-content 切换立即生效不可过渡
+          // (图标瞬跳);② calc 百分比在过渡中按当前容器宽实时解析(产生驼峰峰值);
+          // ③ 圆点尺寸变更时同步此值。公式:(aside 4rem - 圆点 0.5rem)/2 = 1.75rem。
+          collapsed ? "px-[1.75rem]" : ""
         }`}
       >
         {/* logo accent bar:展开=竖条,折叠=居中圆点(视觉锚点,呼应导航 active dot) */}
@@ -54,8 +58,9 @@ export function Sidebar({ collapsed }: SidebarProps) {
             title={collapsed ? label : undefined}
             className={({ isActive }) =>
               [
-                "flex items-center rounded-md px-3 py-2 text-sm transition-[background-color,color,transform] duration-150",
-                collapsed && "justify-center px-0",
+                "flex items-center rounded-md px-3 py-2 text-sm transition-[background-color,color,transform,padding] duration-150",
+                // 折叠态 padding 居中,同 header 三禁令。公式:(aside 4rem - nav px-2 两侧 1rem - icon 0.875rem)/2
+                collapsed && "px-[1.0625rem]",
                 isActive
                   ? "bg-primary-accent/12 font-medium text-primary-accent"
                   : "text-muted-foreground hover:translate-x-[3px] hover:bg-card-hover hover:text-foreground",

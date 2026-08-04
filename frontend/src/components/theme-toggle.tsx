@@ -11,7 +11,9 @@ export function ThemeToggle({ collapsed = false }: { collapsed?: boolean }) {
       onClick={() => setTheme(isDark ? "light" : "dark")}
       aria-label={isDark ? "切换到浅色主题" : "切换到深色主题"}
       className={`flex w-full items-center rounded-full bg-primary-accent/12 px-3 py-1.5 text-xs font-medium text-primary-accent transition-[background-color,padding] hover:bg-primary-accent/20 ${
-        collapsed ? "justify-center px-0" : ""
+        // 同 sidebar:折叠态 padding 居中,禁 justify-content(瞬跳)/calc 百分比(驼峰)。
+        // 公式:(p-2 容器宽 3rem - icon 0.875rem)/2,icon 尺寸变更时同步
+        collapsed ? "px-[1.0625rem]" : ""
       }`}
     >
       {isDark ? <Sun className="size-3.5 shrink-0" /> : <Moon className="size-3.5 shrink-0" />}
