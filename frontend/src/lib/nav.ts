@@ -12,13 +12,13 @@ interface NavItem {
 
 /**
  * Single source of truth for sidebar navigation.
- * Order is the locked IA: 概览 / 模型管理 / 用量统计 / 工具箱 / 日志查看 / 系统配置.
+ * Order: 概览 / 模型管理 / 用量统计 / 日志查看 / 工具箱 / 系统.
  */
 export const NAV_ITEMS: readonly NavItem[] = [
   { label: "概览", path: "/", icon: LayoutDashboard },
   { label: "模型管理", path: "/models", icon: Boxes },
   { label: "用量统计", path: "/usage", icon: BarChart3 },
-  { label: "工具箱", path: "/tools", icon: Wrench },
   { label: "日志查看", path: "/logs", icon: ScrollText },
-  { label: "系统配置", path: "/system", icon: Settings },
+  { label: "工具箱", path: "/tools", icon: Wrench },
+  { label: "系统", path: "/system", icon: Settings },
 ] as const;
