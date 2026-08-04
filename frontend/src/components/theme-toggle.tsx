@@ -10,12 +10,21 @@ export function ThemeToggle({ collapsed = false }: { collapsed?: boolean }) {
       type="button"
       onClick={() => setTheme(isDark ? "light" : "dark")}
       aria-label={isDark ? "切换到浅色主题" : "切换到深色主题"}
-      className={`flex w-full items-center gap-2 rounded-full bg-primary-accent/12 px-3 py-1.5 text-xs font-medium text-primary-accent transition-colors hover:bg-primary-accent/20 ${
+      className={`flex w-full items-center rounded-full bg-primary-accent/12 px-3 py-1.5 text-xs font-medium text-primary-accent transition-[background-color,padding] hover:bg-primary-accent/20 ${
         collapsed ? "justify-center px-0" : ""
       }`}
     >
       {isDark ? <Sun className="size-3.5 shrink-0" /> : <Moon className="size-3.5 shrink-0" />}
-      {!collapsed && (isDark ? "切换浅色" : "切换深色")}
+      {/* 同 sidebar:文字 grid-cols 收缩过渡,条件渲染会造成瞬间消失闪一下 */}
+      <span
+        className={`grid transition-[grid-template-columns] duration-200 ${
+          collapsed ? "grid-cols-[0fr]" : "ml-2 grid-cols-[1fr]"
+        }`}
+      >
+        <span className="min-w-0 overflow-hidden whitespace-nowrap">
+          {isDark ? "切换浅色" : "切换深色"}
+        </span>
+      </span>
     </button>
   );
 }
