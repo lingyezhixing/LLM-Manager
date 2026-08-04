@@ -116,7 +116,13 @@ export function TokenChart({
   const yAt = (v: number) => PAD.t + PLOT_H - (v / max) * PLOT_H;
   const pts = (series: number[]): Pt[] => series.map((v, i) => [xAt(i), yAt(v)]);
 
-  const yTicks = [1, 0.75, 0.5, 0.25, 0].map((f) => ({ v: max * f, y: yAt(max * f) }));
+  // 整数域(token 曲线)→ tick 值取整(775/581/388/194/0,位置仍按未取整值算保持等距);
+  // 浮点域(成本曲线)→ 保留小数(金额允许小数)。y 位置用原始值,tick 标签用取整值。
+  const integerDomain = total.every((v) => Number.isInteger(v));
+  const yTicks = [1, 0.75, 0.5, 0.25, 0].map((f) => ({
+    v: integerDomain ? Math.round(max * f) : max * f,
+    y: yAt(max * f),
+  }));
   const labelCount = Math.min(5, n);
   const xLabelIdx = Array.from({ length: labelCount }, (_, k) =>
     labelCount === 1 ? 0 : Math.round((k * (n - 1)) / (labelCount - 1)),
@@ -166,9 +172,12 @@ export function TokenChart({
             <text x={PAD.l - 6} y={t.y + 3} textAnchor="end" fontSize="10" fill="currentColor">{formatY(t.v)}</text>
           </g>
         ))}
-        {/* x labels */}
+        {/* x labels:首标签 start 锚(左→右排)、尾标签 end 锚(右→左排)、中间 middle——
+            避免首尾标签 middle 锚超出 viewBox 被裁(如末位 "08-04 16:0") */}
         {xLabelIdx.map((i) => (
-          <text key={i} x={xAt(i)} y={H - 8} textAnchor="middle" fontSize="10" fill="currentColor">{fmtTs(buckets[i], preset)}</text>
+          <text key={i} x={xAt(i)} y={H - 8}
+            textAnchor={n === 1 || (i !== 0 && i !== n - 1) ? "middle" : i === 0 ? "start" : "end"}
+            fontSize="10" fill="currentColor">{fmtTs(buckets[i], preset)}</text>
         ))}
 
         {/* total area + line (primary) */}
