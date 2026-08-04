@@ -223,9 +223,11 @@ async def flush() -> None:
         with _pending_lock:
             if not _pending:
                 return
+            if _db is None:          # 🔵2:未接线(测试/启动早期无库可写)→ 清空 pending 安全丢弃,避免无界增长
+                _pending.clear()
+                return
             batch = _pending[:]
             _pending.clear()
-        assert _db is not None
         by_session: dict[int, list[tuple[int, float, str, str, str]]] = {}
         for sid, seq, ts, stream, level, text in batch:
             by_session.setdefault(sid, []).append((seq, ts, stream, level, text))
@@ -263,6 +265,8 @@ async def flush_loop(stop_event: asyncio.Event) -> None:
             pass
         except asyncio.CancelledError:
             break
+        except Exception:                  # 🔵2:兜底防未料异常静默杀掉日志管线(flush 内部已捕 insert 异常)
+            logger.exception("flush_loop iteration failed; continuing")
     await flush()
 
 

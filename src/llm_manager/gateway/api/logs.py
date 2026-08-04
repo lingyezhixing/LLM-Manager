@@ -8,6 +8,7 @@ residuals); logs API reads ``get_db(request)``.
 """
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 from typing import Literal
 
@@ -47,7 +48,10 @@ async def _session_stream(session_id: int, level: str | None, db, q) -> AsyncIte
     q 由端点先 subscribe(存在性校验,None → 404——生成器内 raise HTTPException
     不会转成 404,响应头已发)。finally 里 unsubscribe 与端点 subscribe 对称。"""
     try:
-        for r in _logs.log_lines_backfill(db, session_id, limit=2048, level=level):
+        # 🔵3:回填 2048 行的同步 SQL 移出事件循环线程,避免长订阅首帧阻塞其它请求。
+        backfill = await asyncio.to_thread(
+            _logs.log_lines_backfill, db, session_id, limit=2048, level=level)
+        for r in backfill:
             yield sse_frame(_to_line(r))
         while True:
             line = await q.get()
@@ -97,6 +101,8 @@ def register_logs_routes(api: APIRouter) -> None:
                     model: str | None = None, session_id: int | None = None,
                     level: Literal["info", "ok", "warn", "error"] | None = None,
                     limit: int = 500) -> LogSearchResponse:
+        if not q.strip():
+            return LogSearchResponse(total=0, matches=[])   # 🔵5:空查询无意义,拒空串避免 LIKE '%%' 全表扫描
         m = _resolve_model(request, model)
         total, rows = _logs.log_search(get_db(request), q, type_=type, model_name=m,
                                     session_id=session_id, level=level, limit=limit)

@@ -52,8 +52,8 @@ class ProgramUpdate(BaseModel):
 
 
 class WolUpdate(BaseModel):
-    broadcast_address: str
-    mac_address: str
+    broadcast_address: str = Field(min_length=1)   # B8:必填非空(清除走 DELETE,不靠空串半残配置)
+    mac_address: str = Field(min_length=1)
 
 class ClaudeConfigsUpdate(BaseModel):
     configs: dict[str, dict[str, str]]
@@ -266,13 +266,12 @@ def register_config_routes(api: APIRouter) -> None:
 
     @api.put("/config/wol")
     def put_wol(request: Request, body: WolUpdate) -> dict:
-        updates: dict[str, str] = {}
-        if body.broadcast_address is not None:
-            updates["wol_broadcast"] = body.broadcast_address
-        if body.mac_address is not None:
-            updates["wol_mac"] = body.mac_address
-        if updates:
-            set_settings(get_db(request), updates)
+        # 两字段均必填非空(WolUpdate min_length=1);清除走 DELETE。原 `is not None` 是死分支
+        # (Pydantic 必填 str 恒非 None)。整组写,与 delete_wol 对称。
+        set_settings(get_db(request), {
+            "wol_broadcast": body.broadcast_address,
+            "wol_mac": body.mac_address,
+        })
         cfg = get_config_store(request).reload()
         return _config_write_result(request, cfg)
 

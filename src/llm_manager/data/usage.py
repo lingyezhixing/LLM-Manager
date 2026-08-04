@@ -350,7 +350,7 @@ def usage_cost(
 
     ptype = {n: m.pricing.pricing_type for n, m in cfg.models.items()}
     by_model = [
-        CostByModel(model=n, pricing_type=ptype.get(n, "tier"), cost=c)
+        CostByModel(model=n, pricing_type=ptype.get(n, "tier"), cost=round(c, 6))   # 🔵7:与 total 同精度 round(6),显示一致
         for n, c in acc.items()
         if c > 0
     ]

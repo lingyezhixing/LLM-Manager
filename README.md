@@ -23,7 +23,7 @@
    请求按 `model` 字段解析别名并自动路由至对应本地模型服务端口。
 
 2. **函数式探测器架构**
-   - **健康探测器**：以纯函数 `probe_registry`（按模型模式分派）替代接口插件，支持 `Chat`、`Base`、`Embedding`、`Reranker` 四种模式的健康检查。
+   - **健康探测器**：以纯函数 `probe_registry`（按模型模式分派）替代接口插件，支持 `Chat`、`Embedding`、`Reranker` 三种模式的健康检查。
    - **设备监控**：检测 `NVIDIA GPU`（nvidia-smi）与 `AMD 780M` 核显（LibreHardwareMonitor）状态，用于动态调度。
 
 3. **智能资源调度**

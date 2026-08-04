@@ -171,9 +171,8 @@ def _read_appconfig_locked(db: Db) -> AppConfig:
             "SELECT alias FROM model_aliases WHERE model_id = ? ORDER BY ord", (mid,)))
         schemes: dict[str, Scheme] = {}
         for srow in db.conn.execute(
-                "SELECT id, config_source, required_devices, memory_mb, command "
+                "SELECT config_source, required_devices, memory_mb, command "
                 "FROM model_schemes WHERE model_id = ? ORDER BY ord", (mid,)):
-            sid = srow["id"]
             d = json.loads(srow["command"] or "{}")
             command = Command(exe=d.get("exe", ""), args=tuple(d.get("args", [])),
                               env=dict(d.get("env", {})), cwd=d.get("cwd"), conda_env=d.get("conda_env"))
