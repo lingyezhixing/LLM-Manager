@@ -2,7 +2,7 @@
 
 Module-level functions over a private dict. asyncio single-thread event loop →
 loop-resident state needs no locks (cross-thread resources like sqlite are
-locked separately, see spec §6)."""
+locked separately)."""
 from __future__ import annotations
 
 import asyncio
@@ -188,7 +188,8 @@ def finish_start(name: str, status: ModelStatus, *, owner: asyncio.Future | None
     owner: the future this winner obtained from claim_start. If given and the
     current _inflight[name] is a DIFFERENT future (stop already popped ours, or
     a concurrent restart re-claimed), this call is a no-op — we must NOT clobber
-    the new owner's inflight or overwrite rec.status. Guards invariant 5
+    the new owner's inflight or overwrite rec.status. Guards the owner-token
+    single-dispatch invariant
     against the slow-probe + concurrent-restart interleaving (orphan winner)."""
     rec = _rec(name)
     if owner is not None and _inflight.get(name) is not owner:

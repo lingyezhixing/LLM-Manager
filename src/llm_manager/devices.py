@@ -105,7 +105,7 @@ def _run_smi() -> str:
             capture_output=True, text=True, timeout=5, check=False,
         )
         return r.stdout if r.returncode == 0 else ""
-    except Exception:
+    except Exception:  # noqa: BLE001 — nvidia-smi 子进程异常/超时 → 视作无 NVIDIA,返回空
         return ""
 
 
@@ -129,7 +129,7 @@ def enumerate_cpu() -> list[DeviceInfo]:
         avail = int(mem.available // (1024 * 1024))
         used = int(mem.used // (1024 * 1024))
         usage = float(psutil.cpu_percent(interval=None))
-    except Exception:
+    except Exception:  # noqa: BLE001 — psutil 读 RAM/CPU 占用失败 → 返回零值降级 DeviceInfo,不抛
         return [DeviceInfo("CPU", "CPU", "RAM", 0, 0, 0, 0.0, None)]
     return [DeviceInfo("CPU", "CPU", "RAM", total, avail, used, usage, _lhm_cpu_temp())]
 
@@ -151,7 +151,7 @@ def enumerate_lhm_gpus() -> list[DeviceInfo]:
                 for s in hw.Sensors
             )
             out.append(_aggregate_sensors(str(hw.Name), sensors))
-        except Exception:
+        except Exception:  # noqa: BLE001 — 单个 LHM GPU 传感器读取失败 → 跳过该 GPU,继续其余
             pass
     return out
 
@@ -208,7 +208,7 @@ def _close_lhm() -> None:
     if _LHM_COMPUTER is not None:
         try:
             _LHM_COMPUTER.Close()
-        except Exception:
+        except Exception:  # noqa: BLE001 — 进程退出收尾,Close 失败可忽略
             pass
         _LHM_COMPUTER = None
 
@@ -234,8 +234,8 @@ def _lhm_computer():
                     c.Open()
                     _LHM_COMPUTER = c
                     atexit.register(_close_lhm)
-                except Exception:
-                    return None  # 初始化失败(DLL 损坏/Open 失败等)→ None,调用方降级
+                except Exception:  # noqa: BLE001 — 初始化失败(DLL 损坏/Open 失败等)→ None,调用方降级
+                    return None
     return _LHM_COMPUTER
 
 
@@ -254,7 +254,7 @@ def _lhm_cpu_temp() -> float | None:
                     "Tctl" in str(s.Name) or "Tdie" in str(s.Name)
                 ):
                     return float(s.Value) if s.Value is not None else None
-    except Exception:
+    except Exception:  # noqa: BLE001 — 读 LHM CPU 温度失败 → None
         return None
     return None
 
@@ -278,8 +278,8 @@ class DeviceMonitor:
                 result = enum()
                 if result:
                     candidates.extend(result)
-            except Exception:
-                pass  # 单个后端失败不影响其他
+            except Exception:  # noqa: BLE001 — 单个后端失败不影响其他
+                pass
         matched, unmatched = match_devices(self._referenced, candidates)
         cache: dict[str, DeviceInfo] = dict(matched)
         for c in unmatched:

@@ -1,4 +1,4 @@
-"""Background loops: idle reclamation + auto-start. Plan 5."""
+"""Background loops: idle reclamation + auto-start."""
 from __future__ import annotations
 
 import asyncio
@@ -14,7 +14,7 @@ AUTO_START_MARGIN: float = 30.0
 
 def _plan_batches(models_schemes: list) -> tuple[list[str], list[str]]:
     """设备隔离贪心:scheme.required_devices 与并行批已占无交集 → parallel(累计 occupied);
-    有交集 → serial。纯函数(spec §3.1)。"""
+    有交集 → serial。纯函数,无 IO。"""
     parallel: list[str] = []
     occupied: set[str] = set()
     serial: list[str] = []
@@ -29,7 +29,7 @@ def _plan_batches(models_schemes: list) -> tuple[list[str], list[str]]:
 
 def select_idle_candidates(alive_sec: float, now: float) -> list[str]:
     """只读 state:ROUTING ∩ pending==0 ∩ idle>alive_sec。now 注入(可测)。
-    相对 state 全局确定,但非引用透明(读模块级 _state,区别于 scheduling 主 spec §4.4 注入快照的纯函数)。"""
+    相对 state 全局确定,但非引用透明:读模块级 _state(区别于 scheduling 注入快照的纯函数)。"""
     return [n for n in state.routing_names()
             if state.pending_count(n) == 0 and (now - state.get_last_access(n)) > alive_sec]
 
@@ -62,7 +62,7 @@ async def idle_reclamation_loop(lifecycle, get_cfg, stop_event: asyncio.Event, *
 
 
 async def auto_start(lifecycle, models: list[str], cfg, monitor, *, timeout: float, stop_event: asyncio.Event) -> None:
-    """设备隔离分批调度(spec §3.1):扫描硬件 → select_adaptive → _plan_batches
+    """设备隔离分批调度:扫描硬件 → select_adaptive → _plan_batches
     → parallel gather(spawn 锁串行 spawn,probe 并行)+ serial 逐一(refresh 缓存刷新)。"""
     if not models:
         logger.info("no auto_start models")

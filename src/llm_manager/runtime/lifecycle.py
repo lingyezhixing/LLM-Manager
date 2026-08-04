@@ -50,7 +50,7 @@ class Lifecycle:
         self._db = db
         self._stop_events: dict[str, asyncio.Event] = {}
         self._active_schemes: dict[str, Scheme] = {}
-        self._spawn_lock = asyncio.Lock()   # Plan 7:全局 spawn 锁(spec §3.2)
+        self._spawn_lock = asyncio.Lock()   # 全局 spawn 锁:并发 spawn 串行,防显存超量
         self._log_session_ids: dict[str, int] = {}   # alias → 进行中模型日志会话 id(多模型并发,按 alias 独立追踪)
         self._runtime_seg_ids: dict[str, int] = {}   # alias → 进行中计费运行段 id(record_runtime_end 按关,不再靠 end_time IS NULL 定位)
 
@@ -60,7 +60,7 @@ class Lifecycle:
         if state.is_runnable(alias):
             status = state.get_status(alias)
             if inc_pending and status == ModelStatus.ROUTING:
-                state.begin_request(alias)   # 同一无 await 临界段内 inc → 关闭 idle 回收 TOCTOU(#2)
+                state.begin_request(alias)   # 同一无 await 临界段内 inc → 关闭 idle 回收 TOCTOU 间隙
             logger.debug("%s already %s (skip)", alias, status.value)
             return status
         future, won = state.claim_start(alias)
@@ -162,7 +162,7 @@ class Lifecycle:
         logger.info("cold start %s scheme=%s devices=%s",
                     alias, scheme.config_source, sorted(scheme.required_devices))
 
-        # === spawn 锁:check_and_free + spawn 串行,避免并发 spawn 显存超量(spec §3.2) ===
+        # === spawn 锁:check_and_free + spawn 串行,避免并发 spawn 显存超量 ===
         async with self._spawn_lock:
             snap = self._devices.snapshot()
             runnable = self._runnable(exclude=alias)
@@ -193,7 +193,7 @@ class Lifecycle:
             logger.info("spawn %s pid=%d", alias, rec.pid)
 
             # === 模型日志会话:先收口上一会话(防快速 restart 残留),再开新会话。
-            # 失败仅降级(该模型本次日志不落库),不阻断 spawn(guard D:spawn 锁内不得抛)。===
+            # 失败仅降级(该模型本次日志不落库),不阻断 spawn:spawn 锁内不得抛。===
             try:
                 self._log_end(alias)
                 self._log_session_ids[alias] = _logs.start_session(
@@ -201,7 +201,7 @@ class Lifecycle:
             except Exception:
                 logger.warning("log session start failed for %s", alias, exc_info=True)
 
-            # === post-spawn critical section (no await) === invariant 3
+            # === post-spawn 无-await 临界段 ===
             state.record_pid(alias, rec.pid)
             orphan_pid = rec.pid if ev.is_set() else None
             # === end critical section ===
@@ -212,7 +212,7 @@ class Lifecycle:
             return ModelStatus.STOPPED
 
         # Any raise below must kill the spawned pid before propagating;
-        # ensure_running's outer except has no rec.pid reference (guard D).
+        # ensure_running's outer except has no rec.pid reference.
         try:
             if ev.is_set():
                 return await self._abort_spawned(rec.pid)
@@ -229,12 +229,12 @@ class Lifecycle:
             if not probe.ok:
                 await self._supervisor.kill_tree(rec.pid)
                 if ev.is_set():
-                    return ModelStatus.STOPPED        # kill_tree awaited; stop may have come — don't overwrite STOPPED (guard H)
+                    return ModelStatus.STOPPED        # kill_tree awaited; stop may have come — don't overwrite STOPPED
                 self._log_end(alias)   # probe 失败不会走 on_exit / stop(FAILED 早退)→ 必须在此收口,防泄漏 running 会话
                 state.record_failure(alias, f"probe failed: {probe.message}")
                 return ModelStatus.FAILED
 
-            # === set-ROUTING critical section (no await) === invariant 2
+            # === set-ROUTING 无-await 临界段 ===
             if ev.is_set():
                 return await self._abort_spawned(rec.pid)
             state.set_status(alias, ModelStatus.ROUTING)
