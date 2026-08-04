@@ -18,7 +18,7 @@ dependencies = [
 [project.optional-dependencies]
 monitoring = ["pythonnet>=3"]
 tray = ["pystray", "Pillow"]
-dev = ["pytest>=8", "pytest-asyncio>=0.23", "ruff", "pyright", "httpx>=0.25"]
+dev = ["pytest>=8", "pytest-asyncio>=0.23", "ruff==0.12.7", "pyright", "httpx>=0.25"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
