@@ -1,6 +1,6 @@
-# LLM-Manager
+# LLM-Manager v3.0.0a1
 
-**LLM-Manager** 是一个统一管理本地大型语言模型（LLM）的后端网关。通过统一 API 接口和动态资源调度，简化多模型在本地环境中的部署与调用流程。
+**LLM-Manager** 是一个统一管理本地大型语言模型（LLM）的代理网关 + WebUI：按需启动 / 空闲回收本地模型进程（llama.cpp / lmdeploy / vLLM …），对外暴露 OpenAI / Anthropic / Responses 兼容 API，记录用量与计费，并提供系统配置、模型管理、用量统计、日志查看的完整前端。**完全离线运行**（无任何云端依赖）。
 
 > **⚠️ 重要说明**：
 > 本项目为个人开发工具，适用于本地实验环境。
@@ -9,48 +9,61 @@
 
 ---
 
-## 核心功能（已迁移）
+## 功能特性
 
-1. **统一 API 接口**
-   提供兼容 OpenAI 格式的标准接口，同时支持 Anthropic 与 Responses API：
-   - `/v1/chat/completions`（OpenAI Chat）
-   - `/v1/completions`（OpenAI Completions）
-   - `/v1/embeddings`（OpenAI Embedding）
-   - `/v1/rerank`（Reranker）
-   - `/v1/messages`（Anthropic Claude API）
-   - `/v1/responses`（OpenAI Responses API）
-   - `/v1/models`
-   请求按 `model` 字段解析别名并自动路由至对应本地模型服务端口。
+### 1. 统一 API 接口
+提供 OpenAI / Anthropic / Responses 三种兼容格式，请求按 `model` 字段解析别名并自动路由至对应本地模型服务端口：
+- `/v1/chat/completions`、`/v1/completions`（OpenAI）
+- `/v1/embeddings`、`/v1/rerank`（Embedding / Reranker）
+- `/v1/messages`（Anthropic Claude API）
+- `/v1/responses`（OpenAI Responses API）
+- `/v1/models`
 
-2. **函数式探测器架构**
-   - **健康探测器**：以纯函数 `probe_registry`（按模型模式分派）替代接口插件，支持 `Chat`、`Embedding`、`Reranker` 三种模式的健康检查。
-   - **设备监控**：检测 `NVIDIA GPU`（nvidia-smi）与 `AMD 780M` 核显（LibreHardwareMonitor）状态，用于动态调度。
+### 2. 按需启动与智能调度
+- **按需启动**：请求到达时自动启动模型，空闲超时后自动关闭以释放显存。
+- **环境适配**：根据当前在线显卡型号自动选择匹配的启动方案（scheme），设备不满足时自动回退到下一个方案。
+- **并发安全**：单派发 Future 去重 + 全局 spawn 锁 + owner-token guard，高并发冷启动不串槽。
+- **健康探测**：纯函数 `probe_registry` 按模型模式（Chat / Embedding / Reranker）分派探测方式；设备监控覆盖 NVIDIA GPU（nvidia-smi）与 AMD 780M 核显（LibreHardwareMonitor）。
 
-3. **智能资源调度**
-   - **按需启动**：请求到达时自动启动模型，空闲超时后关闭以释放显存。
-   - **环境适配**：根据当前在线显卡型号自动选择匹配的启动配置（scheme）。
-   - **并发控制**：单派发 Future 去重 + 全局 spawn 锁 + owner-token guard，优化高并发冷启动流程，避免线程阻塞与跨代状态串槽。
+### 3. 全量 Token 追踪
+- 按请求路径自动分派解析器（OpenAI / Anthropic / Responses 三种格式），流量自动纳入统计，无需白名单配置。
+- 适配 **llama.cpp** 与 **lmdeploy** 双后端（流式请求自动注入 `include_usage`，保障流式用量完整）。
 
-4. **多端点 Token 追踪**
-   - 按请求路径自动分派到对应解析器（OpenAI / Anthropic / Responses 三种格式）。
-   - 适配 `llama.cpp` 与 `lmdeploy` 双后端（流式请求自动注入 `include_usage`）。
-   - 全量追踪（track-all）：所有模型的流量自动纳入统计，无需手动配置白名单。
+### 4. 计费与用量统计
+- **计费系统**：阶梯 token 计费 + 按时租赁，混合计费汇总（分级按量 / 按时计费）。
+- **分析看板**：成本趋势 / Token 趋势 / 单模型统计 / 使用量汇总（WebUI 用量统计页，实时 SSE 刷新）。
 
-5. **系统托盘增强**
-   - **网络唤醒（WOL）**：托盘菜单支持唤醒远程设备（如飞牛 NAS）。
-   - **Claude 配置切换**：在预设的 Claude API 配置间一键切换（如 GLM / Local），子菜单显示当前配置。
+### 5. 系统托盘
+- 🌐 一键打开 WebUI · 🔔 网络唤醒远程设备（如飞牛 NAS）· Claude API 预设一键切换（子菜单显示当前配置）· ▶ 重启自启模型 / ⏹ 卸载全部模型 · ❌ 优雅退出。
+- 无头环境（无桌面 / 无 pystray）自动降级为静默后台运行。
 
-6. **计费与用量统计**
-   - **计费系统**：阶梯 token 计费 + 按时租赁，混合计费汇总。
-   - **分析看板**：成本趋势 / Token 趋势 / 单模型统计 / 使用量汇总（WebUI 用量统计页）。
+### 6. 数据与日志管理
+- **日志全落库**（SQLite）：系统日志会话 + 模型日志，WebUI 双 Tab 日志页（会话列表 + 实时行详情，SSE 流式）。
+- **保留规则**：按时间 / 按条数自动清理，可配置。
+- **数据管理**：删除模型数据（级联 + VACUUM 回收）、孤立模型检测、存储统计。
 
-7. **数据管理与日志**
-   - **数据管理**：删除模型数据（级联 + VACUUM 回收）、孤立模型检测、存储统计。
-   - **日志查看**：系统 / 模型日志全部落库（SQLite），WebUI 双 Tab 日志页（会话列表 + 实时行详情），保留规则自动清理（按时间 / 按条数）。
+### 7. WebUI 前端
+- React 19 + Vite + TypeScript + Tailwind v4 + TanStack Query，双主题（深 / 亮），实时监控。
+- 页面：**概览**（设备 / 模型 / 会话实时状态）· **模型管理**（启停 + 实时日志 + 定义 CRUD）· **用量统计** · **日志查看** · **系统配置**（程序 / 模型 / 计费 / WOL / Claude 预设 / 日志保留 / 数据管理）。
+- 配置修改即时生效或提示重启（需重启字段自动检测 + 一键自重启，退出码 81 契约）。
 
-8. **WebUI 前端**
-   - React + TypeScript 实时监控界面：概览、模型管理（启停 + 实时日志）、用量统计、日志查看、系统配置（模型定义 CRUD / 计费 / WOL / Claude 预设 / 日志保留）、数据库管理。
-   - 配置修改即时生效或提示重启（需重启字段自动检测 + 一键自重启，退出码 81 契约）。
+---
+
+## 架构
+
+```
+config   ── 纯数据 + 校验（DB → frozen dataclasses）
+state    ── 内存状态机 + 单派发 inflight Future
+supervisor ── 子进程管理（kill_tree + 单 wait 协程）
+runtime  ── 生命周期编排 / 纯函数资源调度 / 心跳 / 日志保留
+data     ── SQLite 持久化 + 日志 / 用量 / 配置存储
+gateway  ── 流式代理 + REST/SSE 端点 + 别名解析
+tray     ── 系统托盘（WOL / Claude 预设 / 快速启停）
+```
+
+- **单进程模型**：一个 Python 进程跑一个 app（FastAPI + uvicorn），模块级单例内存状态，SQLite 单连接 + `write_lock` 串行化。
+- **配置单一源**：全部配置存 SQLite（`data/llm_manager.db`），运行时只读 frozen 快照；环境变量仅在启动期覆写并持久化。
+- **自重启契约**：退出码 81 = 请求重启；`LLM-Manager.bat` 监督器循环重启。
 
 ---
 
@@ -77,7 +90,7 @@ pip install -e ".[monitoring,tray,dev]"
 python -m llm_manager
 ```
 
-启动后访问：`http://localhost:8080`
+启动后访问：`http://localhost:8080`（8080 端口同时 serve API 与前端构建产物 `frontend/dist`）
 
 ---
 
@@ -86,7 +99,7 @@ python -m llm_manager
 全部配置存储在 SQLite 数据库（默认 `data/llm_manager.db`）中，通过 WebUI「系统配置」页或 `/api/config/*` 修改，无需编辑配置文件：
 
 - **程序配置**：监听地址 / 端口、日志级别、空闲回收间隔（分钟）、Claude settings 路径、WOL、Claude 预设、日志保留规则。
-- **模型定义**：名称、别名、模式、端口、自动启动、设备方案（scheme: required_devices / memory_mb / **结构化启动命令** exe + args + env）、计费（阶梯 / 按时）。
+- **模型定义**：名称、别名、模式、端口、自动启动、设备方案（scheme: required_devices / memory_mb / **结构化启动命令** exe + args + env + conda_env）、计费（阶梯 / 按时）。
 - **环境变量**（可选，启动时覆写并持久化）：`LLM_MANAGER_HOST` / `LLM_MANAGER_PORT` / `LLM_MANAGER_ALIVE_TIME` / `LLM_MANAGER_LOG_LEVEL` / `LLM_MANAGER_DB_PATH`。
 
 首次启动（空库）时，若项目根目录存在 `config.yaml`（旧版 YAML 配置，结构参考下方），会作为一次性引导导入；否则使用默认配置。导入后配置以 DB 为准，`config.yaml` 不再被读取。
@@ -119,3 +132,20 @@ Local-Models:
 ```
 
 > ✅ **说明**：设备不满足前一个 scheme 时自动回退到下一个（多 GPU 启动灵活性）。
+
+---
+
+## 开发
+
+后端（项目根，conda env `LLM-Manager`）：
+```bash
+python -m pytest tests -q     # 全量测试（含 smoke）
+ruff check .                  # lint
+pyright src/llm_manager       # 类型检查
+```
+
+前端（`frontend/`）：
+```bash
+npm run build        # = tsc -b && vite build；8080 端口 serve 的是 dist 构建产物，改前端后必跑
+npx oxlint src       # lint
+```
