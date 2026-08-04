@@ -135,8 +135,8 @@ export function ModelDefPanel() {
                 className={
                   "rounded-md px-3 py-2 text-left text-sm transition-colors " +
                   (selected
-                    ? "bg-muted font-medium text-foreground"
-                    : "text-muted-foreground hover:bg-muted hover:text-foreground")
+                    ? "bg-primary-accent/12 font-medium text-primary-accent"
+                    : "text-muted-foreground hover:bg-card-hover hover:text-foreground")
                 }
               >
                 {m.name}
