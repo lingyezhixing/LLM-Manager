@@ -1,21 +1,13 @@
-// 用量聚合 + 计费成本。
-// S2:响应类型从后端 OpenAPI 生成(schema.d.ts,`python scripts/gen_types.py` 再生成),
-// 不再手写——防「改后端忘改前端」漂移。下方 fetch 函数的返回类型 = 生成的 *Response 别名。
-import type {
-  ByModelEntryResponse,
-  CostByModelResponse,
-  CostSummaryResponse,
-  SessionUsageResponse,
-  UsageSeriesResponse,
-  UsageSummaryResponse,
-} from "./schema";
-
-export type SessionUsage = SessionUsageResponse;
-export type UsageSummary = UsageSummaryResponse;
-export type ByModelEntry = ByModelEntryResponse;
-export type UsageSeries = UsageSeriesResponse;       // buckets/total/models:时间序列(成本序列同形)
-export type CostByModel = CostByModelResponse;
-export type CostSummary = CostSummaryResponse;
+// 用量聚合 + 计费成本。Types hand-defined to match gateway/api/usage.py 的响应模型
+// (UsageSummaryResponse / UsageSeriesResponse / CostSummaryResponse)。
+export interface SessionUsage {
+  started_at: number;       // process start (wall-clock epoch seconds) — frontend ticks uptime
+  input_tokens: number;
+  output_tokens: number;
+  cache_hit: number;
+  cache_miss: number;
+  hit_rate: number;
+}
 
 export async function fetchSessionUsage(): Promise<SessionUsage> {
   const res = await fetch("/api/usage/session");
@@ -33,43 +25,87 @@ export async function fetchHealth(): Promise<HealthResponse> {
   return (await res.json()) as HealthResponse;
 }
 
-// 区间参数:预设(period)或自定义起止秒(epoch)。与后端 _resolve_range 对齐。
-export type UsageSeriesParams = { period: string } | { start: number; end: number };
-
-function qsFor(params: UsageSeriesParams): URLSearchParams {
-  return new URLSearchParams(
-    "period" in params
-      ? { period: params.period }
-      : { start: String(params.start), end: String(params.end) },
-  );
+export interface UsageSeries {
+  buckets: number[];                       // bucket-start wall-clock epochs (chart x-axis)
+  total: number[];                         // tokens per bucket, summed across models
+  models: Record<string, number[]>;        // model name → tokens per bucket
 }
 
+export type UsageSeriesParams = { period: string } | { start: number; end: number };
+
 export async function fetchUsageSeries(params: UsageSeriesParams): Promise<UsageSeries> {
-  const res = await fetch(`/api/usage/series?${qsFor(params).toString()}`);
+  const qs = new URLSearchParams(
+    "period" in params ? { period: params.period } : { start: String(params.start), end: String(params.end) },
+  );
+  const res = await fetch(`/api/usage/series?${qs.toString()}`);
   if (!res.ok) throw new Error(`/api/usage/series failed: ${res.status}`);
   return (await res.json()) as UsageSeries;
 }
 
+export interface UsageSummary {
+  input_tokens: number;
+  output_tokens: number;
+  cache_hit: number;
+  cache_miss: number;
+  hit_rate: number;
+  request_count: number;
+}
+
 export async function fetchUsageSummary(params: UsageSeriesParams): Promise<UsageSummary> {
-  const res = await fetch(`/api/usage/summary?${qsFor(params).toString()}`);
+  const qs = new URLSearchParams(
+    "period" in params ? { period: params.period } : { start: String(params.start), end: String(params.end) },
+  );
+  const res = await fetch(`/api/usage/summary?${qs.toString()}`);
   if (!res.ok) throw new Error(`/api/usage/summary failed: ${res.status}`);
   return (await res.json()) as UsageSummary;
 }
 
+export interface ByModelEntry {
+  model: string;
+  input_tokens: number;
+  output_tokens: number;
+  cache_n: number;
+  request_count: number;
+  hit_rate: number;
+  share: number;
+  latency_ms: number;
+}
+
 export async function fetchUsageByModel(params: UsageSeriesParams): Promise<ByModelEntry[]> {
-  const res = await fetch(`/api/usage/by-model?${qsFor(params).toString()}`);
+  const qs = new URLSearchParams(
+    "period" in params ? { period: params.period } : { start: String(params.start), end: String(params.end) },
+  );
+  const res = await fetch(`/api/usage/by-model?${qs.toString()}`);
   if (!res.ok) throw new Error(`/api/usage/by-model failed: ${res.status}`);
   return (await res.json()) as ByModelEntry[];
 }
 
+// 计费成本 — cost 汇总 + cost 时间序列(序列与 usage/series 同形)。Match gateway/api/usage.py
+// 的 CostSummaryResponse / UsageSeriesResponse。
+export interface CostByModel {
+  model: string;
+  pricing_type: "tier" | "hourly";
+  cost: number;
+}
+export interface CostSummary {
+  total_cost: number;
+  by_model: CostByModel[];
+}
+
 export async function fetchUsageCost(params: UsageSeriesParams): Promise<CostSummary> {
-  const res = await fetch(`/api/usage/cost?${qsFor(params).toString()}`);
+  const qs = new URLSearchParams(
+    "period" in params ? { period: params.period } : { start: String(params.start), end: String(params.end) },
+  );
+  const res = await fetch(`/api/usage/cost?${qs.toString()}`);
   if (!res.ok) throw new Error(`/api/usage/cost failed: ${res.status}`);
   return (await res.json()) as CostSummary;
 }
 
 export async function fetchUsageCostSeries(params: UsageSeriesParams): Promise<UsageSeries> {
-  const res = await fetch(`/api/usage/cost-series?${qsFor(params).toString()}`);
+  const qs = new URLSearchParams(
+    "period" in params ? { period: params.period } : { start: String(params.start), end: String(params.end) },
+  );
+  const res = await fetch(`/api/usage/cost-series?${qs.toString()}`);
   if (!res.ok) throw new Error(`/api/usage/cost-series failed: ${res.status}`);
   return (await res.json()) as UsageSeries;
 }

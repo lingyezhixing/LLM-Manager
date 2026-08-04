@@ -123,13 +123,13 @@ npx tsc -b           # 仅类型检查
 
 ## 9. 已知遗留 / 已评估 DEFER(非阻塞,按节奏渐进)
 
-- **S2 前后端类型生成(已建立,渐进迁移)**:`scripts/gen_types.py` 从 FastAPI OpenAPI 生成
-  `frontend/src/lib/api/schema.d.ts`(纯 stdlib,无 npm 依赖——openapi-typescript 官方只支持 TS 5,
-  本项目用 TS 6;且须离线)。`npm run gen-types` 重生成(需 llm_manager 可导入的 python 环境)。
-  **已迁移**:usage 响应类型(SessionUsage/UsageSummary/ByModelEntry/UsageSeries/CostByModel/CostSummary
-  → schema.d.ts 别名,消费方零改动)。**待迁移**:logs(LogLine/LogSession 的 stream/level/status 需后端
-  补 Literal 才不丢精度)、config/models GET(返回裸 dict,需补 `response_model`)、请求体(ModelDefInput 等,
-  注意有默认值的字段会生成成可选)。改后端响应模型后跑 `npm run gen-types`。
+- **S2 前后端类型生成(已建后回退,2026-08-04)**:曾引入 `scripts/gen_types.py` 从 FastAPI OpenAPI
+  生成 `schema.d.ts`(aef9887),评估后决定回退——单人开发 + 小类型面(~26 个手写 interface)+
+  低改动频率下收益不足;且渐进迁移停在中间态 = 同一后端模型两份 TS 定义(schema.d.ts 20 个类型
+  仅 6 个被消费,其余与手写版并存),双路径比纯手动更差。已删脚本/schema/npm script,usage.ts
+  恢复 aef9887^ 手写版(字节级还原)。**类型对齐回归纯手写自律**:改后端响应模型时记得同步
+  `frontend/src/lib/api/{usage,logs,models,config,data}.ts` 的同形 interface(round3 §5-S2
+  风险记录仍有效)。若未来进入「频繁改响应模型 × 多消费方」阶段再评估引入,届时一次推完、不留中间态。
 - **S3 CI / pre-commit**:`ruff format --check && ruff check && pyright && pytest -q` +
   前端 `oxlint && tsc -b`。项目装了 ruff 但未强制 format(37/42 文件会重排)。**待用户定**
   是否一次性 `ruff format` + 纳入 CI。
