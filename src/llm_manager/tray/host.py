@@ -18,7 +18,6 @@ import logging
 import os
 import threading
 import webbrowser
-from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -41,10 +40,6 @@ except ImportError:
 # (即 import 成功)时才会解引用,故 None 路径不可达。
 pystray: Any = _pystray
 Image: Any = _pil_image
-
-
-def _noop() -> None:
-    pass
 
 
 def _is_headless_display() -> bool:
@@ -70,7 +65,6 @@ class SystemTray:
         settings_path,
         startup_timeout: float,
         auto_start_margin: float,
-        request_restart: Callable[[], None] = _noop,
     ) -> None:
         self._lifecycle = lifecycle
         self._get_cfg = get_cfg
@@ -80,7 +74,6 @@ class SystemTray:
         self._settings_path = Path(settings_path)
         self._startup_timeout = startup_timeout
         self._auto_start_margin = auto_start_margin
-        self._request_restart = request_restart
         self._icon = None
         self._thread: threading.Thread | None = None
 
@@ -126,7 +119,6 @@ class SystemTray:
         items += [
             pystray.MenuItem("▶ 重启自启模型", self.restart_auto_start),
             pystray.MenuItem("⏹ 卸载全部模型", self.unload_all),
-            pystray.MenuItem("🔄 重启程序", self.restart_app),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("❌ 退出程序", self.exit_app),
         ]
@@ -184,13 +176,6 @@ class SystemTray:
         # graceful: flip server.should_exit on the loop → uvicorn shuts down →
         # lifespan finally runs (unload_all + close clients/db).
         self._loop.call_soon_threadsafe(setattr, self._server, "should_exit", True)
-        if self._icon is not None:
-            self._icon.stop()
-
-    def restart_app(self, icon=None, item=None) -> None:
-        # 与 exit_app 同路径优雅退出,但 request_restart 额外置 restart_requested
-        # → main() 以 RESTART_EXIT_CODE 退出 → 监督器在其上重启。
-        self._request_restart()
         if self._icon is not None:
             self._icon.stop()
 

@@ -82,7 +82,7 @@ tray     ── 系统托盘(自重启触发 / WOL / Claude 预设应用)
 - 生产:`LLM-Manager.bat` 监督器循环,`main()` 以 81 退出 → 重启。
 - dev:`Dev-Backend.bat` `:restart` + 81 循环;`os._exit(81)` 跳过 lifespan 收尾
   (dev 进程一次性,可接受)。
-- 托盘菜单/`POST /api/config/restart` 均走 `restart_requested → exit 81`。
+- `POST /api/config/restart`(WebUI 顶部重启横幅)走 `restart_requested → exit 81`。
 
 ## 6. 命令(验收用)
 

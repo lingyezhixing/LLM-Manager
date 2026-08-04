@@ -176,10 +176,3 @@ def test_send_wol_uses_fresh_wol_from_store(monkeypatch, tmp_path):
     current["wol"] = WakeOnLanConfig("172.16.0.255", "11:22:33:44:55:66")
     tray.send_wol()
     assert sent[-1] == ("11:22:33:44:55:66", "172.16.0.255")
-
-
-def test_restart_app_invokes_request_restart():
-    calls = []
-    tray = _make_tray(request_restart=lambda: calls.append("restart"))
-    tray.restart_app()
-    assert calls == ["restart"]
