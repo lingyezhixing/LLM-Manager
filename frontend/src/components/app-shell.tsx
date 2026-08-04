@@ -33,9 +33,12 @@ function AppLayout() {
       <Sidebar collapsed={collapsed} />
       <div ref={scrollRef} className="scrollbar-none flex flex-1 flex-col overflow-y-auto">
         <PillBar collapsed={collapsed} onToggleCollapse={toggle} />
+        {/* min-h-0 是必须的:flex 子项默认 min-height:auto 会被内容撑高,长页面内容超高时
+            总高超容器 → 触发 flex-shrink → main 的 flex-basis 0% 权重为 0,全部压缩落到
+            PillBar 上(被压扁 40→30px)。min-h-0 让 main 高度归 flex 分配,溢出交给滚动列。 */}
         <main
           key={pathname}
-          className="animate-page-in w-full flex-1 px-4 pb-4 pt-8 md:px-6"
+          className="animate-page-in min-h-0 w-full flex-1 px-4 pb-4 pt-8 md:px-6"
         >
           <Outlet />
         </main>
