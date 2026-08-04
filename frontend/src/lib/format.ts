@@ -55,3 +55,13 @@ export function fmtDuration(sec: number): string {
   const h = Math.floor(sec / 3600);
   return `${h}h ${Math.round((sec % 3600) / 60)}m`;
 }
+
+/** 数字输入框值解析:空串 → 0(NumberInput 受控值常见)。 */
+export function numFromStr(s: string): number {
+  return s === "" ? 0 : Number(s);
+}
+
+/** 同上,但空串 → null(可空数值字段,如 pricing tier 区间上界 max)。 */
+export function numOrNull(s: string): number | null {
+  return s === "" ? null : Number(s);
+}

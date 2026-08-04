@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { ConfigSaveBar } from "@/components/config-save-bar";
 import { Button } from "@/components/ui/button";
 import { Field, NumberInput, Select, Switch, TextInput } from "@/components/ui/form";
+import { numFromStr as num } from "@/lib/format";
 import { StringListEditor } from "@/components/ui/repeatable-fields";
 import { PricingEditor } from "@/components/system/pricing-editor";
 import { SchemeEditor } from "@/components/system/scheme-editor";
@@ -113,7 +114,6 @@ export function ModelDefForm({ model, onSaved, onDirtyChange }: ModelDefFormProp
   const canSave = clientValid(form) && portValid;
 
   const set = <K extends keyof ModelDef>(k: K, v: ModelDef[K]) => setForm({ ...form, [k]: v });
-  const num = (s: string): number => (s === "" ? 0 : Number(s));
 
   const setScheme = (i: number, next: SchemeDef) =>
     setForm({ ...form, schemes: form.schemes.map((s, idx) => (idx === i ? next : s)) });

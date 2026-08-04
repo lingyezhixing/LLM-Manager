@@ -2,6 +2,7 @@ import { type ReactNode, useEffect, useRef, useState } from "react";
 import { ConfigSaveBar } from "@/components/config-save-bar";
 import { ErrorState } from "@/components/ui/error-state";
 import { Field, NumberInput, Select, TextInput } from "@/components/ui/form";
+import { numFromStr as num } from "@/lib/format";
 import { InfoTile } from "@/components/ui/info-tile";
 import { useToast } from "@/components/ui/toast";
 import { LogRetentionEditor } from "@/components/system/log-retention-editor";
@@ -90,7 +91,6 @@ export function GeneralPanel() {
   const aliveValid = form.program.alive_time >= 0;
   const set = (p: ProgramConfig) => setForm({ ...form, program: p });
   const setLogs = (l: LogRetention) => setForm({ ...form, logs: l });
-  const num = (s: string): number => (s === "" ? 0 : Number(s));
   const saving = update.isPending || updateLogs.isPending;
   const saveError = update.error ?? updateLogs.error;
 

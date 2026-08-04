@@ -1,3 +1,5 @@
+import { apiJson } from "./shared";
+
 // 用量聚合 + 计费成本。Types hand-defined to match gateway/api/usage.py 的响应模型
 // (UsageSummaryResponse / UsageSeriesResponse / CostSummaryResponse)。
 export interface SessionUsage {
@@ -11,9 +13,7 @@ export interface SessionUsage {
 }
 
 export async function fetchSessionUsage(): Promise<SessionUsage> {
-  const res = await fetch("/api/usage/session");
-  if (!res.ok) throw new Error(`/api/usage/session failed: ${res.status}`);
-  return (await res.json()) as SessionUsage;
+  return apiJson<SessionUsage>("/api/usage/session");
 }
 
 export interface HealthResponse {
@@ -21,9 +21,7 @@ export interface HealthResponse {
 }
 
 export async function fetchHealth(): Promise<HealthResponse> {
-  const res = await fetch("/health");
-  if (!res.ok) throw new Error(`/health failed: ${res.status}`);
-  return (await res.json()) as HealthResponse;
+  return apiJson<HealthResponse>("/health");
 }
 
 export interface UsageSeries {
@@ -38,9 +36,7 @@ export async function fetchUsageSeries(params: UsageSeriesParams): Promise<Usage
   const qs = new URLSearchParams(
     "period" in params ? { period: params.period } : { start: String(params.start), end: String(params.end) },
   );
-  const res = await fetch(`/api/usage/series?${qs.toString()}`);
-  if (!res.ok) throw new Error(`/api/usage/series failed: ${res.status}`);
-  return (await res.json()) as UsageSeries;
+  return apiJson<UsageSeries>(`/api/usage/series?${qs.toString()}`);
 }
 
 export interface UsageSummary {
@@ -56,9 +52,7 @@ export async function fetchUsageSummary(params: UsageSeriesParams): Promise<Usag
   const qs = new URLSearchParams(
     "period" in params ? { period: params.period } : { start: String(params.start), end: String(params.end) },
   );
-  const res = await fetch(`/api/usage/summary?${qs.toString()}`);
-  if (!res.ok) throw new Error(`/api/usage/summary failed: ${res.status}`);
-  return (await res.json()) as UsageSummary;
+  return apiJson<UsageSummary>(`/api/usage/summary?${qs.toString()}`);
 }
 
 export interface ByModelEntry {
@@ -76,9 +70,7 @@ export async function fetchUsageByModel(params: UsageSeriesParams): Promise<ByMo
   const qs = new URLSearchParams(
     "period" in params ? { period: params.period } : { start: String(params.start), end: String(params.end) },
   );
-  const res = await fetch(`/api/usage/by-model?${qs.toString()}`);
-  if (!res.ok) throw new Error(`/api/usage/by-model failed: ${res.status}`);
-  return (await res.json()) as ByModelEntry[];
+  return apiJson<ByModelEntry[]>(`/api/usage/by-model?${qs.toString()}`);
 }
 
 // 计费成本 — cost 汇总 + cost 时间序列(序列与 usage/series 同形)。Match gateway/api/usage.py
@@ -97,16 +89,12 @@ export async function fetchUsageCost(params: UsageSeriesParams): Promise<CostSum
   const qs = new URLSearchParams(
     "period" in params ? { period: params.period } : { start: String(params.start), end: String(params.end) },
   );
-  const res = await fetch(`/api/usage/cost?${qs.toString()}`);
-  if (!res.ok) throw new Error(`/api/usage/cost failed: ${res.status}`);
-  return (await res.json()) as CostSummary;
+  return apiJson<CostSummary>(`/api/usage/cost?${qs.toString()}`);
 }
 
 export async function fetchUsageCostSeries(params: UsageSeriesParams): Promise<UsageSeries> {
   const qs = new URLSearchParams(
     "period" in params ? { period: params.period } : { start: String(params.start), end: String(params.end) },
   );
-  const res = await fetch(`/api/usage/cost-series?${qs.toString()}`);
-  if (!res.ok) throw new Error(`/api/usage/cost-series failed: ${res.status}`);
-  return (await res.json()) as UsageSeries;
+  return apiJson<UsageSeries>(`/api/usage/cost-series?${qs.toString()}`);
 }

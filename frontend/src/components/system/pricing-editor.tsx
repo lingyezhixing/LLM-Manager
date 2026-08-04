@@ -1,5 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { Field, NumberInput, Select, Switch } from "@/components/ui/form";
+import { numOrNull as num } from "@/lib/format";
 import type { Pricing, PricingTier } from "@/lib/api";
 
 // 计费配置段:计费方式(按量/按时)+ 按时单价 / 阶梯表编辑器。空 tiers = 免费。
@@ -23,7 +24,6 @@ export function PricingEditor({ value, onChange }: { value: Pricing; onChange: (
           cache_write_price: 0, cache_read_price: 0 },
       ],
     });
-  const num = (s: string): number | null => (s === "" ? null : Number(s));
 
   return (
     <div className="flex flex-col gap-3">

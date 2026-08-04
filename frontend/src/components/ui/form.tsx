@@ -1,6 +1,6 @@
 import type { InputHTMLAttributes, ReactNode, SelectHTMLAttributes, TextareaHTMLAttributes } from "react";
 
-// 项目首套表单原子。语义 token + --ring focus,三主题自适应。后续 wol/claude/logs/model-def 复用。
+// 项目首套表单原子。语义 token + --ring focus,二主题自适应。后续 wol/claude/logs/model-def 复用。
 // 共享框样式(不含高度):input 原子加 h-9,TextArea 加 min-h + py。
 const fieldBase =
   "w-full bg-input border border-border rounded-md px-3 text-sm text-foreground placeholder:text-muted-foreground disabled:opacity-50";
@@ -48,7 +48,7 @@ export function TextArea(props: TextareaHTMLAttributes<HTMLTextAreaElement>) {
   return <textarea {...props} className={`${fieldBase} min-h-24 py-2 font-mono ${props.className ?? ""}`} />;
 }
 
-// 开关(自启动等布尔项):track + 滑块。开=primary,关=muted;滑块色随态切换保三主题对比。
+// 开关(自启动等布尔项):track + 滑块。开=primary,关=muted;滑块色随态切换保二主题对比。
 // role=switch + aria-checked;label 经 htmlFor 关联(点标签即切换)。
 export function Switch({
   checked,

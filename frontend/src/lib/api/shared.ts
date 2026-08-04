@@ -19,3 +19,12 @@ export async function parseApiError(res: Response): Promise<Error> {
   }
   return new Error(msg);
 }
+
+/** 统一 fetch + 解析 JSON:失败抛 parseApiError 解出的可读错误(含后端 detail),
+ *  而非裸 "URL failed: ${status}"。GET 直接传 url;POST/PUT/DELETE 经 init 传 body。
+ *  本层所有读取端应走此 helper,保证错误信息精度一致(见 usage/logs/config-GET)。 */
+export async function apiJson<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
+  const res = await fetch(input, init);
+  if (!res.ok) throw await parseApiError(res);
+  return (await res.json()) as T;
+}

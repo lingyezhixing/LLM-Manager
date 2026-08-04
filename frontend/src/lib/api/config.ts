@@ -1,6 +1,6 @@
 // 系统配置 — config 写回 + system info. Types hand-defined to match
 // gateway/api/config_api.py (ProgramUpdate / GET /api/config / GET /api/system/info)。
-import { parseApiError } from "./shared";
+import { apiJson, parseApiError } from "./shared";
 
 export interface SystemInfo {
   version: string;
@@ -25,7 +25,7 @@ export interface LogRetention {
 
 export interface ConfigResponse {
   program: ProgramConfig;
-  wol: { broadcast_address: string; mac_address: string } | null;
+  wol: WolConfig | null;
   claude: Record<string, Record<string, string>>;
   logs: LogRetention;
   restart_fields: string[];
@@ -103,21 +103,15 @@ export async function fetchClaudeCurrent(): Promise<{ current: string }> {
 export type ProgramUpdate = Partial<ProgramConfig>;
 
 export async function fetchSystemInfo(): Promise<SystemInfo> {
-  const res = await fetch("/api/system/info");
-  if (!res.ok) throw new Error(`/api/system/info failed: ${res.status}`);
-  return (await res.json()) as SystemInfo;
+  return apiJson<SystemInfo>("/api/system/info");
 }
 
 export async function fetchConfig(): Promise<ConfigResponse> {
-  const res = await fetch("/api/config");
-  if (!res.ok) throw new Error(`/api/config failed: ${res.status}`);
-  return (await res.json()) as ConfigResponse;
+  return apiJson<ConfigResponse>("/api/config");
 }
 
 export async function fetchRestartStatus(): Promise<ConfigWriteResult> {
-  const res = await fetch("/api/config/restart-status");
-  if (!res.ok) throw new Error(`/api/config/restart-status failed: ${res.status}`);
-  return (await res.json()) as ConfigWriteResult;
+  return apiJson<ConfigWriteResult>("/api/config/restart-status");
 }
 
 // 自重启:后端优雅关闭 + sys.exit(81)→ 监督器重启。202;失败抛 parseApiError。
