@@ -77,11 +77,11 @@ export function TokenCurveCard() {
         </div>
       </div>
       {isError ? (
-        <div className="flex h-[200px] items-center justify-center">
+        <div className="flex h-[160px] items-center justify-center">
           <ErrorState message={(error as Error).message} onRetry={() => refetch()} />
         </div>
       ) : isLoading || !data ? (
-        <div className="flex h-[200px] items-center justify-center text-sm text-muted-foreground">加载中…</div>
+        <div className="flex h-[160px] items-center justify-center text-sm text-muted-foreground">加载中…</div>
       ) : (
         <TokenChart data={data} preset={chartPresetFor(preset)} />
       )}

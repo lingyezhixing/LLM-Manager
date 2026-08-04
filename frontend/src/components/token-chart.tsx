@@ -10,7 +10,7 @@ import { formatTokens } from "@/lib/format";
 const MODEL_COLORS = ["#f97316", "#a855f7", "#22c55e", "#eab308", "#ec4899", "#06b6d4", "#3b82f6", "#ef4444"];
 
 const W = 760;
-const H = 240;
+const H = 192;   // 240 的 4/5:两页曲线图统一缩减高度(视觉平衡)
 const PAD = { l: 44, r: 16, t: 16, b: 28 };
 const PLOT_W = W - PAD.l - PAD.r;
 const PLOT_H = H - PAD.t - PAD.b;
@@ -105,7 +105,7 @@ export function TokenChart({
   const n = buckets.length;
 
   if (n === 0) {
-    return <div className="flex h-[200px] items-center justify-center text-sm text-muted-foreground">暂无数据</div>;
+    return <div className="flex h-[160px] items-center justify-center text-sm text-muted-foreground">暂无数据</div>;
   }
 
   const visibleNames = modelNames.filter((m) => !hidden.has(m));

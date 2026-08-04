@@ -64,24 +64,24 @@ export function UsageChartCard({
       </div>
       {view === "cost" ? (
         costSeriesQ.isError ? (
-          <div className="flex h-[240px] items-center justify-center">
+          <div className="flex h-[192px] items-center justify-center">
             <ErrorState message={(costSeriesQ.error as Error).message} onRetry={() => costSeriesQ.refetch()} />
           </div>
         ) : costSeriesQ.isLoading || !costSeriesQ.data ? (
-          <div className="flex h-[240px] items-center justify-center text-sm text-muted-foreground">加载中…</div>
+          <div className="flex h-[192px] items-center justify-center text-sm text-muted-foreground">加载中…</div>
         ) : costSeriesQ.data.buckets.length === 0 ? (
-          <div className="flex h-[240px] items-center justify-center rounded-lg border border-dashed border-border text-sm text-muted-foreground">该时间范围内暂无成本</div>
+          <div className="flex h-[192px] items-center justify-center rounded-lg border border-dashed border-border text-sm text-muted-foreground">该时间范围内暂无成本</div>
         ) : (
           <TokenChart data={costSeriesQ.data} preset={chartPreset} formatY={formatCost} />
         )
       ) : isError ? (
-        <div className="flex h-[240px] items-center justify-center">
+        <div className="flex h-[192px] items-center justify-center">
           <ErrorState message={(error as Error).message} onRetry={() => refetchSeries()} />
         </div>
       ) : isLoading || !data ? (
-        <div className="flex h-[240px] items-center justify-center text-sm text-muted-foreground">加载中…</div>
+        <div className="flex h-[192px] items-center justify-center text-sm text-muted-foreground">加载中…</div>
       ) : data.buckets.length === 0 ? (
-        <div className="flex h-[240px] items-center justify-center rounded-lg border border-dashed border-border text-sm text-muted-foreground">
+        <div className="flex h-[192px] items-center justify-center rounded-lg border border-dashed border-border text-sm text-muted-foreground">
           该时间范围内暂无请求
         </div>
       ) : (
