@@ -106,11 +106,11 @@
   --primary-accent: var(--primary-600);
 
   --success: var(--success-500);
-  --success-foreground: #fff;
+  --success-foreground: #0d1117;
   --success-accent: var(--success-600);
 
   --warning: var(--warning-500);
-  --warning-foreground: #fff;
+  --warning-foreground: #0d1117;
   --warning-accent: var(--warning-600);
 
   --destructive: var(--destructive-500);
