@@ -3,7 +3,7 @@ import type { InputHTMLAttributes, ReactNode, SelectHTMLAttributes, TextareaHTML
 // 项目首套表单原子。语义 token + --ring focus,三主题自适应。后续 wol/claude/logs/model-def 复用。
 // 共享框样式(不含高度):input 原子加 h-9,TextArea 加 min-h + py。
 const fieldBase =
-  "w-full bg-input border border-border rounded-md px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50";
+  "w-full bg-input border border-border rounded-md px-3 text-sm text-foreground placeholder:text-muted-foreground disabled:opacity-50";
 const inputBase = `${fieldBase} h-9`;
 
 export function Field({
@@ -71,7 +71,7 @@ export function Switch({
       id={id}
       disabled={disabled}
       onClick={() => onChange(!checked)}
-      className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50 ${
+      className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors disabled:opacity-50 ${
         checked ? "bg-primary" : "bg-muted"
       } ${className ?? ""}`}
     >

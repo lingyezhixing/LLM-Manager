@@ -63,7 +63,7 @@ function Dialog({
   if (!open) return null;
   return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose();   // 仅点遮罩本体才关(面板内点击不关)
       }}
@@ -73,7 +73,7 @@ function Dialog({
     >
       <div
         ref={panelRef}
-        className="w-full max-w-sm rounded-lg border border-border bg-popover p-5 text-popover-foreground shadow-lg"
+        className="w-full max-w-sm rounded-xl border border-border bg-popover p-5 text-popover-foreground shadow-card"
       >
         {children}
       </div>

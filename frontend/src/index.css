@@ -48,7 +48,7 @@
   --success-800: hsl(146 70% 20%);
   --success-900: hsl(146 65% 11%);
   --success: var(--success-500);
-  --success-foreground: #fff;
+  --success-foreground: #0d1117;
   --success-accent: var(--success-400);
 
   --warning-50: hsl(37 95% 95%);
@@ -62,7 +62,7 @@
   --warning-800: hsl(37 90% 27%);
   --warning-900: hsl(37 90% 16%);
   --warning: var(--warning-500);
-  --warning-foreground: #fff;
+  --warning-foreground: #0d1117;
   --warning-accent: var(--warning-400);
 
   --destructive-50: hsl(339 95% 95%);

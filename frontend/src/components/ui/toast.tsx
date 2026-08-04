@@ -57,7 +57,7 @@ function ToastRow({ item, onClose }: { item: ToastItem; onClose: () => void }) {
     <div
       role={item.type === "error" ? "alert" : "status"}
       aria-live={item.type === "error" ? "assertive" : "polite"}
-      className="flex items-start gap-2 rounded-md border border-border bg-popover p-3 text-sm text-popover-foreground shadow-lg"
+      className="flex items-start gap-2 rounded-lg border border-border bg-popover p-3 text-sm text-popover-foreground shadow-card"
     >
       <Icon className={`mt-0.5 h-4 w-4 shrink-0 ${ICON_CLS[item.type]}`} />
       <span className="flex-1 break-words">{item.message}</span>
