@@ -59,16 +59,16 @@ export default function LogsPage() {
   return (
     <div className="flex h-full flex-col gap-3 p-4">
       {/* Tab 栏 */}
-      <div className="flex items-center gap-1 rounded-lg border border-border bg-card p-1 text-[12px]">
+      <div className="flex items-center gap-1 rounded-lg border border-border bg-card p-1 text-[12px] shadow-card">
         {(["system", "model"] as const).map((t) => (
           <button key={t} onClick={() => setTab(t)}
-            className={`rounded-md px-3 py-1 font-medium transition-colors ${tab === t ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}>
+            className={`rounded-md px-3 py-1 font-medium transition-colors ${tab === t ? "bg-primary-accent/12 text-primary-accent" : "text-muted-foreground hover:text-foreground"}`}>
             {t === "system" ? "系统日志" : "模型日志"}
           </button>
         ))}
         {tab === "model" && (
           <select value={model} onChange={(e) => setModel(e.target.value)}
-            className="ml-auto rounded border border-border bg-background px-2 py-1 text-[11px] text-foreground focus:border-primary focus:outline-none">
+            className="ml-auto rounded border border-border bg-background px-2 py-1 text-[11px] text-foreground">
             <option value="">全部模型</option>
             {models.map((m) => <option key={m} value={m}>{m}</option>)}
           </select>

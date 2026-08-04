@@ -8,7 +8,7 @@ const LOG_LEVEL_FILTER_LABEL: Record<string, string> = {
   "": "全部", info: "info", ok: "ok", warn: "warn", error: "error",
 };
 const LOG_LINE_LEVEL_COLOR: Record<string, string> = {
-  info: "text-foreground/80", ok: "text-success", warn: "text-warning", error: "text-destructive",
+  info: "text-foreground/80", ok: "text-success-accent", warn: "text-warning-accent", error: "text-destructive-accent",
 };
 
 type LogLinesView = ReturnType<typeof useLogViewer>;
@@ -26,7 +26,7 @@ export function LogLines({ h }: { h: LogLinesView }) {
       <div className="flex flex-wrap items-center gap-2 border-b border-border bg-muted/30 px-3.5 py-1.5 text-[10.5px]">
         {LOG_LEVEL_FILTERS.map((lv) => (
           <button key={lv} onClick={() => setLevel(lv)}
-            className={`rounded border px-2 py-0.5 transition-colors ${level === lv ? "border-primary bg-primary text-primary-foreground" : "border-border bg-card text-muted-foreground hover:text-foreground"}`}>
+            className={`rounded border px-2 py-0.5 transition-colors ${level === lv ? "border-transparent bg-primary-accent/12 font-medium text-primary-accent" : "border-border bg-card text-muted-foreground hover:text-foreground"}`}>
             {LOG_LEVEL_FILTER_LABEL[lv]}
           </button>
         ))}
@@ -39,7 +39,7 @@ export function LogLines({ h }: { h: LogLinesView }) {
             if (e.key === "Escape") h.onInput("");
           }}
           placeholder="搜索本次日志…(Enter 搜索)"
-          className="w-44 rounded border border-border bg-background px-2 py-0.5 text-foreground placeholder:text-muted-foreground/60 focus:border-primary focus:outline-none"
+          className="w-44 rounded border border-border bg-background px-2 py-0.5 text-foreground placeholder:text-muted-foreground/60"
         />
         {h.searching ? <span className="text-muted-foreground">…</span>
           : h.matches.length > 0 ? (
@@ -71,7 +71,7 @@ export function LogLines({ h }: { h: LogLinesView }) {
         })}
         {showJump && (
           <button onClick={h.backToLive}
-            className="absolute bottom-3 right-3.5 rounded-full bg-primary px-3 py-1 text-[10.5px] font-medium text-primary-foreground shadow-lg hover:opacity-90">
+            className="absolute bottom-3 right-3.5 rounded-full bg-primary px-3 py-1 text-[10.5px] font-medium text-primary-foreground shadow-card hover:opacity-90">
             {jumpLabel}
           </button>
         )}

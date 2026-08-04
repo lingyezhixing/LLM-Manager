@@ -16,12 +16,12 @@ export function SessionList({
         return (
           <button key={s.id} onClick={() => onSelect(s.id)}
             className={`rounded-md border px-2.5 py-1.5 text-left transition-colors ${
-              active ? "border-primary bg-primary/10" : "border-border bg-card hover:bg-muted/50"
+              active ? "border-primary-accent bg-primary-accent/10" : "border-border-subtle bg-card-2 hover:bg-card-hover"
             }`}>
             <div className="flex items-center gap-1.5 text-[11px] font-medium text-foreground">
-              {running && <span className="size-1.5 animate-pulse rounded-full bg-success" />}
+              {running && <span className="size-1.5 shrink-0 rounded-full bg-success" />}
               <span className="tabular-nums">{fmtTime(s.start_time)}</span>
-              <span className="ml-auto text-[10px] text-muted-foreground">{s.line_count} 行</span>
+              <span className="ml-auto font-mono text-[10px] text-muted-foreground">{s.line_count} 行</span>
             </div>
             <div className="text-[10px] text-muted-foreground">
               {running ? "进行中" : `时长 ${fmtDuration(s.duration_s ?? 0)}`}
