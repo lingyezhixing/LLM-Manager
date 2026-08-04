@@ -19,7 +19,8 @@ export default function ModelsPage() {
 
   return (
     <>
-      <div className="grid h-[calc(100vh-104px)] gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,4fr)]">
+      {/* 高度 = 视口 - 壳层 chrome(胶囊 40 + sticky 12 + py 16×2 = 84px) */}
+      <div className="grid h-[calc(100dvh-84px)] gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,4fr)]">
         <div className="flex flex-col gap-2 overflow-auto">
           {models.length === 0
             ? <p className="text-sm text-muted-foreground">加载中…</p>

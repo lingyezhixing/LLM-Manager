@@ -3,12 +3,12 @@ import { startModel, stopModel } from "@/lib/api";
 import { formatIdle } from "@/lib/format";
 import { useToast } from "@/components/ui/toast";
 
-// 状态点用主题 token 的 CSS 变量(success/primary/destructive/muted-foreground),随主题变、不荧光。
+// 状态点用主题 token 的 CSS 变量(success/primary-accent/destructive/muted-foreground),随主题变、不荧光。
 const DOT: Record<string, string> = {
   stopped: "var(--color-muted-foreground)",
-  starting: "var(--color-primary)",
-  init_script: "var(--color-primary)",
-  health_check: "var(--color-primary)",
+  starting: "var(--color-primary-accent)",
+  init_script: "var(--color-primary-accent)",
+  health_check: "var(--color-primary-accent)",
   routing: "var(--color-success)",
   failed: "var(--color-destructive)",
 };
@@ -38,7 +38,7 @@ export function ModelCard({ m, selected, nowMs, onSelect }: {
   return (
     <div onClick={onSelect}
       className={`flex items-center gap-2 rounded-lg border p-2.5 cursor-pointer transition-colors ${
-        selected ? "border-primary bg-primary/10" : "border-border hover:bg-muted/50"}`}>
+        selected ? "border-primary-accent bg-primary-accent/10" : "border-border-subtle hover:bg-card-hover"}`}>
       <div className="min-w-0 flex-1">
         <div className="text-[12.5px] font-semibold truncate text-foreground">{m.alias}</div>
         <div className="mt-0.5 flex items-center gap-1.5 text-[10.5px]">
