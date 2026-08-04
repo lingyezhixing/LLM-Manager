@@ -42,8 +42,8 @@ export function SessionStats() {
       <div className="grid grid-cols-2 gap-2">
         <InfoTile label="输入" value={formatTokens(data.input_tokens, 2)} />
         <InfoTile label="输出" value={formatTokens(data.output_tokens, 2)} />
-        <InfoTile label="缓存命中" value={formatTokens(data.cache_hit, 2)} valueClass="text-success" />
-        <InfoTile label="缓存未命中" value={formatTokens(data.cache_miss, 2)} valueClass="text-destructive" />
+        <InfoTile label="缓存命中" value={formatTokens(data.cache_hit, 2)} valueClass="text-success-accent" />
+        <InfoTile label="缓存未命中" value={formatTokens(data.cache_miss, 2)} valueClass="text-destructive-accent" />
       </div>
       <div className="mt-2 rounded-lg border border-border-subtle bg-card-2 px-3 py-2">
         <div className="flex items-baseline justify-between">
