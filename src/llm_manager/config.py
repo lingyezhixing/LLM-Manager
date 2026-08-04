@@ -199,24 +199,6 @@ def validate(cfg: AppConfig) -> list[str]:
     return errors
 
 
-def scheme_memory_warnings(cfg: AppConfig) -> list[str]:
-    """软告警(非 fatal):scheme 声明了 required_devices 但缺对应 memory_mb → 调度时该设备
-    按 0 需求,显存检查被架空(check_and_free 收到空 required → 无 deficit → 直接放行)。
-
-    作 WARNING 而非 error:部分合法配置刻意不填(如多设备备用方案/用户暂不启用驱逐),
-    硬性报错会阻止已运行的配置启动。启动期 + 模型 CRUD 时日志告警,提示用户按需补全。
-    详见 round3 审查 B4③。"""
-    warnings: list[str] = []
-    for name, m in cfg.models.items():
-        for sname, scheme in m.schemes.items():
-            missing = set(scheme.required_devices) - set(scheme.memory_mb)
-            if missing:
-                warnings.append(
-                    f"Model '{name}' scheme '{sname}': required_devices {sorted(missing)} "
-                    f"have no memory_mb entry → memory check bypassed for those devices")
-    return warnings
-
-
 def select_adaptive(model: ModelConfig, online: set[str]) -> Scheme | None:
     for scheme in model.schemes.values():
         if scheme.required_devices <= online:

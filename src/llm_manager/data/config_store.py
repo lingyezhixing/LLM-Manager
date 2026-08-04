@@ -237,8 +237,6 @@ def mutate_appconfig(db: Db, fn: Callable[[AppConfig], AppConfig]) -> AppConfig:
         errors = config.validate(new_cfg)
         if errors:
             raise ConfigValidationFailed(errors)
-        for w in config.scheme_memory_warnings(new_cfg):
-            logger.warning("config: %s", w)
         _write_appconfig_locked(db, new_cfg)
         return new_cfg
 

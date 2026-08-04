@@ -58,16 +58,28 @@ function stripEmptyKeys(rec: Record<string, string | number>): Record<string, st
 function cleanPayload(m: ModelDef): ModelDef {
   return {
     ...m,
-    schemes: m.schemes.map((s) => ({
-      ...s,
-      required_devices: s.required_devices.filter((d) => d !== ""),
-      command: {
-        ...s.command,
-        args: s.command.args.filter((a) => a !== ""),
-        env: stripEmptyKeys(s.command.env) as Record<string, string>,
-      },
-      memory_mb: stripEmptyKeys(s.memory_mb) as Record<string, number>,
-    })),
+    schemes: m.schemes.map((s) => {
+      // memory_mb:每个 required_device 必须有条目(缺则补 0)。0 = 该设备仅用于方案匹配、
+      // 不占显存预算(调度时空缺与 0 等价,都不检查显存);显式持久化 0 让「所见即所存」,
+      // 消除前端显示 0(合并默认)但 DB 存空 {} 的假象。
+      const memory_mb: Record<string, number> = {};
+      for (const d of s.required_devices) {
+        if (d.trim() !== "") memory_mb[d] = s.memory_mb[d] ?? 0;
+      }
+      for (const [k, v] of Object.entries(s.memory_mb)) {
+        if (k.trim() !== "" && !(k in memory_mb)) memory_mb[k] = v;   // 保留 required 之外的显存条目
+      }
+      return {
+        ...s,
+        required_devices: s.required_devices.filter((d) => d !== ""),
+        command: {
+          ...s.command,
+          args: s.command.args.filter((a) => a !== ""),
+          env: stripEmptyKeys(s.command.env) as Record<string, string>,
+        },
+        memory_mb,
+      };
+    }),
   };
 }
 

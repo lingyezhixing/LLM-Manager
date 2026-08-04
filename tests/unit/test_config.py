@@ -166,31 +166,3 @@ def test_validate_rejects_out_of_range_ports():
     errs = validate(cfg)
     assert any("Program port 99999 out of range" in e for e in errs)
     assert any("port 0 out of range" in e for e in errs)
-
-
-def test_scheme_memory_warnings_flags_missing_memory_mb():
-    from llm_manager.config import scheme_memory_warnings
-    # required_devices 含 gpu0,但 memory_mb 只给 gpu1 → gpu0 缺(显存检查被架空)
-    cfg = AppConfig(
-        program=_prog(),
-        models={"M": ModelConfig("M", ("m",), "Chat", 1, False,
-                                 {"S": Scheme("S", frozenset({"gpu0", "gpu1"}), Command(exe="a.bat"),
-                                              {"gpu1": 1024})})},
-        wol=None, claude_configs={})
-    warns = scheme_memory_warnings(cfg)
-    assert len(warns) == 1
-    assert "gpu0" in warns[0]
-    assert "memory check bypassed" in warns[0]
-    # validate 不受影响(仅 WARNING,非 error)
-    assert validate(cfg) == []
-
-
-def test_scheme_memory_warnings_clean_when_required_subset_of_memory():
-    from llm_manager.config import scheme_memory_warnings
-    cfg = AppConfig(
-        program=_prog(),
-        models={"M": ModelConfig("M", ("m",), "Chat", 1, False,
-                                 {"S": Scheme("S", frozenset({"gpu0"}), Command(exe="a.bat"),
-                                              {"gpu0": 1024, "gpu1": 2048})})},  # required ⊆ memory → 干净
-        wol=None, claude_configs={})
-    assert scheme_memory_warnings(cfg) == []
