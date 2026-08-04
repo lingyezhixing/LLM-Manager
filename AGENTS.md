@@ -14,6 +14,7 @@ lmdeploy / vLLM …),对外暴露 OpenAI / Anthropic / Responses 兼容 API,记�
 - 前端:React 19 + Vite + TS + Tailwind v4 + TanStack Query。`frontend/`
 - 进程:单 Python 进程跑一个 app(见不变量 1)。8080 端口同时 serve API 与前端构建产物
   (`frontend/dist`,**非实时源码**——改前端后须 `npm run build` 或看 Vite dev 端口)。
+  **dist 已入库**:改前端须重建并提交 dist,克隆即用、无需本地构建。
 
 ## 2. 架构分层(依赖单向无环)
 

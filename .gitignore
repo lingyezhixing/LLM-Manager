@@ -51,7 +51,7 @@ __pycache__/
 *.egg-info/
 *.egg-link
 build/
-dist/
+/dist/
 
 # 忽略虚拟环境
 venv/
@@ -60,9 +60,6 @@ env/
 
 # 忽略Node.js相关文件
 node_modules/
-
-# 前端构建产物（源码入库，产物不入库）
-/frontend/dist/
 
 # 忽略其他临时文件
 *.tmp
