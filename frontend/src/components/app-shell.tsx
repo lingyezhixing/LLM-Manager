@@ -6,7 +6,8 @@ import { Sidebar } from "@/components/sidebar";
 const COLLAPSE_KEY = "lhm:nav-collapsed";
 
 /**
- * App shell (NapCat 克制演绎):左玻璃侧栏 + 右滚动列(悬浮胶囊条 + 居中 max-w-1000 内容)。
+ * App shell (NapCat 克制演绎):左玻璃侧栏 + 右滚动列(悬浮胶囊条 + 全宽内容)。
+ * 控制台数据密集——内容区占满宽度(弃 NapCat 居中 1000px 列)。
  * 折叠状态 localStorage 持久化,键不变。页面切换经 key=pathname 触发 animate-page-in。
  */
 function AppLayout() {
@@ -28,7 +29,7 @@ function AppLayout() {
         <PillBar collapsed={collapsed} onToggleCollapse={toggle} />
         <main
           key={pathname}
-          className="animate-page-in mx-auto w-full max-w-[1000px] flex-1 px-4 py-4 md:px-6"
+          className="animate-page-in w-full flex-1 px-4 py-4 md:px-6"
         >
           <Outlet />
         </main>
