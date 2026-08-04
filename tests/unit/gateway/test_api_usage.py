@@ -41,6 +41,30 @@ def test_usage_session_returns_totals() -> None:
     assert j["cache_hit"] == 30
     assert j["cache_miss"] == 70
     assert j["hit_rate"] == 0.3
+    assert j["total_cost"] == 0.0   # 无 config_store(测试 stub)→ 计费降级为 0,不影响 token 面板
+
+
+def test_usage_session_total_cost_since_start(tmp_path) -> None:
+    """本次启动消耗 = 窗口 [started_at, now) 的成本;started_at 之前的请求不计数。"""
+    import time
+    from llm_manager.config import AppConfig, Command, ModelConfig, Pricing, PricingTier, ProgramConfig, Scheme
+    db = open_db(tmp_path / "t.db")
+    now = time.time()
+    record_usage(db, "m1", start=123.0, end=now - 0.5, input_tokens=1000, output_tokens=500,
+                 cache_n=0, prompt_n=1000)      # 窗内(started_at=123.0 之后)
+    record_usage(db, "m1", start=10.0, end=100.0, input_tokens=1000, output_tokens=500,
+                 cache_n=0, prompt_n=1000)      # 窗外(上一进程,< started_at)
+    cfg = AppConfig(program=ProgramConfig("0.0.0.0", 8080, 60, "INFO"), models={
+        "m1": ModelConfig("m1", ("m1",), "Chat", 1, False,
+                          {"s": Scheme("s", frozenset({"gpu"}), Command(exe="x"), {"gpu": 1})},
+                          pricing=Pricing(tiers=(PricingTier(tier_index=1, input_price=3.0, output_price=9.0),))),
+    }, wol=None, claude_configs={})
+    with TestClient(_app(db, cfg)) as c:
+        r = c.get("/api/usage/session")
+    assert r.status_code == 200
+    j = r.json()
+    expected = (1000 * 3.0 + 500 * 9.0) / 1_000_000   # 仅窗内请求计费
+    assert abs(j["total_cost"] - expected) < 1e-9
 
 
 def test_usage_series_endpoint_custom_range(tmp_path) -> None:

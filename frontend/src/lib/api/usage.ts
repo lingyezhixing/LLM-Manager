@@ -7,6 +7,7 @@ export interface SessionUsage {
   cache_hit: number;
   cache_miss: number;
   hit_rate: number;
+  total_cost: number;       // 本次启动消耗金额(后端 compute-on-read 窗口 [started_at, now))
 }
 
 export async function fetchSessionUsage(): Promise<SessionUsage> {

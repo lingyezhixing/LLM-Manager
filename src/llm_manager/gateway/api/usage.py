@@ -13,6 +13,7 @@ epochs so the chart's x-axis is displayable.
 from __future__ import annotations
 
 import datetime
+import logging
 import time
 
 from fastapi import APIRouter, Request
@@ -22,6 +23,8 @@ from llm_manager.data import session
 from llm_manager.data.usage import usage_by_model, usage_cost, usage_cost_series, usage_series, usage_summary
 from llm_manager.gateway.api.common import get_config_store, get_db
 
+logger = logging.getLogger(__name__)
+
 
 class SessionUsageResponse(BaseModel):
     started_at: float
@@ -30,6 +33,7 @@ class SessionUsageResponse(BaseModel):
     cache_hit: int
     cache_miss: int
     hit_rate: float
+    total_cost: float = 0.0   # 本次启动消耗金额(compute-on-read 窗口 [started_at, now),见模块 docstring)
 
 
 class UsageSeriesResponse(BaseModel):
@@ -106,7 +110,19 @@ def _resolve_window(preset: str, start: float | None, end: float | None) -> tupl
 def register_usage_routes(router: APIRouter) -> None:
     @router.get("/usage/session", response_model=SessionUsageResponse)
     def session_usage_endpoint(request: Request) -> SessionUsageResponse:
-        s = session.snapshot(getattr(request.app.state, "started_at", None) or time.time())
+        started = getattr(request.app.state, "started_at", None) or time.time()
+        s = session.snapshot(started)
+        total_cost = 0.0
+        store = getattr(request.app.state, "config_store", None)
+        if store is not None:
+            try:
+                # 本次启动消耗 = 窗口 [started_at, now) 的成本(compute-on-read,与用量页同口径;
+                # 上一进程的请求/段 end_time < started_at 自然落在窗外)。best-effort:
+                # 计费计算失败仅降级为 0,不影响 token 面板。
+                total_cost = usage_cost(get_db(request), store.snapshot(),
+                                        start_ts=started, end_ts=time.time()).total_cost
+            except Exception:
+                logger.warning("session cost computation failed", exc_info=True)
         return SessionUsageResponse(
             started_at=s.started_at,
             input_tokens=s.input_tokens,
@@ -114,6 +130,7 @@ def register_usage_routes(router: APIRouter) -> None:
             cache_hit=s.cache_hit,
             cache_miss=s.cache_miss,
             hit_rate=s.hit_rate,
+            total_cost=total_cost,
         )
 
     @router.get("/usage/series", response_model=UsageSeriesResponse)
