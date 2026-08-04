@@ -39,7 +39,7 @@ export default function SystemPage() {
           正在重启,页面将在恢复后自动刷新…
         </div>
       )}
-      <div className="mt-4">
+      <div>
         <SystemNav active={zone} onSelect={setZone} />
         <div className="mt-6">
           {zone === "general" && <GeneralPanel />}

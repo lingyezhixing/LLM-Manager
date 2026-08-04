@@ -57,7 +57,7 @@ export default function LogsPage() {
     () => sessions.find((s) => s.id === selectedId) ?? null, [sessions, selectedId]);
 
   return (
-    <div className="flex h-full flex-col gap-3 p-4">
+    <div className="flex h-full flex-col gap-3 px-4 pb-4">
       {/* Tab 栏 */}
       <div className="flex items-center gap-1 rounded-lg border border-border bg-card p-1 text-[12px] shadow-card">
         {(["system", "model"] as const).map((t) => (

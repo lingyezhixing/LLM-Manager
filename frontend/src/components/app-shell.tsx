@@ -35,7 +35,7 @@ function AppLayout() {
         <PillBar collapsed={collapsed} onToggleCollapse={toggle} />
         <main
           key={pathname}
-          className="animate-page-in w-full flex-1 px-4 py-4 md:px-6"
+          className="animate-page-in w-full flex-1 px-4 pb-4 pt-8 md:px-6"
         >
           <Outlet />
         </main>
