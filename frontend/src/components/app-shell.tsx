@@ -1,18 +1,19 @@
 import { useState } from "react";
-import { Outlet } from "react-router-dom";
+import { Outlet, useLocation } from "react-router-dom";
+import { PillBar } from "@/components/pill-bar";
 import { Sidebar } from "@/components/sidebar";
-import { TopBar } from "@/components/top-bar";
 
 const COLLAPSE_KEY = "lhm:nav-collapsed";
 
 /**
- * App shell: full-width TopBar over a [Sidebar | main <Outlet/>] row.
- * Owns the sidebar collapse state, persisted in localStorage, shared with TopBar + Sidebar.
+ * App shell (NapCat 克制演绎):左玻璃侧栏 + 右滚动列(悬浮胶囊条 + 居中 max-w-1000 内容)。
+ * 折叠状态 localStorage 持久化,键不变。页面切换经 key=pathname 触发 animate-page-in。
  */
 function AppLayout() {
   const [collapsed, setCollapsed] = useState<boolean>(
     () => localStorage.getItem(COLLAPSE_KEY) === "1",
   );
+  const { pathname } = useLocation();
   const toggle = () => {
     setCollapsed((prev) => {
       const next = !prev;
@@ -21,11 +22,14 @@ function AppLayout() {
     });
   };
   return (
-    <div className="flex h-screen flex-col bg-background text-foreground">
-      <TopBar collapsed={collapsed} onToggleCollapse={toggle} />
-      <div className="flex flex-1 overflow-hidden">
-        <Sidebar collapsed={collapsed} />
-        <main className="flex-1 overflow-auto p-6">
+    <div className="flex h-screen overflow-hidden bg-background text-foreground">
+      <Sidebar collapsed={collapsed} />
+      <div className="flex flex-1 flex-col overflow-y-auto">
+        <PillBar collapsed={collapsed} onToggleCollapse={toggle} />
+        <main
+          key={pathname}
+          className="animate-page-in mx-auto w-full max-w-[1000px] flex-1 px-4 py-4 md:px-6"
+        >
           <Outlet />
         </main>
       </div>
