@@ -2,6 +2,8 @@ import { useState } from "react";
 
 import { useQuery } from "@tanstack/react-query";
 
+import { LineChart } from "lucide-react";
+
 import { ErrorState } from "@/components/ui/error-state";
 import { TokenChart } from "@/components/token-chart";
 import { fetchUsageCostSeries, fetchUsageSeries, type UsageSeries, type UsageSeriesParams } from "@/lib/api";
@@ -33,33 +35,25 @@ export function UsageChartCard({
   });
   const chartPreset = chartPresetFor(preset);
   return (
-    <div className="rounded-lg border border-border p-4">
+    <div className="rounded-lg border border-border bg-card p-4 shadow-card">
       <div className="mb-3 flex items-center justify-between">
-        <span className="text-xs uppercase tracking-wide text-muted-foreground">
-          {view === "cost" ? "成本曲线(元)" : "Token 消耗曲线"}
+        <span className="flex items-center gap-2 text-sm font-semibold">
+          <LineChart className="size-4 text-primary-accent" />
+          {view === "cost" ? "成本曲线" : "Token 消耗曲线"}
         </span>
-        <div className="flex overflow-hidden rounded-md border border-border">
-          <button
-            type="button"
-            onClick={() => setView("total")}
-            className={`px-2.5 py-0.5 text-[11px] ${view === "total" ? "bg-muted font-medium text-foreground" : "text-muted-foreground"}`}
-          >
-            总量
-          </button>
-          <button
-            type="button"
-            onClick={() => setView("models")}
-            className={`px-2.5 py-0.5 text-[11px] ${view === "models" ? "bg-muted font-medium text-foreground" : "text-muted-foreground"}`}
-          >
-            按模型
-          </button>
-          <button
-            type="button"
-            onClick={() => setView("cost")}
-            className={`px-2.5 py-0.5 text-[11px] ${view === "cost" ? "bg-muted font-medium text-foreground" : "text-muted-foreground"}`}
-          >
-            成本
-          </button>
+        <div className="flex items-center gap-1">
+          {(["total", "models", "cost"] as const).map((v) => (
+            <button
+              key={v}
+              type="button"
+              onClick={() => setView(v)}
+              className={`rounded-full px-2.5 py-0.5 text-[11px] transition-colors ${
+                view === v ? "bg-primary-accent/12 font-medium text-primary-accent" : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {v === "total" ? "总量" : v === "models" ? "按模型" : "成本"}
+            </button>
+          ))}
         </div>
       </div>
       {view === "cost" ? (

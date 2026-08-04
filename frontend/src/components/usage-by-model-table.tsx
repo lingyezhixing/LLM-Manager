@@ -72,21 +72,21 @@ export function UsageByModelTable({
           {rows.map((r) => (
             <tr key={r.model} className="border-t border-border">
               <td className="p-2">{r.model}</td>
-              <td className="p-2 text-right tabular-nums">{formatTokens(r.input_tokens)}</td>
-              <td className="p-2 text-right tabular-nums">{formatTokens(r.output_tokens)}</td>
-              <td className="p-2 text-right tabular-nums text-success">{formatTokens(r.cache_n)}</td>
-              <td className="p-2 text-right tabular-nums">{formatCount(r.request_count)}</td>
+              <td className="p-2 text-right font-mono tabular-nums">{formatTokens(r.input_tokens)}</td>
+              <td className="p-2 text-right font-mono tabular-nums">{formatTokens(r.output_tokens)}</td>
+              <td className="p-2 text-right font-mono tabular-nums text-success">{formatTokens(r.cache_n)}</td>
+              <td className="p-2 text-right font-mono tabular-nums">{formatCount(r.request_count)}</td>
               <td className="p-2">
                 <div className="flex items-center gap-2">
                   <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
                     <div className="h-full rounded-full bg-primary" style={{ width: `${(r.share * 100).toFixed(1)}%` }} />
                   </div>
-                  <span className="w-9 text-right text-xs text-muted-foreground">{formatPercent(r.share)}</span>
+                  <span className="w-9 text-right font-mono text-xs text-muted-foreground">{formatPercent(r.share)}</span>
                 </div>
               </td>
-              <td className="p-2 text-right tabular-nums">{formatHitRate(r.hit_rate)}</td>
-              <td className="p-2 text-right tabular-nums">{formatLatency(r.latency_ms)}</td>
-              <td className="p-2 text-right tabular-nums">{costQ.data ? formatCost(costOf.get(r.model) ?? 0) : "—"}</td>
+              <td className="p-2 text-right font-mono tabular-nums">{formatHitRate(r.hit_rate)}</td>
+              <td className="p-2 text-right font-mono tabular-nums">{formatLatency(r.latency_ms)}</td>
+              <td className="p-2 text-right font-mono tabular-nums">{costQ.data ? formatCost(costOf.get(r.model) ?? 0) : "—"}</td>
             </tr>
           ))}
         </tbody>
@@ -96,7 +96,7 @@ export function UsageByModelTable({
 }
 
 function Card({ children }: { children: ReactNode }) {
-  return <div className="rounded-lg border border-border p-4">{children}</div>;
+  return <div className="rounded-lg border border-border bg-card p-4 shadow-card">{children}</div>;
 }
 
 function Empty() {
