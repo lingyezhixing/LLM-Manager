@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Outlet, useLocation } from "react-router-dom";
 import { PillBar } from "@/components/pill-bar";
 import { Sidebar } from "@/components/sidebar";
@@ -15,6 +15,11 @@ function AppLayout() {
     () => localStorage.getItem(COLLAPSE_KEY) === "1",
   );
   const { pathname } = useLocation();
+  const scrollRef = useRef<HTMLDivElement>(null);
+  // 路由切换滚动归位(壳层滚动容器持久化 scrollTop,不重置会落到新页中部)
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: 0 });
+  }, [pathname]);
   const toggle = () => {
     setCollapsed((prev) => {
       const next = !prev;
@@ -25,7 +30,7 @@ function AppLayout() {
   return (
     <div className="flex h-screen overflow-hidden bg-background text-foreground">
       <Sidebar collapsed={collapsed} />
-      <div className="flex flex-1 flex-col overflow-y-auto">
+      <div ref={scrollRef} className="flex flex-1 flex-col overflow-y-auto">
         <PillBar collapsed={collapsed} onToggleCollapse={toggle} />
         <main
           key={pathname}

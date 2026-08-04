@@ -16,7 +16,7 @@ export function SessionList({
         return (
           <button key={s.id} onClick={() => onSelect(s.id)}
             className={`rounded-md border px-2.5 py-1.5 text-left transition-colors ${
-              active ? "border-primary-accent bg-primary-accent/10" : "border-border-subtle bg-card-2 hover:bg-card-hover"
+              active ? "border-primary-accent bg-primary-accent/12" : "border-border-subtle bg-card-2 hover:bg-card-hover"
             }`}>
             <div className="flex items-center gap-1.5 text-[11px] font-medium text-foreground">
               {running && <span className="size-1.5 shrink-0 rounded-full bg-success" />}

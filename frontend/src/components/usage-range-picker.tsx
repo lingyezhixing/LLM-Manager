@@ -24,7 +24,7 @@ export function UsageRangePicker({
             setCalOpen(false);
           }}
           className={`rounded-full border border-border px-2.5 py-0.5 text-[11px] ${
-            value.preset === p.key ? "bg-muted font-medium text-foreground" : "text-muted-foreground hover:text-foreground"
+            value.preset === p.key ? "bg-primary-accent/12 font-medium text-primary-accent" : "text-muted-foreground hover:text-foreground"
           }`}
         >
           {p.label}
@@ -34,7 +34,7 @@ export function UsageRangePicker({
         type="button"
         onClick={() => setCalOpen(true)}
         className={`rounded-full border border-border px-2.5 py-0.5 text-[11px] ${
-          value.preset === "custom" ? "bg-muted font-medium text-foreground" : "text-muted-foreground hover:text-foreground"
+          value.preset === "custom" ? "bg-primary-accent/12 font-medium text-primary-accent" : "text-muted-foreground hover:text-foreground"
         }`}
       >
         📅 {fmtRange(displayed)}

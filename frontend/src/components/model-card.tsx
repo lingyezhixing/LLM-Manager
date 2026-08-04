@@ -38,7 +38,7 @@ export function ModelCard({ m, selected, nowMs, onSelect }: {
   return (
     <div onClick={onSelect}
       className={`flex items-center gap-2 rounded-lg border p-2.5 cursor-pointer transition-colors ${
-        selected ? "border-primary-accent bg-primary-accent/10" : "border-border-subtle hover:bg-card-hover"}`}>
+        selected ? "border-primary-accent bg-primary-accent/12" : "border-border-subtle hover:bg-card-hover"}`}>
       <div className="min-w-0 flex-1">
         <div className="text-[12.5px] font-semibold truncate text-foreground">{m.alias}</div>
         <div className="mt-0.5 flex items-center gap-1.5 text-[10.5px]">
