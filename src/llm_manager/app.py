@@ -90,12 +90,12 @@ def create_app(db_path: Path | None = None, *, legacy_yaml: Path | None = None) 
                                   stop_event=stop_event))
         idle_task = asyncio.create_task(
             background.idle_reclamation_loop(lifecycle, store.snapshot, stop_event))
-        # 系统托盘(守卫:pystray 可用 + 需 uvicorn server 句柄做优雅退出 + claude_settings_path)
+        # 系统托盘(守卫:pystray 可用 + 需 uvicorn server 句柄做优雅退出;claude_settings_path 可空,
+        # 未配置时托盘照常启动,仅 Claude 预设子菜单隐藏——首次启动不该缺失托盘)
         tray = None
         server = getattr(app.state, "uvicorn_server", None)
 
-        if (tray_host.is_tray_available() and server is not None
-                and cfg.program.claude_settings_path):
+        if tray_host.is_tray_available() and server is not None:
             tray = tray_host.SystemTray(
                 lifecycle=lifecycle, get_cfg=store.snapshot, monitor=monitor,
                 loop=app.state.loop, server=server,

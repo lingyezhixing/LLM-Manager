@@ -97,6 +97,24 @@ def test_apply_claude_unknown_preset_noop(monkeypatch, tmp_path):
     assert called == []
 
 
+def test_apply_claude_empty_settings_path_is_noop(monkeypatch):
+    # claude_settings_path 可空(托盘启动门槛已移除):空路径不得写库(Path("") 会落到 cwd)
+    tray = _make_tray(settings_path="")
+    called = []
+    monkeypatch.setattr(host.claude, "apply_preset", lambda *a: called.append(a))
+    tray.apply_claude("Local")
+    assert called == []
+
+
+def test_apply_claude_none_settings_path_is_noop(monkeypatch):
+    # 空库首次启动:claude_settings_path 为 None——Path(None) 曾致启动崩溃(ddfffe1 修复的回归)
+    tray = _make_tray(settings_path=None)
+    called = []
+    monkeypatch.setattr(host.claude, "apply_preset", lambda *a: called.append(a))
+    tray.apply_claude("Local")
+    assert called == []
+
+
 # ---------- async marshal ----------
 async def test_unload_all_marshals_lifecycle_unload_all():
     life = _FakeLife()

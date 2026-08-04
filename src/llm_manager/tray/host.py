@@ -71,7 +71,7 @@ class SystemTray:
         self._monitor = monitor
         self._loop = loop
         self._server = server
-        self._settings_path = Path(settings_path)
+        self._settings_path = Path(settings_path) if settings_path else None
         self._startup_timeout = startup_timeout
         self._auto_start_margin = auto_start_margin
         self._icon = None
@@ -113,7 +113,9 @@ class SystemTray:
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("🔔 网络唤醒飞牛", self.send_wol),
         ]
-        if cfg.claude_configs:
+        # 预设子菜单需目标 settings 路径(为空时写库会落到 cwd);未配置路径则隐藏该子菜单,
+        # 托盘其余功能(WebUI/WOL/启停/退出)照常可用
+        if cfg.claude_configs and cfg.program.claude_settings_path:
             submenu = pystray.Menu(*[self._preset_menuitem(n) for n in cfg.claude_configs])
             items.append(pystray.MenuItem("🔄 Claude 配置", submenu))  # action=Menu 即子菜单(本版无 submenu kwarg)
         items += [
@@ -136,6 +138,10 @@ class SystemTray:
         return pystray.MenuItem(name, action, checked=checked)
 
     def _current_preset(self) -> str:
+        # 与 apply_claude 同款守卫:子菜单按活配置渲染、_settings_path 为构造时捕获,
+        # 中途配置路径未重启时可能出现 None(Path(None) 会炸)。
+        if not self._settings_path:
+            return "(未知)"
         return claude.detect_current_preset(self._settings_path, dict(self._get_cfg().claude_configs))
 
     # ---------- actions (unit-testable; no pystray objects) ----------
@@ -156,6 +162,9 @@ class SystemTray:
             logger.error("发送网络唤醒包失败: %s", e)
 
     def apply_claude(self, preset_name: str) -> None:
+        if not self._settings_path:
+            logger.warning("未配置 claude_settings_path,无法切换 Claude 配置")
+            return
         preset = (self._get_cfg().claude_configs or {}).get(preset_name)
         if not preset:
             logger.error("未知 Claude 配置: %s", preset_name)
