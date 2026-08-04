@@ -53,7 +53,9 @@ def create_app(db_path: Path | None = None, *, legacy_yaml: Path | None = None) 
     setup_logging(level=cfg.program.log_level)   # log_level 接线(此前硬编码 INFO,该参数从未生效)
     logger.info("config loaded (DB %s): %d models, %s:%d, alive %dmin",
                 resolved_db, len(cfg.models), cfg.program.host, cfg.program.port, cfg.program.alive_time)
-    monitor = DeviceMonitor(ENUMERATORS, config.referenced_devices(cfg))
+    # referenced 动态化:配置运行时可变(WebUI 在线加模型),按活配置重算设备引用,
+    # 否则新模型引用的设备名不进 online → 启动报 no adaptive scheme(需重启才生效)
+    monitor = DeviceMonitor(ENUMERATORS, lambda: config.referenced_devices(store.snapshot()))
     supervisor = Supervisor()
     lifecycle = Lifecycle(get_cfg=store.snapshot, supervisor=supervisor, devices=monitor,
                           probes=probe_registry, db=db)

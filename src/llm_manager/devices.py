@@ -260,15 +260,19 @@ def _lhm_cpu_temp() -> float | None:
 
 
 class DeviceMonitor:
-    """On-demand 枚举 + 模糊匹配。refresh() 跑全部枚举器 → candidates → match_devices(referenced)
-    → 原子 rebind self._cache(config 名键控 + 未引用实测名键控)。"""
+    """On-demand 枚举 + 模糊匹配。refresh() 跑全部枚举器 → candidates →
+    match_devices(get_referenced()) → 原子 rebind self._cache(config 名键控 + 未引用实测名键控)。
+
+    referenced **动态获取**(每次 refresh 按活配置重算):配置运行时可变(WebUI 在线加
+    模型),若冻结在启动时,新模型引用的设备名不会进入 online → 启动报 no adaptive
+    scheme,必须重启才生效。get_referenced 返回「归一化 config 名」集合。"""
     def __init__(
         self,
         enumerators: list[Callable[[], list[DeviceInfo]]],
-        referenced: set[str],
+        get_referenced: Callable[[], set[str]],
     ) -> None:
         self._enumerators = enumerators
-        self._referenced = set(referenced)
+        self._get_referenced = get_referenced
         self._cache: dict[str, DeviceInfo] = {}
 
     def refresh(self) -> None:
@@ -280,7 +284,7 @@ class DeviceMonitor:
                     candidates.extend(result)
             except Exception:  # noqa: BLE001 — 单个后端失败不影响其他
                 pass
-        matched, unmatched = match_devices(self._referenced, candidates)
+        matched, unmatched = match_devices(self._get_referenced(), candidates)
         cache: dict[str, DeviceInfo] = dict(matched)
         for c in unmatched:
             cache[c.device_name] = c  # 未引用:以实测名入快照供展示(对调度无害)

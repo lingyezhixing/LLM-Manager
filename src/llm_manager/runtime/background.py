@@ -89,7 +89,9 @@ async def auto_start(lifecycle, models: list[str], cfg, monitor, *, timeout: flo
     for name in models:
         scheme = _cfg.select_adaptive(cfg.models[name], online)
         if scheme is None:
-            logger.info("auto_start skip %s: no adaptive scheme (devices offline)", name)
+            required = sorted({d for s in cfg.models[name].schemes.values() for d in s.required_devices})
+            logger.info("auto_start skip %s: no adaptive scheme (required %s, online %s)",
+                        name, required, sorted(online))
         else:
             planned.append((name, scheme))
     # 3. 设备隔离分批

@@ -267,7 +267,7 @@ def test_device_monitor_matches_config_names_and_keeps_unmatched():
     def enum_cpu():
         return [DeviceInfo("CPU", "CPU", "RAM", 16384, 8192, 8192, 33.0, None)]
 
-    mon = DeviceMonitor([enum_gpus, enum_cpu], {"rtx 4060", "v100"})
+    mon = DeviceMonitor([enum_gpus, enum_cpu], lambda: {"rtx 4060", "v100"})
     mon.refresh()
     online = mon.online_devices()
     assert "rtx 4060" in online and "v100" in online  # config 名(已匹配)
@@ -277,9 +277,34 @@ def test_device_monitor_matches_config_names_and_keeps_unmatched():
     assert snap["v100"].total_memory_mb == 32768
 
 
+def test_device_monitor_dynamic_referenced_new_config_names_apply_without_restart():
+    # WebUI 在线加模型引用新设备名:referenced 动态获取 → 下次 refresh 即生效,无需重启
+    from llm_manager.devices import DeviceMonitor, DeviceInfo
+
+    def enum_gpus():
+        return [
+            DeviceInfo("NVIDIA GeForce RTX 4060", "GPU", "VRAM", 8188, 6266, 1692, 35.0, 51.0),
+            DeviceInfo("NVIDIA GeForce GTX 1650", "GPU", "VRAM", 4096, 2000, 2096, 10.0, 45.0),
+        ]
+
+    referenced = {"rtx 4060"}
+    mon = DeviceMonitor([enum_gpus], lambda: referenced)
+    mon.refresh()
+    assert "rtx 4060" in mon.online_devices()
+    assert "NVIDIA GeForce RTX 4060" not in mon.online_devices()  # 已匹配,不再以实测名出现
+
+    # 模拟在线添加引用 GTX 1650 的模型(旧引用删除)
+    referenced = {"gtx 1650"}
+    mon.refresh()
+    online = mon.online_devices()
+    assert "gtx 1650" in online
+    assert "rtx 4060" not in online
+    assert "NVIDIA GeForce RTX 4060" in online  # 落选者回退为原始检测名(对调度无害,供展示)
+
+
 def test_device_monitor_unmatched_referenced_is_offline():
     from llm_manager.devices import DeviceMonitor
-    mon = DeviceMonitor([lambda: []], {"rtx 5090"})  # 什么都没枚举到
+    mon = DeviceMonitor([lambda: []], lambda: {"rtx 5090"})  # 什么都没枚举到
     mon.refresh()
     assert "rtx 5090" not in mon.online_devices()
 
@@ -294,7 +319,7 @@ def test_device_monitor_enumerator_exception_isolated():
     def ok():
         return [DeviceInfo("CPU", "CPU", "RAM", 0, 0, 0, 0.0, None)]
 
-    mon = DeviceMonitor([boom, ok], {"cpu"})
+    mon = DeviceMonitor([boom, ok], lambda: {"cpu"})
     mon.refresh()
     assert "cpu" in mon.online_devices()
 

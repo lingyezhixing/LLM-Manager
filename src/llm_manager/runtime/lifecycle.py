@@ -154,10 +154,15 @@ class Lifecycle:
         if ev.is_set():
             return ModelStatus.STOPPED
 
-        scheme = self._scheme_select(model, self._devices.online_devices())
+        online = self._devices.online_devices()
+        scheme = self._scheme_select(model, online)
         if scheme is None:
-            logger.warning("%s: no adaptive scheme (devices offline)", alias)
-            state.record_failure(alias, "no adaptive scheme (devices offline)")
+            # 消息带 required vs online 对比:可区分「设备真离线」与「required 名不匹配」
+            # (匹配=token 全子集,如 'rtx4060' 拆不成 {rtx,4060} 永远不匹配)
+            required = sorted({d for s in model.schemes.values() for d in s.required_devices})
+            msg = f"no adaptive scheme (required {required}, online {sorted(online)})"
+            logger.warning("%s: %s", alias, msg)
+            state.record_failure(alias, msg)
             return ModelStatus.FAILED
         logger.info("cold start %s scheme=%s devices=%s",
                     alias, scheme.config_source, sorted(scheme.required_devices))
