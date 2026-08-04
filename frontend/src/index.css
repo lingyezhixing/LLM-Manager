@@ -1,60 +1,216 @@
 @import "tailwindcss";
 
-/* ===== Design tokens. Components use ONLY semantic tokens (bg-background etc).
-   3 themes via [data-theme]; default :root = 深色克制. Principles: no gradients,
-   no glassmorphism, no motion; single accent; real component chrome, not bare. ===== */
+/* ===== Design tokens. Components use ONLY semantic tokens (bg-card etc).
+   2 themes via [data-theme]; :root = 深色克制. Principles (2026-08-04 redesign):
+   glass ONLY on shell (sidebar + pill bar); content cards = semi-transparent solid,
+   NO blur; no gradients; no constant animation; single primary hue (212°) w/ full
+   50-900 scale; numeric values always font-mono; warm theme removed. ===== */
 
 :root, [data-theme="dark"] {
-  --background: #0d1117;        --foreground: #e6edf3;
-  --card: #161b22;              --card-foreground: #e6edf3;
-  --popover: #161b22;           --popover-foreground: #e6edf3;
-  --primary: #6b8cff;           --primary-foreground: #ffffff;
-  --muted: #21262d;             --muted-foreground: #8b949e;
-  --destructive: #e5534b;       --destructive-foreground: #ffffff;
-  --success: #3fb950;           --success-foreground: #0d1117;
-  --warning: #e3b341;           --warning-foreground: #0d1117;
-  --border: #262c36;            --input: #262c36;        --ring: #6b8cff;
-  --radius: 0.625rem;
+  --background: hsl(240 5% 4%);
+  --foreground: rgba(255,255,255,.98);
+  --card: rgba(255,255,255,.04);
+  --card-2: rgba(255,255,255,.05);
+  --card-hover: rgba(255,255,255,.06);
+  --popover: rgba(20,20,23,.97);
+  --popover-foreground: rgba(255,255,255,.98);
+  --muted: rgba(255,255,255,.06);
+  --muted-foreground: rgba(255,255,255,.45);
+  --input: rgba(255,255,255,.05);
+  --border: rgba(255,255,255,.08);
+  --border-subtle: rgba(255,255,255,.06);
+  --pill: rgba(0,0,0,.5);                 /* 悬浮胶囊条底(壳层玻璃) */
+  --sidebar: rgba(255,255,255,.04);       /* 侧栏底(壳层玻璃) */
+
+  /* primary blue 212° — 同相色 + 明度梯度(50 亮 → 900 暗) */
+  --primary-50: hsl(212 100% 95%);
+  --primary-100: hsl(212 92% 90%);
+  --primary-200: hsl(212 92% 79%);
+  --primary-300: hsl(212 92% 69%);
+  --primary-400: hsl(212 92% 60%);
+  --primary-500: hsl(212 100% 47%);
+  --primary-600: hsl(212 100% 38%);
+  --primary-700: hsl(212 100% 29%);
+  --primary-800: hsl(212 100% 19%);
+  --primary-900: hsl(212 100% 10%);
+  --primary: var(--primary-500);
+  --primary-foreground: #fff;
+  --primary-accent: var(--primary-400);  /* 暗主题文字/激活档 = 亮蓝 60% */
+
+  --success-50: hsl(146 80% 95%);
+  --success-100: hsl(146 75% 90%);
+  --success-200: hsl(146 70% 79%);
+  --success-300: hsl(146 66% 69%);
+  --success-400: hsl(146 62% 55%);
+  --success-500: hsl(146 79% 44%);
+  --success-600: hsl(146 79% 36%);
+  --success-700: hsl(146 75% 28%);
+  --success-800: hsl(146 70% 20%);
+  --success-900: hsl(146 65% 11%);
+  --success: var(--success-500);
+  --success-foreground: #fff;
+  --success-accent: var(--success-400);
+
+  --warning-50: hsl(37 95% 95%);
+  --warning-100: hsl(37 93% 90%);
+  --warning-200: hsl(37 92% 79%);
+  --warning-300: hsl(37 92% 69%);
+  --warning-400: hsl(37 91% 64%);
+  --warning-500: hsl(37 91% 55%);
+  --warning-600: hsl(37 91% 45%);
+  --warning-700: hsl(37 90% 36%);
+  --warning-800: hsl(37 90% 27%);
+  --warning-900: hsl(37 90% 16%);
+  --warning: var(--warning-500);
+  --warning-foreground: #fff;
+  --warning-accent: var(--warning-400);
+
+  --destructive-50: hsl(339 95% 95%);
+  --destructive-100: hsl(339 93% 90%);
+  --destructive-200: hsl(339 92% 80%);
+  --destructive-300: hsl(339 91% 70%);
+  --destructive-400: hsl(339 90% 61%);
+  --destructive-500: hsl(339 90% 51%);
+  --destructive-600: hsl(339 90% 41%);
+  --destructive-700: hsl(339 90% 32%);
+  --destructive-800: hsl(339 90% 22%);
+  --destructive-900: hsl(339 90% 13%);
+  --destructive: var(--destructive-500);
+  --destructive-foreground: #fff;
+  --destructive-accent: var(--destructive-400);
+
+  --ring: var(--primary-400);
+  --shadow-card: 0 1px 2px rgba(0,0,0,.4), 0 2px 10px rgba(0,0,0,.25);
+  --shadow-lift: 0 1px 2px rgba(0,0,0,.4), 0 2px 10px rgba(0,0,0,.25), 0 4px 18px rgba(0,0,0,.3);
 }
 
 [data-theme="light"] {
-  --background: #f6f7f9;        --foreground: #16181d;
-  --card: #ffffff;              --card-foreground: #16181d;
-  --popover: #ffffff;           --popover-foreground: #16181d;
-  --primary: #4f46e5;           --primary-foreground: #ffffff;
-  --muted: #eef0f3;             --muted-foreground: #6b7280;
-  --destructive: #cf3933;       --destructive-foreground: #ffffff;
-  --success: #16a34a;           --success-foreground: #ffffff;
-  --warning: #a16207;           --warning-foreground: #ffffff;
-  --border: #e7e8ec;            --input: #e7e8ec;        --ring: #4f46e5;
-  --radius: 0.75rem;
-}
+  --background: #fff;
+  --foreground: rgba(0,0,0,.95);
+  --card: rgba(255,255,255,.6);
+  --card-2: rgba(0,0,0,.03);
+  --card-hover: rgba(0,0,0,.04);
+  --popover: #fff;
+  --popover-foreground: rgba(0,0,0,.95);
+  --muted: rgba(0,0,0,.05);
+  --muted-foreground: rgba(0,0,0,.45);
+  --input: rgba(0,0,0,.04);
+  --border: rgba(0,0,0,.1);
+  --border-subtle: rgba(0,0,0,.06);
+  --pill: rgba(255,255,255,.7);
+  --sidebar: rgba(255,255,255,.6);
 
-[data-theme="warm"] {
-  --background: #f6f2ec;        --foreground: #3b352b;
-  --card: #fffdf8;              --card-foreground: #3b352b;
-  --popover: #fffdf8;           --popover-foreground: #3b352b;
-  --primary: #8a6d52;           --primary-foreground: #ffffff;
-  --muted: #ece4d6;             --muted-foreground: #9a8f7d;
-  --destructive: #b5462f;       --destructive-foreground: #ffffff;
-  --success: #6f8f5a;           --success-foreground: #ffffff;
-  --warning: #a47a3b;           --warning-foreground: #ffffff;
-  --border: #e8e0d3;            --input: #e8e0d3;        --ring: #8a6d52;
-  --radius: 0.75rem;
+  /* 色阶同暗主题;亮主题取深档作文字/激活 */
+  --primary: var(--primary-500);
+  --primary-foreground: #fff;
+  --primary-accent: var(--primary-600);
+
+  --success: var(--success-500);
+  --success-foreground: #fff;
+  --success-accent: var(--success-600);
+
+  --warning: var(--warning-500);
+  --warning-foreground: #fff;
+  --warning-accent: var(--warning-600);
+
+  --destructive: var(--destructive-500);
+  --destructive-foreground: #fff;
+  --destructive-accent: var(--destructive-600);
+
+  --ring: var(--primary-500);
+  --shadow-card: 0 1px 2px rgba(0,0,0,.04), 0 2px 10px rgba(0,0,0,.06);
+  --shadow-lift: 0 1px 2px rgba(0,0,0,.04), 0 2px 10px rgba(0,0,0,.06), 0 4px 18px rgba(0,0,0,.08);
 }
 
 @theme inline {
-  --color-background: var(--background);          --color-foreground: var(--foreground);
-  --color-card: var(--card);                      --color-card-foreground: var(--card-foreground);
-  --color-popover: var(--popover);                --color-popover-foreground: var(--popover-foreground);
-  --color-primary: var(--primary);                --color-primary-foreground: var(--primary-foreground);
-  --color-muted: var(--muted);                    --color-muted-foreground: var(--muted-foreground);
-  --color-destructive: var(--destructive);        --color-destructive-foreground: var(--destructive-foreground);
-  --color-success: var(--success);                --color-success-foreground: var(--success-foreground);
-  --color-warning: var(--warning);                --color-warning-foreground: var(--warning-foreground);
-  --color-border: var(--border);                  --color-input: var(--input);    --color-ring: var(--ring);
-  --radius-lg: var(--radius);                     --radius-md: calc(var(--radius) - 2px);
-  --radius-sm: calc(var(--radius) - 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-2: var(--card-2);
+  --color-card-hover: var(--card-hover);
+  --color-card-foreground: var(--foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-border-subtle: var(--border-subtle);
+  --color-pill: var(--pill);
+  --color-sidebar: var(--sidebar);
+  --color-ring: var(--ring);
+  /* 色阶(组件用 text-primary-400 / bg-primary-accent/12 等;alpha 修饰符走 color-mix) */
+  --color-primary-50: var(--primary-50);
+  --color-primary-100: var(--primary-100);
+  --color-primary-200: var(--primary-200);
+  --color-primary-300: var(--primary-300);
+  --color-primary-400: var(--primary-400);
+  --color-primary-500: var(--primary-500);
+  --color-primary-600: var(--primary-600);
+  --color-primary-700: var(--primary-700);
+  --color-primary-800: var(--primary-800);
+  --color-primary-900: var(--primary-900);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary-accent: var(--primary-accent);
+  --color-success-50: var(--success-50);
+  --color-success-100: var(--success-100);
+  --color-success-200: var(--success-200);
+  --color-success-300: var(--success-300);
+  --color-success-400: var(--success-400);
+  --color-success-500: var(--success-500);
+  --color-success-600: var(--success-600);
+  --color-success-700: var(--success-700);
+  --color-success-800: var(--success-800);
+  --color-success-900: var(--success-900);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-success-accent: var(--success-accent);
+  --color-warning-50: var(--warning-50);
+  --color-warning-100: var(--warning-100);
+  --color-warning-200: var(--warning-200);
+  --color-warning-300: var(--warning-300);
+  --color-warning-400: var(--warning-400);
+  --color-warning-500: var(--warning-500);
+  --color-warning-600: var(--warning-600);
+  --color-warning-700: var(--warning-700);
+  --color-warning-800: var(--warning-800);
+  --color-warning-900: var(--warning-900);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-warning-accent: var(--warning-accent);
+  --color-destructive-50: var(--destructive-50);
+  --color-destructive-100: var(--destructive-100);
+  --color-destructive-200: var(--destructive-200);
+  --color-destructive-300: var(--destructive-300);
+  --color-destructive-400: var(--destructive-400);
+  --color-destructive-500: var(--destructive-500);
+  --color-destructive-600: var(--destructive-600);
+  --color-destructive-700: var(--destructive-700);
+  --color-destructive-800: var(--destructive-800);
+  --color-destructive-900: var(--destructive-900);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-destructive-accent: var(--destructive-accent);
+  --shadow-card: var(--shadow-card);
+  --shadow-lift: var(--shadow-lift);
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 14px;
+  --animate-page-in: page-in 150ms ease-out;
+}
+
+/* 页面进入:150ms 淡入 + 4px 上移(仅进入,无退出;CSS-only,无 framer-motion) */
+@keyframes page-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* focus-visible:全站统一 2px 主色描边 + 2px 偏移(规范 §5) */
+:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
 }
 
 body {
