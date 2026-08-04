@@ -16,12 +16,13 @@ function formatUptime(sec: number): string {
   return `${d}d ${h % 24}h`;
 }
 
-/** Session stats (since gateway start). Totals refetch every 3s; uptime ticks locally. */
+/** Session stats (since gateway start). Totals refetch every 10s——token 是内存读、成本是
+ *  DB 查询,3s 过频;uptime ticks locally. */
 export function SessionStats() {
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["usage", "session"],
     queryFn: fetchSessionUsage,
-    refetchInterval: 3000,
+    refetchInterval: 10_000,
   });
   const now = useNowTick(1000);
 
