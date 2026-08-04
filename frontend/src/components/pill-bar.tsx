@@ -15,7 +15,7 @@ export function PillBar({ collapsed, onToggleCollapse }: PillBarProps) {
   const title = NAV_ITEMS.find((n) => n.path === pathname)?.label ?? "LLM-Manager";
   const ToggleIcon = collapsed ? PanelLeftOpen : PanelLeftClose;
   return (
-    <header className="sticky top-3 z-30 mx-2 flex h-10 items-center gap-2 rounded-full border border-border-subtle bg-pill px-2.5 shadow-card backdrop-blur-lg md:mx-3">
+    <header className="sticky top-4 z-30 mx-2 flex h-10 items-center gap-2 rounded-full border border-border-subtle bg-pill px-2.5 shadow-card backdrop-blur-lg md:mx-3">
       <button
         type="button"
         onClick={onToggleCollapse}

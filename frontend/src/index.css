@@ -221,6 +221,11 @@
   }
 }
 
+/* 页面级滚动条隐藏(用户决策):外观出现/消失不再引起布局浮动,滚轮/触屏照样滚。
+   仅用于壳层滚动容器;内层滚动区(日志行/会话列表等)保留细滚动条。 */
+.scrollbar-none { scrollbar-width: none; }
+.scrollbar-none::-webkit-scrollbar { display: none; }
+
 body {
   margin: 0;
   background: var(--color-background);

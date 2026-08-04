@@ -31,7 +31,7 @@ function AppLayout() {
   return (
     <div className="flex h-screen overflow-hidden bg-background text-foreground">
       <Sidebar collapsed={collapsed} />
-      <div ref={scrollRef} className="flex flex-1 flex-col overflow-y-auto">
+      <div ref={scrollRef} className="scrollbar-none flex flex-1 flex-col overflow-y-auto">
         <PillBar collapsed={collapsed} onToggleCollapse={toggle} />
         <main
           key={pathname}
