@@ -228,7 +228,7 @@ def test_record_runtime_end_closes_by_segment_id(tmp_path):
     """record_runtime_end 按 segment_id 关段(不再靠 end_time IS NULL 找最新)。
     开两段拿 id,只关指定段;另一段仍开;已关段再关幂等 no-op。"""
     db = open_db(tmp_path / "t.db")
-    seg1 = record_runtime_start(db, "m1", start=100.0)
+    record_runtime_start(db, "m1", start=100.0)   # 段 1(id 不用,仅造"另一段仍开")
     seg2 = record_runtime_start(db, "m1", start=200.0)
     record_runtime_end(db, seg2, end=300.0)        # 按 id 只关 seg2
     rows = db.conn.execute(

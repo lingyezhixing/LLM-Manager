@@ -192,7 +192,6 @@ def test_get_failure_reason():
 def test_failure_reason_cleared_on_restart():
     """B3:失败后再启动成功,陈旧 failure_reason 必须清除(SSE 不再携带上次失败原因)。"""
     from llm_manager import state
-    from llm_manager.state import ModelStatus
     state._reset()
     state.record_failure("m1", "probe failed")
     assert state.get_failure_reason("m1") == "probe failed"

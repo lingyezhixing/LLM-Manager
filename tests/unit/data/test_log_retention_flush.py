@@ -60,7 +60,7 @@ def test_log_cleanup_time_rule_skips_live(tmp_path):
     """时间规则同样排除 live_session_ids(belt-and-braces 两规则都生效)。"""
     db = open_db(tmp_path / "t.db")
     live = logs.log_start_session(db, "system", None, None, 1000.0)
-    old = logs.log_start_session(db, "model", "m", "m", 1005.0)
+    logs.log_start_session(db, "model", "m", "m", 1005.0)   # 旧会话(被时间规则删除)
     removed_s, _ = logs.log_cleanup(db, days=2, count=100, now=200000.0,   # cutoff=27200
                                   live_session_ids={live})
     assert [r["id"] for r in logs.log_sessions(db)] == [live]
@@ -74,7 +74,7 @@ def test_loop_skips_live_sessions_in_module(tmp_path):
     db = open_db(tmp_path / "t.db")
     logs.init(db)
     try:
-        live = logs.start_session("system", None, None, start=1000.0)
+        logs.start_session("system", None, None, start=1000.0)   # live 会话(下方 id 1)
         for i in range(5):
             logs.log_start_session(db, "model", f"m{i}", f"m{i}", float(2000 + i))
         stop = asyncio.Event()

@@ -73,8 +73,9 @@ tray     ── 系统托盘(自重启触发 / WOL / Claude 预设应用)
 
 - **模型 CRUD**:`mutate_appconfig` 全量替换模型世界(DELETE+INSERT,id churn 可接受),
   validate 失败 raise `ConfigValidationFailed`(→422,不落脏数据)。
-- **`required_devices ⊄ memory_mb`** 是软告警(`scheme_memory_warnings`,非 fatal):
-  调度时该设备按 0 需求、显存检查被架空;部分合法配置刻意不填,故仅日志告警。
+- **`required_devices ⊄ memory_mb`** 合法、不告警:缺条目的设备按 0 需求调度(该设备
+  不做显存检查)——「设备仅用于方案匹配、真运行在别处」是合法用法,`{}` 与 `{dev:0}`
+  调度语义等价;前端保存时会把 required 设备的缺省显存显式写 0(所见即所存)。
 
 ## 5. 退出码 / 自重启契约
 
@@ -88,7 +89,7 @@ tray     ── 系统托盘(自重启触发 / WOL / Claude 预设应用)
 后端(项目根,conda env `LLM-Manager`):
 ```bash
 python -m pytest tests -q          # 全量(含 smoke);~22s
-ruff check src tests               # lint
+ruff check .                     # lint(单路径;0.12.7 多路径参数偶发丢诊断——竞态,勿用 `ruff check src tests`)
 pyright src/llm_manager            # 类型检查(0 errors 基线)
 ```
 前端(`frontend/`):
@@ -103,13 +104,15 @@ npx tsc -b           # 仅类型检查
 | 模块 | 单例 | 说明 |
 |---|---|---|
 | `state` | `_state` / `_inflight` | 模型状态机 + 单派发 Future |
-| `data.logs` | `_sessions` / `_pending` / `_db` / `_flush_chain` | 日志会话 live 集 + 待落库 + flush 串行链 |
+| `data.logs` | `_sessions` / `_alias_to_session` / `_pending` / `_db` / `_flush_chain` | 日志会话 live 集 + alias↔会话映射 + 待落库 + flush 串行链 |
 | `data.usage` | `_live_segments` | 运行中计费段(崩溃随进程消失) |
 | `devices` | `_LHM_COMPUTER`(LibreHardwareMonitor) | 780M 核显传感器单例 |
-| `session` | 模型会话追踪 | alias↔session 映射 |
+| `data.session` | `_c`(进程内用量计数器) | 概览 session-stats 卡的 token 累计(重启清零) |
 
-测试有 `_reset()` 接缝清空(state/logs/usage)。**新增模块级可变状态前先想清楚**:
-它隐式假设「整个进程只有一个 app 实例」,破坏该假设会牵连 live 集语义。
+测试接缝:state/session 有 `_reset()`、logs 有 `reset()`;usage 无 `_reset`,
+由 `tests/unit/data/test_persistence.py` 的本地 fixture 直接清 `_live_segments`。
+**新增模块级可变状态前先想清楚**:它隐式假设「整个进程只有一个 app 实例」,
+破坏该假设会牵连 live 集语义。
 
 ## 8. 工作流约束
 
