@@ -1,4 +1,9 @@
-"""Usage-row persistence + cost aggregation over model_requests/model_runtime。schema/迁移与存储管理在 data/persistence.py,日志存储 in data/logs.py。"""
+"""Usage-row persistence + cost aggregation over model_requests/model_runtime。schema/迁移与存储管理在 data/persistence.py,日志存储 in data/logs.py。
+
+计费口径(设计决策,勿当缺口):**无计价快照**——每次查询用当前配置全量重算
+(compute-on-read)。改价/改计费类型会回溯改写全部历史费用、删模型则该模型历史
+费用归零:费用=当前架构下的派生值;token 是 DB 事实不受配置影响(两视图语义不同、
+各自自洽)。若未来需要"历史账单不可变",再给请求/运行段冻结单价(表加列)。"""
 from __future__ import annotations
 
 import math
