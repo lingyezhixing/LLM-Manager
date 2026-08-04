@@ -358,6 +358,41 @@ def test_delete_model_def_removes(tmp_path):
         assert c.get("/api/config/models").json() == []
 
 
+def test_delete_model_def_removes_logs_keeps_usage(tmp_path):
+    """删定义 → 连带删该模型日志会话(级联 log_lines),保留请求记录(成为孤立模型)。"""
+    import asyncio
+    from llm_manager.data import logs as _logs
+    from llm_manager.data import persistence as _p
+    from llm_manager.data.usage import record_usage
+    try:
+        with TestClient(_app(tmp_path)) as c:
+            c.post("/api/config/models", json=_def_body("M"))
+            db = c.app.state.db
+            _logs.init(db)
+            # M 的日志会话(落库行)+ 请求记录;N 的会话作对照组
+            _logs.start_session("model", model_name="M", alias="M")
+            _logs.capture("M", "hello", "out")
+            asyncio.run(_logs.flush())
+            _logs.start_session("model", model_name="N", alias="N")
+            record_usage(db, "M", start=1.0, end=2.0, input_tokens=10, output_tokens=5,
+                         cache_n=0, prompt_n=10)
+            r = c.delete("/api/config/models/M")
+            assert r.status_code == 200
+            # 日志:M 的会话连同行级联删除;N 的会话保留
+            assert db.conn.execute(
+                "SELECT COUNT(*) FROM log_sessions WHERE model_name='M' OR alias='M'").fetchone()[0] == 0
+            assert db.conn.execute("SELECT COUNT(*) FROM log_lines").fetchone()[0] == 0
+            assert db.conn.execute(
+                "SELECT COUNT(*) FROM log_sessions WHERE model_name='N'").fetchone()[0] == 1
+            # 请求记录:M 保留(models 主档 + model_requests 行)→ 成为孤立模型
+            assert db.conn.execute(
+                "SELECT COUNT(*) FROM models WHERE original_name='M'").fetchone()[0] == 1
+            assert db.conn.execute("SELECT COUNT(*) FROM model_requests").fetchone()[0] == 1
+            assert _p.orphaned_models(db, set(c.app.state.config_store.snapshot().models.keys())) == ["M"]
+    finally:
+        _logs.reset()
+
+
 def test_delete_model_def_unknown_404(tmp_path):
     with TestClient(_app(tmp_path)) as c:
         r = c.delete("/api/config/models/nope")

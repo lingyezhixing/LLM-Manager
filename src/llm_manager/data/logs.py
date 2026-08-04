@@ -328,6 +328,23 @@ def log_end_session(db: Db, session_id: int, end: float) -> None:
         db.conn.commit()
 
 
+def delete_model_sessions(db: Db, model_name: str, aliases: tuple[str, ...]) -> int:
+    """删模型定义时连带删除其全部日志会话(级联 log_lines,ON DELETE CASCADE)。
+
+    设计:删定义 = 删日志 + 保留请求记录(请求记录成为孤立模型,由数据管理页的
+    孤立模型清理,见 persistence.orphaned_models)。匹配 model_name(恒为 primary)
+    + alias(aliases[0] 或旧数据变体),belt-and-braces。返回删除的会话数。"""
+    terms = {model_name, *aliases}
+    with db.write_lock:
+        ph = ",".join("?" * len(terms))
+        cur = db.conn.execute(
+            f"DELETE FROM log_sessions WHERE model_name IN ({ph}) OR alias IN ({ph})",
+            (*terms, *terms),
+        )
+        db.conn.commit()
+        return cur.rowcount
+
+
 def log_session_exists(db: Db, session_id: int) -> bool:
     """会话行是否存在(读接口 404 校验用)。"""
     return db.conn.execute(

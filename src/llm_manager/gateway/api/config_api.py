@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import time
 from dataclasses import replace
@@ -18,6 +19,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from llm_manager.config import AppConfig, Command, ModelConfig, Pricing, PricingTier, Scheme, _norm_device
+from llm_manager.data import logs as _logs
 from llm_manager.data.config_store import (
     ConfigValidationFailed,
     ModelExists,
@@ -36,6 +38,8 @@ try:
         _VERSION = "unknown"
 except Exception:
     _VERSION = "unknown"
+
+logger = logging.getLogger(__name__)
 
 _RESTART_FIELDS = ("host", "port", "claude_settings_path", "log_level")
 
@@ -417,9 +421,16 @@ def register_config_routes(api: APIRouter) -> None:
         from llm_manager.state import ModelStatus
         if state.get_status(name) == ModelStatus.ROUTING:
             raise HTTPException(409, f"model '{name}' is routing; stop it before deleting")
+        aliases = cfg.models[name].aliases   # 快照仍在,先取别名(删日志匹配用)
         try:
             mutate_appconfig(get_db(request), lambda c: _delete_model(c, name))
         except ModelNotFound:
             raise HTTPException(404, f"model '{name}' not found")
         store.reload()
+        # 设计:删定义 = 连带删日志 + 保留请求记录(成为孤立模型,由数据管理页清理)。
+        # best-effort:日志删除失败不影响定义删除结果。
+        try:
+            _logs.delete_model_sessions(get_db(request), name, aliases)
+        except Exception:
+            logger.warning("delete model '%s' log sessions failed", name, exc_info=True)
         return {"affected_routing": [], "hint": None}

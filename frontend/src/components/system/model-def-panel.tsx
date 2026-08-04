@@ -53,7 +53,7 @@ export function ModelDefPanel() {
     const name = effSelected;
     const ok = await confirm({
       title: `删除模型 ${name}?`,
-      description: "此操作不可撤销。",
+      description: "将同时删除该模型的日志记录;请求记录保留(可在数据库管理页的孤立模型处清理)。",
       confirmText: "删除",
       cancelText: "取消",
       danger: true,
