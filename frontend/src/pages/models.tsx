@@ -22,9 +22,11 @@ export default function ModelsPage() {
       {/* 高度 = 视口 - 壳层 chrome(胶囊 40 + sticky top-4 16 + main pt-8 32 + pb 16 = 104px) */}
       <div className="grid h-[calc(100dvh-104px)] gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,4fr)]">
         <div className="flex flex-col gap-2 overflow-auto">
-          {models.length === 0
+          {data === null
             ? <p className="text-sm text-muted-foreground">加载中…</p>
-            : models.map((m) => (
+            : models.length === 0
+              ? <p className="text-sm text-muted-foreground">暂无模型 — 到「系统配置 → 模型定义」添加</p>
+              : models.map((m) => (
               <ModelCard key={m.alias} m={m} nowMs={now}
                 selected={selected?.alias === m.alias} onSelect={() => setSel(m.alias)} />
             ))}
