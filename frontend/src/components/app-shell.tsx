@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { Outlet, useLocation } from "react-router-dom";
 import { PillBar } from "@/components/pill-bar";
 import { Sidebar } from "@/components/sidebar";
@@ -16,8 +16,9 @@ function AppLayout() {
   );
   const { pathname } = useLocation();
   const scrollRef = useRef<HTMLDivElement>(null);
-  // 路由切换滚动归位(壳层滚动容器持久化 scrollTop,不重置会落到新页中部)
-  useEffect(() => {
+  // 路由切换滚动归位(壳层滚动容器持久化 scrollTop,不重置会落到新页中部;
+  // useLayoutEffect 在绘制前执行,避免高页闪一帧旧滚动位置)
+  useLayoutEffect(() => {
     scrollRef.current?.scrollTo({ top: 0 });
   }, [pathname]);
   const toggle = () => {

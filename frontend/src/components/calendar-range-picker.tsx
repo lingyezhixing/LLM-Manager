@@ -151,7 +151,7 @@ export function CalendarRangePicker({
         className="fixed inset-0 z-10 cursor-default"
         onClick={onClose}
       />
-      <div className="absolute right-0 top-full z-20 mt-1 flex gap-5 rounded-lg border border-border bg-card p-3 shadow-lg">
+      <div className="absolute right-0 top-full z-20 mt-1 flex gap-5 rounded-lg border border-border bg-card p-3 shadow-card">
         <MonthPanel
           view={leftView}
           onShift={(d) => setLeftView((v) => addMonths(v, d))}
