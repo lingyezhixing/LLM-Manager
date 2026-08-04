@@ -52,8 +52,10 @@ export function SessionStats() {
         <div className="mt-1.5 h-1.5 overflow-hidden rounded bg-destructive/25">
           <div className="h-full bg-success transition-[width] duration-300" style={{ width: `${pct}%` }} />
         </div>
-        {/* 本次启动消耗金额(与命中率同框,分隔线下)——后端 compute-on-read 窗口 [started_at, now) */}
-        <div className="mt-2 flex items-baseline justify-between border-t border-border pt-2">
+      </div>
+      {/* 本次启动消耗:独立小卡(与命中率同款式)——后端 compute-on-read 窗口 [started_at, now) */}
+      <div className="mt-2 rounded-lg border border-border px-3 py-2">
+        <div className="flex items-baseline justify-between">
           <span className="text-xs text-muted-foreground">本次启动消耗</span>
           <span className="font-semibold text-primary">{formatCost(data.total_cost)}</span>
         </div>
