@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { fetchSessions } from "@/lib/api";
 import type { LogSession } from "@/lib/api";
+import { NavTab, NavTabs } from "@/components/ui/nav-tabs";
 import { SessionList } from "@/components/logs/session-list";
 import { LogViewer } from "@/components/logs/log-viewer";
 
@@ -58,13 +59,12 @@ export default function LogsPage() {
 
   return (
     <div className="flex h-full flex-col gap-3 px-4 pb-4">
-      {/* Tab 栏 */}
-      <div className="flex items-center gap-1 rounded-lg border border-border bg-card p-1 text-[12px] shadow-card">
+      {/* Tab 栏(NavTabs 与系统页分区导航同款,防样式漂移) */}
+      <NavTabs>
         {(["system", "model"] as const).map((t) => (
-          <button key={t} onClick={() => setTab(t)}
-            className={`rounded-md px-3 py-1 font-medium transition-colors ${tab === t ? "bg-primary-accent/12 text-primary-accent" : "text-muted-foreground hover:text-foreground"}`}>
+          <NavTab key={t} active={tab === t} onClick={() => setTab(t)}>
             {t === "system" ? "系统日志" : "模型日志"}
-          </button>
+          </NavTab>
         ))}
         {tab === "model" && (
           <select value={model} onChange={(e) => setModel(e.target.value)}
@@ -73,7 +73,7 @@ export default function LogsPage() {
             {models.map((m) => <option key={m} value={m}>{m}</option>)}
           </select>
         )}
-      </div>
+      </NavTabs>
       {/* 主从 */}
       <div className="grid min-h-0 flex-1 grid-cols-[260px_1fr] gap-3">
         <div className="overflow-y-auto rounded-lg border border-border bg-card">

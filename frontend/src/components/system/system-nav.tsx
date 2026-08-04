@@ -1,3 +1,5 @@
+import { NavTab, NavTabs } from "@/components/ui/nav-tabs";
+
 export type SystemZone = "general" | "models" | "network" | "claude" | "database";
 
 const ZONES: { key: SystemZone; label: string }[] = [
@@ -8,6 +10,7 @@ const ZONES: { key: SystemZone; label: string }[] = [
   { key: "database", label: "数据库管理" },
 ];
 
+/** 分区导航:NavTabs 与日志页双 Tab 同款(胶囊容器 + accent/12 激活),防样式漂移。 */
 export function SystemNav({
   active, onSelect,
 }: {
@@ -15,25 +18,12 @@ export function SystemNav({
   onSelect: (zone: SystemZone) => void;
 }) {
   return (
-    <nav className="flex flex-wrap gap-2 border-b border-border pb-3">
-      {ZONES.map((z) => {
-        const isActive = z.key === active;
-        return (
-          <button
-            key={z.key}
-            type="button"
-            onClick={() => onSelect(z.key)}
-            className={
-              "rounded-md px-3 py-2 text-sm transition-colors " +
-              (isActive
-                ? "bg-primary-accent/12 font-medium text-primary-accent"
-                : "text-muted-foreground hover:bg-card-hover hover:text-foreground")
-            }
-          >
-            {z.label}
-          </button>
-        );
-      })}
-    </nav>
+    <NavTabs>
+      {ZONES.map((z) => (
+        <NavTab key={z.key} active={z.key === active} onClick={() => onSelect(z.key)}>
+          {z.label}
+        </NavTab>
+      ))}
+    </NavTabs>
   );
 }
