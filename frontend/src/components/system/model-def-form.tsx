@@ -7,7 +7,7 @@ import { StringListEditor } from "@/components/ui/repeatable-fields";
 import { PricingEditor } from "@/components/system/pricing-editor";
 import { SchemeEditor } from "@/components/system/scheme-editor";
 import { type ModelDef, type ModelWriteResult, type SchemeDef } from "@/lib/api";
-import { useCreateModelDef, useUpdateModelDef } from "@/lib/use-model-defs";
+import { useCreateModelDef, useUpdateModelDef } from "@/lib/hooks/use-model-defs";
 
 const MODES = ["Chat", "Embedding", "Reranker"];
 

@@ -7,7 +7,7 @@ import {
   restartModel,
   updateModelDef,
   type ModelDef,
-} from "./api";
+} from "@/lib/api";
 
 // 查询键独立于 ["config"](配置更新不连带重取模型列表);mutation 内联失效。
 export function useModelDefs() {

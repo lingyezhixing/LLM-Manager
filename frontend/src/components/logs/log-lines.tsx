@@ -1,4 +1,4 @@
-import type { useLogViewer } from "@/lib/use-model-logs";
+import type { useLogViewer } from "@/lib/hooks/use-model-logs";
 
 /** 级别过滤 + 搜索跳转 + 窗口化行渲染 + 返回最新药丸——ModelLogPanel 与 LogViewer 共享核心。
  * 头部(标题/会话信息)由两消费方各自渲染;h 来自 useLogViewer(useModelLogs/useSessionLogs 返回同形)。

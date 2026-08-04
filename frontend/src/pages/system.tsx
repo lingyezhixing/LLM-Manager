@@ -7,7 +7,7 @@ import { ModelDefPanel } from "@/components/system/model-def-panel";
 import { RestartBanner } from "@/components/system/restart-banner";
 import { SystemNav, type SystemZone } from "@/components/system/system-nav";
 import { WolPanel } from "@/components/system/wol-panel";
-import { useRestartApp, useRestartStatus } from "@/lib/use-config";
+import { useRestartApp, useRestartStatus } from "@/lib/hooks/use-config";
 
 export default function SystemPage() {
   const [zone, setZone] = useState<SystemZone>("general");

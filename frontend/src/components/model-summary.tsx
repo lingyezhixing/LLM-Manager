@@ -2,8 +2,8 @@ import { Link } from "react-router-dom";
 import { Activity } from "lucide-react";
 import { InfoTile } from "@/components/ui/info-tile";
 import { formatIdle } from "@/lib/format";
-import { useEventStream } from "@/lib/use-event-stream";
-import { useNowTick } from "@/lib/use-now-tick";
+import { useEventStream } from "@/lib/hooks/use-event-stream";
+import { useNowTick } from "@/lib/hooks/use-now-tick";
 import type { ModelInfo, ModelsResponse } from "@/lib/api";
 
 /** Per-model trailing status line, with idle ticked locally from last_access. */

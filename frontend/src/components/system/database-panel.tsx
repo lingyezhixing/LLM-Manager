@@ -3,7 +3,7 @@ import { useConfirm } from "@/components/ui/dialog";
 import { ErrorState } from "@/components/ui/error-state";
 import { InfoTile } from "@/components/ui/info-tile";
 import { useToast } from "@/components/ui/toast";
-import { useDeleteModelData, useOrphanedModels, useStorageStats } from "@/lib/use-data";
+import { useDeleteModelData, useOrphanedModels, useStorageStats } from "@/lib/hooks/use-data";
 
 // 数据库管理页(迁移 legacy DataManagement):存储统计 + 孤立模型清理 + 模型数据详情。
 // 每载入获取一次(refetchOnMount: "always"),不轮询。删除 = 级联清数据 + 自动 VACUUM(后端)。

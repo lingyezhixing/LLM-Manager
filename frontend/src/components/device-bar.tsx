@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Cpu } from "lucide-react";
-import { useEventStream } from "@/lib/use-event-stream";
+import { useEventStream } from "@/lib/hooks/use-event-stream";
 import type { DevicesResponse } from "@/lib/api";
 
 type MemUnit = "GB" | "MB";

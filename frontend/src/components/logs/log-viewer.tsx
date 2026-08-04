@@ -1,6 +1,6 @@
 import { LogLines } from "@/components/logs/log-lines";
 import type { LogSession } from "@/lib/api";
-import { useSessionLogs } from "@/lib/use-model-logs";
+import { useSessionLogs } from "@/lib/hooks/use-model-logs";
 
 /** 右栏日志行详情:头部 + 共享 LogLines(级别过滤/搜索跳转/实时跟随)。 */
 export function LogViewer({ session }: { session: LogSession }) {

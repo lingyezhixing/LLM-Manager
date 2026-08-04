@@ -7,9 +7,9 @@ import { InfoTile } from "@/components/ui/info-tile";
 import { useToast } from "@/components/ui/toast";
 import { LogRetentionEditor } from "@/components/system/log-retention-editor";
 import { type LogRetention, type ProgramConfig } from "@/lib/api";
-import { useConfig, useUpdateLogRetention, useUpdateProgram } from "@/lib/use-config";
-import { useNowTick } from "@/lib/use-now-tick";
-import { useSystemInfo } from "@/lib/use-config";
+import { useConfig, useUpdateLogRetention, useUpdateProgram } from "@/lib/hooks/use-config";
+import { useNowTick } from "@/lib/hooks/use-now-tick";
+import { useSystemInfo } from "@/lib/hooks/use-config";
 
 const LOG_LEVELS = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"];
 

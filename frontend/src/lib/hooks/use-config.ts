@@ -16,7 +16,7 @@ import {
   type LogRetention,
   type ProgramUpdate,
   type WolConfig,
-} from "./api";
+} from "@/lib/api";
 
 // 配置写回后失效:config(读穿取新值)+ restart-status(顶部横幅按新状态刷新)。
 // 供 useUpdateProgram/useUpdateWol/useUpdateClaudeConfigs 共用;日志保留/应用预设语义不同,各管各的。

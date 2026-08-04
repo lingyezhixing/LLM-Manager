@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { deleteModelData, fetchOrphanedModels, fetchStorageStats } from "./api";
+import { deleteModelData, fetchOrphanedModels, fetchStorageStats } from "@/lib/api";
 
 // 数据管理页:每载入必获取(refetchOnMount: "always"),不轮询。
 export function useStorageStats() {

@@ -6,7 +6,7 @@ import { ErrorState } from "@/components/ui/error-state";
 import { Field, TextInput } from "@/components/ui/form";
 import { useToast } from "@/components/ui/toast";
 import type { WolConfig } from "@/lib/api";
-import { useConfig, useDeleteWol, useUpdateWol } from "@/lib/use-config";
+import { useConfig, useDeleteWol, useUpdateWol } from "@/lib/hooks/use-config";
 
 function shallowEqual(a: WolConfig, b: WolConfig): boolean {
   return a.broadcast_address === b.broadcast_address && a.mac_address === b.mac_address;

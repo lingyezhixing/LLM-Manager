@@ -1,7 +1,7 @@
 import { useLocation } from "react-router-dom";
 import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { NAV_ITEMS } from "@/lib/nav";
-import { useHealth } from "@/lib/use-health";
+import { useHealth } from "@/lib/hooks/use-health";
 
 interface PillBarProps {
   collapsed: boolean;

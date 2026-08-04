@@ -1,6 +1,6 @@
 import { LogLines } from "@/components/logs/log-lines";
 import type { ModelInfo } from "@/lib/api";
-import { useModelLogs } from "@/lib/use-model-logs";
+import { useModelLogs } from "@/lib/hooks/use-model-logs";
 
 /** 右栏日志面板(选中模型)。头部(状态点/别名/端口) + 共享 LogLines。 */
 export function ModelLogPanel({ m }: { m: ModelInfo }) {

@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { useEventStream } from "@/lib/use-event-stream";
-import { useNowTick } from "@/lib/use-now-tick";
+import { useEventStream } from "@/lib/hooks/use-event-stream";
+import { useNowTick } from "@/lib/hooks/use-now-tick";
 import { ModelCard } from "@/components/model-card";
 import { ModelLogPanel } from "@/components/model-log-panel";
 import type { ModelsResponse } from "@/lib/api";

@@ -4,7 +4,7 @@ import { useConfirm } from "@/components/ui/dialog";
 import { ErrorState } from "@/components/ui/error-state";
 import { useToast } from "@/components/ui/toast";
 import { ModelDefForm } from "@/components/system/model-def-form";
-import { useDeleteModelDef, useModelDef, useModelDefs, useRestartModel } from "@/lib/use-model-defs";
+import { useDeleteModelDef, useModelDef, useModelDefs, useRestartModel } from "@/lib/hooks/use-model-defs";
 import type { ModelWriteResult } from "@/lib/api";
 
 // 模型定义 CRUD 面板:顶部选择带 + 下方详情(新建/编辑/删除)+ 编辑后按模型重启提示。

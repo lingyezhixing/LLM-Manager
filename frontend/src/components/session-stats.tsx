@@ -3,7 +3,7 @@ import { ErrorState } from "@/components/ui/error-state";
 import { InfoTile } from "@/components/ui/info-tile";
 import { fetchSessionUsage } from "@/lib/api";
 import { formatCost, formatTokens } from "@/lib/format";
-import { useNowTick } from "@/lib/use-now-tick";
+import { useNowTick } from "@/lib/hooks/use-now-tick";
 
 /** Compact uptime: 45s / 12m / 3h 12m / 2d 5h. */
 function formatUptime(sec: number): string {

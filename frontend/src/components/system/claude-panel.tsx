@@ -12,7 +12,7 @@ import {
   useConfig,
   useUpdateClaudeConfigs,
   useUpdateProgram,
-} from "@/lib/use-config";
+} from "@/lib/hooks/use-config";
 
 // 解析预设 JSON 文本:须为 str→str 对象。失败 → { ok:false, message }。
 function parseEnvJson(text: string): { ok: true; value: Record<string, string> } | { ok: false; message: string } {
