@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { LineChart } from "lucide-react";
 
 import { CalendarRangePicker } from "@/components/calendar-range-picker";
 import { ErrorState } from "@/components/ui/error-state";
@@ -35,9 +36,12 @@ export function TokenCurveCard() {
   });
 
   return (
-    <div className="rounded-lg border border-border p-3">
+    <div className="rounded-lg border border-border bg-card p-4 shadow-card">
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-        <span className="text-sm font-semibold">Token 消耗</span>
+        <span className="flex items-center gap-2 text-sm font-semibold">
+          <LineChart className="size-4 text-primary-accent" />
+          Token 消耗
+        </span>
         <div className="relative flex flex-wrap items-center gap-1">
           {USAGE_PRESETS.map((p) => (
             <button
@@ -48,7 +52,7 @@ export function TokenCurveCard() {
                 setCalOpen(false);
               }}
               className={`rounded-full border border-border px-2.5 py-0.5 text-[11px] ${
-                preset === p.key ? "bg-muted font-medium text-foreground" : "text-muted-foreground hover:text-foreground"
+                preset === p.key ? "bg-primary-accent/12 font-medium text-primary-accent" : "text-muted-foreground hover:text-foreground"
               }`}
             >
               {p.label}
@@ -58,7 +62,7 @@ export function TokenCurveCard() {
             type="button"
             onClick={() => setCalOpen(true)}
             className={`rounded-full border border-border px-2.5 py-0.5 text-[11px] ${
-              preset === "custom" ? "bg-muted font-medium text-foreground" : "text-muted-foreground hover:text-foreground"
+              preset === "custom" ? "bg-primary-accent/12 font-medium text-primary-accent" : "text-muted-foreground hover:text-foreground"
             }`}
           >
             {fmtRange(displayed)}

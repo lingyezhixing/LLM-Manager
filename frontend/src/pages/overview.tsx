@@ -3,29 +3,16 @@ import { ModelSummary } from "@/components/model-summary";
 import { SessionStats } from "@/components/session-stats";
 import { TokenCurveCard } from "@/components/token-curve-card";
 
-/**
- * 概览 — read-only cross-cutting overview.
- * Order: device bar (SSE live) → token row (curve placeholder [Round 2] + session stats)
- * → model status summary (refetch).
- */
+/** 概览 — 卡片流:设备卡 → [曲线 2fr | 本次启动 1fr] → 模型摘要。 */
 export default function OverviewPage() {
   return (
-    <>
-      <section className="mb-6">
-        <h2 className="mb-2 text-xs uppercase tracking-wide text-muted-foreground">设备</h2>
-        <DeviceBar />
-      </section>
-
-      <section className="mb-6 grid gap-4 lg:grid-cols-[minmax(0,4fr)_minmax(0,1fr)]">
+    <div className="flex flex-col gap-4">
+      <DeviceBar />
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
         <TokenCurveCard />
-        <div className="rounded-lg border border-border p-4">
-          <SessionStats />
-        </div>
-      </section>
-
-      <section className="mb-6">
-        <ModelSummary />
-      </section>
-    </>
+        <SessionStats />
+      </div>
+      <ModelSummary />
+    </div>
   );
 }

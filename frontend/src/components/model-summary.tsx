@@ -1,17 +1,10 @@
 import { Link } from "react-router-dom";
+import { Activity } from "lucide-react";
+import { InfoTile } from "@/components/ui/info-tile";
 import { formatIdle } from "@/lib/format";
 import { useEventStream } from "@/lib/use-event-stream";
 import { useNowTick } from "@/lib/use-now-tick";
 import type { ModelInfo, ModelsResponse } from "@/lib/api";
-
-function Stat({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="flex-1 rounded-lg border border-border px-3 py-2">
-      <div className="text-xs text-muted-foreground">{label}</div>
-      <div className="text-lg font-semibold">{value}</div>
-    </div>
-  );
-}
 
 /** Per-model trailing status line, with idle ticked locally from last_access. */
 function activityText(m: ModelInfo, nowMs: number): string {
@@ -25,8 +18,7 @@ function activityText(m: ModelInfo, nowMs: number): string {
 
 /**
  * Model status summary (概览). Subscribes to /api/models/stream (event-driven push) and
- * ticks idle locally — no polling. Status changes arrive as SSE; idle seconds are derived
- * client-side from last_access.
+ * ticks idle locally — no polling. Card w/ icon header + 3 KPI tiles + running rows.
  */
 export function ModelSummary() {
   const data = useEventStream<ModelsResponse>("/api/models/stream");
@@ -40,15 +32,18 @@ export function ModelSummary() {
   const failed = models.filter((m) => m.status === "failed");
 
   return (
-    <div>
-      <div className="mb-3 flex gap-3">
-        <Stat label="运行中" value={running.length} />
-        <Stat label="已停止" value={stopped.length} />
-        <Stat label="失败" value={failed.length} />
+    <section className="rounded-lg border border-border bg-card p-4 shadow-card">
+      <div className="mb-3 flex items-center justify-between">
+        <h3 className="flex items-center gap-2 text-sm font-semibold text-foreground">
+          <Activity className="size-4 text-primary-accent" />
+          模型摘要
+        </h3>
+        <Link to="/models" className="text-xs text-primary-accent hover:underline">管理全部 →</Link>
       </div>
-      <div className="mb-2 flex items-center justify-between">
-        <span className="text-xs uppercase tracking-wide text-muted-foreground">运行中的模型</span>
-        <Link to="/models" className="text-xs text-primary hover:underline">管理全部 →</Link>
+      <div className="mb-3 grid grid-cols-3 gap-2">
+        <InfoTile label="运行中" value={running.length} valueClass="text-success-accent" />
+        <InfoTile label="已停止" value={stopped.length} />
+        <InfoTile label="失败" value={failed.length} valueClass="text-destructive-accent" />
       </div>
       {running.length === 0 ? (
         <p className="text-sm text-muted-foreground">无运行中的模型</p>
@@ -59,15 +54,20 @@ export function ModelSummary() {
             return (
               <div
                 key={m.alias}
-                className="flex items-center justify-between rounded-md border border-border px-3 py-2 text-sm"
+                className="flex items-center justify-between rounded-md border border-border-subtle px-3 py-2 text-sm"
               >
-                <span className="truncate">{m.alias}</span>
-                <span className="text-muted-foreground">端口 {m.port}{extra ? ` · ${extra}` : ""}</span>
+                <span className="flex items-center gap-2 truncate">
+                  <span className="size-1.5 shrink-0 rounded-full bg-success" />
+                  <span className="truncate">{m.alias}</span>
+                </span>
+                <span className="font-mono text-xs text-muted-foreground">
+                  端口 {m.port}{extra ? ` · ${extra}` : ""}
+                </span>
               </div>
             );
           })}
         </div>
       )}
-    </div>
+    </section>
   );
 }

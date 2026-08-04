@@ -33,7 +33,7 @@ export function SessionStats() {
   const uptimeSec = Math.max(0, Math.floor((now - data.started_at * 1000) / 1000));
 
   return (
-    <div>
+    <section className="rounded-lg border border-border bg-card p-4 shadow-card">
       <div className="mb-3 flex items-baseline justify-between">
         <span className="text-sm font-semibold">本次启动</span>
         <span className="text-xs text-muted-foreground">运行 {formatUptime(uptimeSec)}</span>
@@ -45,22 +45,22 @@ export function SessionStats() {
         <InfoTile label="缓存命中" value={formatTokens(data.cache_hit, 2)} valueClass="text-success" />
         <InfoTile label="缓存未命中" value={formatTokens(data.cache_miss, 2)} valueClass="text-destructive" />
       </div>
-      <div className="mt-2 rounded-lg border border-border px-3 py-2">
+      <div className="mt-2 rounded-lg border border-border-subtle bg-card-2 px-3 py-2">
         <div className="flex items-baseline justify-between">
           <span className="text-xs text-muted-foreground">命中率</span>
-          <span className="font-semibold text-primary">{pct}%</span>
+          <span className="font-semibold text-primary-accent">{pct}%</span>
         </div>
         <div className="mt-1.5 h-1.5 overflow-hidden rounded bg-destructive/25">
           <div className="h-full bg-success transition-[width] duration-300" style={{ width: `${pct}%` }} />
         </div>
       </div>
       {/* 本次启动消耗:独立小卡(与命中率同款式)——后端 compute-on-read 窗口 [started_at, now) */}
-      <div className="mt-2 rounded-lg border border-border px-3 py-2">
+      <div className="mt-2 rounded-lg border border-border-subtle bg-card-2 px-3 py-2">
         <div className="flex items-baseline justify-between">
           <span className="text-xs text-muted-foreground">本次启动消耗</span>
-          <span className="font-semibold text-primary">{formatCost(data.total_cost)}</span>
+          <span className="font-semibold text-primary-accent">{formatCost(data.total_cost)}</span>
         </div>
       </div>
-    </div>
+    </section>
   );
 }

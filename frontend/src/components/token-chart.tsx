@@ -181,8 +181,8 @@ export function TokenChart({
         ))}
 
         {/* total area + line (primary) */}
-        <g className="text-primary">
-          <path d={`${smoothPath(pts(total))} L${xAt(n - 1).toFixed(1)},${yAt(0).toFixed(1)} L${xAt(0).toFixed(1)},${yAt(0).toFixed(1)} Z`} fill="currentColor" fillOpacity={0.12} />
+        <g className="text-primary-accent">
+          <path d={`${smoothPath(pts(total))} L${xAt(n - 1).toFixed(1)},${yAt(0).toFixed(1)} L${xAt(0).toFixed(1)},${yAt(0).toFixed(1)} Z`} fill="currentColor" fillOpacity={0.08} />
           <path d={smoothPath(pts(total))} fill="none" stroke="currentColor" strokeWidth={1.5} vectorEffect="non-scaling-stroke" strokeLinejoin="round" strokeLinecap="round" />
         </g>
         {/* per-model lines */}
@@ -194,7 +194,7 @@ export function TokenChart({
         {hover !== null && (
           <>
             <line x1={xAt(hover)} y1={PAD.t} x2={xAt(hover)} y2={PAD.t + PLOT_H} stroke="currentColor" strokeOpacity={0.35} strokeDasharray="3 3" />
-            <circle cx={xAt(hover)} cy={yAt(total[hover])} r={3} fill="var(--color-primary)" />
+            <circle cx={xAt(hover)} cy={yAt(total[hover])} r={3} fill="var(--color-primary-accent)" />
           </>
         )}
       </svg>
