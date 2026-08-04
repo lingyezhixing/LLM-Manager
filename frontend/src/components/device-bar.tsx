@@ -29,7 +29,10 @@ function DeviceCard({
     <div className="min-w-[150px] flex-1 rounded-lg border border-border bg-card p-3">
       <div className="flex items-center justify-between text-sm font-medium">
         <span className="truncate">{d.device_name}</span>
-        <span className="text-xs text-muted-foreground">{isCpu ? "CPU" : "GPU"}</span>
+        <span className="text-xs text-muted-foreground">
+          {isCpu ? "CPU" : "GPU"}
+          {d.temperature_celsius != null ? ` · ${Math.round(d.temperature_celsius)}°C` : ""}
+        </span>
       </div>
       <div className="mt-2 flex items-center justify-between text-xs text-muted-foreground">
         <span>利用率</span>
@@ -58,9 +61,6 @@ function DeviceCard({
           className="h-full bg-success transition-[width] duration-300"
           style={{ width: `${pctOf(d.used_memory_mb, d.total_memory_mb)}%` }}
         />
-      </div>
-      <div className="mt-2 text-xs text-muted-foreground">
-        {d.temperature_celsius != null ? `${Math.round(d.temperature_celsius)}°C` : "—"}
       </div>
     </div>
   );
