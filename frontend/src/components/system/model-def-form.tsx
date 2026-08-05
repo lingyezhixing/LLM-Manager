@@ -230,11 +230,13 @@ export function ModelDefForm({ model, onSaved, onDirtyChange }: ModelDefFormProp
         每个方案 = 一套启动配置;运行时按在线设备自动选匹配的方案(多 GPU 或备用配置时才需多套,一般一套即可)。
       </p>
       <div className="flex flex-col gap-3">
+        {/* 命令变量:{{port}}/{{alias}} → 顶部端口/第一别名,实时预览替换(与后端 substitute_vars 一致) */}
         {form.schemes.map((s, i) => (
           <SchemeEditor
             key={i}
             value={s}
             index={i}
+            vars={{ "{{port}}": String(form.port), "{{alias}}": form.aliases[0] ?? "" }}
             onChange={(next) => setScheme(i, next)}
             onRemove={() => removeScheme(i)}
           />

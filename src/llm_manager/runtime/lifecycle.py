@@ -17,7 +17,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from llm_manager import state
-from llm_manager.config import AppConfig, ModelConfig, Scheme, resolve_alias, select_adaptive
+from llm_manager.config import AppConfig, ModelConfig, Scheme, resolve_alias, select_adaptive, substitute_vars
 from llm_manager.data import logs as _logs
 from llm_manager.probes import ProbeResult
 from llm_manager.runtime import scheduling
@@ -185,12 +185,15 @@ class Lifecycle:
                 return ModelStatus.STOPPED
 
             c = scheme.command
+            # 变量替换({{port}}/{{alias}}):顶部端口/别名修改自动传导到启动命令;无占位符原样。
+            exe = substitute_vars(c.exe, model)
+            args = [substitute_vars(a, model) for a in c.args]
             if c.conda_env:
                 conda_prefix = ["conda", "run", "-n", c.conda_env, "--no-capture-output"]
-                argv = (["cmd", "/c", *conda_prefix, c.exe, *c.args] if os.name == "nt"
-                        else [*conda_prefix, c.exe, *c.args])
+                argv = (["cmd", "/c", *conda_prefix, exe, *args] if os.name == "nt"
+                        else [*conda_prefix, exe, *args])
             else:
-                argv = [c.exe, *c.args]
+                argv = [exe, *args]
             env = {**os.environ, **c.env}
             rec = await self._supervisor.spawn(
                 argv, env=env, cwd=c.cwd,

@@ -76,6 +76,20 @@ class ModelConfig:
     pricing: Pricing = field(default_factory=Pricing)
 
 
+# 启动命令变量占位符:{{port}} / {{alias}}(alias=aliases[0])。双大括号——
+# 单大括号与 JSON 参数(如 --chat-template-kwargs {"enable_thinking":false})冲突,
+# 替换会把 {e 误认成占位符;双大括号在 JSON 中几乎不出现,安全。
+# 有占位符才替换,无则原样(写死值/不需要都不受影响)。
+SUBST_PLACEHOLDERS = ("{{port}}", "{{alias}}")
+
+
+def substitute_vars(text: str, model: ModelConfig) -> str:
+    """启动命令变量替换:{{port}} → 模型端口,{{alias}} → 第一别名(下游 served name)。
+    在 launch 构建 argv 时统一应用,使顶部端口/别名修改自动传导到启动命令。"""
+    alias = model.aliases[0] if model.aliases else ""
+    return text.replace("{{port}}", str(model.port)).replace("{{alias}}", alias)
+
+
 @dataclass(frozen=True, slots=True)
 class ProgramConfig:
     host: str

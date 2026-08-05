@@ -1,7 +1,8 @@
 from pathlib import Path
 
 from llm_manager.config import (Command, AppConfig, ModelConfig, ProgramConfig, Scheme,
-                                load, ModelMode, resolve_alias, select_adaptive, validate)
+                                load, ModelMode, resolve_alias, select_adaptive, validate,
+                                substitute_vars)
 
 
 def _write_cfg(tmp_path: Path, body: str) -> Path:
@@ -166,3 +167,41 @@ def test_validate_rejects_out_of_range_ports():
     errs = validate(cfg)
     assert any("Program port 99999 out of range" in e for e in errs)
     assert any("port 0 out of range" in e for e in errs)
+
+
+# ---------- substitute_vars:启动命令变量替换 ----------
+
+def _model(port: int = 10004, aliases: tuple[str, ...] = ("Qwen3.5-2B", "q")) -> ModelConfig:
+    return ModelConfig("M", aliases, "Chat", port, False,
+                       {"S": Scheme("S", frozenset({"gpu"}), Command(exe="a.bat"), {"gpu": 1})})
+
+
+def test_substitute_vars_replaces_port_and_first_alias():
+    m = _model(port=10004, aliases=("Qwen3.5-2B", "q"))
+    assert substitute_vars("--host 127.0.0.1 --port {{port}}", m) == "--host 127.0.0.1 --port 10004"
+    assert substitute_vars("-a {{alias}}", m) == "-a Qwen3.5-2B"
+    # 仅第一别名替换,非首个别名不换
+    assert substitute_vars("{{alias}} vs q", m) == "Qwen3.5-2B vs q"
+    # 组合
+    assert substitute_vars("--port {{port}} -a {{alias}}", m) == "--port 10004 -a Qwen3.5-2B"
+
+
+def test_substitute_vars_without_placeholder_unchanged():
+    m = _model()
+    assert substitute_vars("--temp 0.8 -c 8192", m) == "--temp 0.8 -c 8192"
+    # 写死端口/别名不误伤
+    assert substitute_vars("--port 10010", m) == "--port 10010"
+
+
+def test_substitute_vars_does_not_touch_single_brace_json():
+    # 单大括号 JSON 参数(如 --chat-template-kwargs)不得被误认成占位符
+    m = _model()
+    s = substitute_vars('{"enable_thinking":false}', m)
+    assert s == '{"enable_thinking":false}'
+    s2 = substitute_vars('--chat-template-kwargs {"enable_thinking":false}', m)
+    assert s2 == '--chat-template-kwargs {"enable_thinking":false}'
+
+
+def test_substitute_vars_empty_aliases_yields_empty_alias():
+    m = _model(aliases=())
+    assert substitute_vars("-a {{alias}}", m) == "-a "

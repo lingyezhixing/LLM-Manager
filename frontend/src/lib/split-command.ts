@@ -62,13 +62,24 @@ export function joinCommandLine(exe: string, args: string[]): string {
     .join(" ");
 }
 
-/** 预览最终将执行的命令(含 conda 包装;不含系统 env 合并、Windows 的 cmd /c 前缀)。 */
+/** 启动命令变量替换:{{port}}/{{alias}} → 模型实际值(与后端 substitute_vars 同占位符;
+ * 有占位符才换,无则原样)。双大括号避免与 JSON 参数(单大括号)混淆。 */
+export function applyVars(text: string, vars?: Record<string, string>): string {
+  if (!vars) return text;
+  let out = text;
+  for (const [k, v] of Object.entries(vars)) out = out.replaceAll(k, v);
+  return out;
+}
+
+/** 预览最终将执行的命令(含 conda 包装;不含系统 env 合并、Windows 的 cmd /c 前缀)。
+ * vars({{port}}/{{alias}})替换后显示,与后端实际执行一致。 */
 export function previewCommand(c: {
   exe: string;
   args: string[];
   conda_env: string | null;
-}): string {
-  const base = [c.exe, ...c.args].filter((s) => s.trim() !== "").join(" ");
+}, vars?: Record<string, string>): string {
+  const subst = (t: string) => applyVars(t, vars);
+  const base = [c.exe, ...c.args].filter((s) => s.trim() !== "").map(subst).join(" ");
   if (!base) return "";
   return c.conda_env
     ? `conda run -n ${c.conda_env} --no-capture-output ${base}`

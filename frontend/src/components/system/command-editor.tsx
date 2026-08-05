@@ -11,9 +11,12 @@ import type { CommandDef } from "@/lib/api";
 export function CommandEditor({
   value,
   onChange,
+  vars,
 }: {
   value: CommandDef;
   onChange: (next: CommandDef) => void;
+  // 变量替换({{port}}/{{alias}} → 实际值,仅用于「将执行」预览;编辑框保持字面占位符)
+  vars?: Record<string, string>;
 }) {
   const [line, setLine] = useState(() => joinCommandLine(value.exe, value.args));
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -44,7 +47,7 @@ export function CommandEditor({
   const toStr = (s: string | null): string => s ?? "";
   const fromStr = (s: string): string | null => (s === "" ? null : s);
 
-  const preview = previewCommand(value);
+  const preview = previewCommand(value, vars);
 
   return (
     <div className="rounded-md border border-border p-3">
@@ -68,7 +71,7 @@ export function CommandEditor({
           placeholder="lmdeploy"
         />
       </Field>
-      <Field label="命令行" hint="粘贴整条命令(可多行,换行当空格);含空格的路径用引号括起。程序拆成 argv 直跑(无 shell 特性:| > && $ 等不生效)">
+      <Field label="命令行" hint="粘贴整条命令(可多行,换行当空格);含空格的路径用引号括起。支持 {{port}} / {{alias}} 占位符(启动时替换为顶部的端口/第一别名,「将执行」预览可见)。程序拆成 argv 直跑(无 shell 特性:| > && $ 等不生效)">
         <TextArea
           value={line}
           onChange={(e) => onLine(e.target.value)}

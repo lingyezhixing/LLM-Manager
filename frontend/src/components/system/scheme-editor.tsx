@@ -11,11 +11,14 @@ export function SchemeEditor({
   index,
   onChange,
   onRemove,
+  vars,
 }: {
   value: SchemeDef;
   index: number;
   onChange: (next: SchemeDef) => void;
   onRemove: () => void;
+  // 命令变量替换({{port}}/{{alias}}),透传 CommandEditor 预览
+  vars?: Record<string, string>;
 }) {
   const set = <K extends keyof SchemeDef>(k: K, v: SchemeDef[K]) =>
     onChange({ ...value, [k]: v });
@@ -39,7 +42,7 @@ export function SchemeEditor({
         />
       </Field>
       <div className="mb-1 text-xs font-medium text-muted-foreground">启动命令</div>
-      <CommandEditor value={value.command} onChange={(command) => set("command", command)} />
+      <CommandEditor value={value.command} onChange={(command) => set("command", command)} vars={vars} />
       <Field label="设备与显存(设备名 = MB)" hint="每行一个设备;设备名=所需设备(须在线),值=显存预算 MB。后端归一化(小写+去空格)">
         <KeyValueEditor
           entries={deviceMem}
