@@ -3,6 +3,26 @@ import { Field, NumberInput, Select, Switch } from "@/components/ui/form";
 import { numOrNull as num } from "@/lib/format";
 import type { Pricing, PricingTier } from "@/lib/api";
 
+/** 阶梯单行紧凑输入:小 label + 窄数字框(多个阶梯字段排一行)。 */
+function TierInput({ label, value, onChange, disabled }: {
+  label: string;
+  value: number | string;
+  onChange: (v: number | null) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <div className="flex flex-col gap-0.5">
+      <span className="text-[10px] leading-none text-muted-foreground">{label}</span>
+      <NumberInput
+        value={value}
+        disabled={disabled}
+        onChange={(e) => onChange(num(e.target.value))}
+        className="w-16"
+      />
+    </div>
+  );
+}
+
 // 计费配置段:计费方式(按量/按时)+ 按时单价 / 阶梯表编辑器。空 tiers = 免费。
 export function PricingEditor({ value, onChange }: { value: Pricing; onChange: (p: Pricing) => void }) {
   const setTier = (i: number, next: PricingTier) =>
@@ -58,39 +78,28 @@ export function PricingEditor({ value, onChange }: { value: Pricing; onChange: (
             <label htmlFor="pr-cache" className="text-xs text-muted-foreground">支持缓存(prompt_n 同算输入费 + 写缓存费)</label>
           </div>
           {value.tiers.map((t, i) => (
-            <div key={i} className="rounded-md border border-border p-3">
-              <div className="mb-2 flex items-center justify-between">
-                <span className="text-xs font-medium text-muted-foreground">阶梯 {t.tier_index}</span>
-                <Button type="button" size="sm" variant="ghost" className="text-destructive" onClick={() => removeTier(i)}>
-                  删除
-                </Button>
-              </div>
-              <div className="grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-4">
-                <Field label="输入 min">
-                  <NumberInput value={t.min_input ?? 0} onChange={(e) => setTier(i, { ...t, min_input: num(e.target.value) ?? 0 })} />
-                </Field>
-                <Field label="输入 max(空=∞)">
-                  <NumberInput value={t.max_input ?? ""} onChange={(e) => setTier(i, { ...t, max_input: num(e.target.value) })} />
-                </Field>
-                <Field label="输出 min">
-                  <NumberInput value={t.min_output ?? 0} onChange={(e) => setTier(i, { ...t, min_output: num(e.target.value) ?? 0 })} />
-                </Field>
-                <Field label="输出 max(空=∞)">
-                  <NumberInput value={t.max_output ?? ""} onChange={(e) => setTier(i, { ...t, max_output: num(e.target.value) })} />
-                </Field>
-                <Field label="输入价(元/M)">
-                  <NumberInput value={t.input_price} onChange={(e) => setTier(i, { ...t, input_price: e.target.value === "" ? 0 : Number(e.target.value) })} />
-                </Field>
-                <Field label="输出价(元/M)">
-                  <NumberInput value={t.output_price} onChange={(e) => setTier(i, { ...t, output_price: e.target.value === "" ? 0 : Number(e.target.value) })} />
-                </Field>
-                <Field label="缓存读价(元/M)">
-                  <NumberInput value={t.cache_read_price} disabled={!value.support_cache} onChange={(e) => setTier(i, { ...t, cache_read_price: e.target.value === "" ? 0 : Number(e.target.value) })} />
-                </Field>
-                <Field label="缓存写价(元/M)">
-                  <NumberInput value={t.cache_write_price} disabled={!value.support_cache} onChange={(e) => setTier(i, { ...t, cache_write_price: e.target.value === "" ? 0 : Number(e.target.value) })} />
-                </Field>
-              </div>
+            <div key={i} className="flex flex-wrap items-end gap-x-3 gap-y-2 rounded-md border border-border px-3 py-2">
+              <span className="mb-0.5 text-xs font-medium text-muted-foreground">阶梯 {t.tier_index}</span>
+              <TierInput label="输入min" value={t.min_input ?? 0}
+                onChange={(v) => setTier(i, { ...t, min_input: v ?? 0 })} />
+              <TierInput label="输入max" value={t.max_input ?? ""}
+                onChange={(v) => setTier(i, { ...t, max_input: v })} />
+              <TierInput label="输出min" value={t.min_output ?? 0}
+                onChange={(v) => setTier(i, { ...t, min_output: v ?? 0 })} />
+              <TierInput label="输出max" value={t.max_output ?? ""}
+                onChange={(v) => setTier(i, { ...t, max_output: v })} />
+              <TierInput label="输入价" value={t.input_price}
+                onChange={(v) => setTier(i, { ...t, input_price: v ?? 0 })} />
+              <TierInput label="输出价" value={t.output_price}
+                onChange={(v) => setTier(i, { ...t, output_price: v ?? 0 })} />
+              <TierInput label="缓存读" value={t.cache_read_price} disabled={!value.support_cache}
+                onChange={(v) => setTier(i, { ...t, cache_read_price: v ?? 0 })} />
+              <TierInput label="缓存写" value={t.cache_write_price} disabled={!value.support_cache}
+                onChange={(v) => setTier(i, { ...t, cache_write_price: v ?? 0 })} />
+              <Button type="button" size="sm" variant="ghost" className="mb-0.5 text-destructive"
+                onClick={() => removeTier(i)}>
+                删除
+              </Button>
             </div>
           ))}
           <Button type="button" size="sm" variant="ghost" onClick={addTier}>+ 添加阶梯</Button>
