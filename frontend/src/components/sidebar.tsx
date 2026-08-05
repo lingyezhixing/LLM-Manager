@@ -25,14 +25,14 @@ export function Sidebar({ collapsed }: SidebarProps) {
         className={`flex items-center px-4 pb-6 pt-5 transition-[padding] duration-200 ${
           // 折叠态左右 padding 居中。三禁令:① justify-content 切换立即生效不可过渡
           // (图标瞬跳);② calc 百分比在过渡中按当前容器宽实时解析(产生驼峰峰值);
-          // ③ 圆点尺寸变更时同步此值。公式:(aside 4rem - 圆点 0.5rem)/2 = 1.75rem。
-          collapsed ? "px-[1.75rem]" : ""
+          // ③ 圆点尺寸变更时同步此值。公式:(aside 4rem - 圆点 0.75rem)/2 = 1.625rem。
+          collapsed ? "px-[1.625rem]" : ""
         }`}
       >
         {/* logo accent bar:展开=竖条,折叠=居中圆点(视觉锚点,呼应导航 active dot) */}
         <span
           className={`shrink-0 rounded-full bg-primary-accent transition-[width,height,border-radius] duration-200 ${
-            collapsed ? "size-2" : "h-5 w-1"
+            collapsed ? "size-3" : "h-5 w-1"
           }`}
         />
         <span
