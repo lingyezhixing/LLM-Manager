@@ -3,7 +3,8 @@ import { Field, NumberInput, Select, Switch } from "@/components/ui/form";
 import { numOrNull as num } from "@/lib/format";
 import type { Pricing, PricingTier } from "@/lib/api";
 
-/** 阶梯单行紧凑输入:小 label + 窄数字框(多个阶梯字段排一行)。 */
+/** 阶梯单行紧凑输入:小 label + 数字框。flex-1 均分行内宽度——容器宽时 8 框一行,
+ * 窄时 flex-wrap 自动换行且每行内仍均分填满(纯 CSS 自适应,无需 JS 测量)。 */
 function TierInput({ label, value, onChange, disabled }: {
   label: string;
   value: number | string;
@@ -11,13 +12,13 @@ function TierInput({ label, value, onChange, disabled }: {
   disabled?: boolean;
 }) {
   return (
-    <div className="flex flex-col gap-0.5">
-      <span className="text-[10px] leading-none text-muted-foreground">{label}</span>
+    <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+      <span className="truncate text-[10px] leading-none text-muted-foreground">{label}</span>
       <NumberInput
         value={value}
         disabled={disabled}
         onChange={(e) => onChange(num(e.target.value))}
-        className="w-16"
+        className="w-full"
       />
     </div>
   );
