@@ -31,11 +31,11 @@ export function useCreateModelDef() {
   });
 }
 
-// 前缀失效 list(含 detail);表单用 baseline,refetch 不打断编辑。
+// mutationFn 接收 {body, migrate}:migrate 仅改名时由表单经 useConfirm 询问后传入。
 export function useUpdateModelDef(name: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: ModelDef) => updateModelDef(name, body),
+    mutationFn: (vars: { body: ModelDef; migrate: boolean }) => updateModelDef(name, vars.body, vars.migrate),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["model-defs"] });
     },

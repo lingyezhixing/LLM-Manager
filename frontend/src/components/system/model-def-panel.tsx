@@ -76,7 +76,7 @@ export function ModelDefPanel() {
     } else {
       setHint(null);
     }
-    if (wasCreate) setSelected(name); // 新建成功 → 切该模型编辑态
+    setSelected(name);   // 新建/改名 → 切到该名;普通保存 name=当前选中,setSelected 无副作用
     toast.success(wasCreate ? `已创建模型「${name}」` : "已保存");
   };
 

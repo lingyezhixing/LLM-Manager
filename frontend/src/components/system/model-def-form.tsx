@@ -6,6 +6,7 @@ import { numFromStr as num } from "@/lib/format";
 import { StringListEditor } from "@/components/ui/repeatable-fields";
 import { PricingEditor } from "@/components/system/pricing-editor";
 import { SchemeEditor } from "@/components/system/scheme-editor";
+import { useConfirm } from "@/components/ui/dialog";
 import { type ModelDef, type ModelWriteResult, type SchemeDef } from "@/lib/api";
 import { useCreateModelDef, useUpdateModelDef } from "@/lib/hooks/use-model-defs";
 
@@ -103,6 +104,7 @@ export function ModelDefForm({ model, onSaved, onDirtyChange }: ModelDefFormProp
     onDirtyChange?.(isCreate || !deepEqual(form, baseline));
   }, [isCreate, form, baseline, onDirtyChange]);
 
+  const confirm = useConfirm();
   const update = useUpdateModelDef(model?.name ?? "");
   const create = useCreateModelDef();
   const mutation = isCreate ? create : update;
@@ -133,25 +135,44 @@ export function ModelDefForm({ model, onSaved, onDirtyChange }: ModelDefFormProp
       ],
     });
 
-  const onSave = () => {
+  const doUpdate = (migrate: boolean) => {
     const payload = cleanPayload(form);
     setForm(payload);
-    // F1:baseline 仅在保存成功后推进。原代码 mutate 前就 setBaseline → 失败时 dirty 立即
-    // 变 false → 保存条(含错误)卸载、切模型守卫失效,用户以为已保存实则丢失。
+    // F1:baseline 仅在保存成功后推进,失败时 dirty 不丢。
+    update.mutate(
+      { body: payload, migrate },
+      {
+        onSuccess: (result) => {
+          setBaseline(clone(payload));
+          onSaved(result, payload.name);   // 传新名:改名后 panel 切到新名
+        },
+      },
+    );
+  };
+
+  const onSave = async () => {
     if (isCreate) {
+      const payload = cleanPayload(form);
+      setForm(payload);
       create.mutate(payload, {
         onSuccess: () => {
           setBaseline(clone(payload));
           onSaved({ affected_routing: [], hint: null }, payload.name);
         },
       });
-    } else {
-      update.mutate(payload, {
-        onSuccess: (result) => {
-          setBaseline(clone(payload));
-          onSaved(result, model!.name);
-        },
+      return;
+    }
+    // 编辑态改名:询问是否迁移历史数据(二元;false=不迁移但仍保存)
+    if (form.name.trim() !== model!.name) {
+      const migrate = await confirm({
+        title: "改名:是否迁移历史数据?",
+        description: "两种都会保存改名。迁移 → 用量/成本/日志归到新名,统计连续;不迁移 → 旧名变孤立模型、新名从零。",
+        confirmText: "迁移",
+        cancelText: "不迁移(保留旧名)",
       });
+      doUpdate(migrate);
+    } else {
+      doUpdate(false);
     }
   };
 
@@ -161,13 +182,12 @@ export function ModelDefForm({ model, onSaved, onDirtyChange }: ModelDefFormProp
       <div className="grid grid-cols-1 gap-x-6 sm:grid-cols-2">
         <Field
           label="名称"
-          hint={isCreate ? "唯一标识;新建后不可改名" : "🔴 不可改(改名=删除后新建)"}
+          hint={isCreate ? "唯一标识" : "可改名(保存时会询问是否迁移历史数据)"}
           htmlFor="mdf-name"
         >
           <TextInput
             id="mdf-name"
             value={form.name}
-            disabled={!isCreate}
             onChange={(e) => set("name", e.target.value)}
           />
         </Field>

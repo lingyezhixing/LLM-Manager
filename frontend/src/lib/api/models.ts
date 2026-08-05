@@ -126,12 +126,20 @@ export async function createModelDef(body: ModelDef): Promise<void> {
   if (!res.ok) throw await parseApiError(res);
 }
 
-export async function updateModelDef(name: string, body: ModelDef): Promise<ModelWriteResult> {
-  const res = await fetch(`/api/config/models/${encodeURIComponent(name)}`, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
+// migrate_data:仅改名(body.name≠路径 name)时生效——true=把历史用量/成本/日志迁到新名。
+export async function updateModelDef(
+  name: string,
+  body: ModelDef,
+  migrate_data = false,
+): Promise<ModelWriteResult> {
+  const res = await fetch(
+    `/api/config/models/${encodeURIComponent(name)}?migrate_data=${migrate_data}`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    },
+  );
   if (!res.ok) throw await parseApiError(res);
   return (await res.json()) as ModelWriteResult;
 }
