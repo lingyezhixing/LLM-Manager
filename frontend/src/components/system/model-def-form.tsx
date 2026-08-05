@@ -151,6 +151,7 @@ export function ModelDefForm({ model, onSaved, onDirtyChange }: ModelDefFormProp
   };
 
   const onSave = async () => {
+    if (saving) return;   // 防重复提交(ConfigSaveBar 已 disable 按钮,此为函数级双保险)
     if (isCreate) {
       const payload = cleanPayload(form);
       setForm(payload);
@@ -162,8 +163,9 @@ export function ModelDefForm({ model, onSaved, onDirtyChange }: ModelDefFormProp
       });
       return;
     }
-    // 编辑态改名:询问是否迁移历史数据(二元;false=不迁移但仍保存)
-    if (form.name.trim() !== model!.name) {
+    // 编辑态改名(精确比较,与后端 body.name != name 一致——单边 trim 会造成前后端判定不一致):
+    // 询问是否迁移历史数据(二元;false=不迁移但仍保存)
+    if (form.name !== model!.name) {
       const migrate = await confirm({
         title: "改名:是否迁移历史数据?",
         description: "两种都会保存改名。迁移 → 用量/成本/日志归到新名,统计连续;不迁移 → 旧名变孤立模型、新名从零。",

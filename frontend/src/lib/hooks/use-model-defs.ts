@@ -32,6 +32,7 @@ export function useCreateModelDef() {
 }
 
 // mutationFn 接收 {body, migrate}:migrate 仅改名时由表单经 useConfirm 询问后传入。
+// 前缀失效 list(含 detail);表单用 baseline,refetch 不打断编辑。
 export function useUpdateModelDef(name: string) {
   const qc = useQueryClient();
   return useMutation({
