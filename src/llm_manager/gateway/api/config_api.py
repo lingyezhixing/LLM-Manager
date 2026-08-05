@@ -201,6 +201,26 @@ def _rename_migrator(old: str, new: str) -> "Callable":
     return migrate
 
 
+def _delete_old_sessions(old: str) -> "Callable":
+    """构造 post_write 回调:不迁移改名时,删除旧名日志会话。
+
+    与 delete_model_def 一致(日志绑定定义:旧身份废弃 → 删日志;请求记录留孤立)。
+    匹配 model_name 或 alias ∈ {old} ∪ 旧别名(别名从 old_cfg 取改名前的值)。
+    在改名同事务内执行(commit 前),与配置写原子。
+    """
+    def drop(db, old_cfg, _new_cfg):
+        aliases = old_cfg.models[old].aliases if old in old_cfg.models else ()
+        terms = {old, *aliases}
+        if not terms:
+            return
+        ph = ",".join("?" * len(terms))
+        db.conn.execute(
+            f"DELETE FROM log_sessions WHERE model_name IN ({ph}) OR alias IN ({ph})",
+            (*terms, *terms),
+        )
+    return drop
+
+
 def _delete_model(cfg: AppConfig, name: str) -> AppConfig:
     """fn: 删 name。不存在 → ModelNotFound(→ 404)。"""
     if name not in cfg.models:
@@ -435,7 +455,12 @@ def register_config_routes(api: APIRouter) -> None:
                     f"new name '{body.name}' is occupied by orphaned data; "
                     "clean it in data management first",
                 )
-        post = _rename_migrator(name, body.name) if (is_rename and migrate_data) else None
+        if is_rename:
+            # 迁移=数据+日志跟新名;不迁移=旧身份废弃,删旧日志(与 delete_model_def 一致),
+            # 请求记录留孤立。两者均在改名同事务内经 post_write 原子执行。
+            post = _rename_migrator(name, body.name) if migrate_data else _delete_old_sessions(name)
+        else:
+            post = None
         try:
             new_cfg = mutate_appconfig(db, lambda c: _update_model(c, name, body), post_write=post)
         except ModelNotFound:

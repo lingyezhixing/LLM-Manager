@@ -347,8 +347,12 @@ def test_put_model_def_unknown_404(tmp_path):
     assert r.status_code == 404
 
 
-def test_put_model_def_rename_without_migrate_keeps_data(tmp_path):
-    """改名(默认 migrate_data=false):cfg 换 key,旧名数据保留(变孤立)。"""
+def test_put_model_def_rename_without_migrate_deletes_logs(tmp_path):
+    """改名(默认 migrate_data=false):cfg 换 key;请求记录(models)保留为孤立,旧日志删除。
+
+    不迁移=旧身份废弃:日志随旧定义删(与 delete_model_def 一致,不留幽灵),
+    请求记录留孤立(可由数据管理页清)。
+    """
     from llm_manager.data.usage import resolve_model_id
     app = _app(tmp_path)
     with TestClient(app) as c:
@@ -363,12 +367,13 @@ def test_put_model_def_rename_without_migrate_keeps_data(tmp_path):
         assert r.status_code == 200
         names = [m["name"] for m in c.get("/api/config/models").json()]
         assert "N" in names and "M" not in names
-        # 旧名数据未迁移
+        # 请求记录保留为孤立(不迁移)
         rows = [row["original_name"] for row in app.state.db.conn.execute("SELECT original_name FROM models")]
         assert rows == ["M"]
+        # 旧日志已删(不迁移=旧身份废弃,日志随旧定义删,不留幽灵)
         ls = [row["model_name"] for row in app.state.db.conn.execute(
             "SELECT model_name FROM log_sessions WHERE type='model'")]
-        assert ls == ["M"]
+        assert ls == []
 
 
 def test_put_model_def_rename_with_migrate_moves_data(tmp_path):
