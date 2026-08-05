@@ -176,12 +176,20 @@ def _create_model(cfg: AppConfig, body: ModelDefInput) -> AppConfig:
 
 
 def _update_model(cfg: AppConfig, name: str, body: ModelDefInput) -> AppConfig:
-    """fn: 全量替换 name 处定义。不存在 → ModelNotFound(→ 404);body.name≠name → ValueError(改名,→ 422)。"""
+    """fn: 全量替换 name 处定义。
+    - 不存在 → ModelNotFound(→ 404)
+    - body.name == name → 全量替换该定义
+    - body.name ≠ name(改名)→ 换字典 key;新名已存在 → ModelExists(→ 409)。
+    数据层迁移(models.original_name/log_sessions)由端点经 post_write 处理,此纯函数不碰 DB。"""
     if name not in cfg.models:
         raise ModelNotFound(name)
-    if body.name != name:
-        raise ValueError(f"rename not supported (path '{name}' != body '{body.name}'); delete + create instead")
-    return replace(cfg, models={**cfg.models, name: _to_model_config(body)})
+    if body.name == name:
+        return replace(cfg, models={**cfg.models, name: _to_model_config(body)})
+    if body.name in cfg.models:
+        raise ModelExists(body.name)
+    new_models = {k: v for k, v in cfg.models.items() if k != name}
+    new_models[body.name] = _to_model_config(body)
+    return replace(cfg, models=new_models)
 
 
 def _delete_model(cfg: AppConfig, name: str) -> AppConfig:

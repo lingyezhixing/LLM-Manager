@@ -217,6 +217,33 @@ def test_create_model_fn_raises_model_exists():
         _create_model(cfg, _body("M"))
 
 
+def test_update_model_rename_swaps_key():
+    from llm_manager.gateway.api.config_api import _create_model, _update_model
+    cfg = _create_model(_empty_cfg(), _body("M"))
+    cfg2 = _update_model(cfg, "M", _body("N"))
+    assert "M" not in cfg2.models
+    assert "N" in cfg2.models
+    assert cfg2.models["N"].port == 8000
+
+
+def test_update_model_rename_conflict_raises_model_exists():
+    import pytest
+    from llm_manager.data.config_store import ModelExists
+    from llm_manager.gateway.api.config_api import _create_model, _update_model
+    cfg = _create_model(_empty_cfg(), _body("M"))
+    cfg = _create_model(cfg, _body("N"))
+    with pytest.raises(ModelExists):
+        _update_model(cfg, "M", _body("N"))   # M→N,但 N 已存在
+
+
+def test_update_model_no_rename_replaces_in_place():
+    from llm_manager.gateway.api.config_api import _create_model, _update_model
+    cfg = _create_model(_empty_cfg(), _body("M", port=8000))
+    cfg2 = _update_model(cfg, "M", _body("M", port=9000))   # 同名=非改名
+    assert set(cfg2.models.keys()) == {"M"}
+    assert cfg2.models["M"].port == 9000
+
+
 def test_update_model_fn_replaces():
     from llm_manager.gateway.api.config_api import _create_model, _update_model
     cfg = _create_model(_empty_cfg(), _body("M", port=8000))
