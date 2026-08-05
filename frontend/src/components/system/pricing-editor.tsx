@@ -80,7 +80,7 @@ export function PricingEditor({ value, onChange }: { value: Pricing; onChange: (
           </div>
           {value.tiers.map((t, i) => (
             <div key={i} className="flex flex-wrap items-end gap-x-3 gap-y-2 rounded-md border border-border px-3 py-2">
-              <span className="mb-0.5 text-xs font-medium text-muted-foreground">阶梯 {t.tier_index}</span>
+              <span className="self-center text-xs font-medium text-muted-foreground">阶梯 {t.tier_index}</span>
               <TierInput label="输入min" value={t.min_input ?? 0}
                 onChange={(v) => setTier(i, { ...t, min_input: v ?? 0 })} />
               <TierInput label="输入max" value={t.max_input ?? ""}
