@@ -1,6 +1,7 @@
 import json
 
 import pytest
+from dataclasses import replace
 
 from llm_manager.config import AppConfig, Command, ModelConfig, ProgramConfig, Scheme, WakeOnLanConfig
 from llm_manager.data.config_store import (
@@ -338,6 +339,7 @@ def test_write_appconfig_locked_callable_under_held_lock(tmp_path):
     db = open_db(tmp_path / "t.db")
     with db.write_lock:                       # caller 持锁
         _write_appconfig_locked(db, _sample_cfg())
+        db.conn.commit()                       # _write_appconfig_locked 不再自 commit
     assert "Qwen3-4B" in read_appconfig(db).models
 
 
@@ -437,3 +439,38 @@ def test_retention_bad_values_fall_back_to_defaults(tmp_path):
     out = read_appconfig(db)
     assert out.program.log_retention_days == 30      # 回退默认
     assert out.program.log_retention_count == 10
+
+
+def test_mutate_appconfig_post_write_runs_before_commit(tmp_path):
+    """post_write 在 _write_appconfig_locked 之后、commit 之前执行,能读到本次未提交的写入。"""
+    db = open_db(tmp_path / "t.db")
+    write_appconfig(db, _sample_cfg())
+    seen = {}
+
+    def post(d, old_cfg, new_cfg):
+        seen["called"] = True
+        names = {r["name"] for r in d.conn.execute("SELECT name FROM model_defs")}
+        seen["has_sample"] = bool(names)   # _write_appconfig_locked 已写、尚未 commit
+
+    mutate_appconfig(db, lambda c: c, post_write=post)
+    assert seen["called"] is True
+    assert seen["has_sample"] is True
+
+
+def test_mutate_appconfig_post_write_failure_rolls_back(tmp_path):
+    """post_write 抛异常 → 整事务回滚(config 写也不留)。"""
+    db = open_db(tmp_path / "t.db")
+    write_appconfig(db, _sample_cfg())
+    before = read_appconfig(db).program.port
+
+    def boom(d, old_cfg, new_cfg):
+        raise RuntimeError("boom")
+
+    import pytest
+    with pytest.raises(RuntimeError):
+        mutate_appconfig(
+            db,
+            lambda c: replace(c, program=replace(c.program, port=before + 1)),
+            post_write=boom,
+        )
+    assert read_appconfig(db).program.port == before   # 回滚:port 未变

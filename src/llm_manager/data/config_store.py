@@ -81,7 +81,8 @@ def _delete_model_world_locked(db: Db) -> None:
 
 def _write_appconfig_locked(db: Db, cfg: AppConfig) -> None:
     """caller MUST hold db.write_lock。全量替换模型世界 + upsert program/wol/claude。
-    失败 rollback——共享写连接上未回滚的 partial 会被后续无关 commit 冲刷为脏数据。"""
+    失败 rollback——共享写连接上未回滚的 partial 会被后续无关 commit 冲刷为脏数据。
+    **本函数不 commit,由 caller 在同事务内追加操作后统一 commit**(支持 `mutate_appconfig` 的 `post_write`)。"""
     try:
         p = cfg.program
         _upsert_locked(db, "host", p.host)
@@ -132,7 +133,6 @@ def _write_appconfig_locked(db: Db, cfg: AppConfig) -> None:
                      t.input_price, t.output_price,
                      t.cache_write_price, t.cache_read_price),
                 )
-        db.conn.commit()
     except Exception:
         db.conn.rollback()
         raise
@@ -140,9 +140,10 @@ def _write_appconfig_locked(db: Db, cfg: AppConfig) -> None:
 
 def write_appconfig(db: Db, cfg: AppConfig) -> None:
     """信任的内部/导入写路径(导入前已 validate,故不校验)。
-    失败原子回滚——见 `_write_appconfig_locked`。"""
+    失败原子回滚——见 `_write_appconfig_locked`(它不 commit,由本函数提交)。"""
     with db.write_lock:
         _write_appconfig_locked(db, cfg)
+        db.conn.commit()
 
 
 def _read_appconfig_locked(db: Db) -> AppConfig:
@@ -221,12 +222,18 @@ class ConfigValidationFailed(Exception):
         self.errors = errors
 
 
-def mutate_appconfig(db: Db, fn: Callable[[AppConfig], AppConfig]) -> AppConfig:
-    """锁内原子读-改-写:read → fn(cfg)→cfg' → validate → write。
+def mutate_appconfig(
+    db: Db,
+    fn: Callable[[AppConfig], AppConfig],
+    post_write: Callable[[Db, AppConfig, AppConfig], None] | None = None,
+) -> AppConfig:
+    """锁内原子读-改-写:read → fn→cfg' → validate → write → [post_write] → commit。
 
     fn: ``AppConfig -> AppConfig``,用 dataclasses.replace 在 frozen 快照上构造新实例;
     可 raise ModelNotFound / ModelExists(存在性检查,404/409 语义)。
     validate 失败 raise ConfigValidationFailed(不落库)。
+    post_write(db, old_cfg, new_cfg):若提供,在 _write_appconfig_locked 之后、commit 之前于
+    **同一写事务**内执行(改名时联动迁移 models/log_sessions,与 config 写原子);其异常触发 rollback。
     成功返新快照(caller 负责 store.reload() 刷缓存)。
 
     用锁-free 的 _read/_write_appconfig_locked(非重入 Lock:不能在此调公共 read/write_appconfig)。
@@ -237,7 +244,14 @@ def mutate_appconfig(db: Db, fn: Callable[[AppConfig], AppConfig]) -> AppConfig:
         errors = config.validate(new_cfg)
         if errors:
             raise ConfigValidationFailed(errors)
-        _write_appconfig_locked(db, new_cfg)
+        try:
+            _write_appconfig_locked(db, new_cfg)
+            if post_write is not None:
+                post_write(db, cfg, new_cfg)
+            db.conn.commit()
+        except Exception:
+            db.conn.rollback()
+            raise
         return new_cfg
 
 
