@@ -7,7 +7,7 @@ interface SidebarProps {
 }
 
 /**
- * Left navigation sidebar (NapCat 克制演绎). Expanded w-64 / collapsed w-16 icon rail;
+ * Left navigation sidebar (NapCat 克制演绎). Expanded w-[13.125rem] / collapsed w-16 icon rail;
  * glass surface (blur 只在壳层). Active item: primary-accent 12% bg + accent text +
  * right dot. Bottom: theme toggle pill.
  *
@@ -19,7 +19,7 @@ interface SidebarProps {
 export function Sidebar({ collapsed }: SidebarProps) {
   return (
     <aside
-      className={`${collapsed ? "w-16" : "w-64"} flex shrink-0 flex-col border-r border-border bg-sidebar backdrop-blur-xl transition-[width] duration-200`}
+      className={`${collapsed ? "w-16" : "w-[13.125rem]"} flex shrink-0 flex-col border-r border-border bg-sidebar backdrop-blur-xl transition-[width] duration-200`}
     >
       <div
         className={`flex items-center px-4 pb-6 pt-5 transition-[padding] duration-200 ${
