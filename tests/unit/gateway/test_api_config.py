@@ -251,14 +251,6 @@ def test_update_model_fn_replaces():
     assert cfg2.models["M"].port == 9000
 
 
-def test_update_model_fn_rejects_rename():
-    from llm_manager.gateway.api.config_api import _create_model, _update_model
-    cfg = _create_model(_empty_cfg(), _body("M"))
-    import pytest
-    with pytest.raises(ValueError):
-        _update_model(cfg, "M", _body("Other"))        # body.name != path name
-
-
 def test_update_model_fn_raises_not_found():
     from llm_manager.data.config_store import ModelNotFound
     from llm_manager.gateway.api.config_api import _update_model
@@ -355,11 +347,86 @@ def test_put_model_def_unknown_404(tmp_path):
     assert r.status_code == 404
 
 
-def test_put_model_def_rename_422(tmp_path):
+def test_put_model_def_rename_without_migrate_keeps_data(tmp_path):
+    """改名(默认 migrate_data=false):cfg 换 key,旧名数据保留(变孤立)。"""
+    from llm_manager.data.usage import resolve_model_id
+    app = _app(tmp_path)
+    with TestClient(app) as c:
+        c.post("/api/config/models", json=_def_body("M"))
+        resolve_model_id(app.state.db, "M")                       # 造 models 行(用量/成本锚点)
+        app.state.db.conn.execute(
+            "INSERT INTO log_sessions (type, model_name, alias, start_time) "
+            "VALUES ('model','M','M',0)"
+        )
+        app.state.db.conn.commit()
+        r = c.put("/api/config/models/M", json=_def_body("N"))    # 改名,默认不迁移
+        assert r.status_code == 200
+        names = [m["name"] for m in c.get("/api/config/models").json()]
+        assert "N" in names and "M" not in names
+        # 旧名数据未迁移
+        rows = [row["original_name"] for row in app.state.db.conn.execute("SELECT original_name FROM models")]
+        assert rows == ["M"]
+        ls = [row["model_name"] for row in app.state.db.conn.execute(
+            "SELECT model_name FROM log_sessions WHERE type='model'")]
+        assert ls == ["M"]
+
+
+def test_put_model_def_rename_with_migrate_moves_data(tmp_path):
+    """改名 + migrate_data=true:models.original_name 与 log_sessions.model_name 迁到新名,model_id 不变。"""
+    from llm_manager.data.usage import resolve_model_id
+    app = _app(tmp_path)
+    with TestClient(app) as c:
+        c.post("/api/config/models", json=_def_body("M"))
+        mid = resolve_model_id(app.state.db, "M")
+        app.state.db.conn.execute(
+            "INSERT INTO log_sessions (type, model_name, alias, start_time) "
+            "VALUES ('model','M','M',0)"
+        )
+        app.state.db.conn.commit()
+        r = c.put("/api/config/models/M?migrate_data=true", json=_def_body("N"))
+        assert r.status_code == 200
+        rows = [row["original_name"] for row in app.state.db.conn.execute("SELECT original_name FROM models")]
+        assert rows == ["N"]
+        # model_id 不变 → model_requests/model_runtime 仍关联
+        new_id = app.state.db.conn.execute(
+            "SELECT id FROM models WHERE original_name='N'").fetchone()["id"]
+        assert new_id == mid
+        ls = [row["model_name"] for row in app.state.db.conn.execute(
+            "SELECT model_name FROM log_sessions WHERE type='model'")]
+        assert ls == ["N"]
+
+
+def test_put_model_def_rename_conflict_409(tmp_path):
+    with TestClient(_app(tmp_path)) as c:
+        c.post("/api/config/models", json=_def_body("M", port=8000))
+        c.post("/api/config/models", json=_def_body("N", port=9000))
+        r = c.put("/api/config/models/M", json=_def_body("N", port=9000))   # M→N,N 已存在
+        assert r.status_code == 409
+
+
+def test_put_model_def_rename_active_409(tmp_path):
+    """活跃态(ROUTING)改名 → 409(避免与 state/lifecycle 错位)。"""
+    from llm_manager import state
+    from llm_manager.state import ModelStatus
+    state._reset()
     with TestClient(_app(tmp_path)) as c:
         c.post("/api/config/models", json=_def_body("M"))
-        r = c.put("/api/config/models/M", json=_def_body("Other"))   # body.name≠path
-    assert r.status_code == 422
+        state.set_status("M", ModelStatus.ROUTING, force=True)
+        r = c.put("/api/config/models/M", json=_def_body("N"))
+        assert r.status_code == 409
+    state._reset()
+
+
+def test_put_model_def_rename_migrate_new_name_occupied_422(tmp_path):
+    """迁移时新名已被孤立数据占用 → 422(避免 UPDATE models 撞 UNIQUE)。"""
+    from llm_manager.data.usage import resolve_model_id
+    app = _app(tmp_path)
+    with TestClient(app) as c:
+        c.post("/api/config/models", json=_def_body("M"))
+        resolve_model_id(app.state.db, "N")     # 孤立数据先占了 N
+        app.state.db.conn.commit()
+        r = c.put("/api/config/models/M?migrate_data=true", json=_def_body("N"))
+        assert r.status_code == 422
 
 
 def test_put_model_def_routing_returns_hint(tmp_path):

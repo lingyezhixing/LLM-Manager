@@ -13,7 +13,7 @@ import os
 import time
 from dataclasses import replace
 from pathlib import Path
-from typing import Literal
+from typing import Callable, Literal
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -190,6 +190,15 @@ def _update_model(cfg: AppConfig, name: str, body: ModelDefInput) -> AppConfig:
     new_models = {k: v for k, v in cfg.models.items() if k != name}
     new_models[body.name] = _to_model_config(body)
     return replace(cfg, models=new_models)
+
+
+def _rename_migrator(old: str, new: str) -> "Callable":
+    """构造 post_write 回调:把 models.original_name 与 log_sessions.model_name 从 old 迁到 new。
+    在 mutate_appconfig 的写事务内执行(commit 前),与改名原子。alias 列不动(改名不改别名)。"""
+    def migrate(db, _old_cfg, _new_cfg):
+        db.conn.execute("UPDATE models SET original_name=? WHERE original_name=?", (new, old))
+        db.conn.execute("UPDATE log_sessions SET model_name=? WHERE model_name=?", (new, old))
+    return migrate
 
 
 def _delete_model(cfg: AppConfig, name: str) -> AppConfig:
@@ -404,19 +413,43 @@ def register_config_routes(api: APIRouter) -> None:
                 "pricing": _pricing_dict(m.pricing)}
 
     @api.put("/config/models/{name}")
-    def put_model_def(name: str, request: Request, body: ModelDefInput) -> dict:
+    def put_model_def(
+        name: str, request: Request, body: ModelDefInput, migrate_data: bool = False
+    ) -> dict:
         db = get_db(request)
         store = get_config_store(request)
+        is_rename = body.name != name
+        if is_rename:
+            # 运行中拦截:活跃态改名会与 state(primary_name keyed)/lifecycle 错位
+            from llm_manager import state
+            from llm_manager.state import ModelStatus
+            st = state.get_status(name)
+            if st not in (ModelStatus.STOPPED, ModelStatus.FAILED):
+                raise HTTPException(409, f"model '{name}' is {st.value}; stop it before renaming")
+            # UNIQUE 预检:迁移时新名不得已被孤立数据占用(否则 UPDATE models 撞 UNIQUE)
+            if migrate_data and db.conn.execute(
+                "SELECT 1 FROM models WHERE original_name = ?", (body.name,)
+            ).fetchone():
+                raise HTTPException(
+                    422,
+                    f"new name '{body.name}' is occupied by orphaned data; "
+                    "clean it in data management first",
+                )
+        post = _rename_migrator(name, body.name) if (is_rename and migrate_data) else None
         try:
-            new_cfg = mutate_appconfig(db, lambda c: _update_model(c, name, body))
+            new_cfg = mutate_appconfig(db, lambda c: _update_model(c, name, body), post_write=post)
         except ModelNotFound:
             raise HTTPException(404, f"model '{name}' not found")
+        except ModelExists:
+            raise HTTPException(409, f"model '{body.name}' already exists")
         except ConfigValidationFailed as e:
             raise HTTPException(422, detail=e.errors)
         except ValueError as e:
             raise HTTPException(422, detail=str(e))
         store.reload()
-        affected = _routing_served(name, new_cfg)
+        # 改名时模型已停(运行中拦截),affected 必为空;非改名维持原 _routing_served 语义
+        primary_for_hint = body.name if is_rename else name
+        affected = _routing_served(primary_for_hint, new_cfg)
         return {"affected_routing": affected, "hint": "restart_model" if affected else None}
 
     @api.delete("/config/models/{name}")
