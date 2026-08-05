@@ -230,6 +230,20 @@ def _delete_old_sessions(old: str) -> "Callable":
     return drop
 
 
+def _alias_migrator(primary: str) -> "Callable":
+    """构造 post_write 回调:改别名(非改名)时,把日志 alias 快照同步为新的 aliases[0]。
+
+    日志页按别名显示;改别名若不迁移日志,旧日志残留旧别名快照(日志页显示旧名,
+    出现「两个名字」)。与改名迁移(_rename_migrator)对齐:别名变更即同步快照。"""
+    def sync(db, _old_cfg, new_cfg):
+        new_alias = new_cfg.models[primary].aliases[0]
+        db.conn.execute(
+            "UPDATE log_sessions SET alias=? WHERE model_name=?",
+            (new_alias, primary),
+        )
+    return sync
+
+
 def _delete_model(cfg: AppConfig, name: str) -> AppConfig:
     """fn: 删 name。不存在 → ModelNotFound(→ 404)。"""
     if name not in cfg.models:
@@ -469,7 +483,14 @@ def register_config_routes(api: APIRouter) -> None:
             # 请求记录留孤立。两者均在改名同事务内经 post_write 原子执行。
             post = _rename_migrator(name, body.name) if migrate_data else _delete_old_sessions(name)
         else:
-            post = None
+            # 非改名但 aliases[0] 变更:同步日志别名快照(日志页按别名显示,不残留旧名)。
+            # 变更判定用改前快照(store.snapshot);sync 用 post_write 传入的 new_cfg 取新别名。
+            old_cfg = store.snapshot()
+            if body.aliases and name in old_cfg.models \
+                    and body.aliases[0] != old_cfg.models[name].aliases[0]:
+                post = _alias_migrator(name)
+            else:
+                post = None
         try:
             new_cfg = mutate_appconfig(db, lambda c: _update_model(c, name, body), post_write=post)
         except ModelNotFound:

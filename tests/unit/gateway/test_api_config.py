@@ -426,6 +426,40 @@ def test_put_model_def_rename_migrate_syncs_alias_snapshot(tmp_path):
         assert la == ["new-a"]
 
 
+def test_put_model_def_alias_change_syncs_log_alias_snapshot(tmp_path):
+    """非改名但 aliases[0] 变更 → 日志 alias 快照同步为新别名(日志页按别名显示,不残留旧名)。"""
+    app = _app(tmp_path)
+    with TestClient(app) as c:
+        c.post("/api/config/models", json=_def_body("M", aliases=["old-a"]))
+        app.state.db.conn.execute(
+            "INSERT INTO log_sessions (type, model_name, alias, start_time) "
+            "VALUES ('model','M','old-a',0)"
+        )
+        app.state.db.conn.commit()
+        r = c.put("/api/config/models/M", json=_def_body("M", aliases=["new-a"]))   # 同名,别名变
+        assert r.status_code == 200
+        la = [row["alias"] for row in app.state.db.conn.execute(
+            "SELECT alias FROM log_sessions WHERE type='model'")]
+        assert la == ["new-a"]
+
+
+def test_put_model_def_same_alias_no_log_change(tmp_path):
+    """非改名且别名不变 → 日志不动(不误同步)。"""
+    app = _app(tmp_path)
+    with TestClient(app) as c:
+        c.post("/api/config/models", json=_def_body("M", aliases=["a1"]))
+        app.state.db.conn.execute(
+            "INSERT INTO log_sessions (type, model_name, alias, start_time) "
+            "VALUES ('model','M','a1',0)"
+        )
+        app.state.db.conn.commit()
+        r = c.put("/api/config/models/M", json=_def_body("M", aliases=["a1"]))   # 同名同别名
+        assert r.status_code == 200
+        la = [row["alias"] for row in app.state.db.conn.execute(
+            "SELECT alias FROM log_sessions WHERE type='model'")]
+        assert la == ["a1"]
+
+
 def test_put_model_def_rename_conflict_409(tmp_path):
     with TestClient(_app(tmp_path)) as c:
         c.post("/api/config/models", json=_def_body("M", port=8000))
