@@ -247,18 +247,21 @@ export function useLogViewer(api: LogApi | null, runKey: number | null) {
 /**
  * 单模型日志查看器(模型管理页右栏)。api 按 alias/runKey 定位该模型最新会话:
  * 停止/重启(runKey=pid 变)时重新定位 → 新会话 id → 重订阅。模型从未启动
- * (无会话)→ api=null → 面板空态。level/input 由 useLogViewer 持有,ModelLogPanel 经共享 LogLines 读写。
+ * (无会话)→ api=null → 面板空态。enabled=false(模型未运行)→ 不定位历史会话,
+ * 保持空态(避免停止后仍展示上一次的日志)。level/input 由 useLogViewer 持有,
+ * ModelLogPanel 经共享 LogLines 读写。
  */
-export function useModelLogs(alias: string, runKey: number | null) {
+export function useModelLogs(alias: string, runKey: number | null, enabled = true) {
   const [sessionId, setSessionId] = useState<number | null>(null);
   useEffect(() => {
+    if (!enabled) { setSessionId(null); return; }   // 模型未运行:不定位历史会话,保持空态
     let cancelled = false;
     setSessionId(null);
     fetchSessions({ type: "model", model: alias, limit: 1 })
       .then((s) => { if (!cancelled && s.length > 0) setSessionId(s[0].id); })
       .catch(() => { /* 后端不可达:保持空态 */ });
     return () => { cancelled = true; };
-  }, [alias, runKey]);
+  }, [alias, runKey, enabled]);
   const api = useMemo(
     () => (sessionId == null ? null : sessionLogApi(sessionId)),
     [sessionId],

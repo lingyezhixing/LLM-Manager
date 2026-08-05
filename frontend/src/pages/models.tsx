@@ -14,7 +14,7 @@ export default function ModelsPage() {
   const data = useEventStream<ModelsResponse>("/api/models/stream");
   const now = useNowTick(1000);
   const [sel, setSel] = useState<string | null>(null);
-  const models = data?.data ?? [];
+  const models = [...(data?.data ?? [])].sort((a, b) => a.port - b.port);   // 统一按 port 升序
   const selected = models.find((mm) => mm.alias === sel) ?? models[0] ?? null;
 
   return (

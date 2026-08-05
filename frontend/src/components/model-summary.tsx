@@ -27,7 +27,8 @@ export function ModelSummary() {
   if (!data) return <p className="text-sm text-muted-foreground">加载中…</p>;
 
   const models: ModelInfo[] = data.data ?? [];
-  const running = models.filter((m) => m.status === "routing");
+  const running = models.filter((m) => m.status === "routing")
+    .sort((a, b) => a.port - b.port);   // 统一按 port 升序
   const stopped = models.filter((m) => m.status === "stopped");
   const failed = models.filter((m) => m.status === "failed");
 
