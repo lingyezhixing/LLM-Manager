@@ -193,11 +193,20 @@ def _update_model(cfg: AppConfig, name: str, body: ModelDefInput) -> AppConfig:
 
 
 def _rename_migrator(old: str, new: str) -> "Callable":
-    """构造 post_write 回调:把 models.original_name 与 log_sessions.model_name 从 old 迁到 new。
-    在 mutate_appconfig 的写事务内执行(commit 前),与改名原子。alias 列不动(改名不改别名)。"""
-    def migrate(db, _old_cfg, _new_cfg):
+    """构造 post_write 回调:把模型身份从 old 迁到 new(改名 + 迁移时)。
+
+    - models.original_name(用量/成本/运行时锚点):old → new
+    - log_sessions.model_name:old → new
+    - log_sessions.alias(日志显示的服务名快照):同步为改名后配置的 aliases[0]——
+      日志页按别名显示,不同步会残留旧别名快照(出现「两个名字」)。
+    """
+    def migrate(db, _old_cfg, new_cfg):
         db.conn.execute("UPDATE models SET original_name=? WHERE original_name=?", (new, old))
-        db.conn.execute("UPDATE log_sessions SET model_name=? WHERE model_name=?", (new, old))
+        new_alias = new_cfg.models[new].aliases[0] if new_cfg.models[new].aliases else new
+        db.conn.execute(
+            "UPDATE log_sessions SET model_name=?, alias=? WHERE model_name=?",
+            (new, new_alias, old),
+        )
     return migrate
 
 

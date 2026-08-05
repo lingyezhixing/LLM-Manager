@@ -399,6 +399,31 @@ def test_put_model_def_rename_with_migrate_moves_data(tmp_path):
         ls = [row["model_name"] for row in app.state.db.conn.execute(
             "SELECT model_name FROM log_sessions WHERE type='model'")]
         assert ls == ["N"]
+        # alias 快照同步为新配置 aliases[0](日志页按别名显示,不残留旧名快照)
+        la = [row["alias"] for row in app.state.db.conn.execute(
+            "SELECT alias FROM log_sessions WHERE type='model'")]
+        assert la == ["N"]
+
+
+def test_put_model_def_rename_migrate_syncs_alias_snapshot(tmp_path):
+    """迁移时日志别名快照同步为新配置 aliases[0](改 primary + 别名都变时,旧日志不残留旧名)。"""
+    app = _app(tmp_path)
+    with TestClient(app) as c:
+        c.post("/api/config/models", json=_def_body("M", aliases=["old-a"]))
+        app.state.db.conn.execute(
+            "INSERT INTO log_sessions (type, model_name, alias, start_time) "
+            "VALUES ('model','M','old-a',0)"
+        )
+        app.state.db.conn.commit()
+        body = _def_body("N", aliases=["new-a"])   # 改名 + 别名同时变
+        r = c.put("/api/config/models/M?migrate_data=true", json=body)
+        assert r.status_code == 200
+        ls = [row["model_name"] for row in app.state.db.conn.execute(
+            "SELECT model_name FROM log_sessions WHERE type='model'")]
+        assert ls == ["N"]
+        la = [row["alias"] for row in app.state.db.conn.execute(
+            "SELECT alias FROM log_sessions WHERE type='model'")]
+        assert la == ["new-a"]
 
 
 def test_put_model_def_rename_conflict_409(tmp_path):
