@@ -10,7 +10,40 @@ from .common import (
     _lhm_computer, _aggregate_sensors,  # Windows LHM 运行时
 )
 
-# ==================== AMD(amdgpu sysfs,待 780M 实测校准)====================
+# ==================== AMD(amdgpu sysfs + LHM)====================
+
+
+def _is_amdgpu(dev: Path) -> bool:
+    """uevent 含 DRIVER=amdgpu → AMD GPU(与 Intel 的 _is_i915 同构,不依赖 vendor 猜测)。"""
+    try:
+        uevent = dev.joinpath("uevent").read_text(encoding="ascii", errors="ignore")
+    except OSError:
+        return False
+    return "DRIVER=amdgpu" in uevent
+
+
+def _amd_vram(dev: Path) -> tuple[int, int]:
+    """mem_info_vram_total / mem_info_vram_used(字节 → MB);缺失 → (0,0)。"""
+    total = _read_int_mb(dev / "mem_info_vram_total")
+    used = _read_int_mb(dev / "mem_info_vram_used")
+    return total, used
+
+
+_AMD_GPU_NAMES = {
+    "1002:15fe": "AMD Radeon 780M Graphics",
+}
+
+
+def _amd_gpu_name(dev: Path) -> str:
+    """uevent 的 PCI_ID(如 1002:15fe)→ 已知映射名,未知 → 'AMD Radeon (1002:xxxx)'。"""
+    try:
+        for line in dev.joinpath("uevent").read_text(encoding="ascii", errors="ignore").splitlines():
+            if line.startswith("PCI_ID="):
+                pci_id = line.split("=", 1)[1].strip().lower()
+                return _AMD_GPU_NAMES.get(pci_id, f"AMD Radeon ({pci_id})")
+    except OSError:
+        pass
+    return "AMD Radeon"
 
 
 class AmdAdapter:
@@ -26,7 +59,7 @@ class AmdAdapter:
 
     def _enumerate_linux(self) -> list[DeviceInfo]:
         """Linux amdgpu GPU:gpu_busy_percent 利用率 + mem_info_vram_* 显存 + hwmon 温度。
-        字段读不到自动降级 None/0。"""
+        字段读不到自动降级 None/0(无 amdgpu 卡实测校准,识别与字段语义按 amdgpu 驱动文档)。"""
         if not _DRM_CLASS.is_dir():
             return []
         out: list[DeviceInfo] = []
@@ -61,34 +94,3 @@ class AmdAdapter:
             except Exception:  # noqa: BLE001 — 单个 LHM GPU 传感器读取失败 → 跳过该 GPU,继续其余
                 pass
         return out
-
-
-def _is_amdgpu(dev: Path) -> bool:
-    try:
-        uevent = dev.joinpath("uevent").read_text(encoding="ascii", errors="ignore")
-    except OSError:
-        return False
-    return "DRIVER=amdgpu" in uevent
-
-
-def _amd_vram(dev: Path) -> tuple[int, int]:
-    """mem_info_vram_total / mem_info_vram_used(字节 → MB);缺失 → (0,0)。"""
-    total = _read_int_mb(dev / "mem_info_vram_total")
-    used = _read_int_mb(dev / "mem_info_vram_used")
-    return total, used
-
-
-_AMD_GPU_NAMES = {
-    "1002:15fe": "AMD Radeon 780M Graphics",
-}
-
-
-def _amd_gpu_name(dev: Path) -> str:
-    try:
-        for line in dev.joinpath("uevent").read_text(encoding="ascii", errors="ignore").splitlines():
-            if line.startswith("PCI_ID="):
-                pci_id = line.split("=", 1)[1].strip().lower()
-                return _AMD_GPU_NAMES.get(pci_id, f"AMD Radeon ({pci_id})")
-    except OSError:
-        pass
-    return "AMD Radeon"

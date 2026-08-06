@@ -116,7 +116,8 @@ def _lhm_computer():
 
 def _aggregate_sensors(device_name: str, sensors: Iterator[tuple[str, str, float]]) -> "DeviceInfo":
     """Pure: fold LHM sensor tuples into DeviceInfo. Port semantics from legacy amd_780m.py.
-    跨设备共享(Intel/AMD 的 LHM Gpu 折叠同一实现);各自遍历骨架在各设备文件。"""
+    跨设备共享(Intel/AMD 的 LHM Gpu 折叠同一实现);各自遍历骨架在各设备文件。
+    温度取同硬件所有温度传感器最大值(多传感器语义稳定,单传感器时即其本身)。"""
     from . import DeviceInfo  # noqa: F401 — 避免循环导入,延迟导入
     core_load = 0.0
     temp_c = None
@@ -134,7 +135,7 @@ def _aggregate_sensors(device_name: str, sensors: Iterator[tuple[str, str, float
             elif "Shared" in sname and "Total" in sname:
                 shared_total = val
         elif stype == "Temperature":
-            temp_c = val
+            temp_c = max(temp_c, val) if temp_c is not None else val
     total = ded_total + shared_total
     used = ded_used + shared_used
     if total <= 0:
