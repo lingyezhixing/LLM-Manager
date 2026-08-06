@@ -144,27 +144,25 @@ def _run_intel_gpu_top() -> str | None:
 
 
 def _parse_intel_gpu_top(stdout: str | None) -> dict | None:
-    """解析 intel_gpu_top -J 输出,取**最后一帧**完整采样(跳过 period.duration<100ms 的
-    初始化帧)。返回 {busy_pct, freq_mhz, power_watts};无有效帧/不可解析 → None。"""
+    """流式解析 intel_gpu_top -J 输出(pretty 多行/单行/逗号分隔均兼容),
+    取最后一帧完整采样(跳过 period.duration<100ms 的初始化帧)。
+    返回 {busy_pct, freq_mhz, power_watts};无有效帧/不可解析 → None。"""
     if not stdout:
         return None
     import json
-    last = None
-    for line in stdout.splitlines():
-        line = line.strip()
-        if not line or line in ("[", "]"):
-            continue
-        if line.endswith(","):
-            line = line[:-1]
-        if line.startswith(","):  # intel_gpu_top 记录分隔逗号在行首(实测样本)
-            line = line[1:]
+    decoder = json.JSONDecoder()
+    buf, last = stdout, None
+    while True:
+        buf = buf.lstrip(" \t\r\n,[]")
+        if not buf:
+            break
         try:
-            frame = json.loads(line)
+            frame, end = decoder.raw_decode(buf)
         except json.JSONDecodeError:
-            continue
-        if frame.get("period", {}).get("duration", 0) < 100:
-            continue  # 初始化帧(period≈0.035ms),无采样意义
-        last = frame
+            break
+        buf = buf[end:]
+        if frame.get("period", {}).get("duration", 0) >= 100:
+            last = frame
     if last is None:
         return None
     busy = max((e.get("busy", 0.0) for e in last.get("engines", {}).values()), default=0.0)

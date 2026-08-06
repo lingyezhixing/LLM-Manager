@@ -476,6 +476,60 @@ def test_parse_intel_gpu_top_skips_init_frame_and_takes_last(monkeypatch):
     assert m == {"busy_pct": 10.0, "freq_mhz": 1500.0, "power_watts": 1.2}  # 初始化帧跳过、取最后帧
 
 
+def test_parse_intel_gpu_top_pretty_multiline_real_format(monkeypatch):
+    # 真机实测:intel_gpu_top -J 输出为 pretty 多行格式(每帧跨 ~20 行,字段逐行)
+    from llm_manager.devices.adapters import _parse_intel_gpu_top
+
+    sample = ('[\n'
+              '{\n'
+              '\t"period": {\n'
+              '\t\t"duration": 0.035112,\n'
+              '\t\t"unit": "ms"\n'
+              '\t},\n'
+              '\t"engines": {\n'
+              '\t\t"Render/3D": {\n'
+              '\t\t\t"busy": 0.000000,\n'
+              '\t\t\t"sema": 0.000000,\n'
+              '\t\t\t"wait": 0.000000,\n'
+              '\t\t\t"unit": "%"\n'
+              '\t\t}\n'
+              '\t}\n'
+              '},\n'
+              '{\n'
+              '\t"period": {\n'
+              '\t\t"duration": 1000.342406,\n'
+              '\t\t"unit": "ms"\n'
+              '\t},\n'
+              '\t"frequency": {\n'
+              '\t\t"requested": 2400.000000,\n'
+              '\t\t"actual": 2400.000000,\n'
+              '\t\t"unit": "MHz"\n'
+              '\t},\n'
+              '\t"engines": {\n'
+              '\t\t"Render/3D": {\n'
+              '\t\t\t"busy": 12.500000,\n'
+              '\t\t\t"sema": 0.000000,\n'
+              '\t\t\t"wait": 0.000000,\n'
+              '\t\t\t"unit": "%"\n'
+              '\t\t},\n'
+              '\t\t"Video": {\n'
+              '\t\t\t"busy": 5.000000,\n'
+              '\t\t\t"sema": 0.000000,\n'
+              '\t\t\t"wait": 0.000000,\n'
+              '\t\t\t"unit": "%"\n'
+              '\t\t}\n'
+              '\t},\n'
+              '\t"power": {\n'
+              '\t\t"GPU": 3.500000,\n'
+              '\t\t"Package": 2.389197,\n'
+              '\t\t"unit": "W"\n'
+              '\t}\n'
+              '}\n'
+              ']')
+    m = _parse_intel_gpu_top(sample)
+    assert m == {"busy_pct": 12.5, "freq_mhz": 2400.0, "power_watts": 3.5}  # 初始化帧跳过、busy 取 max
+
+
 def test_parse_intel_gpu_top_unparseable_returns_none():
     from llm_manager.devices.adapters import _parse_intel_gpu_top
     assert _parse_intel_gpu_top("") is None
