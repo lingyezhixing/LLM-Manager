@@ -51,29 +51,29 @@ def test_is_lhm_available_no_pythonnet(monkeypatch):
 def test_is_lhm_available_dll_present(monkeypatch, tmp_path):
     import sys
     import types
-    import llm_manager.devices as dev
+    from llm_manager.devices import adapters as ad
 
     monkeypatch.setitem(sys.modules, "clr", types.ModuleType("clr"))  # 假装 pythonnet 已装
     fake_dll = tmp_path / "LibreHardwareMonitorLib.dll"
     fake_dll.write_text("fake")
-    monkeypatch.setattr(dev, "_LHM_DLL", fake_dll)
-    assert dev.is_lhm_available() is True
+    monkeypatch.setattr(ad, "_LHM_DLL", fake_dll)
+    assert ad.is_lhm_available() is True
 
 
 def test_is_lhm_available_dll_missing(monkeypatch, tmp_path):
     import sys
     import types
-    import llm_manager.devices as dev
+    from llm_manager.devices import adapters as ad
 
     monkeypatch.setitem(sys.modules, "clr", types.ModuleType("clr"))
-    monkeypatch.setattr(dev, "_LHM_DLL", tmp_path / "nonexistent.dll")
-    assert dev.is_lhm_available() is False
+    monkeypatch.setattr(ad, "_LHM_DLL", tmp_path / "nonexistent.dll")
+    assert ad.is_lhm_available() is False
 
 
 def test_run_smi_uses_noheader_nounits_format(monkeypatch):
     # 真机验证发现:nvidia-smi 默认输出带 [MiB]/[%] 单位,_parse_smi 的 int() 解析失败 →
     # 必须用 --format=csv,noheader,nounits 让输出纯数字(_parse_smi 纯函数不变)。
-    import llm_manager.devices as dev
+    from llm_manager.devices import adapters as ad
     captured = {}
 
     class _R:
@@ -84,8 +84,8 @@ def test_run_smi_uses_noheader_nounits_format(monkeypatch):
         captured["cmd"] = cmd
         return _R()
 
-    monkeypatch.setattr(dev.subprocess, "run", fake_run)
-    dev._run_smi()
+    monkeypatch.setattr(ad.subprocess, "run", fake_run)
+    ad._run_smi()
     assert "--format=csv,noheader,nounits" in captured["cmd"], captured["cmd"]
 
 
@@ -167,11 +167,11 @@ def test_match_devices_requires_full_subset_not_partial():
 
 
 def test_enumerate_nvidia_returns_all_rows_with_raw_names(monkeypatch):
-    import llm_manager.devices as dev
+    from llm_manager.devices import adapters as ad
     smi = ("NVIDIA GeForce RTX 4060 Laptop GPU, 8188, 1692, 6266, 35, 51\n"
            "Tesla V100-SXM2-32GB, 32768, 0, 32365, 0, 40\n")
-    monkeypatch.setattr(dev, "_run_smi", lambda: smi)
-    out = dev.enumerate_nvidia()
+    monkeypatch.setattr(ad, "_run_smi", lambda: smi)
+    out = ad.NvidiaAdapter().enumerate()
     assert len(out) == 2
     assert out[0].device_name == "NVIDIA GeForce RTX 4060 Laptop GPU"  # 原始名,非 config 键
     assert out[0].device_type == "GPU" and out[0].memory_type == "VRAM"
@@ -180,46 +180,46 @@ def test_enumerate_nvidia_returns_all_rows_with_raw_names(monkeypatch):
 
 
 def test_enumerate_nvidia_empty_when_no_smi(monkeypatch):
-    import llm_manager.devices as dev
-    monkeypatch.setattr(dev, "_run_smi", lambda: "")
-    assert dev.enumerate_nvidia() == []
+    from llm_manager.devices import adapters as ad
+    monkeypatch.setattr(ad, "_run_smi", lambda: "")
+    assert ad.NvidiaAdapter().enumerate() == []
 
 
 def test_lhm_computer_unavailable_returns_none(monkeypatch):
-    import llm_manager.devices as dev
-    monkeypatch.setattr(dev, "is_lhm_available", lambda: False)
-    assert dev._lhm_computer() is None
+    from llm_manager.devices import adapters as ad
+    monkeypatch.setattr(ad, "is_lhm_available", lambda: False)
+    assert ad._lhm_computer() is None
 
 
 def test_lhm_computer_init_failure_returns_none(monkeypatch):
     # 初始化抛异常(AddReference 失败等)→ None,不穿透(防 enumerate_cpu 的 try 外调用)
     import sys
     import types
-    import llm_manager.devices as dev
+    from llm_manager.devices import adapters as ad
 
     def boom(*a, **k):
         raise RuntimeError("AddReference failed")
 
     fake_clr = types.ModuleType("clr")
     fake_clr.AddReference = boom
-    monkeypatch.setattr(dev, "is_lhm_available", lambda: True)
+    monkeypatch.setattr(ad, "is_lhm_available", lambda: True)
     monkeypatch.setitem(sys.modules, "clr", fake_clr)
-    monkeypatch.setattr(dev, "_LHM_COMPUTER", None)
-    assert dev._lhm_computer() is None
+    monkeypatch.setattr(ad, "_LHM_COMPUTER", None)
+    assert ad._lhm_computer() is None
 
 
 def test_enumerate_cpu_basic(monkeypatch):
-    import llm_manager.devices as dev
+    from llm_manager.devices import adapters as ad
 
     class _Mem:
         total = 16 * 1024**3
         available = 8 * 1024**3
         used = 8 * 1024**3
 
-    monkeypatch.setattr(dev.psutil, "virtual_memory", lambda: _Mem())
-    monkeypatch.setattr(dev.psutil, "cpu_percent", lambda interval=None: 33.0)
-    monkeypatch.setattr(dev, "_lhm_cpu_temp", lambda: None)
-    out = dev.enumerate_cpu()
+    monkeypatch.setattr(ad.psutil, "virtual_memory", lambda: _Mem())
+    monkeypatch.setattr(ad.psutil, "cpu_percent", lambda interval=None: 33.0)
+    monkeypatch.setattr(ad, "_lhm_cpu_temp", lambda: None)
+    out = ad.CpuAdapter().enumerate()
     assert len(out) == 1
     info = out[0]
     assert info.device_name == "CPU"
@@ -231,28 +231,28 @@ def test_enumerate_cpu_basic(monkeypatch):
 
 
 def test_enumerate_cpu_psutil_failure_degraded(monkeypatch):
-    import llm_manager.devices as dev
+    from llm_manager.devices import adapters as ad
 
     def boom():
         raise OSError("psutil broke")
 
-    monkeypatch.setattr(dev.psutil, "virtual_memory", boom)
-    out = dev.enumerate_cpu()
+    monkeypatch.setattr(ad.psutil, "virtual_memory", boom)
+    out = ad.CpuAdapter().enumerate()
     assert len(out) == 1  # 恒 1 元素:降级不抛
     assert out[0].device_name == "CPU"
     assert out[0].total_memory_mb == 0  # 降级零值
 
 
 def test_lhm_cpu_temp_unavailable_returns_none(monkeypatch):
-    import llm_manager.devices as dev
-    monkeypatch.setattr(dev, "_lhm_computer", lambda: None)
-    assert dev._lhm_cpu_temp() is None
+    from llm_manager.devices import adapters as ad
+    monkeypatch.setattr(ad, "_lhm_computer", lambda: None)
+    assert ad._lhm_cpu_temp() is None
 
 
 def test_enumerate_lhm_gpus_unavailable_returns_empty(monkeypatch):
-    import llm_manager.devices as dev
-    monkeypatch.setattr(dev, "_lhm_computer", lambda: None)
-    assert dev.enumerate_lhm_gpus() == []
+    from llm_manager.devices import adapters as ad
+    monkeypatch.setattr(ad, "_lhm_computer", lambda: None)
+    assert ad.LhmAdapter().enumerate() == []
 
 
 def test_device_monitor_matches_config_names_and_keeps_unmatched():
@@ -327,9 +327,10 @@ def test_device_monitor_enumerator_exception_isolated():
 def test_new_gpu_model_matches_via_config_only(monkeypatch):
     """加设备零改代码:config 写 'rtx 5090',mock nvidia-smi 返回 5090 行 → 匹配成功,无需改 devices.py。"""
     import llm_manager.devices as dev
+    from llm_manager.devices import adapters as ad
     smi = "NVIDIA GeForce RTX 5090, 32768, 1000, 31768, 5, 45\n"
-    monkeypatch.setattr(dev, "_run_smi", lambda: smi)
-    matched, unmatched = dev.match_devices({"rtx 5090"}, dev.enumerate_nvidia())
+    monkeypatch.setattr(ad, "_run_smi", lambda: smi)
+    matched, unmatched = dev.match_devices({"rtx 5090"}, ad.NvidiaAdapter().enumerate())
     assert "rtx 5090" in matched
     assert matched["rtx 5090"].device_name == "NVIDIA GeForce RTX 5090"
     assert matched["rtx 5090"].total_memory_mb == 32768
@@ -361,19 +362,19 @@ def _make_fake_sysfs(tmp_path, *, vendor="0x8086", busy="42", pci_id="8086:46d1"
 
 
 def test_enumerate_intel_igpus_basic(monkeypatch, tmp_path):
-    import llm_manager.devices as dev
+    from llm_manager.devices import adapters as ad
 
     drm = _make_fake_sysfs(tmp_path, busy="42", temp_mc=48000)
-    monkeypatch.setattr(dev.os, "name", "posix")
-    monkeypatch.setattr(dev, "_DRM_CLASS", drm)
+    monkeypatch.setattr(ad.os, "name", "posix")
+    monkeypatch.setattr(ad, "_DRM_CLASS", drm)
 
     class _Mem:
         total = 16 * 1024**3
         available = 8 * 1024**3
         used = 8 * 1024**3
 
-    monkeypatch.setattr(dev.psutil, "virtual_memory", lambda: _Mem())
-    out = dev.enumerate_intel_igpus()
+    monkeypatch.setattr(ad.psutil, "virtual_memory", lambda: _Mem())
+    out = ad.IntelLinuxAdapter().enumerate()
     assert len(out) == 1  # 只命中 card0;card1(NVIDIA)与 connector 跳过
     info = out[0]
     assert info.device_name == "Intel UHD Graphics (Alder Lake-N)"  # 46d1 映射
@@ -384,54 +385,54 @@ def test_enumerate_intel_igpus_basic(monkeypatch, tmp_path):
 
 
 def test_enumerate_intel_igpus_unknown_pci_id_fallback(monkeypatch, tmp_path):
-    import llm_manager.devices as dev
+    from llm_manager.devices import adapters as ad
 
     drm = _make_fake_sysfs(tmp_path, pci_id="8086:46f0")
-    monkeypatch.setattr(dev.os, "name", "posix")
-    monkeypatch.setattr(dev, "_DRM_CLASS", drm)
-    out = dev.enumerate_intel_igpus()
+    monkeypatch.setattr(ad.os, "name", "posix")
+    monkeypatch.setattr(ad, "_DRM_CLASS", drm)
+    out = ad.IntelLinuxAdapter().enumerate()
     assert len(out) == 1
     assert out[0].device_name == "Intel UHD Graphics (8086:46f0)"
 
 
 def test_enumerate_intel_igpus_skips_non_intel_and_no_busy(monkeypatch, tmp_path):
-    import llm_manager.devices as dev
+    from llm_manager.devices import adapters as ad
 
     drm = _make_fake_sysfs(tmp_path, busy=None)  # 有 vendor 但无 gpu_busy_percent → 跳过
-    monkeypatch.setattr(dev.os, "name", "posix")
-    monkeypatch.setattr(dev, "_DRM_CLASS", drm)
-    assert dev.enumerate_intel_igpus() == []
+    monkeypatch.setattr(ad.os, "name", "posix")
+    monkeypatch.setattr(ad, "_DRM_CLASS", drm)
+    assert ad.IntelLinuxAdapter().enumerate() == []
 
     drm2 = _make_fake_sysfs(tmp_path / "b", vendor="0x10de")
-    monkeypatch.setattr(dev, "_DRM_CLASS", drm2)
-    assert dev.enumerate_intel_igpus() == []
+    monkeypatch.setattr(ad, "_DRM_CLASS", drm2)
+    assert ad.IntelLinuxAdapter().enumerate() == []
 
 
 def test_enumerate_intel_igpus_windows_and_missing_sysfs(monkeypatch, tmp_path):
-    import llm_manager.devices as dev
+    from llm_manager.devices import adapters as ad
 
     drm = _make_fake_sysfs(tmp_path, busy="42")
-    monkeypatch.setattr(dev, "_DRM_CLASS", drm)
-    monkeypatch.setattr(dev.os, "name", "nt")
-    assert dev.enumerate_intel_igpus() == []  # Windows 不走 sysfs
+    monkeypatch.setattr(ad, "_DRM_CLASS", drm)
+    monkeypatch.setattr(ad.os, "name", "nt")
+    assert ad.IntelLinuxAdapter().enumerate() == []  # Windows 不走 sysfs
 
-    monkeypatch.setattr(dev.os, "name", "posix")
-    monkeypatch.setattr(dev, "_DRM_CLASS", tmp_path / "nonexistent")
-    assert dev.enumerate_intel_igpus() == []  # 无 /sys/class/drm → []
+    monkeypatch.setattr(ad.os, "name", "posix")
+    monkeypatch.setattr(ad, "_DRM_CLASS", tmp_path / "nonexistent")
+    assert ad.IntelLinuxAdapter().enumerate() == []  # 无 /sys/class/drm → []
 
 
 def test_enumerate_intel_igpus_psutil_failure_degraded(monkeypatch, tmp_path):
-    import llm_manager.devices as dev
+    from llm_manager.devices import adapters as ad
 
     drm = _make_fake_sysfs(tmp_path, busy="7")
-    monkeypatch.setattr(dev.os, "name", "posix")
-    monkeypatch.setattr(dev, "_DRM_CLASS", drm)
+    monkeypatch.setattr(ad.os, "name", "posix")
+    monkeypatch.setattr(ad, "_DRM_CLASS", drm)
 
     def boom():
         raise OSError("psutil broke")
 
-    monkeypatch.setattr(dev.psutil, "virtual_memory", boom)
-    out = dev.enumerate_intel_igpus()
+    monkeypatch.setattr(ad.psutil, "virtual_memory", boom)
+    out = ad.IntelLinuxAdapter().enumerate()
     assert len(out) == 1  # 降级零值,不抛
     assert out[0].total_memory_mb == 0
     assert out[0].usage_percentage == 7.0
