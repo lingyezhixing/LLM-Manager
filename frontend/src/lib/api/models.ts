@@ -26,6 +26,8 @@ export interface DeviceInfo {
   used_memory_mb: number;
   usage_percentage: number;
   temperature_celsius: number | null;
+  freq_mhz: number | null;
+  power_watts: number | null;
 }
 export interface DevicesResponse { data: DeviceInfo[]; }
 

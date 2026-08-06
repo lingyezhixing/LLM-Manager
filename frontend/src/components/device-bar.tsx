@@ -33,6 +33,7 @@ function DeviceCard({
         <span className="text-xs text-muted-foreground">
           {isCpu ? "CPU" : "GPU"}
           {d.temperature_celsius != null ? <> · <span className="font-mono">{Math.round(d.temperature_celsius)}°C</span></> : ""}
+          {d.freq_mhz != null ? <> · <span className="font-mono">{Math.round(d.freq_mhz)} MHz</span></> : ""}
         </span>
       </div>
       <div className="mt-2 flex items-center justify-between text-xs text-muted-foreground">
