@@ -114,3 +114,8 @@ docs/
 
 # 忽略开发用启动脚本（仅本地开发，不上传）
 Dev-Backend.bat
+
+# Docker 实际使用文件：由 example 复制而来（cp Dockerfile.example Dockerfile），
+# 可随意修改不影响 git；example 模板本身入库追踪
+Dockerfile
+docker-compose.yml

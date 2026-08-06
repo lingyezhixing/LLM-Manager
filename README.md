@@ -92,6 +92,19 @@ python -m llm_manager
 
 启动后访问：`http://localhost:8080`（8080 端口同时 serve API 与前端构建产物 `frontend/dist`）
 
+### 4. Docker 部署（挂载模式）
+```bash
+# 从 example 模板复制出实际文件（实际文件已 gitignore，可随意修改，不影响 git 更新）
+cp Dockerfile.example Dockerfile
+cp docker-compose.yml.example docker-compose.yml
+
+docker compose up -d --build     # 首次构建 + 启动
+docker compose up -d             # 日常：改代码/配置后重启即可，无需重建
+```
+- 整个代码库挂载进容器（`.:/app`）：环境是环境、代码是代码，改代码/前端 dist 即时生效，只有依赖变更才需重建
+- `data/`、`logs/` 落在宿主机，天然持久化；配置全部走 WebUI（DB 化），无需进容器改文件
+- 容器内 `python -m llm_manager` 即 parent+worker 自重启；镜像预装 llama.cpp 编译/运行所需系统库（Vulkan/OpenBLAS/cmake 工具链），llama.cpp 编译脚本不归本仓库管理
+
 ---
 
 ## 系统配置（SQLite DB 化）

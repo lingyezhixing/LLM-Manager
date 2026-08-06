@@ -1,0 +1,28 @@
+services:
+  llm-manager:
+    container_name: llm-manager
+    build: .
+    image: lingyezhixing/llm-manager:latest
+    restart: unless-stopped
+    volumes:
+      - .:/app
+    ports:
+      - "8080:8080"
+    environment:
+      - TZ=Asia/Shanghai
+      # - LLM_MANAGER_DB_PATH=/app/data/llm_manager.db   # 默认即此,一般无需设置
+    devices:
+      - /dev/dri/renderD128:/dev/dri/renderD128
+    # NVIDIA GPU(宿主需已装 nvidia-container-toolkit):
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+    # 与其他容器互联(需先 `docker network create open-webui-net`,外部网络):
+    # networks:
+    #   default:
+    #     name: open-webui-net
+    #     external: true
