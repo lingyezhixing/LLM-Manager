@@ -1,4 +1,12 @@
 @echo off
+:: 提权:非管理员 → PowerShell 以管理员身份重新拉起自身(UAC 一次)。
+:: 开机自启(任务计划程序)已注册为最高权限则直接跳过此段。
+net session >nul 2>&1
+if %errorlevel% neq 0 (
+    powershell -NoProfile -Command "Start-Process -FilePath '%~f0' -ArgumentList '%*' -Verb RunAs"
+    exit /b
+)
+
 if "%1"=="silent" goto silent_start
 
 set "vbsfile=%temp%\%~n0.vbs"

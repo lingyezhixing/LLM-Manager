@@ -1,6 +1,7 @@
 """设备适配器共享辅助:_DRM_CLASS/_drm_cards(DRM sysfs)、_system_mem(系统内存)、
 _hwmon_temp1(hwmon 温度)、_read_float/_read_int_mb(数值读取)以及 Windows LHM 运行时
-(Intel/AMD/CPU 共享)。"""
+(单例 _lhm_computer + 跨设备共享折叠 _aggregate_sensors;设备私有解析如 CPU Tctl 温度
+在各设备文件内部,遵循「每设备文件按平台分割路径」)。"""
 from __future__ import annotations
 
 import atexit
@@ -65,8 +66,7 @@ _LHM_DLL = Path(__file__).resolve().parents[1] / "assets" / "dll" / "LibreHardwa
 
 
 def is_lhm_available() -> bool:
-    """pythonnet 可 import + LHM DLL 存在。devices.build_adapters() 装配位一次性判断
-    (DLL 路径复用 _LHM_DLL 单一来源)。"""
+    """pythonnet 可 import + LHM DLL 存在。_lhm_computer 惰性初始化前的快速判定。"""
     try:
         import clr  # type: ignore[import-not-found]  # noqa: F401
     except ImportError:
@@ -90,8 +90,7 @@ def _close_lhm() -> None:
 
 def _lhm_computer():
     """共享 LHM Computer 单例。**契约:永不抛**(返回 Computer | None)——初始化失败→None,
-    使 CpuAdapter.enumerate/IntelAdapter._enumerate_windows/AmdAdapter._enumerate_windows 降级而非 raise
-    (防 _lhm_cpu_temp 在 CpuAdapter.enumerate 的 try 外调用时穿透)。
+    使各适配器 Windows 分支(CPU/Intel/AMD)降级而非 raise。
     惰性首次调用初始化(非模块加载时):import clr + AddReference + Computer() + Open() 只首次发生(Lock double-check);
     其后 fast-path = 缓存返回。is_lhm_available() 为假→直接 None。IsCpu+IsGpu 一次开,共用。"""
     global _LHM_COMPUTER
@@ -116,7 +115,8 @@ def _lhm_computer():
 
 
 def _aggregate_sensors(device_name: str, sensors: Iterator[tuple[str, str, float]]) -> "DeviceInfo":
-    """Pure: fold LHM sensor tuples into DeviceInfo. Port semantics from legacy amd_780m.py."""
+    """Pure: fold LHM sensor tuples into DeviceInfo. Port semantics from legacy amd_780m.py.
+    跨设备共享(Intel/AMD 的 LHM Gpu 折叠同一实现);各自遍历骨架在各设备文件。"""
     from . import DeviceInfo  # noqa: F401 — 避免循环导入,延迟导入
     core_load = 0.0
     temp_c = None
@@ -144,23 +144,3 @@ def _aggregate_sensors(device_name: str, sensors: Iterator[tuple[str, str, float
         int(total), int(total - used), int(used), float(core_load),
         int(round(temp_c)) if temp_c is not None else None,
     )
-
-
-def _lhm_cpu_temp() -> float | None:
-    """从共享 LHM Computer 读 Cpu 硬件的 Tctl/Tdie 温度。不可用(无 LHM / 无 Cpu / 异常)→ None。"""
-    c = _lhm_computer()
-    if c is None:
-        return None
-    try:
-        for hw in c.Hardware:
-            if str(hw.HardwareType) != "Cpu":
-                continue
-            hw.Update()
-            for s in hw.Sensors:
-                if str(s.SensorType) == "Temperature" and (
-                    "Tctl" in str(s.Name) or "Tdie" in str(s.Name)
-                ):
-                    return float(s.Value) if s.Value is not None else None
-    except Exception:  # noqa: BLE001 — 读 LHM CPU 温度失败 → None
-        return None
-    return None

@@ -219,7 +219,7 @@ def test_enumerate_cpu_basic(monkeypatch):
 
     monkeypatch.setattr(ad.psutil, "virtual_memory", lambda: _Mem())
     monkeypatch.setattr(ad.psutil, "cpu_percent", lambda interval=None: 33.0)
-    monkeypatch.setattr(ad, "_lhm_cpu_temp", lambda: None)
+    monkeypatch.setattr(ad, "_cpu_temp", lambda: None)
     out = ad.CpuAdapter().enumerate()
     assert len(out) == 1
     info = out[0]
@@ -238,6 +238,7 @@ def test_enumerate_cpu_psutil_failure_degraded(monkeypatch):
         raise OSError("psutil broke")
 
     monkeypatch.setattr(ad.psutil, "virtual_memory", boom)
+    monkeypatch.setattr(ad, "_cpu_temp", lambda: None)
     out = ad.CpuAdapter().enumerate()
     assert len(out) == 1  # 恒 1 元素:降级不抛
     assert out[0].device_name == "CPU"
@@ -245,9 +246,179 @@ def test_enumerate_cpu_psutil_failure_degraded(monkeypatch):
 
 
 def test_lhm_cpu_temp_unavailable_returns_none(monkeypatch):
-    from llm_manager.devices import common as cm
-    monkeypatch.setattr(cm, "_lhm_computer", lambda: None)
-    assert cm._lhm_cpu_temp() is None
+    from llm_manager.devices import cpu as ad
+    monkeypatch.setattr(ad, "_lhm_computer", lambda: None)
+    assert ad._lhm_cpu_temp() is None
+
+
+def _fake_cpu_hw(*sensors):
+    """(SensorType, Name, Value) 元组 → 假 LHM Cpu 硬件(供 _lhm_cpu_temp 测试)。"""
+    import types
+
+    class _FakeSensor:
+        def __init__(self, stype, sname, val):
+            self.SensorType = stype
+            self.Name = sname
+            self.Value = val
+
+    class _FakeHardware:
+        HardwareType = "Cpu"
+
+        def __init__(self, sensors):
+            self.Sensors = sensors
+
+        def Update(self):
+            pass
+
+    return types.SimpleNamespace(Hardware=[
+        _FakeHardware([_FakeSensor(*t) for t in sensors])
+    ])
+
+
+def test_lhm_cpu_temp_reads_valid_tctl(monkeypatch):
+    """管理员下真实读数:>0 直接返回。"""
+    from llm_manager.devices import cpu as ad
+
+    monkeypatch.setattr(ad, "_lhm_computer",
+                        lambda: _fake_cpu_hw(("Temperature", "Core (Tctl/Tdie)", 78.125)))
+    assert ad._lhm_cpu_temp() == 78.125
+
+
+def test_lhm_cpu_temp_zero_without_corroboration_returns_none(monkeypatch):
+    """非管理员 Ryzen:整组 Power=0 / Clock=nan / Tctl=0,Load 正常 → Load 不作佐证 → None。"""
+    from llm_manager.devices import cpu as ad
+
+    monkeypatch.setattr(ad, "_lhm_computer", lambda: _fake_cpu_hw(
+        ("Load", "CPU Core #1", 21.8),
+        ("Load", "CPU Total", 20.3),
+        ("Power", "Package", 0.0),
+        ("Clock", "Core #1", float("nan")),
+        ("Temperature", "Core (Tctl/Tdie)", 0.0),
+    ))
+    assert ad._lhm_cpu_temp() is None
+
+
+def test_lhm_cpu_temp_zero_with_corroboration_returns_zero(monkeypatch):
+    """真 0°C 制冷:Power/Clock 正常 → 佐证成立 → 0 原样上报。"""
+    from llm_manager.devices import cpu as ad
+
+    monkeypatch.setattr(ad, "_lhm_computer", lambda: _fake_cpu_hw(
+        ("Power", "Package", 40.5),
+        ("Clock", "Core #1", 4990.0),
+        ("Temperature", "Core (Tctl/Tdie)", 0.0),
+    ))
+    assert ad._lhm_cpu_temp() == 0.0
+
+
+def test_lhm_cpu_temp_nan_never_returned(monkeypatch):
+    """NaN 不是温度读数:即使有佐证也不返回 → None。"""
+    from llm_manager.devices import cpu as ad
+
+    monkeypatch.setattr(ad, "_lhm_computer", lambda: _fake_cpu_hw(
+        ("Power", "Package", 40.5),
+        ("Temperature", "Core (Tctl/Tdie)", float("nan")),
+    ))
+    assert ad._lhm_cpu_temp() is None
+
+
+def test_lhm_cpu_temp_invalid_then_valid_second_sensor(monkeypatch):
+    """多 Tctl 传感器:先无效(0)后有效 → 取有效值,不被 0 截断。"""
+    from llm_manager.devices import cpu as ad
+
+    monkeypatch.setattr(ad, "_lhm_computer", lambda: _fake_cpu_hw(
+        ("Temperature", "Core (Tctl)", 0.0),
+        ("Temperature", "Core (Tdie)", 55.0),
+    ))
+    assert ad._lhm_cpu_temp() == 55.0
+
+
+def test_cpu_temp_windows_branch_lhm(monkeypatch):
+    """Windows 分支:走 LHM,不触碰 hwmon。"""
+    from llm_manager.devices import cpu as ad
+
+    def boom():
+        raise AssertionError("hwmon 不应被调用")
+
+    monkeypatch.setattr(ad.os, "name", "nt")
+    monkeypatch.setattr(ad, "_lhm_cpu_temp", lambda: 65.0)
+    monkeypatch.setattr(ad, "_cpu_temp_hwmon", boom)
+    assert ad._cpu_temp() == 65.0
+
+
+def test_cpu_temp_windows_branch_lhm_none(monkeypatch):
+    """Windows 分支:LHM 不可用 → None,不回退 hwmon。"""
+    from llm_manager.devices import cpu as ad
+
+    monkeypatch.setattr(ad.os, "name", "nt")
+    monkeypatch.setattr(ad, "_lhm_cpu_temp", lambda: None)
+    assert ad._cpu_temp() is None
+
+
+def test_cpu_temp_linux_branch_hwmon(monkeypatch):
+    """Linux 分支:走 hwmon 读 coretemp,不触碰 LHM。"""
+    import types
+    from llm_manager.devices import cpu as ad
+
+    def boom():
+        raise AssertionError("LHM 不应被调用")
+
+    monkeypatch.setattr(ad.os, "name", "posix")
+    monkeypatch.setattr(ad, "_lhm_cpu_temp", boom)
+    monkeypatch.setattr(ad.psutil, "sensors_temperatures", lambda: {
+        "coretemp": [types.SimpleNamespace(label="Package id 0", current=46.0)],
+    }, raising=False)
+    assert ad._cpu_temp() == 46.0
+
+
+def test_cpu_temp_linux_branch_no_temp(monkeypatch):
+    """Linux 分支:hwmon 无 CPU 芯片 → None。"""
+    import types
+    from llm_manager.devices import cpu as ad
+
+    monkeypatch.setattr(ad.os, "name", "posix")
+    monkeypatch.setattr(ad.psutil, "sensors_temperatures", lambda: {
+        "acpitz": [types.SimpleNamespace(label="", current=27.8)],
+    }, raising=False)
+    assert ad._cpu_temp() is None
+
+
+def test_cpu_temp_hwmon_prefers_package_label(monkeypatch):
+    """label 优先:Core 0 在前,仍取 Package id 0。"""
+    import types
+    from llm_manager.devices import cpu as ad
+
+    monkeypatch.setattr(ad.psutil, "sensors_temperatures", lambda: {
+        "coretemp": [
+            types.SimpleNamespace(label="Core 0", current=45.0),
+            types.SimpleNamespace(label="Package id 0", current=47.0),
+        ],
+    }, raising=False)
+    assert ad._cpu_temp_hwmon() == 47.0
+
+
+def test_cpu_temp_hwmon_ignores_non_cpu_chips(monkeypatch):
+    """只认 CPU 芯片:acpitz/it8613(主板/环境)不兜底 → None。"""
+    import types
+    from llm_manager.devices import cpu as ad
+
+    monkeypatch.setattr(ad.psutil, "sensors_temperatures", lambda: {
+        "acpitz": [types.SimpleNamespace(label="", current=27.8)],
+        "it8613": [types.SimpleNamespace(label="", current=45.0)],
+    }, raising=False)
+    assert ad._cpu_temp_hwmon() is None
+
+
+def test_cpu_temp_hwmon_unavailable_returns_none(monkeypatch):
+    """hwmon 读失败 / 空 / Windows 无此函数 → None(不抛)。"""
+    from llm_manager.devices import cpu as ad
+
+    def boom():
+        raise OSError("no hwmon")
+
+    monkeypatch.setattr(ad.psutil, "sensors_temperatures", boom, raising=False)
+    assert ad._cpu_temp_hwmon() is None
+    monkeypatch.setattr(ad.psutil, "sensors_temperatures", lambda: {}, raising=False)
+    assert ad._cpu_temp_hwmon() is None
 
 
 def test_device_monitor_matches_config_names_and_keeps_unmatched():
