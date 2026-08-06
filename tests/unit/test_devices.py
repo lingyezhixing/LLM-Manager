@@ -596,6 +596,61 @@ def test_device_monitor_enumerator_exception_isolated():
     assert "cpu" in mon.online_devices()
 
 
+def _ranked_adapter(cls_name, devices):
+    """类名与真实适配器一致的假适配器(DeviceMonitor 按 type(ad).__name__ 排序)。"""
+    cls = type(cls_name, (object,), {"enumerate": lambda self: devices})
+    return cls()
+
+
+def test_device_monitor_sorts_cpu_first_then_n_a_i():
+    """卡片顺序:CPU 首位,其余 N-A-I;组内按枚举序(N卡即 CUDA 序)。"""
+    from llm_manager.devices import DeviceMonitor, DeviceInfo
+
+    nvidia = [
+        DeviceInfo("NVIDIA GeForce RTX 4060", "GPU", "VRAM", 8188, 6266, 1692, 35.0, 51.0),
+        DeviceInfo("NVIDIA GeForce RTX 4090", "GPU", "VRAM", 24564, 23540, 1024, 99.0, 70.0),
+    ]
+    amd = [DeviceInfo("AMD Radeon 780M Graphics", "GPU (APU)", "Shared+Ded", 16394, 16376, 17, 0.0, 56.0)]
+    intel = [DeviceInfo("Intel UHD Graphics (Alder Lake-N)", "GPU (iGPU)", "Shared RAM", 15729, 5866, 9863, 0.0, None)]
+    cpu = [DeviceInfo("CPU", "CPU", "RAM", 16384, 8192, 8192, 33.0, None)]
+
+    mon = DeviceMonitor(
+        [_ranked_adapter("NvidiaAdapter", nvidia), _ranked_adapter("AmdAdapter", amd),
+         _ranked_adapter("IntelAdapter", intel), _ranked_adapter("CpuAdapter", cpu)],
+        lambda: {"rtx 4060", "rtx 4090", "780m graphics", "alder lake-n", "cpu"},
+    )
+    mon.refresh()
+    names = [d.device_name for d in mon.snapshot().values()]
+    assert names == [
+        "CPU",
+        "NVIDIA GeForce RTX 4060",  # CUDA 序保留(匹配后不重排)
+        "NVIDIA GeForce RTX 4090",
+        "AMD Radeon 780M Graphics",
+        "Intel UHD Graphics (Alder Lake-N)",
+    ]
+
+
+def test_device_monitor_sorts_unmatched_too():
+    """未被 config 引用时同样按 CPU→N-A-I 排序(实测名入快照)。"""
+    from llm_manager.devices import DeviceMonitor, DeviceInfo
+
+    mon = DeviceMonitor(
+        [_ranked_adapter("NvidiaAdapter", [DeviceInfo("NVIDIA GeForce RTX 4060", "GPU", "VRAM", 8188, 6266, 1692, 35.0, 51.0)]),
+         _ranked_adapter("AmdAdapter", [DeviceInfo("AMD Radeon 780M Graphics", "GPU (APU)", "Shared+Ded", 16394, 16376, 17, 0.0, 56.0)]),
+         _ranked_adapter("IntelAdapter", [DeviceInfo("Intel UHD Graphics (Alder Lake-N)", "GPU (iGPU)", "Shared RAM", 15729, 5866, 9863, 0.0, None)]),
+         _ranked_adapter("CpuAdapter", [DeviceInfo("CPU", "CPU", "RAM", 16384, 8192, 8192, 33.0, None)])],
+        lambda: set(),
+    )
+    mon.refresh()
+    names = [d.device_name for d in mon.snapshot().values()]
+    assert names == [
+        "CPU",
+        "NVIDIA GeForce RTX 4060",
+        "AMD Radeon 780M Graphics",
+        "Intel UHD Graphics (Alder Lake-N)",
+    ]
+
+
 class _FakeAdapter:
     def __init__(self, devices):
         self._devices = devices

@@ -82,7 +82,11 @@ class DeviceMonitor:
 
     referenced **动态获取**(每次 refresh 按活配置重算):配置运行时可变(WebUI 在线加
     模型),若冻结在启动时,新模型引用的设备名不会进入 online → 启动报 no adaptive
-    scheme,必须重启才生效。get_referenced 返回「归一化 config 名」集合。"""
+    scheme,必须重启才生效。get_referenced 返回「归一化 config 名」集合。
+
+    卡片顺序:CPU 固定首位,其余按 N-A-I(适配器种类在收集时记录——Windows 下 A/I
+    的 device_type 同标 "GPU (APU)",前端无法区分);组内按候选枚举序(N卡即 CUDA 序)。
+    排序为纯内存 O(n log n),n ≤ 个位数,零新增 I/O。"""
     def __init__(
         self,
         adapters: list["DeviceAdapter"],
@@ -94,16 +98,23 @@ class DeviceMonitor:
 
     def refresh(self) -> None:
         candidates: list[DeviceInfo] = []
+        kinds: list[str] = []  # 与 candidates 平行:来源适配器名(排序依据)
         for ad in self._adapters:
             try:
                 result = ad.enumerate()
                 if result:
                     candidates.extend(result)
+                    kinds.extend([type(ad).__name__] * len(result))
             except Exception:  # noqa: BLE001 — 单个后端失败不影响其他
                 pass
+
+        def order_key(kv: tuple[str, DeviceInfo]) -> tuple[int, int]:
+            idx = candidates.index(kv[1])
+            return (_DEVICE_KIND_RANK.get(kinds[idx], 9), idx)
+
         matched, unmatched = match_devices(self._get_referenced(), candidates)
-        cache: dict[str, DeviceInfo] = dict(matched)
-        for c in unmatched:
+        cache: dict[str, DeviceInfo] = dict(sorted(matched.items(), key=order_key))
+        for c in sorted(unmatched, key=lambda c: order_key((c.device_name, c))):
             cache[c.device_name] = c  # 未引用:以实测名入快照供展示(对调度无害)
         self._cache = cache  # 原子 rebind
 
@@ -117,3 +128,12 @@ class DeviceMonitor:
 def build_adapters() -> list[DeviceAdapter]:
     """恒注册 4 个设备适配器;平台/工具检测内移到各适配器 enumerate()(不适用时返回 [])。"""
     return [NvidiaAdapter(), IntelAdapter(), AmdAdapter(), CpuAdapter()]
+
+
+# 设备卡片排序:CPU 首位,其余 N-A-I;组内按候选枚举序(DeviceMonitor.refresh 使用)
+_DEVICE_KIND_RANK = {
+    "CpuAdapter": 0,
+    "NvidiaAdapter": 1,
+    "AmdAdapter": 2,
+    "IntelAdapter": 3,
+}
