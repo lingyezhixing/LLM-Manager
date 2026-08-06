@@ -422,7 +422,6 @@ def test_intel_adapter_windows_branch_via_lhm(monkeypatch, tmp_path):
     """Intel Windows 分支:通过 LHM GpuIntel 硬件 → 经 _aggregate_sensors → DeviceInfo。"""
     import types
     from llm_manager.devices import intel as ad
-    from llm_manager.devices import common as cm
 
     class _FakeSensor:
         def __init__(self, stype, sname, val):
@@ -451,8 +450,7 @@ def test_intel_adapter_windows_branch_via_lhm(monkeypatch, tmp_path):
         _FakeHardware("GpuAmd", "AMD Radeon 780M", []),
         _FakeHardware("GpuNvidia", "NVIDIA GeForce RTX 4060", []),
     ])
-    # 需要同时 patch 两个地方:cm._lhm_computer 和 ad._lhm_computer
-    monkeypatch.setattr(cm, "_lhm_computer", lambda: fake_computer)
+    # intel 模块 `from .common import _lhm_computer` 直接绑定 → 仅 patch ad 生效
     monkeypatch.setattr(ad, "_lhm_computer", lambda: fake_computer)
     monkeypatch.setattr(ad.os, "name", "nt")
     out = ad.IntelAdapter().enumerate()
@@ -474,13 +472,16 @@ def test_intel_adapter_windows_lhm_unavailable_returns_empty(monkeypatch):
     assert ad.IntelAdapter().enumerate() == []
 
 
-def test_intel_adapter_linux_missing_sysfs_returns_empty(monkeypatch):
+def test_intel_adapter_linux_missing_sysfs_returns_empty(monkeypatch, tmp_path):
     """Intel Linux 分支:无 sysfs → []。"""
     from llm_manager.devices import intel as ad
+    from llm_manager.devices import common as cm
 
     monkeypatch.setattr(ad.os, "name", "posix")
-    from llm_manager.devices import common as cm
-    monkeypatch.setattr(cm, "_DRM_CLASS", None)  # Path is_dir() 会失败
+    # enumerate 直接检查用 intel 绑定,_drm_cards() 内部引用 common 绑定 → 双 patch 都须指向不存在路径
+    missing = tmp_path / "nonexistent"
+    monkeypatch.setattr(ad, "_DRM_CLASS", missing)
+    monkeypatch.setattr(cm, "_DRM_CLASS", missing)
     assert ad.IntelAdapter().enumerate() == []
 
 
@@ -687,7 +688,6 @@ def test_amd_adapter_windows_branch_via_lhm(monkeypatch, tmp_path):
     """AMD Windows 分支:通过 LHM GpuAmd 硬件 → 经 _aggregate_sensors → DeviceInfo。"""
     import types
     from llm_manager.devices import amd as ad
-    from llm_manager.devices import common as cm
 
     class _FakeSensor:
         def __init__(self, stype, sname, val):
@@ -716,8 +716,7 @@ def test_amd_adapter_windows_branch_via_lhm(monkeypatch, tmp_path):
         _FakeHardware("GpuIntel", "Intel UHD Graphics", []),
         _FakeHardware("GpuNvidia", "NVIDIA GeForce RTX 4060", []),
     ])
-    # 需要同时 patch 两个地方:cm._lhm_computer 和 ad._lhm_computer
-    monkeypatch.setattr(cm, "_lhm_computer", lambda: fake_computer)
+    # amd 模块 `from .common import _lhm_computer` 直接绑定 → 仅 patch ad 生效
     monkeypatch.setattr(ad, "_lhm_computer", lambda: fake_computer)
     monkeypatch.setattr(ad.os, "name", "nt")
     out = ad.AmdAdapter().enumerate()
@@ -739,12 +738,15 @@ def test_amd_adapter_windows_lhm_unavailable_returns_empty(monkeypatch):
     assert ad.AmdAdapter().enumerate() == []
 
 
-def test_amd_adapter_linux_missing_sysfs_returns_empty(monkeypatch):
+def test_amd_adapter_linux_missing_sysfs_returns_empty(monkeypatch, tmp_path):
     """AMD Linux 分支:无 sysfs → []。"""
     from llm_manager.devices import amd as ad
+    from llm_manager.devices import common as cm
 
     monkeypatch.setattr(ad.os, "name", "posix")
-    from llm_manager.devices import common as cm
-    monkeypatch.setattr(cm, "_DRM_CLASS", None)  # Path is_dir() 会失败
+    # enumerate 直接检查用 amd 绑定,_drm_cards() 内部引用 common 绑定 → 双 patch 都须指向不存在路径
+    missing = tmp_path / "nonexistent"
+    monkeypatch.setattr(ad, "_DRM_CLASS", missing)
+    monkeypatch.setattr(cm, "_DRM_CLASS", missing)
     assert ad.AmdAdapter().enumerate() == []
 
