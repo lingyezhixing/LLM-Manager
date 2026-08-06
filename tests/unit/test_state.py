@@ -1,21 +1,22 @@
 import asyncio
+
 import pytest
 
 from llm_manager.state import (
     ModelStatus,
-    set_status,
-    get_status,
-    is_runnable,
-    is_failed,
-    record_failure,
-    pending_count,
-    inc_pending,
-    dec_pending,
-    begin_request,
-    end_request,
-    claim_start,
-    finish_start,
     _reset,
+    begin_request,
+    claim_start,
+    dec_pending,
+    end_request,
+    finish_start,
+    get_status,
+    inc_pending,
+    is_failed,
+    is_runnable,
+    pending_count,
+    record_failure,
+    set_status,
 )
 
 
@@ -194,7 +195,7 @@ async def _owner_guard_body():
     from llm_manager.state import ModelStatus
 
     state._reset()
-    fut1, won = state.claim_start("m1")  # winner1
+    fut1, _won = state.claim_start("m1")  # winner1
     # 模拟:stop pop 走 fut1,并发重启 claim fut2
     state.pop_inflight("m1")
     fut2, _ = state.claim_start("m1")  # winner2 接管, _inflight[m1]=fut2
@@ -239,7 +240,7 @@ async def _claim_and_check_cleared():
     from llm_manager import state
     from llm_manager.state import ModelStatus
 
-    fut, won = state.claim_start("m1")
+    _fut, won = state.claim_start("m1")
     assert won
     assert state.get_failure_reason("m1") is None  # 新一轮启动已清
     state.finish_start("m1", ModelStatus.ROUTING)
@@ -247,7 +248,7 @@ async def _claim_and_check_cleared():
     # 再次失败 → reason 重新设置;再重启 → 再清
     state.record_failure("m1", "second crash")
     assert state.get_failure_reason("m1") == "second crash"
-    fut2, _ = state.claim_start("m1")
+    _fut2, _ = state.claim_start("m1")
     assert state.get_failure_reason("m1") is None
 
 

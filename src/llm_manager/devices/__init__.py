@@ -8,8 +8,9 @@ for display). 每个适配器文件内按平台分割路径,每次仅激活一�
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable, Protocol
+from typing import Protocol
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,10 +31,10 @@ class DeviceInfo:
 
 # DeviceInfo 必须先于各适配器模块导入定义:模块顶层 `from . import DeviceInfo`,
 # 若包仍处部分初始化(DeviceInfo 未绑定)则 ImportError(拆包循环导入陷阱)。
-from .nvidia import NvidiaAdapter  # noqa: E402 — 显式 re-export(供 build_adapters 装配)
-from .intel import IntelAdapter  # noqa: E402
-from .amd import AmdAdapter  # noqa: E402
-from .cpu import CpuAdapter  # noqa: E402
+from .amd import AmdAdapter
+from .cpu import CpuAdapter
+from .intel import IntelAdapter
+from .nvidia import NvidiaAdapter
 
 
 def _tokens(name: str) -> set[str]:
@@ -92,7 +93,7 @@ class DeviceMonitor:
 
     def __init__(
         self,
-        adapters: list["DeviceAdapter"],
+        adapters: list[DeviceAdapter],
         get_referenced: Callable[[], set[str]],
     ) -> None:
         self._adapters = adapters
@@ -108,7 +109,7 @@ class DeviceMonitor:
                 if result:
                     candidates.extend(result)
                     kinds.extend([type(ad).__name__] * len(result))
-            except Exception:  # noqa: BLE001 — 单个后端失败不影响其他
+            except Exception:  # noqa: BLE001, S110 — 单个后端失败不影响其他
                 pass
 
         def order_key(kv: tuple[str, DeviceInfo]) -> tuple[int, int]:

@@ -8,12 +8,12 @@ from pathlib import Path
 from . import DeviceInfo
 from .common import (
     _DRM_CLASS,
+    _aggregate_sensors,  # Windows LHM 运行时
     _drm_cards,
     _hwmon_temp1,
+    _lhm_computer,
     _read_float,
     _read_int_mb,
-    _lhm_computer,
-    _aggregate_sensors,  # Windows LHM 运行时
 )
 
 # ==================== AMD(amdgpu sysfs + LHM)====================
@@ -108,6 +108,6 @@ class AmdAdapter:
                     for s in hw.Sensors
                 )
                 out.append(_aggregate_sensors(str(hw.Name), sensors))
-            except Exception:  # noqa: BLE001 — 单个 LHM GPU 传感器读取失败 → 跳过该 GPU,继续其余
+            except Exception:  # noqa: BLE001, S110 — 单个 LHM GPU 传感器读取失败 → 跳过该 GPU,继续其余
                 pass
         return out

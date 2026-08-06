@@ -1,4 +1,4 @@
-from llm_manager.data.metering import parse_tokens, TokenUsage, needs_include_usage
+from llm_manager.data.metering import TokenUsage, needs_include_usage, parse_tokens
 
 
 def test_parse_openai_usage_json():

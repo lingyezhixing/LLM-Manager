@@ -24,8 +24,8 @@ from llm_manager.realtime import Broadcaster
 
 logger = logging.getLogger(__name__)
 
-_ERR = re.compile(r"error|fail|exception|traceback", re.I)
-_OK = re.compile(r"listening|ready|started|server.*ok", re.I)
+_ERR = re.compile(r"error|fail|exception|traceback", re.IGNORECASE)
+_OK = re.compile(r"listening|ready|started|server.*ok", re.IGNORECASE)
 
 _SYS_LEVELS = {
     "DEBUG": "info",
@@ -272,7 +272,7 @@ async def flush_loop(stop_event: asyncio.Event) -> None:
             if _pending:
                 await flush()
             await asyncio.wait_for(stop_event.wait(), timeout=FLUSH_INTERVAL)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             pass
         except asyncio.CancelledError:
             break

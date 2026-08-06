@@ -14,7 +14,8 @@ and live-log SSE endpoints will build on the same ``Broadcaster``. Loop-resident
 from __future__ import annotations
 
 import asyncio
-from typing import Callable, Generic, Protocol, TypeVar
+from collections.abc import Callable
+from typing import Generic, Protocol, TypeVar
 
 from llm_manager.devices import DeviceInfo
 

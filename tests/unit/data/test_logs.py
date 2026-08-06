@@ -3,6 +3,7 @@ import threading
 import time
 
 import pytest
+
 from llm_manager.data import logs
 from llm_manager.data.persistence import open_db
 
@@ -195,7 +196,7 @@ def test_capture_system_from_worker_thread(store):
                 logs.capture_system(f"line {i}", float(i), "INFO")
                 if i % 50 == 0:
                     time.sleep(0.0001)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             errors.append(e)
 
     t = threading.Thread(target=worker)

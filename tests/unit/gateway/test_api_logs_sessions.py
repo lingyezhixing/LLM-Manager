@@ -80,7 +80,7 @@ def client(tmp_path):
 
 
 def test_sessions_list(client):
-    c, db, sid_sys, sid_m = client
+    c, _db, sid_sys, sid_m = client
     r = c.get("/api/logs/sessions")
     assert r.status_code == 200
     data = r.json()
@@ -100,7 +100,7 @@ def test_running_session_status_survives_heartbeat(client):
     回归 7279319 解耦语义:运行中由内存 live 集合判定,end_time 只管时间——
     API 响应层的 status 必须用 SQL 算好的 status 字段,不能回退到 end_time 判断
     (否则心跳一写 end_time,日志页「运行中」就消失)。"""
-    c, db, sid_sys, sid_m = client
+    c, db, _sid_sys, sid_m = client
     _logs.log_heartbeat_live(db, 2500.0)  # 模拟一次心跳:live 会话 end_time 被推到现在
     r = c.get("/api/logs/sessions")
     by_id = {d["id"]: d for d in r.json()}
@@ -110,13 +110,13 @@ def test_running_session_status_survives_heartbeat(client):
 
 
 def test_sessions_before_pagination(client):
-    c, db, sid_sys, sid_m = client
+    c, _db, sid_sys, _sid_m = client
     r = c.get("/api/logs/sessions?before=2")
     assert [d["id"] for d in r.json()] == [sid_sys]  # id < 2
 
 
 def test_session_lines_and_level(client):
-    c, db, sid_sys, sid_m = client
+    c, _db, sid_sys, _sid_m = client
     r = c.get(f"/api/logs/sessions/{sid_sys}/lines")
     assert [d["text"] for d in r.json()] == ["boot", "boom"]
     r2 = c.get(f"/api/logs/sessions/{sid_sys}/lines?level=error")
@@ -126,13 +126,13 @@ def test_session_lines_and_level(client):
 
 
 def test_session_404(client):
-    c, db, sid_sys, sid_m = client
+    c, _db, _sid_sys, _sid_m = client
     assert c.get("/api/logs/sessions/9999/lines").status_code == 404
     assert c.get("/api/logs/sessions/9999/stream").status_code == 404
 
 
 def test_logs_search(client):
-    c, db, sid_sys, sid_m = client
+    c, _db, sid_sys, _sid_m = client
     r = c.get("/api/logs/search?q=BOOM")
     data = r.json()
     assert data["total"] == 1
@@ -148,7 +148,7 @@ def test_logs_search(client):
 
 def test_search_total_is_true_count_uncut_by_limit(client):
     """真 total:limit 截断行数但 total 是满足条件的全部匹配数。"""
-    c, db, sid_sys, sid_m = client
+    c, db, sid_sys, _sid_m = client
     for i in range(600):
         _logs.log_insert_lines(db, sid_sys, [(100 + i, 1000.0 + i, "sys", "info", f"x {i}")])
     r = c.get("/api/logs/search?q=x&limit=500")
@@ -157,14 +157,14 @@ def test_search_total_is_true_count_uncut_by_limit(client):
 
 
 def test_search_invalid_level_422(client):
-    c, db, sid_sys, sid_m = client
+    c, _db, sid_sys, _sid_m = client
     assert c.get("/api/logs/search?q=x&level=bogus").status_code == 422
     assert c.get("/api/logs/sessions?type=bogus").status_code == 422
     assert c.get(f"/api/logs/sessions/{sid_sys}/lines?level=bogus").status_code == 422
 
 
 def test_unknown_model_alias_404(client):
-    c, db, sid_sys, sid_m = client
+    c, _db, _sid_sys, _sid_m = client
     # 真正未知的 alias(配置与会话历史都无)→ 仍 404
     assert c.get("/api/logs/sessions?model=totally_unknown").status_code == 404
 
@@ -174,7 +174,7 @@ def test_deleted_model_alias_resolves_from_session_history(client):
 
     §8 承诺模型下拉含"已删除模型的残留会话";删模型后 config 无此 alias,
     需回退到 log_sessions 历史按 alias/原名解析。"""
-    c, db, sid_sys, sid_m = client
+    c, db, _sid_sys, _sid_m = client
     sid_del = _logs.log_start_session(db, "model", "deleted_model", "gone", 3000.0)
     _logs.log_insert_lines(db, sid_del, [(1, 3000.1, "model", "info", "residual")])
     _logs.log_end_session(db, sid_del, 3500.0)
@@ -191,7 +191,7 @@ def test_deleted_model_alias_resolves_from_session_history(client):
 
 
 def test_session_stream_backfill_and_live(client):
-    c, db, sid_sys, sid_m = client
+    _c, db, _sid_sys, sid_m = client
     # 回填行经 capture+flush 落库 —— 直插 seq=1 会与 capture 的 next_seq 冲突
     # (UNIQUE(session_id, seq));此刻无订阅者,广播丢弃,仅落库。
     _logs.capture("m1", "listening", "out")

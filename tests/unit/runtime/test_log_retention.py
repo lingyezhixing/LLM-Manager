@@ -1,5 +1,7 @@
 import asyncio
+
 import pytest
+
 from llm_manager.data import logs as _logs
 from llm_manager.data.persistence import open_db
 from llm_manager.runtime import log_retention
@@ -19,7 +21,7 @@ def _seed(db):
 
 
 def test_loop_cleans_by_time(db):
-    old, new = _seed(db)
+    _old, new = _seed(db)
     stop = asyncio.Event()
 
     async def go():

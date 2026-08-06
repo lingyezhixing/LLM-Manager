@@ -56,16 +56,16 @@ class _FakeLoop:
 
 
 def _make_tray(**over):
-    base = dict(
-        lifecycle=_FakeLife(),
-        get_cfg=lambda: _cfg(),
-        monitor=object(),
-        loop=_FakeLoop(),
-        server=_FakeServer(),
-        settings_path="s.json",
-        startup_timeout=60.0,
-        auto_start_margin=30.0,
-    )
+    base = {
+        "lifecycle": _FakeLife(),
+        "get_cfg": lambda: _cfg(),
+        "monitor": object(),
+        "loop": _FakeLoop(),
+        "server": _FakeServer(),
+        "settings_path": "s.json",
+        "startup_timeout": 60.0,
+        "auto_start_margin": 30.0,
+    }
     base.update(over)
     return host.SystemTray(**base)
 

@@ -32,7 +32,7 @@ def register_spa(app: FastAPI) -> None:
     @app.get("/{path:path}")
     def spa(path: str) -> Response:
         # 不接管 API/代理前缀:未知 /api/*、/v1/* GET 返回 JSON 404,不被 SPA HTML 掩盖
-        if path.startswith("api/") or path.startswith("v1/"):
+        if path.startswith(("api/", "v1/")):
             return JSONResponse(status_code=404, content={"detail": "Not Found"})
         # 路径必须解析在 dist 内(resolve 折叠 .. 后用 relative_to 校验),防路径穿越
         base = _FRONTEND_DIST.resolve()

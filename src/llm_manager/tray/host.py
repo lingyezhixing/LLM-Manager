@@ -93,13 +93,13 @@ class SystemTray:
             self._icon = self._build_icon()
             self._icon.run()
         except Exception:  # 托盘失败不应拖垮服务
-            logger.error("托盘运行失败,程序继续后台运行", exc_info=True)
+            logger.exception("托盘运行失败,程序继续后台运行")
 
     def shutdown(self) -> None:
         if self._icon is not None:
             try:
                 self._icon.stop()
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 logger.warning("托盘停止异常: %s", e)
 
     # ---------- icon + menu (need display; not unit-tested) ----------
@@ -182,7 +182,7 @@ class SystemTray:
         try:
             wol.send_wol(wol_cfg.mac_address, wol_cfg.broadcast_address)
             logger.info("网络唤醒包已发送到 %s", wol_cfg.broadcast_address)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error("发送网络唤醒包失败: %s", e)
 
     def apply_claude(self, preset_name: str) -> None:
@@ -196,7 +196,7 @@ class SystemTray:
         try:
             claude.apply_preset(self._settings_path, dict(preset))
             logger.info("Claude 配置已切换至 %s", preset_name)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error("写入 Claude 配置失败: %s", e)
 
     def restart_auto_start(self, icon=None, item=None) -> None:

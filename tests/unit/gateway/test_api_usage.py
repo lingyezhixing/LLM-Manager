@@ -53,6 +53,7 @@ def test_usage_session_returns_totals() -> None:
 def test_usage_session_total_cost_since_start(tmp_path) -> None:
     """本次启动消耗 = 窗口 [started_at, now) 的成本;started_at 之前的请求不计数。"""
     import time
+
     from llm_manager.config import (
         AppConfig,
         Command,
@@ -224,7 +225,7 @@ def test_usage_cost_endpoint_tier_and_hourly(tmp_path):
         cache_n=0,
         prompt_n=1000,
     )
-    from llm_manager.data.usage import record_runtime_start, record_runtime_end
+    from llm_manager.data.usage import record_runtime_end, record_runtime_start
 
     _seg = record_runtime_start(db, "m2", start=0.0)
     record_runtime_end(db, _seg, end=3600.0)

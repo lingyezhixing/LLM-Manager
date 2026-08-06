@@ -74,12 +74,12 @@ def test_strip_headers_response_side_drops_length_encoding():
 
 def test_detect_sse_by_content_type():
     class R:
-        headers = {"content-type": "text/event-stream"}
+        headers = {"content-type": "text/event-stream"}  # noqa: RUF012 — 测试桩,类属性只读
 
     assert proxy._detect_sse(R()) is True
 
     class R2:
-        headers = {"content-type": "application/json"}
+        headers = {"content-type": "application/json"}  # noqa: RUF012 — 测试桩,类属性只读
 
     assert proxy._detect_sse(R2()) is False
 
@@ -170,6 +170,7 @@ def test_record_usage_no_usage_no_row():
 
 def test_record_usage_best_effort_swallows_exception(monkeypatch):
     import sqlite3
+
     from llm_manager.data import usage
 
     async def main():
@@ -221,7 +222,7 @@ async def test_stream_wrapper_long_stream_parses_usage_from_head_and_tail():
     tail = b'event: message_delta\ndata: {"type":"message_delta","usage":{"output_tokens":99}}\n\n'
 
     class FakeResp:
-        headers = {"content-type": "text/event-stream"}
+        headers = {"content-type": "text/event-stream"}  # noqa: RUF012 — 测试桩,类属性只读
 
         async def aiter_bytes(self):
             for c in [head, middle, tail]:
@@ -249,7 +250,7 @@ async def test_stream_wrapper_forwards_chunks_records_usage_ends_request():
     state.begin_request("m1")
 
     class FakeResp:
-        headers = {"content-type": "text/event-stream"}
+        headers = {"content-type": "text/event-stream"}  # noqa: RUF012 — 测试桩,类属性只读
 
         async def aiter_bytes(self):
             for c in [
@@ -427,6 +428,7 @@ async def test_forward_upstream_5xx_passes_through_raw():
 
 async def test_forward_record_usage_failure_does_not_pollute_passthrough(monkeypatch):
     import sqlite3
+
     from llm_manager.data import usage
 
     state._reset()

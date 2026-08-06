@@ -48,9 +48,9 @@ async def log_retention_loop(
                     logger.info(
                         "log retention cleaned %d sessions / %d lines", removed_s, removed_l
                     )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error("log retention iteration error: %s", e)
         try:
             await asyncio.wait_for(stop_event.wait(), timeout=period)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             pass

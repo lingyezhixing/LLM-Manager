@@ -3,7 +3,6 @@ from fastapi.testclient import TestClient
 
 from llm_manager.app import create_app
 
-
 _CFG = """
 program: {host: 0.0.0.0, port: 8080, alive_time: 60, log_level: INFO, log_dir: logs}
 Local-Models:

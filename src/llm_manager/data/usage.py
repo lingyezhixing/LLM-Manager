@@ -267,7 +267,7 @@ def _overlap(a_start: float, a_end: float, b_start: float, b_end: float) -> floa
     return max(0.0, min(a_end, b_end) - max(a_start, b_start))
 
 
-def _tier_matches(t: "PricingTier", inp: int, out: int) -> bool:  # type: ignore[name-defined]
+def _tier_matches(t: PricingTier, inp: int, out: int) -> bool:  # type: ignore[name-defined]
     """First-tier-wins window match (legacy semantics): min=0 closed, else open;
     max None/negative = unbounded."""
     lo_i = 0 if (t.min_input is None or t.min_input < 0) else t.min_input
@@ -279,9 +279,7 @@ def _tier_matches(t: "PricingTier", inp: int, out: int) -> bool:  # type: ignore
     return i_ok and inp <= hi_i and o_ok and out <= hi_o
 
 
-def tier_cost(
-    pricing: "Pricing", input_t: int, output_t: int, cache_n: int, prompt_n: int
-) -> float:  # type: ignore[name-defined]
+def tier_cost(pricing: Pricing, input_t: int, output_t: int, cache_n: int, prompt_n: int) -> float:  # type: ignore[name-defined]
     """Per-request tier cost in yuan. First matching tier wins; no match → 0.
     Cache formula (legacy): cache_n×read + prompt_n×(input+write) + output×output.
     support_cache 是模型级开关(pricing.support_cache),控制缓存计费是否生效。"""
@@ -317,7 +315,7 @@ class CostSummary:
 
 def usage_cost(
     db: Db,
-    cfg: "AppConfig",  # type: ignore[name-defined]
+    cfg: AppConfig,  # type: ignore[name-defined]
     *,
     start_ts: float,
     end_ts: float,
@@ -390,7 +388,7 @@ def usage_cost(
 
 def usage_cost_series(
     db: Db,
-    cfg: "AppConfig",  # type: ignore[name-defined]
+    cfg: AppConfig,  # type: ignore[name-defined]
     *,
     start_ts: float,
     end_ts: float,

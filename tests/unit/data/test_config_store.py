@@ -1,7 +1,7 @@
 import json
+from dataclasses import replace
 
 import pytest
-from dataclasses import replace
 
 from llm_manager.config import (
     AppConfig,
@@ -140,7 +140,7 @@ def test_write_appconfig_rolls_back_on_mid_write_failure(tmp_path):
         wol=None,
         claude_configs={},
     )
-    with pytest.raises(Exception):
+    with pytest.raises(Exception):  # noqa: B017 — 意图:写入必须失败(具体异常类型非关注点,关注事务回滚)
         write_appconfig(db, bad)
     # 模拟"后续无关 writer 的 commit"——若无 rollback,这里会冲刷孤儿 DELETE+partial(A),
     # 使 model_defs 变成 ["A"] 而非 ["keep"]。
@@ -499,6 +499,7 @@ def test_pricing_round_trips_through_config_store(tmp_path):
 def test_pricing_survives_unrelated_model_world_rewrite(tmp_path):
     """CASCADE landmine: rewriting the model world must not wipe pricing that round-trips."""
     from dataclasses import replace
+
     from llm_manager.config import Pricing, PricingTier
 
     db = open_db(tmp_path / "t.db")

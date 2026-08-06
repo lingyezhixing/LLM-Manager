@@ -12,9 +12,10 @@ import json
 import logging
 import os
 import time
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
-from typing import Callable, Literal
+from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -32,13 +33,14 @@ from llm_manager.gateway.api.common import get_config_store, get_db
 from llm_manager.tray import claude
 
 try:
-    from importlib.metadata import PackageNotFoundError, version as _pkg_version
+    from importlib.metadata import PackageNotFoundError
+    from importlib.metadata import version as _pkg_version
 
     try:
         _VERSION = _pkg_version("llm-manager")
     except PackageNotFoundError:
         _VERSION = "unknown"
-except Exception:
+except Exception:  # noqa: BLE001
     _VERSION = "unknown"
 
 logger = logging.getLogger(__name__)
@@ -216,7 +218,7 @@ def _update_model(cfg: AppConfig, name: str, body: ModelDefInput) -> AppConfig:
     return replace(cfg, models=new_models)
 
 
-def _rename_migrator(old: str, new: str) -> "Callable":
+def _rename_migrator(old: str, new: str) -> Callable:
     """构造 post_write 回调:把模型身份从 old 迁到 new(改名 + 迁移时)。
 
     - models.original_name(用量/成本/运行时锚点):old → new
@@ -236,7 +238,7 @@ def _rename_migrator(old: str, new: str) -> "Callable":
     return migrate
 
 
-def _delete_old_sessions(old: str) -> "Callable":
+def _delete_old_sessions(old: str) -> Callable:
     """构造 post_write 回调:不迁移改名时,删除旧名日志会话。
 
     与 delete_model_def 一致(日志绑定定义:旧身份废弃 → 删日志;请求记录留孤立)。
@@ -258,7 +260,7 @@ def _delete_old_sessions(old: str) -> "Callable":
     return drop
 
 
-def _alias_migrator(primary: str) -> "Callable":
+def _alias_migrator(primary: str) -> Callable:
     """构造 post_write 回调:改别名(非改名)时,把日志 alias 快照同步为新的 aliases[0]。
 
     日志页按别名显示;改别名若不迁移日志,旧日志残留旧别名快照(日志页显示旧名,

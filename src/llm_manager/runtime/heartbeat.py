@@ -22,13 +22,13 @@ HEARTBEAT_INTERVAL = 30.0  # 秒:老项目同款节奏,崩溃最多丢最后 30s
 
 
 async def heartbeat_loop(
-    db: "Db", stop_event: asyncio.Event, interval: float = HEARTBEAT_INTERVAL
+    db: Db, stop_event: asyncio.Event, interval: float = HEARTBEAT_INTERVAL
 ) -> None:
     """常驻心跳任务:每 interval 把所有进行中会话/运行段的 end_time 推到 now。"""
     while not stop_event.is_set():
         try:
             await asyncio.wait_for(stop_event.wait(), timeout=interval)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             now = time.time()
             _logs.log_heartbeat_live(db, now)
             runtime_heartbeat_live(db, now)

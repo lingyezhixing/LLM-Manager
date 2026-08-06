@@ -31,10 +31,8 @@ testpaths = ["tests"]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
-# 规则集显式固定(E4/E7/E9/F = 0.12.7 默认集):ruff 0.16 默认集扩大(I/UP/BLE/RUF…),
-# 若跟随默认,升级版本会引入新规则导致结果漂移。显式 select 后版本升级不改变行为。
-# 仓库内 .py 仅分布于 src/ 与 tests/,默认扫描(include 默认 *.py)即全覆盖。
-lint.select = ["E4", "E7", "E9", "F"]
+# 规则集跟随版本默认(riff 0.16.1 全套),版本在 dev 依赖中 == 固定——升级版本即
+# 引入新规则,需显式处理。仓库内 .py 仅分布于 src/ 与 tests/,默认扫描即全覆盖。
 
 [tool.pyright]
 include = ["src/llm_manager"]

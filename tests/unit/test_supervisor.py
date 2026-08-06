@@ -1,7 +1,7 @@
 import asyncio
 import sys
 
-from llm_manager.supervisor import Supervisor, ProcessRunner, ProcessRecord
+from llm_manager.supervisor import ProcessRecord, ProcessRunner, Supervisor
 
 
 def test_supervisor_implements_process_runner():

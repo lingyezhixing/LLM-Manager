@@ -1,17 +1,17 @@
 from pathlib import Path
 
 from llm_manager.config import (
-    Command,
     AppConfig,
+    Command,
     ModelConfig,
+    ModelMode,
     ProgramConfig,
     Scheme,
     load,
-    ModelMode,
     resolve_alias,
     select_adaptive,
-    validate,
     substitute_vars,
+    validate,
 )
 
 
@@ -118,12 +118,12 @@ def test_resolve_alias_to_primary():
 
 def test_referenced_devices_unions_required_and_memory_keys():
     from llm_manager.config import (
-        referenced_devices,
         AppConfig,
-        ProgramConfig,
-        ModelConfig,
-        Scheme,
         Command,
+        ModelConfig,
+        ProgramConfig,
+        Scheme,
+        referenced_devices,
     )
 
     s1 = Scheme(
@@ -152,10 +152,10 @@ def test_referenced_devices_unions_required_and_memory_keys():
 
 def test_referenced_devices_empty_when_no_schemes():
     from llm_manager.config import (
-        referenced_devices,
         AppConfig,
-        ProgramConfig,
         ModelConfig,
+        ProgramConfig,
+        referenced_devices,
     )
 
     m = ModelConfig(primary_name="M", aliases=("m",), mode="Chat", port=1000)
@@ -207,7 +207,7 @@ def test_validate_rejects_duplicate_tier_index_and_negative_price():
 
 
 def _prog(**kw):
-    base = dict(host="0.0.0.0", port=8080, alive_time=60, log_level="INFO")
+    base = {"host": "0.0.0.0", "port": 8080, "alive_time": 60, "log_level": "INFO"}
     base.update(kw)
     return ProgramConfig(**base)
 

@@ -1,7 +1,6 @@
 from llm_manager.devices.common import _aggregate_sensors
 from llm_manager.devices.nvidia import _parse_smi
 
-
 # ==================== nvidia-smi 解析(_parse_smi)====================
 
 
@@ -76,6 +75,7 @@ def test_is_lhm_available_no_pythonnet(monkeypatch):
 def test_is_lhm_available_dll_present(monkeypatch, tmp_path):
     import sys
     import types
+
     from llm_manager.devices import common as cm
 
     monkeypatch.setitem(sys.modules, "clr", types.ModuleType("clr"))  # 假装 pythonnet 已装
@@ -88,6 +88,7 @@ def test_is_lhm_available_dll_present(monkeypatch, tmp_path):
 def test_is_lhm_available_dll_missing(monkeypatch, tmp_path):
     import sys
     import types
+
     from llm_manager.devices import common as cm
 
     monkeypatch.setitem(sys.modules, "clr", types.ModuleType("clr"))
@@ -248,6 +249,7 @@ def test_lhm_computer_init_failure_returns_none(monkeypatch):
     # 初始化抛异常(AddReference 失败等)→ None,不穿透(防 CpuAdapter.enumerate 的 try 外调用)
     import sys
     import types
+
     from llm_manager.devices import common as cm
 
     def boom(*a, **k):
@@ -430,6 +432,7 @@ def test_cpu_temp_windows_branch_lhm_none(monkeypatch):
 def test_cpu_temp_linux_branch_hwmon(monkeypatch):
     """Linux 分支:走 hwmon 读 coretemp,不触碰 LHM。"""
     import types
+
     from llm_manager.devices import cpu as ad
 
     def boom():
@@ -451,6 +454,7 @@ def test_cpu_temp_linux_branch_hwmon(monkeypatch):
 def test_cpu_temp_linux_branch_no_temp(monkeypatch):
     """Linux 分支:hwmon 无 CPU 芯片 → None。"""
     import types
+
     from llm_manager.devices import cpu as ad
 
     monkeypatch.setattr(ad.os, "name", "posix")
@@ -500,6 +504,7 @@ def test_lhm_cpu_freq_all_invalid_returns_none(monkeypatch):
 def test_cpu_freq_psutil_reads_current(monkeypatch):
     """Linux:psutil.cpu_freq().current(容器实测 3184MHz)。"""
     import types
+
     from llm_manager.devices import cpu as ad
 
     monkeypatch.setattr(
@@ -542,6 +547,7 @@ def test_cpu_freq_platform_branch(monkeypatch):
 def test_cpu_temp_hwmon_prefers_package_label(monkeypatch):
     """label 优先:Core 0 在前,仍取 Package id 0。"""
     import types
+
     from llm_manager.devices import cpu as ad
 
     monkeypatch.setattr(
@@ -561,6 +567,7 @@ def test_cpu_temp_hwmon_prefers_package_label(monkeypatch):
 def test_cpu_temp_hwmon_ignores_non_cpu_chips(monkeypatch):
     """只认 CPU 芯片:acpitz/it8613(主板/环境)不兜底 → None。"""
     import types
+
     from llm_manager.devices import cpu as ad
 
     monkeypatch.setattr(
@@ -584,7 +591,7 @@ def test_cpu_temp_hwmon_unavailable_returns_none(monkeypatch):
 
     monkeypatch.setattr(ad.psutil, "sensors_temperatures", boom, raising=False)
     assert ad._cpu_temp_hwmon() is None
-    monkeypatch.setattr(ad.psutil, "sensors_temperatures", lambda: {}, raising=False)
+    monkeypatch.setattr(ad.psutil, "sensors_temperatures", dict, raising=False)
     assert ad._cpu_temp_hwmon() is None
 
 
@@ -592,7 +599,7 @@ def test_cpu_temp_hwmon_unavailable_returns_none(monkeypatch):
 
 
 def test_device_monitor_matches_config_names_and_keeps_unmatched():
-    from llm_manager.devices import DeviceMonitor, DeviceInfo
+    from llm_manager.devices import DeviceInfo, DeviceMonitor
 
     def enum_gpus():
         return [
@@ -617,7 +624,7 @@ def test_device_monitor_matches_config_names_and_keeps_unmatched():
 
 def test_device_monitor_dynamic_referenced_new_config_names_apply_without_restart():
     # WebUI 在线加模型引用新设备名:referenced 动态获取 → 下次 refresh 即生效,无需重启
-    from llm_manager.devices import DeviceMonitor, DeviceInfo
+    from llm_manager.devices import DeviceInfo, DeviceMonitor
 
     def enum_gpus():
         return [
@@ -650,7 +657,7 @@ def test_device_monitor_unmatched_referenced_is_offline():
 
 def test_device_monitor_enumerator_exception_isolated():
     # 单个适配器抛异常不影响其他
-    from llm_manager.devices import DeviceMonitor, DeviceInfo
+    from llm_manager.devices import DeviceInfo, DeviceMonitor
 
     class _BoomAdapter:
         def enumerate(self):
@@ -670,7 +677,7 @@ def _ranked_adapter(cls_name, devices):
 
 def test_device_monitor_sorts_cpu_first_then_n_a_i():
     """卡片顺序:CPU 首位,其余 N-A-I;组内按枚举序(N卡即 CUDA 序)。"""
-    from llm_manager.devices import DeviceMonitor, DeviceInfo
+    from llm_manager.devices import DeviceInfo, DeviceMonitor
 
     nvidia = [
         DeviceInfo("NVIDIA GeForce RTX 4060", "GPU", "VRAM", 8188, 6266, 1692, 35.0, 51.0),
@@ -717,7 +724,7 @@ def test_device_monitor_sorts_cpu_first_then_n_a_i():
 
 def test_device_monitor_sorts_unmatched_too():
     """未被 config 引用时同样按 CPU→N-A-I 排序(实测名入快照)。"""
-    from llm_manager.devices import DeviceMonitor, DeviceInfo
+    from llm_manager.devices import DeviceInfo, DeviceMonitor
 
     mon = DeviceMonitor(
         [
@@ -777,7 +784,7 @@ def test_device_monitor_sorts_unmatched_too():
 
 def test_device_monitor_sorts_mixed_matched_and_unmatched():
     """部分引用(服务器场景:只引用核显,CPU 未引用)→ CPU 仍首位(跨段统一排序,防段间错乱)。"""
-    from llm_manager.devices import DeviceMonitor, DeviceInfo
+    from llm_manager.devices import DeviceInfo, DeviceMonitor
 
     nvidia = [DeviceInfo("NVIDIA GeForce RTX 4060", "GPU", "VRAM", 8188, 6266, 1692, 35.0, 51.0)]
     intel = [
@@ -932,6 +939,7 @@ def test_intel_adapter_no_i915_returns_empty(monkeypatch, tmp_path):
 def test_intel_adapter_windows_branch_via_lhm(monkeypatch, tmp_path):
     """Intel Windows 分支:通过 LHM GpuIntel 硬件 → 经 _aggregate_sensors → DeviceInfo。"""
     import types
+
     from llm_manager.devices import intel as ad
 
     class _FakeSensor:
@@ -978,8 +986,8 @@ def test_intel_adapter_windows_branch_via_lhm(monkeypatch, tmp_path):
 
 def test_intel_adapter_windows_lhm_unavailable_returns_empty(monkeypatch):
     """Intel Windows 分支:LHM 不可用 → []。"""
-    from llm_manager.devices import intel as ad
     from llm_manager.devices import common as cm
+    from llm_manager.devices import intel as ad
 
     # 直接 patch common.is_lhm_available 返回 False,让 _lhm_computer 返回 None
     monkeypatch.setattr(cm, "is_lhm_available", lambda: False)
@@ -991,8 +999,8 @@ def test_intel_adapter_windows_lhm_unavailable_returns_empty(monkeypatch):
 
 def test_intel_adapter_linux_missing_sysfs_returns_empty(monkeypatch, tmp_path):
     """Intel Linux 分支:无 sysfs → []。"""
-    from llm_manager.devices import intel as ad
     from llm_manager.devices import common as cm
+    from llm_manager.devices import intel as ad
 
     monkeypatch.setattr(ad.os, "name", "posix")
     # enumerate 直接检查用 intel 绑定,_drm_cards() 内部引用 common 绑定 → 双 patch 都须指向不存在路径
@@ -1125,18 +1133,16 @@ def test_device_info_response_accepts_new_fields():
     from llm_manager.gateway.api.devices import DeviceInfoResponse
 
     resp = DeviceInfoResponse(
-        **{
-            "device_name": "Intel UHD Graphics (Alder Lake-N)",
-            "device_type": "GPU (iGPU)",
-            "memory_type": "Shared RAM",
-            "total_memory_mb": 16384,
-            "available_memory_mb": 8192,
-            "used_memory_mb": 8192,
-            "usage_percentage": 42.0,
-            "temperature_celsius": None,
-            "freq_mhz": 2400.0,
-            "power_watts": 3.5,
-        }
+        device_name="Intel UHD Graphics (Alder Lake-N)",
+        device_type="GPU (iGPU)",
+        memory_type="Shared RAM",
+        total_memory_mb=16384,
+        available_memory_mb=8192,
+        used_memory_mb=8192,
+        usage_percentage=42.0,
+        temperature_celsius=None,
+        freq_mhz=2400.0,
+        power_watts=3.5,
     )
     assert resp.freq_mhz == 2400.0 and resp.power_watts == 3.5
 
@@ -1228,6 +1234,7 @@ def test_amd_adapter_available_clamped_non_negative(monkeypatch, tmp_path):
 def test_amd_adapter_windows_branch_via_lhm(monkeypatch, tmp_path):
     """AMD Windows 分支:通过 LHM GpuAmd 硬件 → 经 _aggregate_sensors → DeviceInfo。"""
     import types
+
     from llm_manager.devices import amd as ad
 
     class _FakeSensor:

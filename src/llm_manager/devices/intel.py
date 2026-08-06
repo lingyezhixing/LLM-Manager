@@ -10,10 +10,10 @@ from pathlib import Path
 from . import DeviceInfo
 from .common import (
     _DRM_CLASS,
-    _drm_cards,
-    _system_mem,
-    _lhm_computer,
     _aggregate_sensors,  # Windows LHM 运行时
+    _drm_cards,
+    _lhm_computer,
+    _system_mem,
 )
 
 # ==================== Intel iGPU(i915 + intel_gpu_top)====================
@@ -158,6 +158,6 @@ class IntelAdapter:
                     for s in hw.Sensors
                 )
                 out.append(_aggregate_sensors(str(hw.Name), sensors))
-            except Exception:  # noqa: BLE001 — 单个 LHM GPU 传感器读取失败 → 跳过该 GPU,继续其余
+            except Exception:  # noqa: BLE001, S110 — 单个 LHM GPU 传感器读取失败 → 跳过该 GPU,继续其余
                 pass
         return out

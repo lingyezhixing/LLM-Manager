@@ -45,7 +45,7 @@ def setup_logging(level: str = "INFO", log_dir: str = "logs") -> None:
     try:
         Path(log_dir).mkdir(parents=True, exist_ok=True)
         log_file = (
-            Path(log_dir) / f"llm-manager_{datetime.datetime.now().strftime('%Y%m%d-%H%M%S')}.log"
+            Path(log_dir) / f"llm-manager_{datetime.datetime.now().strftime('%Y%m%d-%H%M%S')}.log"  # noqa: DTZ005 — 文件名时间戳,本地时间即可
         )
         fh = logging.FileHandler(log_file, encoding="utf-8")
         fh.setLevel(numeric)
@@ -69,5 +69,5 @@ class SystemLogHandler(logging.Handler):
     def emit(self, record: logging.LogRecord) -> None:
         try:
             self._collector(record.getMessage(), record.created, record.levelname)
-        except Exception:
+        except Exception:  # noqa: BLE001, S110
             pass  # 日志管道永不影响主程序

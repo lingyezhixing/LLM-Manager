@@ -139,7 +139,7 @@ def _reset():
 
 # ---------- Task 7: cold start ----------
 async def test_cold_start_reaches_routing():
-    life, sup, dev, cfg = _make()
+    life, sup, _, _ = _make()
     status = await life.ensure_running("m1")
     assert status == ModelStatus.ROUTING
     assert len(sup.spawned) == 1
@@ -150,7 +150,7 @@ async def test_cold_start_reaches_routing():
 
 # ---------- Task 8: reconcile ----------
 async def test_reconcile_dead_process_in_routing_marks_failed():
-    life, sup, dev, cfg = _make()
+    life, sup, _, _ = _make()
     await life.ensure_running("m1")  # ROUTING, pid 1000
     sup.alive_pids.discard(1000)  # on_exit 漏触发:进程死但状态仍 ROUTING
     status = await life.ensure_running("m1")
@@ -158,7 +158,7 @@ async def test_reconcile_dead_process_in_routing_marks_failed():
 
 
 async def test_reconcile_orphan_starting_with_no_inflight_marks_failed():
-    life, sup, dev, cfg = _make()
+    life, _sup, _, _ = _make()
     state.set_status("m1", ModelStatus.STARTING, force=True)
     assert state.has_inflight("m1") is False
     status = await life.ensure_running("m1")
@@ -167,7 +167,7 @@ async def test_reconcile_orphan_starting_with_no_inflight_marks_failed():
 
 # ---------- Task 9: on_crash ----------
 async def test_external_crash_marks_failed_then_restart():
-    life, sup, dev, cfg = _make()
+    life, sup, _, _ = _make()
     await life.ensure_running("m1")  # ROUTING, pid 1000
     sup.trigger_exit(1000, code=1)  # 外部进程死亡→on_exit cb
     assert state.get_status("m1") == ModelStatus.FAILED
@@ -177,7 +177,7 @@ async def test_external_crash_marks_failed_then_restart():
 
 
 async def test_cooperative_stop_exit_is_not_marked_failed():
-    life, sup, dev, cfg = _make()
+    life, sup, _, _ = _make()
     await life.ensure_running("m1")
     await life.stop("m1")  # 先 STOPPED 再 kill
     sup.trigger_exit(1000, code=0)  # kill 触发的退出
@@ -186,7 +186,7 @@ async def test_cooperative_stop_exit_is_not_marked_failed():
 
 # ---------- Task 10: stop ----------
 async def test_force_stop_then_restart_core_requirement():
-    life, sup, dev, cfg = _make()
+    life, sup, _, _ = _make()
     await life.ensure_running("m1")
     assert state.get_status("m1") == ModelStatus.ROUTING
     await life.stop("m1")  # 手动强制关闭
@@ -198,7 +198,7 @@ async def test_force_stop_then_restart_core_requirement():
 
 
 async def test_stop_on_stopped_or_failed_is_noop():
-    life, sup, dev, cfg = _make()
+    life, sup, _, _ = _make()
     s = await life.stop("m1")  # 从未启动(STOPPED)
     assert s == ModelStatus.STOPPED
     assert sup.killed == []
@@ -209,7 +209,7 @@ async def test_stop_on_stopped_or_failed_is_noop():
 
 
 async def test_stop_from_each_running_state_lands_stopped():
-    life, sup, dev, cfg = _make()
+    life, _sup, _, _ = _make()
     for pre in (
         ModelStatus.STARTING,
         ModelStatus.INIT_SCRIPT,
@@ -227,7 +227,7 @@ async def test_stop_from_each_running_state_lands_stopped():
 
 # ---------- Task 11: single-dispatch / checkpoints / errors / race / eviction ----------
 async def test_single_dispatch_concurrent_start_spawns_once():
-    life, sup, dev, cfg = _make()
+    life, sup, _, _ = _make()
     s1, s2 = await asyncio.gather(life.ensure_running("m1"), life.ensure_running("m1"))
     assert s1 == s2 == ModelStatus.ROUTING
     assert len(sup.spawned) == 1
@@ -238,7 +238,7 @@ async def test_stop_starting_winner_self_terminates_no_routing():
         _time.sleep(0.15)
         return ProbeResult(False, "slow")
 
-    life, sup, dev, cfg = _make(probes={"Chat": slow_probe})
+    life, _sup, _, _ = _make(probes={"Chat": slow_probe})
     task = asyncio.create_task(life.ensure_running("m1"))
     await asyncio.sleep(0.05)
     await life.stop("m1")
@@ -256,7 +256,7 @@ async def test_slow_probe_then_concurrent_restart_not_clobbered():
         _time.sleep(0.3)
         return ProbeResult(True, "ok")
 
-    life, sup, dev, cfg = _make(probes={"Chat": slow_probe})
+    life, sup, _, _ = _make(probes={"Chat": slow_probe})
     w1 = asyncio.create_task(life.ensure_running("m1"))  # 旧 winner → fut1, 进 probe
     await asyncio.sleep(0.05)  # 旧 winner 卡在 to_thread probe
     await life.stop("m1")  # STOPPED + pop_inflight(fut1)
@@ -270,7 +270,7 @@ async def test_slow_probe_then_concurrent_restart_not_clobbered():
 
 
 async def test_post_spawn_stop_kills_orphan_no_leak():
-    life, sup, dev, cfg = _make()
+    life, sup, _, _ = _make()
     orig_spawn = sup.spawn
 
     async def spy_spawn(cmd, *, shell=False, on_output=None, env=None, cwd=None):
@@ -285,14 +285,14 @@ async def test_post_spawn_stop_kills_orphan_no_leak():
 
 
 async def test_no_scheme_marks_failed():
-    life, sup, dev, cfg = _make(dev=FakeDevices(online=set(), snap={}))
+    life, _sup, _, _ = _make(dev=FakeDevices(online=set(), snap={}))
     status = await life.ensure_running("m1")
     assert status == ModelStatus.FAILED
 
 
 async def test_insufficient_resource_marks_failed():
     dev = FakeDevices(online={"rtx 4060"}, snap={"rtx 4060": _dev("rtx 4060", 0)})
-    life, sup, dev2, cfg = _make(dev=dev, models=[_model("m1", mem=4096)])
+    life, _sup, _dev2, _ = _make(dev=dev, models=[_model("m1", mem=4096)])
     status = await life.ensure_running("m1")
     assert status == ModelStatus.FAILED
 
@@ -301,7 +301,7 @@ async def test_probe_failure_marks_failed():
     def bad_probe(alias, port, start_time=None, timeout=60):
         return ProbeResult(False, "unhealthy")
 
-    life, sup, dev, cfg = _make(probes={"Chat": bad_probe})
+    life, sup, _, _ = _make(probes={"Chat": bad_probe})
     status = await life.ensure_running("m1")
     assert status == ModelStatus.FAILED
     assert 1000 in sup.killed
@@ -312,7 +312,7 @@ async def test_probe_timeout_marks_failed():
         _time.sleep(0.1)
         return ProbeResult(False, "探测器深层检查超时")
 
-    life, sup, dev, cfg = _make(probes={"Chat": timeout_probe})
+    life, _sup, _, _ = _make(probes={"Chat": timeout_probe})
     status = await life.ensure_running("m1")
     assert status == ModelStatus.FAILED
 
@@ -321,14 +321,14 @@ async def test_probe_raising_after_spawn_kills_pid_then_failed():
     def raising_probe(alias, port, start_time=None, timeout=60):
         raise RuntimeError("probe blew up")
 
-    life, sup, dev, cfg = _make(probes={"Chat": raising_probe})
+    life, sup, _, _ = _make(probes={"Chat": raising_probe})
     status = await life.ensure_running("m1")
     assert status == ModelStatus.FAILED
     assert 1000 in sup.killed  # spawned pid reaped, not orphaned (guard D)
 
 
 async def test_spawn_exception_marks_failed_no_future_leak():
-    life, sup, dev, cfg = _make()
+    life, sup, _, _ = _make()
     sup.spawn_raises = RuntimeError("boom")
     status = await life.ensure_running("m1")
     assert status == ModelStatus.FAILED
@@ -340,7 +340,7 @@ async def test_pipeline_midstage_exception_clears_inflight():
         def refresh(self):
             raise RuntimeError("nvidia-smi died")
 
-    life, sup, dev, cfg = _make(dev=BoomDevices())
+    life, _sup, _, _ = _make(dev=BoomDevices())
     status = await life.ensure_running("m1")
     assert status == ModelStatus.FAILED
     assert state.has_inflight("m1") is False
@@ -380,7 +380,7 @@ def test_illegal_transition_raises_value_error():
 
 # ---------- Task 12: unload_all + tolerance ----------
 async def test_unload_all_stops_running_models():
-    life, sup, dev, cfg = _make(models=[_model("m1", port=8000), _model("m2", port=8001)])
+    life, _sup, _, _ = _make(models=[_model("m1", port=8000), _model("m2", port=8001)])
     await life.ensure_running("m1")
     await life.ensure_running("m2")
     stopped = await life.unload_all()
@@ -390,14 +390,14 @@ async def test_unload_all_stops_running_models():
 
 
 async def test_unload_all_skips_already_stopped():
-    life, sup, dev, cfg = _make(models=[_model("m1", port=8000)])
+    life, _sup, _, _ = _make(models=[_model("m1", port=8000)])
     stopped = await life.unload_all()
     assert stopped == []
 
 
 async def test_unload_all_tolerates_one_stop_failure():
     # 容错:某模型 stop 抛异常时,unload_all 不整体失败、只返回成功的
-    life, sup, dev, cfg = _make(models=[_model("m1", port=8000), _model("m2", port=8001)])
+    life, sup, _, _ = _make(models=[_model("m1", port=8000), _model("m2", port=8001)])
     await life.ensure_running("m1")
     await life.ensure_running("m2")
     bad_pid = state.get_pid("m2")
@@ -425,7 +425,7 @@ async def test_ensure_running_cancelled_after_spawn_kills_pid_clears_slot():
         _time.sleep(0.3)
         return ProbeResult(True, "ok")
 
-    life, sup, dev, cfg = _make(probes={"Chat": slow_probe})
+    life, sup, _, _ = _make(probes={"Chat": slow_probe})
     task = asyncio.create_task(life.ensure_running("m1"))
     await asyncio.sleep(0.05)  # winner 进 spawn → HEALTH_CHECK → probe(to_thread)
     assert state.get_pid("m1") is not None  # post-spawn:pid 已记
@@ -539,7 +539,7 @@ async def test_pipeline_wires_on_output_to_logs_capture(tmp_path):
     logs.init(db)
     try:
         cap = _CapturingSupervisor()
-        lc, sup, dev, cfg = _make(sup=cap, db=db)
+        lc, _sup, _, _ = _make(sup=cap, db=db)
         await lc.ensure_running("m1")
         assert cap.on_output is not None
         sid = logs.resolve_session("m1")
@@ -564,7 +564,7 @@ async def test_stop_ends_log_session(tmp_path):
     logs.init(db)
     try:
         cap = _CapturingSupervisor()
-        lc, sup, dev, cfg = _make(sup=cap, db=db)
+        lc, _sup, _, _ = _make(sup=cap, db=db)
         await lc.ensure_running("m1")
         assert cap.on_output is not None
         cap.on_output("old session line", "out")
@@ -602,7 +602,7 @@ async def test_pipeline_conda_env_wraps_with_cmd_on_windows():
             )
         },
     )
-    life, sup, dev, cfg = _make(models=[m])
+    life, sup, _, _ = _make(models=[m])
     await life.ensure_running("m1")
     spawned = sup.spawned[0]
     if _os.name == "nt":
@@ -639,7 +639,7 @@ async def test_runtime_session_recorded_on_start_and_stop(tmp_path):
     from llm_manager.data.persistence import open_db
 
     db = open_db(tmp_path / "t.db")
-    life, sup, dev, cfg = _make(db=db)
+    life, _sup, _, _ = _make(db=db)
     await life.ensure_running("m1")  # → ROUTING → runtime start
     open_rows = db.conn.execute(
         "SELECT COUNT(*) AS n FROM model_runtime r JOIN models m ON r.model_id=m.id "
@@ -656,7 +656,7 @@ async def test_runtime_session_recorded_on_start_and_stop(tmp_path):
 
 async def test_runtime_not_recorded_when_db_absent(tmp_path):
     # default _make() (no db) must not crash and must not record
-    life, sup, dev, cfg = _make()
+    life, _sup, _, _ = _make()
     await life.ensure_running("m1")
     assert state.get_status("m1") == ModelStatus.ROUTING
     await life.stop("m1")
@@ -668,7 +668,7 @@ async def test_runtime_session_closed_on_crash(tmp_path):
     from llm_manager.data.persistence import open_db
 
     db = open_db(tmp_path / "t.db")
-    life, sup, dev, cfg = _make(db=db)
+    life, sup, _, _ = _make(db=db)
     await life.ensure_running("m1")  # ROUTING → open session
     sup.trigger_exit(1000, code=1)  # external crash → _on_crash
     assert state.get_status("m1") == ModelStatus.FAILED
@@ -687,7 +687,7 @@ async def test_runtime_session_closed_on_reconcile_dead(tmp_path):
     from llm_manager.data.persistence import open_db
 
     db = open_db(tmp_path / "t.db")
-    life, sup, dev, cfg = _make(db=db)
+    life, sup, _, _ = _make(db=db)
     await life.ensure_running("m1")  # ROUTING → session 1 open
     sup.alive_pids.discard(1000)  # process dead, exit cb never fired
     status = await life.ensure_running("m1")  # reconcile → _runtime_end → restart
@@ -711,7 +711,7 @@ async def test_model_log_session_open_on_spawn_closed_on_stop(tmp_path):
     db = open_db(tmp_path / "t.db")
     logs.init(db)
     try:
-        life, sup, dev, cfg = _make(db=db)
+        life, _sup, _, _ = _make(db=db)
         await life.ensure_running("m1")
         sid = logs.resolve_session("m1")
         assert sid is not None
@@ -740,7 +740,7 @@ async def test_model_log_session_closed_on_crash(tmp_path):
     db = open_db(tmp_path / "t.db")
     logs.init(db)
     try:
-        life, sup, dev, cfg = _make(db=db)
+        life, sup, _, _ = _make(db=db)
         await life.ensure_running("m1")
         assert logs.resolve_session("m1") is not None
         sup.trigger_exit(1000, code=1)
@@ -759,7 +759,7 @@ async def test_model_log_session_restart_opens_new_session_closes_old(tmp_path):
     db = open_db(tmp_path / "t.db")
     logs.init(db)
     try:
-        life, sup, dev, cfg = _make(db=db)
+        life, _sup, _, _ = _make(db=db)
         await life.ensure_running("m1")
         sid1 = logs.resolve_session("m1")
         await life.stop("m1")
@@ -782,7 +782,7 @@ async def test_model_log_session_closed_on_probe_failure(tmp_path):
     db = open_db(tmp_path / "t.db")
     logs.init(db)
     try:
-        life, sup, dev, cfg = _make(
+        life, _sup, _, _ = _make(
             db=db, probes={"Chat": lambda *a, **k: ProbeResult(False, "unhealthy")}
         )
         status = await life.ensure_running("m1")
@@ -803,7 +803,7 @@ async def test_stop_during_spawn_closes_log_session(tmp_path):
     db = open_db(tmp_path / "t.db")
     logs.init(db)
     try:
-        life, sup, dev, cfg = _make(db=db)
+        life, sup, _, _ = _make(db=db)
         spawn_entered = asyncio.Event()
         orig_spawn = sup.spawn
 
@@ -836,7 +836,7 @@ async def test_model_log_sessions_tracked_per_alias(tmp_path):
     try:
         m1 = _model("m1", port=8000)
         m2 = _model("m2", port=8001)
-        life, sup, dev, cfg = _make(models=[m1, m2], db=db)
+        life, _sup, _, _ = _make(models=[m1, m2], db=db)
         await life.ensure_running("m1")
         await life.ensure_running("m2")
         assert logs.resolve_session("m1") is not None

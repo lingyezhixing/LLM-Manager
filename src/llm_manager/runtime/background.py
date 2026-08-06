@@ -59,13 +59,13 @@ async def idle_reclamation_loop(
                     )
                     try:
                         await lifecycle.stop(name)
-                    except Exception as e:
+                    except Exception as e:  # noqa: BLE001
                         logger.error("idle reclaim stop failed %s: %s", name, e)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error("idle reclamation iteration error: %s", e)
         try:
             await asyncio.wait_for(stop_event.wait(), timeout=period)  # 可中断 sleep
-        except asyncio.TimeoutError:
+        except TimeoutError:
             pass
 
 
@@ -86,9 +86,9 @@ async def auto_start(
         try:
             status = await asyncio.wait_for(lifecycle.ensure_running(name), timeout)
             logger.info("auto_start %s -> %s", name, status.value)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.warning("auto_start %s timeout (%.0fs)", name, timeout)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error("auto_start %s failed: %s", name, e)
 
     # 1. 扫描硬件

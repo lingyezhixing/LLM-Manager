@@ -29,9 +29,9 @@ from llm_manager.gateway.api.models import build_models_response
 from llm_manager.gateway.routes import register_routes
 from llm_manager.probes import probe_registry
 from llm_manager.realtime import DeviceFeed, ModelFeed
-from llm_manager.runtime.lifecycle import Lifecycle
 from llm_manager.runtime import background
 from llm_manager.runtime.heartbeat import heartbeat_loop
+from llm_manager.runtime.lifecycle import Lifecycle
 from llm_manager.runtime.log_retention import log_retention_loop, retention_from_store
 from llm_manager.supervisor import Supervisor
 from llm_manager.tray import host as tray_host
@@ -238,7 +238,7 @@ def _force_kill(proc) -> None:
     if proc.poll() is None:
         try:
             proc.kill()
-        except Exception:
+        except Exception:  # noqa: BLE001, S110
             pass
 
 

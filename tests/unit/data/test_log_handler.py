@@ -1,6 +1,6 @@
 import logging
-from llm_manager.data import log_handler
-from llm_manager.data import logs
+
+from llm_manager.data import log_handler, logs
 
 
 def _make_collector(delivered):

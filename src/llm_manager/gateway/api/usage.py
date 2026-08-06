@@ -103,7 +103,7 @@ def _resolve_range(preset: str, start: float | None, end: float | None) -> tuple
         return now - 600, now, 10  # last 10 min, 10s buckets
     if preset == "today":
         midnight = (
-            datetime.datetime.now().replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+            datetime.datetime.now().replace(hour=0, minute=0, second=0, microsecond=0).timestamp()  # noqa: DTZ005 — 本地午夜边界(与 _bucket_axis 的本地 TZ 对齐一致)
         )
         return midnight, now, 600  # since local midnight, 10min buckets
     if preset == "30d":

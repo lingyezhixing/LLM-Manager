@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +26,7 @@ def _safe(parser: Callable[[bytes], TokenUsage]) -> Callable[[bytes], TokenUsage
     def wrapped(body: bytes) -> TokenUsage:
         try:
             return parser(body)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.debug("[parser] %s failed: %s", parser.__name__, e)
             return TokenUsage(0, 0, 0, 0)
 
@@ -47,7 +47,7 @@ def _body_str(body: bytes) -> str:
 def _is_sse(s: str) -> bool:
     for line in s.splitlines():
         ls = line.lstrip()
-        if ls.startswith("data:") or ls.startswith("event:"):
+        if ls.startswith(("data:", "event:")):
             return True
     return False
 

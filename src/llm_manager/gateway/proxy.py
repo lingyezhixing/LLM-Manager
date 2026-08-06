@@ -52,7 +52,7 @@ async def _read_body(request: Request):
     if "application/json" in request.headers.get("content-type", ""):
         try:
             return await request.json()
-        except Exception:
+        except Exception:  # noqa: BLE001
             return await request.body()
     return await request.body()
 
@@ -215,7 +215,7 @@ async def forward(request: Request, path: str, lifecycle, cfg, db, client_pool) 
         state.end_request(primary)
         logger.warning("upstream error model=%s: %s", primary, e)
         raise HTTPException(502, f"upstream error: {e}")
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         state.end_request(primary)
         logger.warning("internal model=%s: %s", primary, e)
         raise HTTPException(500, f"internal: {e}")

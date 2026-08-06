@@ -55,7 +55,7 @@ def _probe(
                 if client.get("/models", timeout=3.0).status_code < 400:
                     ok = True
                     break
-            except Exception:
+            except Exception:  # noqa: BLE001, S110
                 pass
             time.sleep(2)
         if not ok:
@@ -69,7 +69,7 @@ def _probe(
                 resp = client.post(path, json={**body, "model": alias}, timeout=5.0)
                 if resp.status_code < 400:
                     return ProbeResult(True, f"{label}探测器健康检查成功")
-            except Exception:
+            except Exception:  # noqa: BLE001, S110
                 pass
             time.sleep(1)
         return ProbeResult(False, f"{label}探测器深层检查超时")

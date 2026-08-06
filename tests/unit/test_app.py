@@ -28,7 +28,7 @@ def test_lifespan_starts_and_stops_background(tmp_path, monkeypatch):
     monkeypatch.setattr("llm_manager.devices.common.is_lhm_available", lambda: False)
     # 探针秒失败(跳过真实 60s 重试循环):仍证明 auto_start 后台真起 + 失败容错(不抛)+ 不阻塞 /health。
     # 测试的真实契约是「后台任务起 + 失败路径走通 + /health 不阻塞」,「重试 60s」只是 startup_timeout 的副作用。
-    from llm_manager.probes import probe_registry, ProbeResult
+    from llm_manager.probes import ProbeResult, probe_registry
 
     monkeypatch.setitem(
         probe_registry,
@@ -153,7 +153,7 @@ def test_exit_code_for_returns_sentinel_only_when_requested():
 
 
 def test_should_respawn_only_on_restart_sentinel():
-    from llm_manager.app import _should_respawn, RESTART_EXIT_CODE
+    from llm_manager.app import RESTART_EXIT_CODE, _should_respawn
 
     assert _should_respawn(RESTART_EXIT_CODE) is True
     assert _should_respawn(0) is False
@@ -163,7 +163,7 @@ def test_should_respawn_only_on_restart_sentinel():
 
 
 def test_worker_command_contains_executable_and_flag():
-    from llm_manager.app import _worker_command, _WORKER_FLAG
+    from llm_manager.app import _WORKER_FLAG, _worker_command
 
     cmd = _worker_command()
     assert cmd[0] == sys.executable
@@ -173,6 +173,7 @@ def test_worker_command_contains_executable_and_flag():
 
 def test_spawn_kwargs_windows_uses_process_group(monkeypatch):
     import subprocess
+
     import llm_manager.app as appmod
 
     monkeypatch.setattr(appmod.os, "name", "nt")
@@ -194,6 +195,7 @@ def test_spawn_kwargs_posix_uses_new_session(monkeypatch):
 
 def test_forwardable_signals_per_os(monkeypatch):
     import signal as _sig
+
     import llm_manager.app as appmod
 
     monkeypatch.setattr(appmod.os, "name", "nt")
@@ -205,6 +207,7 @@ def test_forwardable_signals_per_os(monkeypatch):
 
 def test_send_shutdown_windows_sends_ctrl_break(monkeypatch):
     import signal as _sig
+
     import llm_manager.app as appmod
 
     monkeypatch.setattr(appmod.os, "name", "nt")
@@ -222,6 +225,7 @@ def test_send_shutdown_windows_sends_ctrl_break(monkeypatch):
 
 def test_send_shutdown_posix_killpg(monkeypatch):
     import signal as _sig
+
     import llm_manager.app as appmod
 
     monkeypatch.setattr(appmod.os, "name", "posix")

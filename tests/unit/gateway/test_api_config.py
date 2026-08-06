@@ -235,13 +235,14 @@ def test_to_model_config_preserves_device_names():
 
 
 def test_to_model_config_rejects_duplicate_scheme_config_source():
+    import pytest
+
     from llm_manager.gateway.api.config_api import (
         CommandInput,
         ModelDefInput,
         SchemeInput,
         _to_model_config,
     )
-    import pytest
 
     body = ModelDefInput(
         name="M",
@@ -314,6 +315,7 @@ def test_update_model_rename_swaps_key():
 
 def test_update_model_rename_conflict_raises_model_exists():
     import pytest
+
     from llm_manager.data.config_store import ModelExists
     from llm_manager.gateway.api.config_api import _create_model, _update_model
 
@@ -341,9 +343,10 @@ def test_update_model_fn_replaces():
 
 
 def test_update_model_fn_raises_not_found():
+    import pytest
+
     from llm_manager.data.config_store import ModelNotFound
     from llm_manager.gateway.api.config_api import _update_model
-    import pytest
 
     with pytest.raises(ModelNotFound):
         _update_model(_empty_cfg(), "nope", _body("nope"))
@@ -358,9 +361,10 @@ def test_delete_model_fn_removes():
 
 
 def test_delete_model_fn_raises_not_found():
+    import pytest
+
     from llm_manager.data.config_store import ModelNotFound
     from llm_manager.gateway.api.config_api import _delete_model
-    import pytest
 
     with pytest.raises(ModelNotFound):
         _delete_model(_empty_cfg(), "nope")
@@ -661,6 +665,7 @@ def test_delete_model_def_removes(tmp_path):
 def test_delete_model_def_removes_logs_keeps_usage(tmp_path):
     """删定义 → 连带删该模型日志会话(级联 log_lines),保留请求记录(成为孤立模型)。"""
     import asyncio
+
     from llm_manager.data import logs as _logs
     from llm_manager.data import persistence as _p
     from llm_manager.data.usage import record_usage

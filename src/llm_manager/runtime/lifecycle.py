@@ -47,7 +47,7 @@ class Lifecycle:
         probes: dict[str, Callable],
         scheme_select=select_adaptive,
         startup_timeout: float = 60.0,
-        db: "Db | None" = None,
+        db: Db | None = None,
     ) -> None:
         self._get_cfg = get_cfg
         self._supervisor = supervisor
@@ -79,7 +79,7 @@ class Lifecycle:
         if not won:
             try:
                 await future
-            except Exception:
+            except Exception:  # noqa: BLE001, S110
                 pass
             status = state.get_status(alias)
             if inc_pending and status == ModelStatus.ROUTING:
@@ -93,7 +93,7 @@ class Lifecycle:
             state.record_failure(alias, "startup cancelled")
             state.finish_start(alias, ModelStatus.FAILED, owner=future)
             raise
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             state.record_failure(alias, f"pipeline error: {e}")
             state.finish_start(alias, ModelStatus.FAILED, owner=future)
         status = state.get_status(alias)
@@ -303,7 +303,7 @@ class Lifecycle:
             self._runtime_end(alias)
             self._log_end(alias)  # 进程崩溃 → 收口日志会话
             state.record_failure(alias, f"process exited code={code}")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error("on_exit callback error for %s: %s", alias, e)
 
     def _reconcile(self, alias: str) -> None:

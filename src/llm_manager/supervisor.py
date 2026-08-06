@@ -109,7 +109,7 @@ class Supervisor:
         finally:
             try:
                 pipe.close()
-            except Exception:
+            except Exception:  # noqa: BLE001, S110
                 pass
 
     async def _wait(self, pid: int) -> None:
@@ -123,7 +123,7 @@ class Supervisor:
         if cb:
             try:
                 cb(rc if rc is not None else -1)
-            except Exception:
+            except Exception:  # noqa: BLE001, S110
                 pass
         # 进程已退出:四张表一并自清(读者线程随管道 EOF 自然结束;kill_tree 的
         # finally 也清,双路径幂等 pop——防 start/stop 循环累积)。
@@ -141,7 +141,7 @@ class Supervisor:
             return p.status() != psutil.STATUS_ZOMBIE and p.is_running()
         except psutil.NoSuchProcess:
             return False
-        except Exception:
+        except Exception:  # noqa: BLE001
             return False
 
     async def kill_tree(self, pid: int) -> bool:
@@ -160,7 +160,7 @@ class Supervisor:
                     return True
             except psutil.NoSuchProcess:
                 return True
-            except Exception:
+            except Exception:  # noqa: BLE001, S110
                 pass
             if os.name == "nt":
                 try:
@@ -171,7 +171,7 @@ class Supervisor:
                         timeout=5,
                     )
                     return r.returncode in (0, 128)
-                except Exception:
+                except Exception:  # noqa: BLE001
                     return False
             else:
                 try:
@@ -179,7 +179,7 @@ class Supervisor:
                     return True
                 except ProcessLookupError:
                     return True
-                except Exception:
+                except Exception:  # noqa: BLE001
                     return False
         finally:
             # 三张表 _procs/_exit_cbs/_readers 不随 start/stop 循环累积(_wait 自清 _wait_tasks;双路径幂等)

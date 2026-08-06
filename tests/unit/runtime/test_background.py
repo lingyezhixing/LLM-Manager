@@ -188,7 +188,7 @@ async def test_idle_loop_reads_fresh_alive_time_each_tick():
 # ---------- auto_start ----------
 def _auto_cfg(models_devs):
     """构造 AppConfig:每模型单 scheme(required dev)。对抗验证 #4:auto_start 显式接收 cfg(避免 lifecycle.cfg 依赖)。"""
-    from llm_manager.config import Scheme, AppConfig, ModelConfig, ProgramConfig, Command
+    from llm_manager.config import AppConfig, Command, ModelConfig, ProgramConfig, Scheme
 
     models = {
         name: ModelConfig(
@@ -293,8 +293,8 @@ async def test_auto_start_device_isolation_batches():
 
 # ---------- _plan_batches (Task 1) ----------
 def test_plan_batches_device_isolation():
+    from llm_manager.config import Command, Scheme
     from llm_manager.runtime.background import _plan_batches
-    from llm_manager.config import Scheme, Command
 
     s_rtx = Scheme("RTX", frozenset({"rtx 4060"}), Command(exe="a.bat"), {"rtx 4060": 5120})
     s_v100_780 = Scheme(
@@ -307,8 +307,8 @@ def test_plan_batches_device_isolation():
 
 
 def test_plan_batches_all_same_device_only_first_parallel():
+    from llm_manager.config import Command, Scheme
     from llm_manager.runtime.background import _plan_batches
-    from llm_manager.config import Scheme, Command
 
     s = Scheme("S", frozenset({"rtx 4060"}), Command(exe="a.bat"), {"rtx 4060": 5120})
     assert _plan_batches([("a", s), ("b", s), ("c", s)]) == (["a"], ["b", "c"])

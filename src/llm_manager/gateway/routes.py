@@ -6,8 +6,8 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 
-from llm_manager.gateway.api import build_api_router
 from llm_manager.gateway import catalog, proxy, spa
+from llm_manager.gateway.api import build_api_router
 
 
 def register_routes(app: FastAPI, lifecycle, db, client_pool) -> None:

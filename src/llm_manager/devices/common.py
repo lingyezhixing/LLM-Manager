@@ -6,10 +6,12 @@ _hwmon_temp1(hwmon 温度)、_read_float/_read_int_mb(数值读取)以及 Window
 from __future__ import annotations
 
 import atexit
-import psutil
 import threading
+from collections.abc import Iterator
 from pathlib import Path
-from typing import TYPE_CHECKING, Iterator
+from typing import TYPE_CHECKING
+
+import psutil
 
 if TYPE_CHECKING:
     from . import DeviceInfo
@@ -91,7 +93,7 @@ def _close_lhm() -> None:
     if _LHM_COMPUTER is not None:
         try:
             _LHM_COMPUTER.Close()
-        except Exception:  # noqa: BLE001 — 进程退出收尾,Close 失败可忽略
+        except Exception:  # noqa: BLE001, S110 — 进程退出收尾,Close 失败可忽略
             pass
         _LHM_COMPUTER = None
 
@@ -111,7 +113,9 @@ def _lhm_computer():
                     import clr  # type: ignore[import-not-found]
 
                     clr.AddReference(str(_LHM_DLL))  # type: ignore[attr-defined]
-                    from LibreHardwareMonitor.Hardware import Computer  # type: ignore[import-not-found]
+                    from LibreHardwareMonitor.Hardware import (
+                        Computer,  # type: ignore[import-not-found]
+                    )
 
                     c = Computer()
                     c.IsGpuEnabled = True
@@ -124,12 +128,12 @@ def _lhm_computer():
     return _LHM_COMPUTER
 
 
-def _aggregate_sensors(device_name: str, sensors: Iterator[tuple[str, str, float]]) -> "DeviceInfo":
+def _aggregate_sensors(device_name: str, sensors: Iterator[tuple[str, str, float]]) -> DeviceInfo:
     """Pure: fold LHM sensor tuples into DeviceInfo. Port semantics from legacy amd_780m.py.
     跨设备共享(Intel/AMD 的 LHM Gpu 折叠同一实现);各自遍历骨架在各设备文件。
     温度取同硬件所有温度传感器最大值;频率取 Clock/Core 传感器(LHM 的 "GPU Core",
     对齐 nvidia-smi clocks.gr / intel_gpu_top frequency.actual 的核心频率语义)。"""
-    from . import DeviceInfo  # noqa: F401 — 避免循环导入,延迟导入
+    from . import DeviceInfo
 
     core_load = 0.0
     temp_c = None
@@ -163,6 +167,6 @@ def _aggregate_sensors(device_name: str, sensors: Iterator[tuple[str, str, float
         int(total - used),
         int(used),
         float(core_load),
-        int(round(temp_c)) if temp_c is not None else None,
+        round(temp_c) if temp_c is not None else None,
         float(freq_mhz) if freq_mhz > 0 else None,
     )

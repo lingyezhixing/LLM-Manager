@@ -16,15 +16,15 @@ from llm_manager.data.persistence import (
     storage_stats,
 )
 from llm_manager.data.usage import (
-    record_usage,
-    record_runtime_start,
     record_runtime_end,
-    runtime_heartbeat_live,
+    record_runtime_start,
+    record_usage,
     resolve_model_id,
+    runtime_heartbeat_live,
     tier_cost,
+    usage_by_model,
     usage_cost,
     usage_cost_series,
-    usage_by_model,
     usage_series,
     usage_summary,
 )
@@ -107,7 +107,7 @@ def test_concurrent_writes_serialized_by_lock(tmp_path):
                     cache_n=0,
                     prompt_n=1,
                 )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             errors.append(e)
 
     threads = [threading.Thread(target=write) for _ in range(4)]

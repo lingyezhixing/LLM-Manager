@@ -8,7 +8,7 @@ import os
 import psutil
 
 from . import DeviceInfo
-from .common import _system_mem, _lhm_computer
+from .common import _lhm_computer, _system_mem
 
 
 def _valid_reading(s) -> bool:

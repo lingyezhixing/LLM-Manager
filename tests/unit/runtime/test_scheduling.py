@@ -1,9 +1,9 @@
 from llm_manager.devices import DeviceInfo
 from llm_manager.runtime.scheduling import (
     RunnableInfo,
+    check_and_free,
     compute_deficit,
     score_candidates,
-    check_and_free,
 )
 
 
