@@ -14,6 +14,7 @@ be exercised in isolation via the ``_run_coro_threadsafe`` seam.
 from __future__ import annotations
 
 import asyncio
+import io
 import logging
 import os
 import threading
@@ -101,28 +102,46 @@ class SystemTray:
 
     # ---------- icon + menu (need display; not unit-tested) ----------
     def _load_image(self):
+        """多尺寸 ICO:Windows 托盘按系统 DPI 选最接近帧渲染(16/24/32px),
+        单帧 256 会让系统硬缩 → 高 DPI 下模糊。sizes 生成的多帧文件经
+        pystray 二次保存仍保留全部帧(Pillow 从 image.info['sizes'] 继承)。"""
         icon = Path(__file__).resolve().parents[1] / "assets" / "icon.ico"
-        if icon.exists():
-            return Image.open(icon)
-        return Image.new("RGB", (64, 64), "black")
+        src = (Image.open(icon).convert("RGBA") if icon.exists()
+               else Image.new("RGBA", (256, 256), (0, 0, 0, 0)))
+        buf = io.BytesIO()
+        src.save(buf, "ICO", sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)])
+        buf.seek(0)
+        return Image.open(buf)
+
+    def _status_line(self, item=None) -> str:
+        """打开菜单时求值的状态行(文本 callable,pystray 显示前调用)。
+        只读 state 原子操作,菜单线程调用安全。"""
+        from llm_manager import state
+        return f"模型运行中: {len(state.routing_names())}/{len(self._get_cfg().models)}"
 
     def _build_icon(self):
         cfg = self._get_cfg()
         items = [
-            pystray.MenuItem("🌐 打开 WebUI", self.open_webui, default=True),
+            pystray.MenuItem(self._status_line, lambda icon, item: None, enabled=False),
             pystray.Menu.SEPARATOR,
-            pystray.MenuItem("🔔 网络唤醒飞牛", self.send_wol),
+            pystray.MenuItem("打开 WebUI", self.open_webui, default=True),
         ]
+        if cfg.wol:
+            items += [
+                pystray.Menu.SEPARATOR,
+                pystray.MenuItem("网络唤醒 NAS", self.send_wol),
+            ]
         # 预设子菜单需目标 settings 路径(为空时写库会落到 cwd);未配置路径则隐藏该子菜单,
         # 托盘其余功能(WebUI/WOL/启停/退出)照常可用
         if cfg.claude_configs and cfg.program.claude_settings_path:
             submenu = pystray.Menu(*[self._preset_menuitem(n) for n in cfg.claude_configs])
-            items.append(pystray.MenuItem("🔄 Claude 配置", submenu))  # action=Menu 即子菜单(本版无 submenu kwarg)
+            items.append(pystray.MenuItem("Claude 配置", submenu))  # action=Menu 即子菜单(本版无 submenu kwarg)
         items += [
-            pystray.MenuItem("▶ 重启自启模型", self.restart_auto_start),
-            pystray.MenuItem("⏹ 卸载全部模型", self.unload_all),
             pystray.Menu.SEPARATOR,
-            pystray.MenuItem("❌ 退出程序", self.exit_app),
+            pystray.MenuItem("重启自启模型", self.restart_auto_start),
+            pystray.MenuItem("卸载全部模型", self.unload_all),
+            pystray.Menu.SEPARATOR,
+            pystray.MenuItem("退出程序", self.exit_app),
         ]
         return pystray.Icon("LLM-Manager", self._load_image(), "LLM-Manager", pystray.Menu(*items))
 
