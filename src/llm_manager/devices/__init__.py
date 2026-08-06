@@ -1,5 +1,5 @@
 """Device detection: backends enumerate all present hardware (NVIDIA via nvidia-smi,
-Intel iGPU via i915 sysfs, AMD GPU via LHM, CPU via psutil) → DeviceMonitor
+Intel iGPU via i915 + intel_gpu_top, AMD GPU via LHM, CPU via psutil) → DeviceMonitor
 fuzzy-matches config device names to detected hardware (token-subset) and atomically
 rebinds a config-keyed cache (+ unmatched devices keyed by raw name for display)."""
 from __future__ import annotations

@@ -466,14 +466,43 @@ def test_intel_adapter_windows_and_missing_sysfs(monkeypatch, tmp_path):
     assert ad.IntelLinuxAdapter().enumerate() == []
 
 
+def test_run_intel_gpu_top_timeout_124_still_returns_stdout(monkeypatch):
+    # GNU coreutils timeout 杀子进程必然返回 124 → 124 属预期,截断 stdout 照收(解析器容忍)
+    from llm_manager.devices import adapters as ad
+
+    class _R:
+        returncode = 124
+        stdout = '[\n{"period": {"duration": 1000.0, "unit": "ms"}}\n]'
+
+    monkeypatch.setattr(ad.shutil, "which", lambda _: "/usr/bin/intel_gpu_top")
+    monkeypatch.setattr(ad.subprocess, "run", lambda *a, **k: _R())
+    assert ad._run_intel_gpu_top() == _R.stdout
+
+
+def test_run_intel_gpu_top_real_failure_returns_none(monkeypatch):
+    # 真失败(工具自身报错)≠ timeout:returncode=1 → None,指标降级
+    from llm_manager.devices import adapters as ad
+
+    class _R:
+        returncode = 1
+        stdout = ""
+
+    monkeypatch.setattr(ad.shutil, "which", lambda _: "/usr/bin/intel_gpu_top")
+    monkeypatch.setattr(ad.subprocess, "run", lambda *a, **k: _R())
+    assert ad._run_intel_gpu_top() is None
+
+
 def test_parse_intel_gpu_top_skips_init_frame_and_takes_last(monkeypatch):
     from llm_manager.devices.adapters import _parse_intel_gpu_top
 
     sample = ('[\n{"period": {"duration": 0.035, "unit": "ms"}, "engines": {"Render/3D": {"busy": 99.0}}}\n,'
               '{"period": {"duration": 1000.0, "unit": "ms"}, "frequency": {"actual": 1500.0},'
-              ' "engines": {"Render/3D": {"busy": 10.0}, "Blitter": {"busy": 3.0}}, "power": {"GPU": 1.2}}\n]')
+              ' "engines": {"Render/3D": {"busy": 10.0}, "Blitter": {"busy": 3.0}}, "power": {"GPU": 1.2}}\n,'
+              '{"period": {"duration": 1000.0, "unit": "ms"}, "frequency": {"actual": 1800.0},'
+              ' "engines": {"Render/3D": {"busy": 25.0}, "Video": {"busy": 5.0}}, "power": {"GPU": 2.2}}\n]')
     m = _parse_intel_gpu_top(sample)
-    assert m == {"busy_pct": 10.0, "freq_mhz": 1500.0, "power_watts": 1.2}  # 初始化帧跳过、取最后帧
+    # 初始化帧跳过;两个有效帧 → 取最后帧(1800/25/2.2 胜出,取第一帧的 bug 在此暴露)
+    assert m == {"busy_pct": 25.0, "freq_mhz": 1800.0, "power_watts": 2.2}
 
 
 def test_parse_intel_gpu_top_pretty_multiline_real_format(monkeypatch):

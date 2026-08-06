@@ -1,4 +1,4 @@
-"""5 个 DeviceAdapter 实现:nvidia-smi / Intel i915 sysfs / amdgpu sysfs / LHM / psutil。
+"""5 个 DeviceAdapter 实现:nvidia-smi / Intel i915 + intel_gpu_top / amdgpu sysfs / LHM / psutil。
 
 统一降级语义:识别失败(数据源不可用)→ [] 静默;识别成功但指标缺失 → None/0,
 设备照常出现。enumerate() 永不抛(内部全兜底)。"""
@@ -130,7 +130,8 @@ def _is_i915(dev: Path) -> bool:
 
 def _run_intel_gpu_top() -> str | None:
     """intel_gpu_top -J 采样输出(JSON 流)或 None(工具缺失/超时/失败)。
-    -s 1000 采样 1s;timeout 2 兜底;每轮 refresh 短进程(与 nvidia-smi 同模式)。"""
+    -s 1000 采样 1s;timeout 2 兜底;每轮 refresh 短进程(与 nvidia-smi 同模式)。
+    timeout 杀进程返回 124 属预期(指标照收);非预期失败(工具缺失/超时 4s)→ None。"""
     if shutil.which("intel_gpu_top") is None:
         return None
     try:
@@ -138,7 +139,7 @@ def _run_intel_gpu_top() -> str | None:
             ["timeout", "2", "intel_gpu_top", "-J", "-s", "1000"],
             capture_output=True, text=True, timeout=4, check=False,
         )
-        return r.stdout if r.returncode == 0 else None
+        return r.stdout if r.returncode in (0, 124) else None  # 124=timeout 杀进程,stdout 含完整采样帧
     except Exception:  # noqa: BLE001 — 子进程异常/超时 → None,指标降级
         return None
 
@@ -161,6 +162,8 @@ def _parse_intel_gpu_top(stdout: str | None) -> dict | None:
         except json.JSONDecodeError:
             break
         buf = buf[end:]
+        if not isinstance(frame, dict):
+            break  # 非 dict JSON(标量/数组)→ 非帧对象,停止(防 .get 穿透)
         if frame.get("period", {}).get("duration", 0) >= 100:
             last = frame
     if last is None:
@@ -209,10 +212,10 @@ class IntelLinuxAdapter:
             return []
         metrics = _parse_intel_gpu_top(_run_intel_gpu_top()) or {}
         return [DeviceInfo(
-            _intel_gpu_name(cards[0] / "device"), "GPU (iGPU)", "Shared RAM",
+            _intel_gpu_name(c / "device"), "GPU (iGPU)", "Shared RAM",
             total, avail, used, metrics.get("busy_pct", 0.0),
             None, metrics.get("freq_mhz"), metrics.get("power_watts"),
-        ) for _ in cards]
+        ) for c in cards]  # 多 i915 卡:按卡命名;指标共享同一次 intel_gpu_top 采样
 
 
 # ==================== AMD(amdgpu sysfs,待 780M 实测校准)====================
