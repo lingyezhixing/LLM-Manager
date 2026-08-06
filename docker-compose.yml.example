@@ -11,6 +11,12 @@ services:
     environment:
       - TZ=Asia/Shanghai
       # - LLM_MANAGER_DB_PATH=/app/data/llm_manager.db   # 默认即此,一般无需设置
+    # Intel iGPU 监控前置(intel_gpu_top 走 i915 PMU):容器默认 seccomp 禁
+    # perf_event_open 且缺 SYS_ADMIN cap。单机私有部署可接受;多租户环境应评估。
+    cap_add:
+      - SYS_ADMIN
+    security_opt:
+      - seccomp=unconfined
     devices:
       - /dev/dri/renderD128:/dev/dri/renderD128
     # NVIDIA GPU(宿主需已装 nvidia-container-toolkit):

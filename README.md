@@ -104,6 +104,7 @@ docker compose up -d             # 日常：改代码/配置后重启即可，�
 - 整个代码库挂载进容器（`.:/app`）：环境是环境、代码是代码，改代码/前端 dist 即时生效，只有依赖变更才需重建
 - `data/`、`logs/` 落在宿主机，天然持久化；配置全部走 WebUI（DB 化），无需进容器改文件
 - 容器内 `python -m llm_manager` 即 parent+worker 自重启；镜像预装 llama.cpp 编译/运行所需系统库（Vulkan/OpenBLAS/cmake 工具链），llama.cpp 编译脚本不归本仓库管理
+- Intel iGPU 监控需容器 `SYS_ADMIN` + `seccomp=unconfined`（compose example 已含，仅供 i915 PMU 监控）
 
 ---
 
