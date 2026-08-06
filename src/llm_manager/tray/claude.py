@@ -6,6 +6,7 @@ preserving all other top-level and env keys; ``detect_current_preset`` reads the
 current ``ANTHROPIC_BASE_URL`` and matches it against configured presets so the
 tray submenu can mark the active one.
 """
+
 from __future__ import annotations
 
 import json
@@ -29,9 +30,7 @@ def apply_preset(settings_path: Path, preset: dict[str, str]) -> None:
     p.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
-def detect_current_preset(
-    settings_path: Path, presets: dict[str, dict[str, str]]
-) -> str:
+def detect_current_preset(settings_path: Path, presets: dict[str, dict[str, str]]) -> str:
     p = Path(settings_path)
     if not p.exists():
         return "(未知)"

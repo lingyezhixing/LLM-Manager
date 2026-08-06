@@ -10,6 +10,7 @@ SSE 测试直接驱动 _session_stream 生成器:starlette TestClient 与 httpx 
 传输层都会死锁。生成器单循环测试覆盖真实逻辑(DB 回填 + 广播实时行);HTTP 层
 路由/404 由 test_session_404 经同步 TestClient 覆盖。
 """
+
 import asyncio
 import json
 
@@ -27,8 +28,11 @@ from llm_manager.state import ModelStatus
 
 
 class _NoLife:
-    async def ensure_running(self, alias, *, inc_pending=False): return ModelStatus.STOPPED
-    async def stop(self, alias): return ModelStatus.STOPPED
+    async def ensure_running(self, alias, *, inc_pending=False):
+        return ModelStatus.STOPPED
+
+    async def stop(self, alias):
+        return ModelStatus.STOPPED
 
 
 _CFG = """
@@ -60,8 +64,9 @@ def _build(tmp_path):
     _logs.reset()
     _logs.init(db)
     sid_sys = _logs.log_start_session(db, "system", None, None, 1000.0)
-    _logs.log_insert_lines(db, sid_sys, [(1, 1000.1, "sys", "info", "boot"),
-                                      (2, 1000.2, "sys", "error", "boom")])
+    _logs.log_insert_lines(
+        db, sid_sys, [(1, 1000.1, "sys", "info", "boot"), (2, 1000.2, "sys", "error", "boom")]
+    )
     _logs.log_end_session(db, sid_sys, 1500.0)
     sid_m = _logs.start_session("model", "m1", "m1a", 2000.0)
     return app, db, sid_sys, sid_m
@@ -96,18 +101,18 @@ def test_running_session_status_survives_heartbeat(client):
     API 响应层的 status 必须用 SQL 算好的 status 字段,不能回退到 end_time 判断
     (否则心跳一写 end_time,日志页「运行中」就消失)。"""
     c, db, sid_sys, sid_m = client
-    _logs.log_heartbeat_live(db, 2500.0)   # 模拟一次心跳:live 会话 end_time 被推到现在
+    _logs.log_heartbeat_live(db, 2500.0)  # 模拟一次心跳:live 会话 end_time 被推到现在
     r = c.get("/api/logs/sessions")
     by_id = {d["id"]: d for d in r.json()}
-    assert by_id[sid_m]["end_time"] == 2500.0       # 心跳确实写了 end_time
-    assert by_id[sid_m]["status"] == "running"      # 但在内存 live 集合 → 仍运行中
-    assert by_id[sid_m]["duration_s"] is None       # 运行中不展示时长
+    assert by_id[sid_m]["end_time"] == 2500.0  # 心跳确实写了 end_time
+    assert by_id[sid_m]["status"] == "running"  # 但在内存 live 集合 → 仍运行中
+    assert by_id[sid_m]["duration_s"] is None  # 运行中不展示时长
 
 
 def test_sessions_before_pagination(client):
     c, db, sid_sys, sid_m = client
     r = c.get("/api/logs/sessions?before=2")
-    assert [d["id"] for d in r.json()] == [sid_sys]   # id < 2
+    assert [d["id"] for d in r.json()] == [sid_sys]  # id < 2
 
 
 def test_session_lines_and_level(client):
@@ -194,17 +199,17 @@ def test_session_stream_backfill_and_live(client):
 
     async def go():
         out = []
-        q = _logs.subscribe(sid_m)          # 端点里的存在性检查同款
+        q = _logs.subscribe(sid_m)  # 端点里的存在性检查同款
         gen = _session_stream(sid_m, None, db, q)
         try:
-            frame = await anext(gen)        # 回填最近行(DB)
+            frame = await anext(gen)  # 回填最近行(DB)
             out.append(json.loads(frame.removeprefix("data: ").strip()))
             _logs.capture("m1", "live line", "out")
-            await _logs.flush()             # 落库 + 广播(同一循环)
-            frame = await anext(gen)        # 实时行经广播
+            await _logs.flush()  # 落库 + 广播(同一循环)
+            frame = await anext(gen)  # 实时行经广播
             out.append(json.loads(frame.removeprefix("data: ").strip()))
         finally:
-            await gen.aclose()              # finally → unsubscribe
+            await gen.aclose()  # finally → unsubscribe
         return out
 
     res = asyncio.run(go())

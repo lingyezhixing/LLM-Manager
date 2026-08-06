@@ -1,5 +1,6 @@
 """Catalog + preflight routes: GET /health, GET /v1/models (id=aliases[0]),
 OPTIONS preflight short-circuit (204 + CORS, before body/alias)."""
+
 from __future__ import annotations
 
 from fastapi import FastAPI, Request

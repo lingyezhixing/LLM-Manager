@@ -10,6 +10,7 @@
 The frontend ticks uptime locally from ``started_at``; series buckets carry wall-clock
 epochs so the chart's x-axis is displayable.
 """
+
 from __future__ import annotations
 
 import datetime
@@ -20,7 +21,13 @@ from fastapi import APIRouter, Request
 from pydantic import BaseModel
 
 from llm_manager.data import session
-from llm_manager.data.usage import usage_by_model, usage_cost, usage_cost_series, usage_series, usage_summary
+from llm_manager.data.usage import (
+    usage_by_model,
+    usage_cost,
+    usage_cost_series,
+    usage_series,
+    usage_summary,
+)
 from llm_manager.gateway.api.common import get_config_store, get_db
 
 logger = logging.getLogger(__name__)
@@ -33,12 +40,14 @@ class SessionUsageResponse(BaseModel):
     cache_hit: int
     cache_miss: int
     hit_rate: float
-    total_cost: float = 0.0   # 本次启动消耗金额(compute-on-read 窗口 [started_at, now),见模块 docstring)
+    total_cost: float = (
+        0.0  # 本次启动消耗金额(compute-on-read 窗口 [started_at, now),见模块 docstring)
+    )
 
 
 class UsageSeriesResponse(BaseModel):
-    buckets: list[float]            # bucket-start wall-clock epochs (chart x-axis)
-    total: list[float]              # value per bucket, summed across models (tokens 或 元)
+    buckets: list[float]  # bucket-start wall-clock epochs (chart x-axis)
+    total: list[float]  # value per bucket, summed across models (tokens 或 元)
     models: dict[str, list[float]]  # model name → value per bucket
 
 
@@ -76,12 +85,12 @@ class CostSummaryResponse(BaseModel):
 def _bucket_for_span(span: float) -> int:
     """Auto bucket size for a custom window, chosen by span (matches preset granularities)."""
     if span <= 3600:
-        return 10           # ≤1h → 10s
+        return 10  # ≤1h → 10s
     if span <= 86_400:
-        return 600          # ≤1d → 10min
+        return 600  # ≤1d → 10min
     if span <= 604_800:
-        return 3_600        # ≤7d → 1h
-    return 86_400           # → 1 day
+        return 3_600  # ≤7d → 1h
+    return 86_400  # → 1 day
 
 
 def _resolve_range(preset: str, start: float | None, end: float | None) -> tuple[float, float, int]:
@@ -91,13 +100,15 @@ def _resolve_range(preset: str, start: float | None, end: float | None) -> tuple
     if start is not None and end is not None:
         return start, end, _bucket_for_span(end - start)
     if preset == "10m":
-        return now - 600, now, 10                  # last 10 min, 10s buckets
+        return now - 600, now, 10  # last 10 min, 10s buckets
     if preset == "today":
-        midnight = datetime.datetime.now().replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
-        return midnight, now, 600                  # since local midnight, 10min buckets
+        midnight = (
+            datetime.datetime.now().replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+        )
+        return midnight, now, 600  # since local midnight, 10min buckets
     if preset == "30d":
-        return now - 2_592_000, now, 86_400        # last 30 days, 1-day buckets
-    return now - 604_800, now, 3_600               # default + "7d": last 7 days, 1h buckets
+        return now - 2_592_000, now, 86_400  # last 30 days, 1-day buckets
+    return now - 604_800, now, 3_600  # default + "7d": last 7 days, 1h buckets
 
 
 def _resolve_window(preset: str, start: float | None, end: float | None) -> tuple[float, float]:
@@ -119,8 +130,9 @@ def register_usage_routes(router: APIRouter) -> None:
                 # 本次启动消耗 = 窗口 [started_at, now) 的成本(compute-on-read,与用量页同口径;
                 # 上一进程的请求/段 end_time < started_at 自然落在窗外)。best-effort:
                 # 计费计算失败仅降级为 0,不影响 token 面板。
-                total_cost = usage_cost(get_db(request), store.snapshot(),
-                                        start_ts=started, end_ts=time.time()).total_cost
+                total_cost = usage_cost(
+                    get_db(request), store.snapshot(), start_ts=started, end_ts=time.time()
+                ).total_cost
             except Exception:
                 logger.warning("session cost computation failed", exc_info=True)
         return SessionUsageResponse(
@@ -201,8 +213,10 @@ def register_usage_routes(router: APIRouter) -> None:
         s = usage_cost(db, cfg, start_ts=s_ts, end_ts=e_ts)
         return CostSummaryResponse(
             total_cost=s.total_cost,
-            by_model=[CostByModelResponse(model=r.model, pricing_type=r.pricing_type, cost=r.cost)
-                      for r in s.by_model],
+            by_model=[
+                CostByModelResponse(model=r.model, pricing_type=r.pricing_type, cost=r.cost)
+                for r in s.by_model
+            ],
         )
 
     @router.get("/usage/cost-series", response_model=UsageSeriesResponse)

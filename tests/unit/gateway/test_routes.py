@@ -84,7 +84,7 @@ def test_v1_models_lists_primary_alias_not_internal_key(tmp_path):
         r = c.get("/v1/models")
     assert r.status_code == 200
     ids = {m["id"] for m in r.json()["data"]}
-    assert "qwen2.5-32b-instruct" in ids   # 主别名对外
+    assert "qwen2.5-32b-instruct" in ids  # 主别名对外
     assert "internal-qwen-key" not in ids  # 内部键不外露
 
 
@@ -100,8 +100,11 @@ def test_non_get_catchall_forwards_to_proxy(tmp_path):
     # catch_all 不再 501;MockTransport 强制 ConnectError → 502(隔离,不依赖真实端口占用)
     def fail_handler(req):
         raise httpx.ConnectError("no upstream (test)", request=req)
+
     app = FastAPI()
-    client = httpx.AsyncClient(base_url="http://127.0.0.1:8000", transport=httpx.MockTransport(fail_handler))
+    client = httpx.AsyncClient(
+        base_url="http://127.0.0.1:8000", transport=httpx.MockTransport(fail_handler)
+    )
     _register(app, _cfg(tmp_path), client_pool={8000: client})
     with TestClient(app) as c:
         r = c.post("/v1/chat/completions", json={"model": "m1"})
@@ -122,21 +125,22 @@ def test_spa_served_and_api_unaffected_when_dist_exists(tmp_path, monkeypatch):
     app = FastAPI()
     _register(app, _cfg(tmp_path))
     with TestClient(app) as c:
-        assert c.get("/").status_code == 200                     # index.html
+        assert c.get("/").status_code == 200  # index.html
         assert "SPA" in c.get("/").text
-        assert c.get("/health").status_code == 200               # 既有路由仍在
-        assert c.get("/api/config/models").status_code == 200    # 管理接口仍在
-        assert c.get("/models").status_code == 200               # SPA 路由回退 index.html
-        assert c.get("/assets/app.js").status_code == 200        # 静态资源
+        assert c.get("/health").status_code == 200  # 既有路由仍在
+        assert c.get("/api/config/models").status_code == 200  # 管理接口仍在
+        assert c.get("/models").status_code == 200  # SPA 路由回退 index.html
+        assert c.get("/assets/app.js").status_code == 200  # 静态资源
 
 
 def test_spa_rejects_path_traversal(tmp_path, monkeypatch):
     """路径穿越防御:GET /%2e%2e/... 必须返回 404,不能读 dist 外的文件。"""
     import llm_manager.gateway.spa as spa_mod
+
     fake_dist = tmp_path / "dist"
     (fake_dist / "assets").mkdir(parents=True)
     (fake_dist / "index.html").write_text("<html>SPA</html>", encoding="utf-8")
-    secret = tmp_path / "config.yaml"          # dist 的同级文件(dist/../config.yaml)
+    secret = tmp_path / "config.yaml"  # dist 的同级文件(dist/../config.yaml)
     secret.write_text("LEAKED-SECRET", encoding="utf-8")
     monkeypatch.setattr(spa_mod, "_FRONTEND_DIST", fake_dist)
     app = FastAPI()
@@ -151,12 +155,13 @@ def test_spa_rejects_path_traversal(tmp_path, monkeypatch):
 def test_spa_boots_when_dist_lacks_assets(tmp_path, monkeypatch):
     """dist 存在但无 assets/ 子目录时,网关仍能启动且 GET / 返回 index.html。"""
     import llm_manager.gateway.spa as spa_mod
+
     fake_dist = tmp_path / "dist"
     fake_dist.mkdir(parents=True)
     (fake_dist / "index.html").write_text("<html>SPA</html>", encoding="utf-8")  # 注意:无 assets/
     monkeypatch.setattr(spa_mod, "_FRONTEND_DIST", fake_dist)
     app = FastAPI()
-    _register(app, _cfg(tmp_path))   # 不应抛 RuntimeError
+    _register(app, _cfg(tmp_path))  # 不应抛 RuntimeError
     with TestClient(app) as c:
         assert c.get("/").status_code == 200
         assert c.get("/health").status_code == 200
@@ -165,12 +170,19 @@ def test_spa_boots_when_dist_lacks_assets(tmp_path, monkeypatch):
 def test_v1_models_reflects_store_reload(tmp_path):
     """读穿:store.reload() 后 /v1/models 反映新模型,无需重启/重注册。"""
     from dataclasses import replace
+
     app = FastAPI()
     _register(app, _cfg(tmp_path))
     with TestClient(app) as c:
-        m2 = config.ModelConfig("m2", ("m2",), "Chat", 8002,
-                                schemes={"s": config.Scheme("s", frozenset({"rtx 4060"}),
-                                                            config.Command(exe="q.bat"), {})})
+        m2 = config.ModelConfig(
+            "m2",
+            ("m2",),
+            "Chat",
+            8002,
+            schemes={
+                "s": config.Scheme("s", frozenset({"rtx 4060"}), config.Command(exe="q.bat"), {})
+            },
+        )
         cur = app.state.config_store.snapshot()
         write_appconfig(app.state.db, replace(cur, models={**cur.models, "m2": m2}))
         app.state.config_store.reload()

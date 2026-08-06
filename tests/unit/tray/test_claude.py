@@ -15,15 +15,20 @@ def test_apply_preset_nests_under_env(tmp_path):
 
 def test_apply_preset_preserves_existing_top_and_env_keys(tmp_path):
     p = tmp_path / "settings.json"
-    p.write_text(json.dumps({
-        "OTHER": "keep",                       # 顶层其他键保留
-        "env": {"ANTHROPIC_BASE_URL": "old", "KEEP_ENV": "v"},
-    }), encoding="utf-8")
+    p.write_text(
+        json.dumps(
+            {
+                "OTHER": "keep",  # 顶层其他键保留
+                "env": {"ANTHROPIC_BASE_URL": "old", "KEEP_ENV": "v"},
+            }
+        ),
+        encoding="utf-8",
+    )
     apply_preset(p, {"ANTHROPIC_BASE_URL": "http://new"})
     data = json.loads(p.read_text(encoding="utf-8"))
     assert data["OTHER"] == "keep"
     assert data["env"]["ANTHROPIC_BASE_URL"] == "http://new"
-    assert data["env"]["KEEP_ENV"] == "v"      # 已有 env 键保留
+    assert data["env"]["KEEP_ENV"] == "v"  # 已有 env 键保留
 
 
 def test_apply_preset_creates_file_with_parent_dir(tmp_path):
@@ -49,16 +54,22 @@ _PRESETS = {
 
 def test_detect_current_preset_matches(tmp_path):
     p = tmp_path / "settings.json"
-    p.write_text(json.dumps({"env": {"ANTHROPIC_BASE_URL": "http://127.0.0.1:8080"}}), encoding="utf-8")
+    p.write_text(
+        json.dumps({"env": {"ANTHROPIC_BASE_URL": "http://127.0.0.1:8080"}}), encoding="utf-8"
+    )
     assert detect_current_preset(p, _PRESETS) == "Local"
-    p.write_text(json.dumps({"env": {"ANTHROPIC_BASE_URL": "https://open.bigmodel.cn/api/anthropic"}}),
-                 encoding="utf-8")
+    p.write_text(
+        json.dumps({"env": {"ANTHROPIC_BASE_URL": "https://open.bigmodel.cn/api/anthropic"}}),
+        encoding="utf-8",
+    )
     assert detect_current_preset(p, _PRESETS) == "GLM"
 
 
 def test_detect_current_preset_unknown_fallback(tmp_path):
     p = tmp_path / "settings.json"
-    p.write_text(json.dumps({"env": {"ANTHROPIC_BASE_URL": "https://other.example.com"}}), encoding="utf-8")
+    p.write_text(
+        json.dumps({"env": {"ANTHROPIC_BASE_URL": "https://other.example.com"}}), encoding="utf-8"
+    )
     assert detect_current_preset(p, _PRESETS) == "(未知)"
     # 文件缺失也回退
     assert detect_current_preset(tmp_path / "nope.json", _PRESETS) == "(未知)"

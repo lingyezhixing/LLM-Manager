@@ -1,4 +1,5 @@
 """Alias → primary_name 解析,OpenAI 兼容代理与管理 API 共用。"""
+
 from __future__ import annotations
 
 from fastapi import HTTPException

@@ -6,6 +6,7 @@ from llm_manager.data import logs
 def _make_collector(delivered):
     def collect(text, ts, levelname):
         delivered.append((text, ts, levelname))
+
     return collect
 
 
@@ -18,12 +19,13 @@ def test_handler_delivers_record():
     text, ts, levelname = delivered[0]
     assert text == "disk nearly full"
     assert levelname == "WARNING"
-    assert ts == rec.created          # 透传 record.created
+    assert ts == rec.created  # 透传 record.created
 
 
 def test_handler_quiet_on_collector_failure():
     def boom(text, ts, levelname):
         raise RuntimeError("collector broke")
+
     h = log_handler.SystemLogHandler(boom)
     h.emit(logging.LogRecord("t", logging.ERROR, "f", 1, "x", None, None))  # 不抛
 
@@ -41,7 +43,7 @@ def test_handler_lazy_formats_record():
     h = log_handler.SystemLogHandler(_make_collector(delivered))
     rec = logging.LogRecord("t", logging.WARNING, "f", 1, "disk %s full", ("nearly",), None)
     h.emit(rec)
-    assert delivered[0][0] == "disk nearly full"   # getMessage() 惰性格式化
+    assert delivered[0][0] == "disk nearly full"  # getMessage() 惰性格式化
 
 
 def test_handler_accepts_capture_system_direct():

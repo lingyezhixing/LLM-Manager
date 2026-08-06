@@ -4,6 +4,7 @@ DeviceMonitor fuzzy-matches config device names to detected hardware (token-subs
 and atomically rebinds a config-keyed cache (+ unmatched devices keyed by raw name
 for display). 每个适配器文件内按平台分割路径,每次仅激活一条;频率/温度字段为
 可空增量(读不到 → None/0),全链路不新增进程、不新增调用。"""
+
 from __future__ import annotations
 
 import re
@@ -21,8 +22,10 @@ class DeviceInfo:
     used_memory_mb: int
     usage_percentage: float
     temperature_celsius: float | None
-    freq_mhz: float | None = None       # 当前核心频率(核心语义,非显存):clocks.gr / LHM Clock/Core / intel_gpu_top
-    power_watts: float | None = None    # 功耗(intel_gpu_top 专用,其余设备读不到)
+    freq_mhz: float | None = (
+        None  # 当前核心频率(核心语义,非显存):clocks.gr / LHM Clock/Core / intel_gpu_top
+    )
+    power_watts: float | None = None  # 功耗(intel_gpu_top 专用,其余设备读不到)
 
 
 # DeviceInfo 必须先于各适配器模块导入定义:模块顶层 `from . import DeviceInfo`,
@@ -72,8 +75,7 @@ def match_devices(
 class DeviceAdapter(Protocol):
     """一个平台×厂商数据源 → 统一 DeviceInfo。实现契约:enumerate() 永不抛(内部兜底)。"""
 
-    def enumerate(self) -> list[DeviceInfo]:
-        ...
+    def enumerate(self) -> list[DeviceInfo]: ...
 
 
 class DeviceMonitor:
@@ -87,6 +89,7 @@ class DeviceMonitor:
     卡片顺序:CPU 固定首位,其余按 N-A-I(适配器种类在收集时记录——Windows 下 A/I
     的 device_type 同标 "GPU (APU)",前端无法区分);组内按候选枚举序(N卡即 CUDA 序)。
     排序为纯内存 O(n log n),n ≤ 个位数,零新增 I/O。"""
+
     def __init__(
         self,
         adapters: list["DeviceAdapter"],
@@ -116,8 +119,7 @@ class DeviceMonitor:
         # 合并统一排序:若分两段(先 matched 后 unmatched),未引用设备(如 CPU)会整体排到
         # 被引用设备之后,跨段顺序错乱——故合成一个序列整体按 rank 排
         cache: dict[str, DeviceInfo] = dict(
-            sorted(list(matched.items()) + [(c.device_name, c) for c in unmatched],
-                   key=order_key)
+            sorted(list(matched.items()) + [(c.device_name, c) for c in unmatched], key=order_key)
         )
         self._cache = cache  # 原子 rebind
 

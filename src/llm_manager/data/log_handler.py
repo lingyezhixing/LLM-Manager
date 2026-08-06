@@ -5,6 +5,7 @@ blocking the caller. Dropped records never affect the main program (the collecto
 is O(1) append; batching/persistence happen in the LogStore flush task).
 To be wired by app.py lifespan (install/remove); tests and non-lifespan paths stay clean.
 """
+
 from __future__ import annotations
 
 import datetime
@@ -18,8 +19,9 @@ logger = logging.getLogger(__name__)
 
 def _cleanup_old_logs(log_dir: str, keep: int = 10) -> None:
     """保留最近 keep 个 llm-manager_*.log(按 mtime),删旧的。"""
-    files = sorted(Path(log_dir).glob("llm-manager_*.log"),
-                   key=lambda p: p.stat().st_mtime, reverse=True)
+    files = sorted(
+        Path(log_dir).glob("llm-manager_*.log"), key=lambda p: p.stat().st_mtime, reverse=True
+    )
     for stale in files[keep:]:
         try:
             stale.unlink()
@@ -42,7 +44,9 @@ def setup_logging(level: str = "INFO", log_dir: str = "logs") -> None:
     root.addHandler(console)
     try:
         Path(log_dir).mkdir(parents=True, exist_ok=True)
-        log_file = Path(log_dir) / f"llm-manager_{datetime.datetime.now().strftime('%Y%m%d-%H%M%S')}.log"
+        log_file = (
+            Path(log_dir) / f"llm-manager_{datetime.datetime.now().strftime('%Y%m%d-%H%M%S')}.log"
+        )
         fh = logging.FileHandler(log_file, encoding="utf-8")
         fh.setLevel(numeric)
         fh.setFormatter(fmt)
@@ -66,4 +70,4 @@ class SystemLogHandler(logging.Handler):
         try:
             self._collector(record.getMessage(), record.created, record.levelname)
         except Exception:
-            pass   # 日志管道永不影响主程序
+            pass  # 日志管道永不影响主程序

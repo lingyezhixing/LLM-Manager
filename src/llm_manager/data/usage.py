@@ -4,6 +4,7 @@
 (compute-on-read)。改价/改计费类型会回溯改写全部历史费用、删模型则该模型历史
 费用归零:费用=当前架构下的派生值;token 是 DB 事实不受配置影响(两视图语义不同、
 各自自洽)。若未来需要"历史账单不可变",再给请求/运行段冻结单价(表加列)。"""
+
 from __future__ import annotations
 
 import math
@@ -36,8 +37,16 @@ def resolve_model_id(db: Db, model_name: str) -> int:
         return _resolve_model_id_locked(db, model_name)
 
 
-def record_usage(db: Db, model_name: str, start: float, end: float,
-                 input_tokens: int, output_tokens: int, cache_n: int, prompt_n: int) -> None:
+def record_usage(
+    db: Db,
+    model_name: str,
+    start: float,
+    end: float,
+    input_tokens: int,
+    output_tokens: int,
+    cache_n: int,
+    prompt_n: int,
+) -> None:
     with db.write_lock:
         mid = _resolve_model_id_locked(db, model_name)
         db.conn.execute(
@@ -87,7 +96,8 @@ def runtime_heartbeat_live(db: Db, now: float) -> int:
     placeholders = ",".join("?" * len(ids))
     with db.write_lock:
         cur = db.conn.execute(
-            f"UPDATE model_runtime SET end_time=? WHERE id IN ({placeholders})", (now, *ids))
+            f"UPDATE model_runtime SET end_time=? WHERE id IN ({placeholders})", (now, *ids)
+        )
         n = cur.rowcount
         db.conn.commit()
         return n
@@ -106,9 +116,9 @@ def record_runtime_end(db: Db, segment_id: int, end: float) -> None:
 
 @dataclass(frozen=True, slots=True)
 class UsageSeries:
-    buckets: list[float]            # bucket-start wall-clock epochs (the time axis)
+    buckets: list[float]  # bucket-start wall-clock epochs (the time axis)
     models: dict[str, list[float]]  # model → value per bucket (tokens 或 元,0-filled)
-    total: list[float]              # value per bucket summed across models
+    total: list[float]  # value per bucket summed across models
 
 
 def _bucket_axis(start_ts: float, end_ts: float, bucket_seconds: int) -> tuple[float, list[float]]:
@@ -148,7 +158,12 @@ def usage_series(db: Db, *, start_ts: float, end_ts: float, bucket_seconds: int)
            FROM model_requests r JOIN models m ON r.model_id = m.id
            WHERE r.end_time >= :start AND r.end_time < :end
            GROUP BY m.original_name, bucket""",
-        {"start": start_ts, "end": end_ts, "bucket": bucket_seconds, "offset": (-time.localtime().tm_gmtoff) % bucket_seconds},
+        {
+            "start": start_ts,
+            "end": end_ts,
+            "bucket": bucket_seconds,
+            "offset": (-time.localtime().tm_gmtoff) % bucket_seconds,
+        },
     ).fetchall()
 
     models: dict[str, list[float]] = {}
@@ -166,8 +181,8 @@ def usage_series(db: Db, *, start_ts: float, end_ts: float, bucket_seconds: int)
 class UsageSummary:
     input_tokens: int
     output_tokens: int
-    cache_hit: int       # SUM(cache_n)
-    cache_miss: int      # SUM(prompt_n)
+    cache_hit: int  # SUM(cache_n)
+    cache_miss: int  # SUM(prompt_n)
     hit_rate: float
     request_count: int
 
@@ -206,7 +221,7 @@ class ByModelRow:
     request_count: int
     hit_rate: float
     share: float
-    latency_ms: float       # AVG(end_time - start_time) * 1000
+    latency_ms: float  # AVG(end_time - start_time) * 1000
 
 
 def usage_by_model(db: Db, *, start_ts: float, end_ts: float) -> list[ByModelRow]:
@@ -232,16 +247,18 @@ def usage_by_model(db: Db, *, start_ts: float, end_ts: float) -> list[ByModelRow
     for r in rows:
         cache_hit = int(r["s_cache"])
         cache_miss = int(r["s_miss"])
-        out.append(ByModelRow(
-            model=r["model"],
-            input_tokens=int(r["s_in"]),
-            output_tokens=int(r["s_out"]),
-            cache_n=cache_hit,
-            request_count=int(r["n"]),
-            hit_rate=hit_rate(cache_hit, cache_miss),
-            share=int(r["s_in"]) / total_in if total_in else 0.0,
-            latency_ms=float(r["s_lat"] or 0) * 1000,
-        ))
+        out.append(
+            ByModelRow(
+                model=r["model"],
+                input_tokens=int(r["s_in"]),
+                output_tokens=int(r["s_out"]),
+                cache_n=cache_hit,
+                request_count=int(r["n"]),
+                hit_rate=hit_rate(cache_hit, cache_miss),
+                share=int(r["s_in"]) / total_in if total_in else 0.0,
+                latency_ms=float(r["s_lat"] or 0) * 1000,
+            )
+        )
     return out
 
 
@@ -262,7 +279,9 @@ def _tier_matches(t: "PricingTier", inp: int, out: int) -> bool:  # type: ignore
     return i_ok and inp <= hi_i and o_ok and out <= hi_o
 
 
-def tier_cost(pricing: "Pricing", input_t: int, output_t: int, cache_n: int, prompt_n: int) -> float:  # type: ignore[name-defined]
+def tier_cost(
+    pricing: "Pricing", input_t: int, output_t: int, cache_n: int, prompt_n: int
+) -> float:  # type: ignore[name-defined]
     """Per-request tier cost in yuan. First matching tier wins; no match → 0.
     Cache formula (legacy): cache_n×read + prompt_n×(input+write) + output×output.
     support_cache 是模型级开关(pricing.support_cache),控制缓存计费是否生效。"""
@@ -272,7 +291,11 @@ def tier_cost(pricing: "Pricing", input_t: int, output_t: int, cache_n: int, pro
         if not _tier_matches(t, input_t, output_t):
             continue
         if pricing.support_cache:
-            raw = cache_n * t.cache_read_price + prompt_n * (t.input_price + t.cache_write_price) + output_t * t.output_price
+            raw = (
+                cache_n * t.cache_read_price
+                + prompt_n * (t.input_price + t.cache_write_price)
+                + output_t * t.output_price
+            )
         else:
             raw = input_t * t.input_price + output_t * t.output_price
         return raw / 1_000_000
@@ -355,7 +378,9 @@ def usage_cost(
 
     ptype = {n: m.pricing.pricing_type for n, m in cfg.models.items()}
     by_model = [
-        CostByModel(model=n, pricing_type=ptype.get(n, "tier"), cost=round(c, 6))   # 🔵7:与 total 同精度 round(6),显示一致
+        CostByModel(
+            model=n, pricing_type=ptype.get(n, "tier"), cost=round(c, 6)
+        )  # 🔵7:与 total 同精度 round(6),显示一致
         for n, c in acc.items()
         if c > 0
     ]
@@ -399,8 +424,13 @@ def usage_cost_series(
             mc = tier_models.get(row["model"])
             if mc is None:
                 continue
-            c = tier_cost(mc.pricing, int(row["input_tokens"]), int(row["output_tokens"]),
-                          int(row["cache_n"]), int(row["prompt_n"]))
+            c = tier_cost(
+                mc.pricing,
+                int(row["input_tokens"]),
+                int(row["output_tokens"]),
+                int(row["cache_n"]),
+                int(row["prompt_n"]),
+            )
             if c <= 0:
                 continue
             idx = int((row["end_time"] - first) // bucket_seconds)
@@ -409,9 +439,11 @@ def usage_cost_series(
                 total[idx] += c
 
     # hourly:单次批量查询所有 hourly 模型的运行段,逐桶摊重叠时长(原 O(N) 查询 → 1 次)。
-    hourly_rates = {n: m.pricing.hourly_price / 3600.0
-                    for n, m in cfg.models.items()
-                    if m.pricing.pricing_type == "hourly" and m.pricing.hourly_price > 0}
+    hourly_rates = {
+        n: m.pricing.hourly_price / 3600.0
+        for n, m in cfg.models.items()
+        if m.pricing.pricing_type == "hourly" and m.pricing.hourly_price > 0
+    }
     if hourly_rates:
         names = list(hourly_rates)
         placeholders = ",".join("?" * len(names))

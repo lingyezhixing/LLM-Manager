@@ -1,5 +1,6 @@
 """Data management API: GET /api/data/storage-stats, GET /api/data/models/orphaned,
 DELETE /api/data/models/{name}. Mirror of test_api_usage.py fixtures."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -22,9 +23,14 @@ def _app(db=None, cfg=None, resolved_db: str | None = None) -> FastAPI:
     app.state.db = db if db is not None else open_db(Path(":memory:"))
     app.state.resolved_db = resolved_db
     if cfg is not None:
+
         class _Stub:
-            def __init__(self, c): self._c = c
-            def snapshot(self): return self._c
+            def __init__(self, c):
+                self._c = c
+
+            def snapshot(self):
+                return self._c
+
         app.state.config_store = _Stub(cfg)
     return app
 

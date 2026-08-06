@@ -12,6 +12,7 @@ from llm_manager.state import ModelStatus
 
 class _FakeLife:
     """记录 stop/ensure_running 调用,支持注入副作用(如 stop(a) 内 inc_pending(b))。"""
+
     def __init__(self, stop=None, ensure_running=None):
         self.stopped: list[str] = []
         self.started: list[str] = []
@@ -19,7 +20,9 @@ class _FakeLife:
         self._ensure_fn = ensure_running
 
     async def stop(self, name):
-        state.set_status(name, ModelStatus.STOPPED, force=True)  # mirror real lifecycle.stop(lifecycle.py:70):使模型退出 routing_names,防 loop 每 tick 重复 stop
+        state.set_status(
+            name, ModelStatus.STOPPED, force=True
+        )  # mirror real lifecycle.stop(lifecycle.py:70):使模型退出 routing_names,防 loop 每 tick 重复 stop
         self.stopped.append(name)
         if self._stop_fn is not None:
             r = self._stop_fn(name)
@@ -37,8 +40,12 @@ class _FakeLife:
 
 
 def _alive_cfg(alive: int) -> AppConfig:
-    return AppConfig(program=ProgramConfig(host="x", port=1, alive_time=alive, log_level="INFO"),
-                     models={}, wol=None, claude_configs={})
+    return AppConfig(
+        program=ProgramConfig(host="x", port=1, alive_time=alive, log_level="INFO"),
+        models={},
+        wol=None,
+        claude_configs={},
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -80,7 +87,9 @@ async def test_idle_loop_reclaims_stale_routing():
     state._set_last_access("m", time.monotonic() - 120)
     life = _FakeLife()
     ev = asyncio.Event()
-    task = asyncio.create_task(background.idle_reclamation_loop(life, lambda: _alive_cfg(1), ev, period=0.01))
+    task = asyncio.create_task(
+        background.idle_reclamation_loop(life, lambda: _alive_cfg(1), ev, period=0.01)
+    )
     await asyncio.sleep(0.05)
     ev.set()
     await task
@@ -93,7 +102,9 @@ async def test_idle_loop_skips_when_pending_at_scan():
     state.inc_pending("m")
     life = _FakeLife()
     ev = asyncio.Event()
-    task = asyncio.create_task(background.idle_reclamation_loop(life, lambda: _alive_cfg(1), ev, period=0.01))
+    task = asyncio.create_task(
+        background.idle_reclamation_loop(life, lambda: _alive_cfg(1), ev, period=0.01)
+    )
     await asyncio.sleep(0.05)
     ev.set()
     await task
@@ -113,7 +124,9 @@ async def test_idle_loop_double_check_skips_new_pending():
 
     life = _FakeLife(stop=stop_during_a)
     ev = asyncio.Event()
-    task = asyncio.create_task(background.idle_reclamation_loop(life, lambda: _alive_cfg(1), ev, period=0.01))
+    task = asyncio.create_task(
+        background.idle_reclamation_loop(life, lambda: _alive_cfg(1), ev, period=0.01)
+    )
     await asyncio.sleep(0.05)
     ev.set()
     await task
@@ -126,7 +139,9 @@ async def test_idle_loop_disabled_when_alive_sec_le_zero():
     state._set_last_access("m", time.monotonic() - 120)
     life = _FakeLife()
     ev = asyncio.Event()
-    task = asyncio.create_task(background.idle_reclamation_loop(life, lambda: _alive_cfg(0), ev, period=0.01))
+    task = asyncio.create_task(
+        background.idle_reclamation_loop(life, lambda: _alive_cfg(0), ev, period=0.01)
+    )
     await asyncio.sleep(0.05)
     ev.set()
     await task
@@ -142,7 +157,9 @@ async def test_idle_loop_survives_stop_exception(caplog):
 
     life = _FakeLife(stop=boom)
     ev = asyncio.Event()
-    task = asyncio.create_task(background.idle_reclamation_loop(life, lambda: _alive_cfg(1), ev, period=0.01))
+    task = asyncio.create_task(
+        background.idle_reclamation_loop(life, lambda: _alive_cfg(1), ev, period=0.01)
+    )
     await asyncio.sleep(0.05)
     ev.set()
     await task  # 不崩
@@ -157,41 +174,62 @@ async def test_idle_loop_reads_fresh_alive_time_each_tick():
     life = _FakeLife()
     ev = asyncio.Event()
     task = asyncio.create_task(
-        background.idle_reclamation_loop(life, lambda: _alive_cfg(cur["alive"]), ev, period=0.01))
+        background.idle_reclamation_loop(life, lambda: _alive_cfg(cur["alive"]), ev, period=0.01)
+    )
     await asyncio.sleep(0.02)
-    assert life.stopped == []                       # alive=0 → 禁用,不回收
-    cur["alive"] = 1                                # 模拟「写回 alive_time」(1min=60s,120s idle 超时)
+    assert life.stopped == []  # alive=0 → 禁用,不回收
+    cur["alive"] = 1  # 模拟「写回 alive_time」(1min=60s,120s idle 超时)
     await asyncio.sleep(0.05)
     ev.set()
     await task
-    assert life.stopped == ["m"]                    # 现在 alive=1 → 回收
+    assert life.stopped == ["m"]  # 现在 alive=1 → 回收
 
 
 # ---------- auto_start ----------
 def _auto_cfg(models_devs):
     """构造 AppConfig:每模型单 scheme(required dev)。对抗验证 #4:auto_start 显式接收 cfg(避免 lifecycle.cfg 依赖)。"""
     from llm_manager.config import Scheme, AppConfig, ModelConfig, ProgramConfig, Command
-    models = {name: ModelConfig(name, (name,), "Chat", i + 1, False,
-                                {"S": Scheme("S", frozenset({dev}), Command(exe="a.bat"), {dev: 1024})})
-              for i, (name, dev) in enumerate(models_devs)}
-    return AppConfig(program=ProgramConfig(host="x", port=1, alive_time=60, log_level="INFO"),
-                     models=models, wol=None, claude_configs={})
+
+    models = {
+        name: ModelConfig(
+            name,
+            (name,),
+            "Chat",
+            i + 1,
+            False,
+            {"S": Scheme("S", frozenset({dev}), Command(exe="a.bat"), {dev: 1024})},
+        )
+        for i, (name, dev) in enumerate(models_devs)
+    }
+    return AppConfig(
+        program=ProgramConfig(host="x", port=1, alive_time=60, log_level="INFO"),
+        models=models,
+        wol=None,
+        claude_configs={},
+    )
 
 
 class _AutoDev:
     def __init__(self, online):
         self._online = set(online)
         self.refresh_calls = 0
-    def online_devices(self): return set(self._online)
-    def snapshot(self): return {}
-    def refresh(self): self.refresh_calls += 1
+
+    def online_devices(self):
+        return set(self._online)
+
+    def snapshot(self):
+        return {}
+
+    def refresh(self):
+        self.refresh_calls += 1
 
 
 async def test_auto_start_concurrent_all_models():
     life = _FakeLife()
     cfg = _auto_cfg([("a", "rtx 4060"), ("b", "rtx 4060"), ("c", "rtx 4060")])
-    await background.auto_start(life, ["a", "b", "c"], cfg, _AutoDev({"rtx 4060"}),
-                                timeout=1.0, stop_event=asyncio.Event())
+    await background.auto_start(
+        life, ["a", "b", "c"], cfg, _AutoDev({"rtx 4060"}), timeout=1.0, stop_event=asyncio.Event()
+    )
     assert sorted(life.started) == ["a", "b", "c"]
 
 
@@ -203,8 +241,9 @@ async def test_auto_start_timeout_does_not_raise(caplog):
     life = _FakeLife(ensure_running=slow)
     cfg = _auto_cfg([("x", "rtx 4060")])
     with caplog.at_level(logging.WARNING):
-        await background.auto_start(life, ["x"], cfg, _AutoDev({"rtx 4060"}),
-                                    timeout=0.05, stop_event=asyncio.Event())
+        await background.auto_start(
+            life, ["x"], cfg, _AutoDev({"rtx 4060"}), timeout=0.05, stop_event=asyncio.Event()
+        )
     assert any("timeout" in r.message for r in caplog.records)
 
 
@@ -215,15 +254,17 @@ async def test_auto_start_failure_does_not_raise(caplog):
     life = _FakeLife(ensure_running=boom)
     cfg = _auto_cfg([("x", "rtx 4060")])
     with caplog.at_level(logging.ERROR):
-        await background.auto_start(life, ["x"], cfg, _AutoDev({"rtx 4060"}),
-                                    timeout=1.0, stop_event=asyncio.Event())
+        await background.auto_start(
+            life, ["x"], cfg, _AutoDev({"rtx 4060"}), timeout=1.0, stop_event=asyncio.Event()
+        )
     assert any("failed" in r.message for r in caplog.records)
 
 
 async def test_auto_start_empty_models_noop():
     life = _FakeLife()
-    await background.auto_start(life, [], _auto_cfg([]), _AutoDev(set()),
-                                timeout=1.0, stop_event=asyncio.Event())
+    await background.auto_start(
+        life, [], _auto_cfg([]), _AutoDev(set()), timeout=1.0, stop_event=asyncio.Event()
+    )
     assert life.started == []
 
 
@@ -237,10 +278,16 @@ async def test_auto_start_device_isolation_batches():
             order.append(name)
             return ModelStatus.ROUTING
 
-    await background.auto_start(_OrderLife(), ["m_rtx", "m_apu", "m_rtx2"], cfg,
-                                _AutoDev({"rtx 4060", "780m"}), timeout=10.0, stop_event=asyncio.Event())
+    await background.auto_start(
+        _OrderLife(),
+        ["m_rtx", "m_apu", "m_rtx2"],
+        cfg,
+        _AutoDev({"rtx 4060", "780m"}),
+        timeout=10.0,
+        stop_event=asyncio.Event(),
+    )
     assert set(order) == {"m_rtx", "m_apu", "m_rtx2"}
-    assert order.index("m_rtx2") > order.index("m_rtx")   # serial 在 parallel 后
+    assert order.index("m_rtx2") > order.index("m_rtx")  # serial 在 parallel 后
     assert order.index("m_rtx2") > order.index("m_apu")
 
 
@@ -248,8 +295,11 @@ async def test_auto_start_device_isolation_batches():
 def test_plan_batches_device_isolation():
     from llm_manager.runtime.background import _plan_batches
     from llm_manager.config import Scheme, Command
+
     s_rtx = Scheme("RTX", frozenset({"rtx 4060"}), Command(exe="a.bat"), {"rtx 4060": 5120})
-    s_v100_780 = Scheme("V100-780M", frozenset({"v100", "780m"}), Command(exe="c.bat"), {"v100": 0, "780m": 2048})
+    s_v100_780 = Scheme(
+        "V100-780M", frozenset({"v100", "780m"}), Command(exe="c.bat"), {"v100": 0, "780m": 2048}
+    )
     planned = [("qwen4b", s_rtx), ("qwen2b", s_v100_780), ("reranker", s_rtx)]
     parallel, serial = _plan_batches(planned)
     assert parallel == ["qwen4b", "qwen2b"]
@@ -259,10 +309,12 @@ def test_plan_batches_device_isolation():
 def test_plan_batches_all_same_device_only_first_parallel():
     from llm_manager.runtime.background import _plan_batches
     from llm_manager.config import Scheme, Command
+
     s = Scheme("S", frozenset({"rtx 4060"}), Command(exe="a.bat"), {"rtx 4060": 5120})
     assert _plan_batches([("a", s), ("b", s), ("c", s)]) == (["a"], ["b", "c"])
 
 
 def test_plan_batches_empty():
     from llm_manager.runtime.background import _plan_batches
+
     assert _plan_batches([]) == ([], [])

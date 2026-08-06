@@ -5,6 +5,7 @@ subscriber-gated ``DeviceFeed`` (2s). Pydantic schemas → OpenAPI (types hand-m
 in ``frontend/src/lib/api.ts``). The SSE generator is extracted (``_device_stream``)
 so it can be unit-tested directly without the HTTP stack.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -29,7 +30,7 @@ class DeviceInfoResponse(BaseModel):
     used_memory_mb: int
     usage_percentage: float
     temperature_celsius: float | None
-    freq_mhz: float | None = None       # 与 DeviceInfo 同步:asdict 展开要求字段存在
+    freq_mhz: float | None = None  # 与 DeviceInfo 同步:asdict 展开要求字段存在
     power_watts: float | None = None
 
 

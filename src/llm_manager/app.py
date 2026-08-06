@@ -2,6 +2,7 @@
 
 lifespan opens the DB, DeviceMonitor (initial refresh), and an httpx-client pool;
 closes them on shutdown. Plan 3 fills the proxy + lifecycle wiring."""
+
 from __future__ import annotations
 
 import asyncio
@@ -41,9 +42,10 @@ logger = logging.getLogger(__name__)
 def create_app(db_path: Path | None = None, *, legacy_yaml: Path | None = None) -> FastAPI:
     resolved_db = Path(db_path or os.environ.get("LLM_MANAGER_DB_PATH", "data/llm_manager.db"))
     db = open_db(resolved_db)
-    _logs.init(db)   # 接线日志存储(幂等)
+    _logs.init(db)  # 接线日志存储(幂等)
     try:
         from llm_manager.data.config_store import ConfigStore, initialize
+
         initialize(db, legacy_yaml)
         store = ConfigStore(db)
         cfg = store.snapshot()
@@ -53,15 +55,22 @@ def create_app(db_path: Path | None = None, *, legacy_yaml: Path | None = None) 
     except Exception:
         db.conn.close()
         raise
-    setup_logging(level=cfg.program.log_level)   # log_level 接线(此前硬编码 INFO,该参数从未生效)
-    logger.info("config loaded (DB %s): %d models, %s:%d, alive %dmin",
-                resolved_db, len(cfg.models), cfg.program.host, cfg.program.port, cfg.program.alive_time)
+    setup_logging(level=cfg.program.log_level)  # log_level 接线(此前硬编码 INFO,该参数从未生效)
+    logger.info(
+        "config loaded (DB %s): %d models, %s:%d, alive %dmin",
+        resolved_db,
+        len(cfg.models),
+        cfg.program.host,
+        cfg.program.port,
+        cfg.program.alive_time,
+    )
     # referenced 动态化:配置运行时可变(WebUI 在线加模型),按活配置重算设备引用,
     # 否则新模型引用的设备名不进 online → 启动报 no adaptive scheme(需重启才生效)
     monitor = DeviceMonitor(build_adapters(), lambda: config.referenced_devices(store.snapshot()))
     supervisor = Supervisor()
-    lifecycle = Lifecycle(get_cfg=store.snapshot, supervisor=supervisor, devices=monitor,
-                          probes=probe_registry, db=db)
+    lifecycle = Lifecycle(
+        get_cfg=store.snapshot, supervisor=supervisor, devices=monitor, probes=probe_registry, db=db
+    )
     clients: dict[int, httpx.AsyncClient] = {}
 
     @asynccontextmanager
@@ -80,21 +89,31 @@ def create_app(db_path: Path | None = None, *, legacy_yaml: Path | None = None) 
         log_stop = asyncio.Event()
         flush_task = asyncio.create_task(_logs.flush_loop(log_stop))
         retention_task = asyncio.create_task(
-            log_retention_loop(db, lambda: retention_from_store(store), log_stop))
+            log_retention_loop(db, lambda: retention_from_store(store), log_stop)
+        )
         heartbeat_task = asyncio.create_task(heartbeat_loop(db, log_stop))
         await asyncio.to_thread(monitor.refresh)
         online = sorted(monitor.online_devices())
         logger.info("devices online: %s", ", ".join(online) if online else "(none)")
         app.state.device_feed = DeviceFeed(monitor)  # 概览设备栏 SSE 源(订阅门控 2s 刷新)
-        app.state.model_feed = ModelFeed(lambda: build_models_response(store.snapshot()))  # 模型 SSE 源(读穿:变更检测推送)
+        app.state.model_feed = ModelFeed(
+            lambda: build_models_response(store.snapshot())
+        )  # 模型 SSE 源(读穿:变更检测推送)
         stop_event = asyncio.Event()
         auto_models = config.auto_start_models(cfg)
         auto_task = asyncio.create_task(
-            background.auto_start(lifecycle, auto_models, cfg, monitor,
-                                  timeout=lifecycle.startup_timeout + background.AUTO_START_MARGIN,
-                                  stop_event=stop_event))
+            background.auto_start(
+                lifecycle,
+                auto_models,
+                cfg,
+                monitor,
+                timeout=lifecycle.startup_timeout + background.AUTO_START_MARGIN,
+                stop_event=stop_event,
+            )
+        )
         idle_task = asyncio.create_task(
-            background.idle_reclamation_loop(lifecycle, store.snapshot, stop_event))
+            background.idle_reclamation_loop(lifecycle, store.snapshot, stop_event)
+        )
         # 系统托盘(守卫:pystray 可用 + 需 uvicorn server 句柄做优雅退出;claude_settings_path 可空,
         # 未配置时托盘照常启动,仅 Claude 预设子菜单隐藏——首次启动不该缺失托盘)
         tray = None
@@ -102,8 +121,11 @@ def create_app(db_path: Path | None = None, *, legacy_yaml: Path | None = None) 
 
         if tray_host.is_tray_available() and server is not None:
             tray = tray_host.SystemTray(
-                lifecycle=lifecycle, get_cfg=store.snapshot, monitor=monitor,
-                loop=app.state.loop, server=server,
+                lifecycle=lifecycle,
+                get_cfg=store.snapshot,
+                monitor=monitor,
+                loop=app.state.loop,
+                server=server,
                 settings_path=cfg.program.claude_settings_path,
                 startup_timeout=lifecycle.startup_timeout,
                 auto_start_margin=background.AUTO_START_MARGIN,
@@ -127,7 +149,9 @@ def create_app(db_path: Path | None = None, *, legacy_yaml: Path | None = None) 
             # === 系统日志收尾:停 flush_loop → 兜底清空剩余 pending → 摘 handler → 收口会话 ===
             try:
                 log_stop.set()
-                await asyncio.gather(flush_task, retention_task, heartbeat_task, return_exceptions=True)
+                await asyncio.gather(
+                    flush_task, retention_task, heartbeat_task, return_exceptions=True
+                )
                 await _logs.flush()
             finally:
                 logging.getLogger().removeHandler(sys_handler)
@@ -139,8 +163,11 @@ def create_app(db_path: Path | None = None, *, legacy_yaml: Path | None = None) 
     app = FastAPI(title="LLM-Manager", lifespan=lifespan)
     register_routes(app, lifecycle, db, clients)
     app.state.config_store = store
-    app.state.resolved_db = str(resolved_db)   # 供 system_info 算 db_size_bytes(不暴露路径键)
-    app.state.boot_program = {f: str(getattr(cfg.program, f)) for f in ("host", "port", "claude_settings_path", "log_level")}
+    app.state.resolved_db = str(resolved_db)  # 供 system_info 算 db_size_bytes(不暴露路径键)
+    app.state.boot_program = {
+        f: str(getattr(cfg.program, f))
+        for f in ("host", "port", "claude_settings_path", "log_level")
+    }
     app.state.started_at = time.time()
     return app
 
@@ -162,7 +189,7 @@ def exit_code_for(restart_requested: bool) -> int:
 # (无进程内重启的隐藏状态泄漏)。退出码协议:81=请求重启,0=正常,其他=崩溃(不自愈)。
 
 _WORKER_FLAG = "--worker"
-_SHUTDOWN_GRACE = 10.0   # worker 优雅关闭超时(秒);超时强杀,防卡死拽死 parent
+_SHUTDOWN_GRACE = 10.0  # worker 优雅关闭超时(秒);超时强杀,防卡死拽死 parent
 
 
 def _should_respawn(rc: int | None) -> bool:
@@ -227,10 +254,12 @@ def _run_worker() -> None:
     """worker:实际应用(create_app + server.run)。退出码 81=请求重启,0=正常;
     parent 监督器在其退出码上决定拉新 / 退出。"""
     import uvicorn
+
     app = create_app(legacy_yaml=Path("config.yaml"))
     cfg = app.state.config_store.snapshot()
     server = uvicorn.Server(
-        uvicorn.Config(app, host=cfg.program.host, port=cfg.program.port, lifespan="on"))
+        uvicorn.Config(app, host=cfg.program.host, port=cfg.program.port, lifespan="on")
+    )
     app.state.uvicorn_server = server
     server.run()
     sys.exit(exit_code_for(getattr(app.state, "restart_requested", False)))
@@ -240,7 +269,9 @@ def _run_parent() -> None:
     """parent 监督器:常驻,不碰 DB / 不持 app 状态。spawn worker、转发 Ctrl-C/SIGTERM、
     按 worker 退出码决定拉新(81)/ 退出(0 或崩溃)。严格顺序:等 rc 到手才 spawn 下一个,
     故无双 worker 并存、无端口竞争。崩溃不自愈(可见失败)。"""
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s", datefmt="%H:%M:%S")
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s", datefmt="%H:%M:%S"
+    )
     while True:
         proc = _spawn_worker()
         _forward_signals(proc)
@@ -257,7 +288,7 @@ def _spawn_worker():
     return subprocess.Popen(_worker_command(), **_spawn_kwargs())
 
 
-_shutting_down = False   # 信号转发置位;防止重启间隙收到的信号误触发新 worker 关闭
+_shutting_down = False  # 信号转发置位;防止重启间隙收到的信号误触发新 worker 关闭
 
 
 def _forward_signals(proc) -> None:

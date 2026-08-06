@@ -1,4 +1,5 @@
 """GET /api/usage/session + GET /api/usage/series (token time-series)."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -18,11 +19,16 @@ def _app(db=None, cfg=None) -> FastAPI:
     register_usage_routes(api)
     app.include_router(api)
     app.state.db = db if db is not None else open_db(Path(":memory:"))
-    app.state.started_at = 123.0   # 生产由 create_app 设置(与 /api/system/info 单源)
+    app.state.started_at = 123.0  # 生产由 create_app 设置(与 /api/system/info 单源)
     if cfg is not None:
+
         class _Stub:
-            def __init__(self, c): self._c = c
-            def snapshot(self): return self._c
+            def __init__(self, c):
+                self._c = c
+
+            def snapshot(self):
+                return self._c
+
         app.state.config_store = _Stub(cfg)
     return app
 
@@ -41,45 +47,89 @@ def test_usage_session_returns_totals() -> None:
     assert j["cache_hit"] == 30
     assert j["cache_miss"] == 70
     assert j["hit_rate"] == 0.3
-    assert j["total_cost"] == 0.0   # 无 config_store(测试 stub)→ 计费降级为 0,不影响 token 面板
+    assert j["total_cost"] == 0.0  # 无 config_store(测试 stub)→ 计费降级为 0,不影响 token 面板
 
 
 def test_usage_session_total_cost_since_start(tmp_path) -> None:
     """本次启动消耗 = 窗口 [started_at, now) 的成本;started_at 之前的请求不计数。"""
     import time
-    from llm_manager.config import AppConfig, Command, ModelConfig, Pricing, PricingTier, ProgramConfig, Scheme
+    from llm_manager.config import (
+        AppConfig,
+        Command,
+        ModelConfig,
+        Pricing,
+        PricingTier,
+        ProgramConfig,
+        Scheme,
+    )
+
     db = open_db(tmp_path / "t.db")
     now = time.time()
-    record_usage(db, "m1", start=123.0, end=now - 0.5, input_tokens=1000, output_tokens=500,
-                 cache_n=0, prompt_n=1000)      # 窗内(started_at=123.0 之后)
-    record_usage(db, "m1", start=10.0, end=100.0, input_tokens=1000, output_tokens=500,
-                 cache_n=0, prompt_n=1000)      # 窗外(上一进程,< started_at)
-    cfg = AppConfig(program=ProgramConfig("0.0.0.0", 8080, 60, "INFO"), models={
-        "m1": ModelConfig("m1", ("m1",), "Chat", 1, False,
-                          {"s": Scheme("s", frozenset({"gpu"}), Command(exe="x"), {"gpu": 1})},
-                          pricing=Pricing(tiers=(PricingTier(tier_index=1, input_price=3.0, output_price=9.0),))),
-    }, wol=None, claude_configs={})
+    record_usage(
+        db,
+        "m1",
+        start=123.0,
+        end=now - 0.5,
+        input_tokens=1000,
+        output_tokens=500,
+        cache_n=0,
+        prompt_n=1000,
+    )  # 窗内(started_at=123.0 之后)
+    record_usage(
+        db,
+        "m1",
+        start=10.0,
+        end=100.0,
+        input_tokens=1000,
+        output_tokens=500,
+        cache_n=0,
+        prompt_n=1000,
+    )  # 窗外(上一进程,< started_at)
+    cfg = AppConfig(
+        program=ProgramConfig("0.0.0.0", 8080, 60, "INFO"),
+        models={
+            "m1": ModelConfig(
+                "m1",
+                ("m1",),
+                "Chat",
+                1,
+                False,
+                {"s": Scheme("s", frozenset({"gpu"}), Command(exe="x"), {"gpu": 1})},
+                pricing=Pricing(
+                    tiers=(PricingTier(tier_index=1, input_price=3.0, output_price=9.0),)
+                ),
+            ),
+        },
+        wol=None,
+        claude_configs={},
+    )
     with TestClient(_app(db, cfg)) as c:
         r = c.get("/api/usage/session")
     assert r.status_code == 200
     j = r.json()
-    expected = (1000 * 3.0 + 500 * 9.0) / 1_000_000   # 仅窗内请求计费
+    expected = (1000 * 3.0 + 500 * 9.0) / 1_000_000  # 仅窗内请求计费
     assert abs(j["total_cost"] - expected) < 1e-9
 
 
 def test_usage_series_endpoint_custom_range(tmp_path) -> None:
     # 2h span → _bucket_for_span returns 600s buckets (12 of them)
     db = open_db(tmp_path / "t.db")
-    record_usage(db, "m1", start=99, end=100, input_tokens=5, output_tokens=5, cache_n=0, prompt_n=0)
-    record_usage(db, "m1", start=699, end=700, input_tokens=3, output_tokens=3, cache_n=0, prompt_n=0)
-    record_usage(db, "m2", start=199, end=200, input_tokens=2, output_tokens=2, cache_n=0, prompt_n=0)
+    record_usage(
+        db, "m1", start=99, end=100, input_tokens=5, output_tokens=5, cache_n=0, prompt_n=0
+    )
+    record_usage(
+        db, "m1", start=699, end=700, input_tokens=3, output_tokens=3, cache_n=0, prompt_n=0
+    )
+    record_usage(
+        db, "m2", start=199, end=200, input_tokens=2, output_tokens=2, cache_n=0, prompt_n=0
+    )
     with TestClient(_app(db)) as c:
         r = c.get("/api/usage/series?start=0&end=7200")
     assert r.status_code == 200
     j = r.json()
-    assert len(j["buckets"]) == 12                       # 7200 / 600
-    assert j["models"]["m1"][0] == 10 and j["models"]["m1"][1] == 6   # end=100→b0, end=700→b600
-    assert j["models"]["m2"][0] == 4                     # end=200→b0
+    assert len(j["buckets"]) == 12  # 7200 / 600
+    assert j["models"]["m1"][0] == 10 and j["models"]["m1"][1] == 6  # end=100→b0, end=700→b600
+    assert j["models"]["m2"][0] == 4  # end=200→b0
     assert j["total"][0] == 14 and j["total"][1] == 6
     assert sum(j["total"]) == 20
 
@@ -96,7 +146,9 @@ def test_usage_series_endpoint_preset_returns_aligned_shape() -> None:
 
 def test_usage_summary_endpoint_aggregates_range(tmp_path) -> None:
     db = open_db(tmp_path / "t.db")
-    record_usage(db, "m1", start=5.0, end=10.0, input_tokens=100, output_tokens=20, cache_n=60, prompt_n=40)
+    record_usage(
+        db, "m1", start=5.0, end=10.0, input_tokens=100, output_tokens=20, cache_n=60, prompt_n=40
+    )
     with TestClient(_app(db)) as c:
         r = c.get("/api/usage/summary?start=0&end=100")
     assert r.status_code == 200
@@ -121,9 +173,15 @@ def test_usage_summary_endpoint_empty_returns_zeros(tmp_path) -> None:
 
 def test_usage_by_model_endpoint_groups_and_shares(tmp_path) -> None:
     db = open_db(tmp_path / "t.db")
-    record_usage(db, "m1", start=5.0, end=10.0, input_tokens=60, output_tokens=20, cache_n=40, prompt_n=20)
-    record_usage(db, "m1", start=12.0, end=15.0, input_tokens=40, output_tokens=10, cache_n=20, prompt_n=20)
-    record_usage(db, "m2", start=15.0, end=18.0, input_tokens=50, output_tokens=10, cache_n=0, prompt_n=50)
+    record_usage(
+        db, "m1", start=5.0, end=10.0, input_tokens=60, output_tokens=20, cache_n=40, prompt_n=20
+    )
+    record_usage(
+        db, "m1", start=12.0, end=15.0, input_tokens=40, output_tokens=10, cache_n=20, prompt_n=20
+    )
+    record_usage(
+        db, "m2", start=15.0, end=18.0, input_tokens=50, output_tokens=10, cache_n=0, prompt_n=50
+    )
     with TestClient(_app(db)) as c:
         r = c.get("/api/usage/by-model?start=0&end=100")
     assert r.status_code == 200
@@ -132,7 +190,7 @@ def test_usage_by_model_endpoint_groups_and_shares(tmp_path) -> None:
     assert j[0]["model"] == "m1"
     assert j[0]["share"] == 100 / 150
     assert j[0]["hit_rate"] == 0.6
-    assert j[0]["latency_ms"] == 4000.0     # AVG(5s, 3s) = 4s
+    assert j[0]["latency_ms"] == 4000.0  # AVG(5s, 3s) = 4s
     assert j[1]["model"] == "m2"
 
 
@@ -145,20 +203,58 @@ def test_usage_by_model_endpoint_empty_returns_empty_list(tmp_path) -> None:
 
 
 def test_usage_cost_endpoint_tier_and_hourly(tmp_path):
-    from llm_manager.config import AppConfig, Command, ModelConfig, Pricing, PricingTier, ProgramConfig, Scheme
+    from llm_manager.config import (
+        AppConfig,
+        Command,
+        ModelConfig,
+        Pricing,
+        PricingTier,
+        ProgramConfig,
+        Scheme,
+    )
+
     db = open_db(tmp_path / "t.db")
-    record_usage(db, "m1", start=5.0, end=10.0, input_tokens=1000, output_tokens=500, cache_n=0, prompt_n=1000)
+    record_usage(
+        db,
+        "m1",
+        start=5.0,
+        end=10.0,
+        input_tokens=1000,
+        output_tokens=500,
+        cache_n=0,
+        prompt_n=1000,
+    )
     from llm_manager.data.usage import record_runtime_start, record_runtime_end
+
     _seg = record_runtime_start(db, "m2", start=0.0)
     record_runtime_end(db, _seg, end=3600.0)
-    cfg = AppConfig(program=ProgramConfig("0.0.0.0", 8080, 60, "INFO"), models={
-        "m1": ModelConfig("m1", ("m1",), "Chat", 1, False,
-                          {"s": Scheme("s", frozenset({"gpu"}), Command(exe="x"), {"gpu": 1})},
-                          pricing=Pricing(tiers=(PricingTier(tier_index=1, input_price=3.0, output_price=9.0),))),
-        "m2": ModelConfig("m2", ("m2",), "Chat", 2, False,
-                          {"s": Scheme("s", frozenset({"gpu"}), Command(exe="x"), {"gpu": 1})},
-                          pricing=Pricing(pricing_type="hourly", hourly_price=10.0)),
-    }, wol=None, claude_configs={})
+    cfg = AppConfig(
+        program=ProgramConfig("0.0.0.0", 8080, 60, "INFO"),
+        models={
+            "m1": ModelConfig(
+                "m1",
+                ("m1",),
+                "Chat",
+                1,
+                False,
+                {"s": Scheme("s", frozenset({"gpu"}), Command(exe="x"), {"gpu": 1})},
+                pricing=Pricing(
+                    tiers=(PricingTier(tier_index=1, input_price=3.0, output_price=9.0),)
+                ),
+            ),
+            "m2": ModelConfig(
+                "m2",
+                ("m2",),
+                "Chat",
+                2,
+                False,
+                {"s": Scheme("s", frozenset({"gpu"}), Command(exe="x"), {"gpu": 1})},
+                pricing=Pricing(pricing_type="hourly", hourly_price=10.0),
+            ),
+        },
+        wol=None,
+        claude_configs={},
+    )
     with TestClient(_app(db, cfg)) as c:
         r = c.get("/api/usage/cost?start=0&end=7200")
     assert r.status_code == 200
@@ -170,14 +266,36 @@ def test_usage_cost_endpoint_tier_and_hourly(tmp_path):
 
 
 def test_usage_cost_series_endpoint_returns_buckets(tmp_path):
-    from llm_manager.config import AppConfig, Command, ModelConfig, Pricing, PricingTier, ProgramConfig, Scheme
+    from llm_manager.config import (
+        AppConfig,
+        Command,
+        ModelConfig,
+        Pricing,
+        PricingTier,
+        ProgramConfig,
+        Scheme,
+    )
+
     db = open_db(tmp_path / "t.db")
-    record_usage(db, "m1", start=9, end=10, input_tokens=1000, output_tokens=0, cache_n=0, prompt_n=1000)
-    cfg = AppConfig(program=ProgramConfig("0.0.0.0", 8080, 60, "INFO"), models={
-        "m1": ModelConfig("m1", ("m1",), "Chat", 1, False,
-                          {"s": Scheme("s", frozenset({"gpu"}), Command(exe="x"), {"gpu": 1})},
-                          pricing=Pricing(tiers=(PricingTier(tier_index=1, input_price=3.0),))),
-    }, wol=None, claude_configs={})
+    record_usage(
+        db, "m1", start=9, end=10, input_tokens=1000, output_tokens=0, cache_n=0, prompt_n=1000
+    )
+    cfg = AppConfig(
+        program=ProgramConfig("0.0.0.0", 8080, 60, "INFO"),
+        models={
+            "m1": ModelConfig(
+                "m1",
+                ("m1",),
+                "Chat",
+                1,
+                False,
+                {"s": Scheme("s", frozenset({"gpu"}), Command(exe="x"), {"gpu": 1})},
+                pricing=Pricing(tiers=(PricingTier(tier_index=1, input_price=3.0),)),
+            ),
+        },
+        wol=None,
+        claude_configs={},
+    )
     with TestClient(_app(db, cfg)) as c:
         r = c.get("/api/usage/cost-series?start=0&end=7200")
     assert r.status_code == 200

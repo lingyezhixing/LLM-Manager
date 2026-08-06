@@ -1,5 +1,6 @@
 """主机 CPU 适配器:psutil RAM/占用 + 温度/频率(LHM 仅 Windows;hwmon/psutil 仅 Linux)。
 平台分支在适配器内部(与 intel/amd 同构),每次仅激活一条路径。"""
+
 from __future__ import annotations
 
 import os
@@ -135,4 +136,6 @@ class CpuAdapter:
             usage = float(psutil.cpu_percent(interval=None))
         except Exception:  # noqa: BLE001
             return [DeviceInfo("CPU", "CPU", "RAM", total, avail, used, 0.0, None)]
-        return [DeviceInfo("CPU", "CPU", "RAM", total, avail, used, usage, _cpu_temp(), _cpu_freq())]
+        return [
+            DeviceInfo("CPU", "CPU", "RAM", total, avail, used, usage, _cpu_temp(), _cpu_freq())
+        ]

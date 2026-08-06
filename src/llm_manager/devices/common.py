@@ -2,6 +2,7 @@
 _hwmon_temp1(hwmon 温度)、_read_float/_read_int_mb(数值读取)以及 Windows LHM 运行时
 (单例 _lhm_computer + 跨设备共享折叠 _aggregate_sensors;设备私有解析如 CPU Tctl 温度
 在各设备文件内部,遵循「每设备文件按平台分割路径」)。"""
+
 from __future__ import annotations
 
 import atexit
@@ -20,8 +21,11 @@ def _system_mem() -> tuple[int, int, int]:
     """系统 RAM 快照 (total, avail, used) MB;psutil 失败 → (0,0,0) 降级不抛。"""
     try:
         mem = psutil.virtual_memory()
-        return (int(mem.total // (1024 * 1024)), int(mem.available // (1024 * 1024)),
-                int(mem.used // (1024 * 1024)))
+        return (
+            int(mem.total // (1024 * 1024)),
+            int(mem.available // (1024 * 1024)),
+            int(mem.used // (1024 * 1024)),
+        )
     except Exception:  # noqa: BLE001
         return (0, 0, 0)
 
@@ -41,7 +45,9 @@ def _hwmon_temp1(dev: Path) -> float | None:
 def _drm_cards() -> list[Path]:
     """/sys/class/drm/cardN(GPU 设备节点;跳过 cardN-* connector)。OSError → []。"""
     try:
-        return sorted(p for p in _DRM_CLASS.iterdir() if p.name.startswith("card") and "-" not in p.name)
+        return sorted(
+            p for p in _DRM_CLASS.iterdir() if p.name.startswith("card") and "-" not in p.name
+        )
     except OSError:
         return []
 
@@ -75,7 +81,9 @@ def is_lhm_available() -> bool:
 
 
 _LHM_COMPUTER = None  # 模块级单例,lazy init
-_LHM_LOCK = threading.Lock()  # 防 monitor.refresh() 跨 asyncio.to_thread 并发 → Computer 双初始化/泄漏
+_LHM_LOCK = (
+    threading.Lock()
+)  # 防 monitor.refresh() 跨 asyncio.to_thread 并发 → Computer 双初始化/泄漏
 
 
 def _close_lhm() -> None:
@@ -101,8 +109,10 @@ def _lhm_computer():
             if _LHM_COMPUTER is None:  # double-checked locking
                 try:
                     import clr  # type: ignore[import-not-found]
+
                     clr.AddReference(str(_LHM_DLL))  # type: ignore[attr-defined]
                     from LibreHardwareMonitor.Hardware import Computer  # type: ignore[import-not-found]
+
                     c = Computer()
                     c.IsGpuEnabled = True
                     c.IsCpuEnabled = True
@@ -120,6 +130,7 @@ def _aggregate_sensors(device_name: str, sensors: Iterator[tuple[str, str, float
     温度取同硬件所有温度传感器最大值;频率取 Clock/Core 传感器(LHM 的 "GPU Core",
     对齐 nvidia-smi clocks.gr / intel_gpu_top frequency.actual 的核心频率语义)。"""
     from . import DeviceInfo  # noqa: F401 — 避免循环导入,延迟导入
+
     core_load = 0.0
     temp_c = None
     freq_mhz = 0.0
@@ -145,8 +156,13 @@ def _aggregate_sensors(device_name: str, sensors: Iterator[tuple[str, str, float
     if total <= 0:
         total = used if used > 0 else 512.0
     return DeviceInfo(
-        device_name, "GPU (APU)", "Shared+Ded",
-        int(total), int(total - used), int(used), float(core_load),
+        device_name,
+        "GPU (APU)",
+        "Shared+Ded",
+        int(total),
+        int(total - used),
+        int(used),
+        float(core_load),
         int(round(temp_c)) if temp_c is not None else None,
         float(freq_mhz) if freq_mhz > 0 else None,
     )

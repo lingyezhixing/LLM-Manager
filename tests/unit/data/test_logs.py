@@ -39,7 +39,7 @@ def test_capture_flush_persists_and_broadcasts(store):
     async def go():
         q = logs.subscribe(sid)
         logs.capture("m1", "hello", "out")
-        await logs.flush()                     # 落库后广播(广播行=DB 行,带全局 id)
+        await logs.flush()  # 落库后广播(广播行=DB 行,带全局 id)
         line = await asyncio.wait_for(q.get(), timeout=1.0)
         received.append(line)
         logs.unsubscribe(sid, q)
@@ -47,7 +47,7 @@ def test_capture_flush_persists_and_broadcasts(store):
     asyncio.run(go())
     rows = logs.log_lines_backfill(db, sid, limit=10)
     assert [r["text"] for r in rows] == ["hello"]
-    assert received[0].id == rows[0]["id"]     # 广播行与落库行同一 id
+    assert received[0].id == rows[0]["id"]  # 广播行与落库行同一 id
     assert received[0].level == "info"
 
 
@@ -57,7 +57,10 @@ def test_capture_level_inference(store):
     logs.capture("m1", "server listening", "out")
     asyncio.run(logs.flush())
     rows = logs.log_lines_backfill(store, sid, limit=10)
-    assert [(r["text"], r["level"]) for r in rows] == [("error: nope", "error"), ("server listening", "ok")]
+    assert [(r["text"], r["level"]) for r in rows] == [
+        ("error: nope", "error"),
+        ("server listening", "ok"),
+    ]
 
 
 def test_session_aliases_new_session(store):
@@ -77,7 +80,7 @@ def test_session_aliases_new_session(store):
 def test_capture_after_end_session_dropped(store):
     sid = logs.start_session("model", "m1", "m1")
     logs.end_session(sid)
-    logs.capture("m1", "orphan line", "out")   # 映射已移除 → 丢弃
+    logs.capture("m1", "orphan line", "out")  # 映射已移除 → 丢弃
     asyncio.run(logs.flush())
     assert logs.log_lines_backfill(store, sid, limit=10) == []
 
@@ -88,7 +91,10 @@ def test_system_capture(store):
     logs.capture_system("WARNING msg", 1000.6)
     asyncio.run(logs.flush())
     rows = logs.log_lines_backfill(store, sid, limit=10)
-    assert [(r["level"], r["stream"], r["ts"]) for r in rows] == [("info", "sys", 1000.5), ("warn", "sys", 1000.6)]
+    assert [(r["level"], r["stream"], r["ts"]) for r in rows] == [
+        ("info", "sys", 1000.5),
+        ("warn", "sys", 1000.6),
+    ]
 
 
 def test_flush_batch_threshold(store):
@@ -125,7 +131,7 @@ def test_subscribe_unknown_session_returns_none(store):
 
 
 def test_flush_no_pending_is_noop(store):
-    asyncio.run(logs.flush())   # 不抛
+    asyncio.run(logs.flush())  # 不抛
 
 
 def test_concurrent_flush_preserves_order(store, monkeypatch):
@@ -142,19 +148,21 @@ def test_concurrent_flush_preserves_order(store, monkeypatch):
         nonlocal calls
         calls += 1
         if calls == 1:
-            time.sleep(0.05)   # 拖延第一个 insert 的锁获取(见上方说明)
+            time.sleep(0.05)  # 拖延第一个 insert 的锁获取(见上方说明)
         return orig_insert(db, session_id, rows)
 
     monkeypatch.setattr(logs, "log_insert_lines", slow_insert)
+
     async def go():
         for i in range(10):
             logs.capture("m1", f"a{i}", "out")
-        t1 = asyncio.create_task(logs.flush())   # 快照 a0..a9 并开始落库(被拖延)
-        await asyncio.sleep(0)                   # 让 t1 真正跑起来(b 行尚未捕获)
+        t1 = asyncio.create_task(logs.flush())  # 快照 a0..a9 并开始落库(被拖延)
+        await asyncio.sleep(0)  # 让 t1 真正跑起来(b 行尚未捕获)
         for i in range(10):
             logs.capture("m1", f"b{i}", "out")
-        t2 = asyncio.create_task(logs.flush())   # 快照 b0..b9
+        t2 = asyncio.create_task(logs.flush())  # 快照 b0..b9
         await asyncio.gather(t1, t2)
+
     asyncio.run(go())
     rows = logs.log_lines_backfill(store, sid, limit=100)
     assert [r["text"] for r in rows] == [f"a{i}" for i in range(10)] + [f"b{i}" for i in range(10)]
@@ -165,10 +173,12 @@ def test_concurrent_flush_preserves_order(store, monkeypatch):
 def test_auto_flush_threshold_in_loop(store):
     """生产路径:capture 攒满 BATCH_SIZE 自动触发 flush 任务落库(无需显式 flush)。"""
     sid = logs.start_session("model", "m1", "m1")
+
     async def go():
         for i in range(logs.BATCH_SIZE):
             logs.capture("m1", f"l{i}", "out")
-        await asyncio.sleep(0.05)   # 给自动创建的 flush 任务执行时间
+        await asyncio.sleep(0.05)  # 给自动创建的 flush 任务执行时间
+
     asyncio.run(go())
     rows = logs.log_lines_backfill(store, sid, limit=logs.BATCH_SIZE + 10)
     assert len(rows) == logs.BATCH_SIZE
@@ -190,18 +200,20 @@ def test_capture_system_from_worker_thread(store):
 
     t = threading.Thread(target=worker)
     t.start()
+
     async def go():
         for _ in range(20):
             await asyncio.sleep(0.005)
             await logs.flush()
+
     asyncio.run(go())
     t.join(timeout=5)
     assert not t.is_alive(), "worker 应在 5s 内完成"
     assert not errors
-    asyncio.run(logs.flush())   # 兜底:worker 尾部行(与 flush 并发期交错时)
+    asyncio.run(logs.flush())  # 兜底:worker 尾部行(与 flush 并发期交错时)
     rows = logs.log_lines_backfill(store, sid, limit=10000)
-    assert len(rows) == 500   # 一行不丢(锁正确时)
-    assert sorted(r["seq"] for r in rows) == list(range(1, 501))   # seq 无重复(递增持锁)
+    assert len(rows) == 500  # 一行不丢(锁正确时)
+    assert sorted(r["seq"] for r in rows) == list(range(1, 501))  # seq 无重复(递增持锁)
 
 
 # ---- log_sessions / log_lines (SQL 存储层测试,自 test_persistence 并入) ----
@@ -222,11 +234,15 @@ def test_log_session_crud(tmp_path):
 def test_log_lines_insert_and_query(tmp_path):
     db = open_db(tmp_path / "t.db")
     sid = logs.log_start_session(db, "system", None, None, 1000.0)
-    ids = logs.log_insert_lines(db, sid, [
-        (1, 1000.1, "sys", "info", "boot line"),
-        (2, 1000.2, "sys", "warn", "warning"),
-        (3, 1000.3, "sys", "error", "boom"),
-    ])
+    ids = logs.log_insert_lines(
+        db,
+        sid,
+        [
+            (1, 1000.1, "sys", "info", "boot line"),
+            (2, 1000.2, "sys", "warn", "warning"),
+            (3, 1000.3, "sys", "error", "boom"),
+        ],
+    )
     assert len(ids) == 3 and ids[0] < ids[1] < ids[2]
     bf = logs.log_lines_backfill(db, sid, limit=2)
     assert [r["text"] for r in bf] == ["warning", "boom"]
@@ -253,7 +269,9 @@ def test_log_insert_lines_empty_returns_empty(tmp_path):
 def test_log_insert_lines_chunks_large_batches(tmp_path):
     db = open_db(tmp_path / "t.db")
     sid = logs.log_start_session(db, "system", None, None, 1000.0)
-    rows = [(i, 1000.0 + i, "sys", "info", f"line {i}") for i in range(1, 400)]  # 399 行 → 3 块(150+150+99)
+    rows = [
+        (i, 1000.0 + i, "sys", "info", f"line {i}") for i in range(1, 400)
+    ]  # 399 行 → 3 块(150+150+99)
     ids = logs.log_insert_lines(db, sid, rows)
     assert len(ids) == 399
     assert ids == sorted(ids)  # 分块后仍全局自增、保持插入序
@@ -282,7 +300,10 @@ def test_log_search_matches_across_sessions_and_filters(tmp_path):
     logs.log_insert_lines(db, s2, [(1, 2000.1, "stdout", "warn", "model startup error")])
     total, rows = logs.log_search(db, "error")
     assert total == 2
-    assert [r["text"] for r in rows] == ["boot Error", "model startup error"]  # 跨会话 + ASCII 大小写不敏感
+    assert [r["text"] for r in rows] == [
+        "boot Error",
+        "model startup error",
+    ]  # 跨会话 + ASCII 大小写不敏感
     assert rows[0]["session_type"] == "system" and rows[1]["session_type"] == "model"
     total, rows = logs.log_search(db, "error", session_id=s1)
     assert total == 1 and [r["text"] for r in rows] == ["boot Error"]
@@ -297,11 +318,12 @@ def test_log_insert_lines_rolls_back_partial_chunks_on_failure(tmp_path):
     """分块插入任一块失败(重复 seq → IntegrityError)→ 整体回滚,不留部分行;
     同连接后续无关 commit 也不得把残留行带落盘。"""
     import sqlite3
+
     p = tmp_path / "t.db"
     db = open_db(p)
     sid = logs.log_start_session(db, "system", None, None, 1000.0)
     rows = [(i, 1000.0 + i, "sys", "info", f"line {i}") for i in range(1, 201)]  # seq 1..200
-    rows.append((151, 3000.0, "sys", "info", "dup seq 151"))                     # 201 行 → 第 2 块内重复
+    rows.append((151, 3000.0, "sys", "info", "dup seq 151"))  # 201 行 → 第 2 块内重复
     with pytest.raises(sqlite3.IntegrityError):
         logs.log_insert_lines(db, sid, rows)
     logs.log_end_session(db, sid, 5000.0)  # 同连接后续 commit —— 若残留事务会误提交部分行
@@ -317,10 +339,19 @@ def test_log_cleanup_time_and_count(tmp_path):
     3 个会话:旧系统会话(1000s,3 行)、旧模型会话(1005s,2 行)、新系统会话(5000s,1 行)。"""
     db = open_db(tmp_path / "t.db")
     old_sys = logs.log_start_session(db, "system", None, None, 1000.0)
-    logs.log_insert_lines(db, old_sys, [(1, 1000.1, "sys", "info", "a"), (2, 1000.2, "sys", "info", "b"),
-                                        (3, 1000.3, "sys", "info", "c")])
+    logs.log_insert_lines(
+        db,
+        old_sys,
+        [
+            (1, 1000.1, "sys", "info", "a"),
+            (2, 1000.2, "sys", "info", "b"),
+            (3, 1000.3, "sys", "info", "c"),
+        ],
+    )
     old_mod = logs.log_start_session(db, "model", "m1", "m1", 1005.0)
-    logs.log_insert_lines(db, old_mod, [(1, 1005.1, "out", "info", "d"), (2, 1005.2, "out", "info", "e")])
+    logs.log_insert_lines(
+        db, old_mod, [(1, 1005.1, "out", "info", "d"), (2, 1005.2, "out", "info", "e")]
+    )
     new_sys = logs.log_start_session(db, "system", None, None, 5000.0)
     logs.log_insert_lines(db, new_sys, [(1, 5000.1, "sys", "info", "f")])
 
@@ -336,14 +367,14 @@ def test_log_cleanup_count_keeps_newest(tmp_path):
         sid = logs.log_start_session(db, "system", None, None, float(1000 + i))
         logs.log_insert_lines(db, sid, [(1, float(1000 + i) + 0.1, "sys", "info", f"l{i}")])
     removed_s, removed_l = logs.log_cleanup(db, days=9999, count=2, now=10000.0)
-    assert removed_s == 1 and removed_l == 1           # 最旧 1 会话(1 行)
+    assert removed_s == 1 and removed_l == 1  # 最旧 1 会话(1 行)
     rows = logs.log_sessions(db)
     assert [r["start_time"] for r in rows] == [1002.0, 1001.0]
 
 
 def test_log_cleanup_both_rules_independent(tmp_path):
     db = open_db(tmp_path / "t.db")
-    sid1 = logs.log_start_session(db, "system", None, None, 100.0)   # 超期 且 最旧
+    sid1 = logs.log_start_session(db, "system", None, None, 100.0)  # 超期 且 最旧
     logs.log_insert_lines(db, sid1, [(1, 100.1, "sys", "info", "a")])
     sid2 = logs.log_start_session(db, "system", None, None, 5000.0)  # 不超期
     logs.log_insert_lines(db, sid2, [(1, 5000.1, "sys", "info", "b")])
@@ -356,9 +387,9 @@ def test_log_cleanup_both_rules_fire_simultaneously(tmp_path):
     """两规则同时触发:时间规则删 {100, 200}(cutoff=3600),条数规则(3>2)补最旧 1 会话(100,
     已含)→ 并集去重 → 删 {100, 200}。"""
     db = open_db(tmp_path / "t.db")
-    sid1 = logs.log_start_session(db, "system", None, None, 100.0)   # 超期,且最旧
+    sid1 = logs.log_start_session(db, "system", None, None, 100.0)  # 超期,且最旧
     logs.log_insert_lines(db, sid1, [(1, 100.1, "sys", "info", "a")])
-    sid2 = logs.log_start_session(db, "system", None, None, 200.0)   # 超期
+    sid2 = logs.log_start_session(db, "system", None, None, 200.0)  # 超期
     logs.log_insert_lines(db, sid2, [(1, 200.1, "sys", "info", "b")])
     sid3 = logs.log_start_session(db, "system", None, None, 5000.0)  # 新鲜
     logs.log_insert_lines(db, sid3, [(1, 5000.1, "sys", "info", "c")])
@@ -385,6 +416,7 @@ def test_log_cleanup_chunks_large_doomed_sets(tmp_path):
     的编译默认;conda 构建默认 250000 会掩盖该问题)→ >999 会话在册时不触发
     too many SQL variables;行/会话数跨块累计精确。"""
     import sqlite3
+
     db = open_db(tmp_path / "t.db")
     db.conn.setlimit(sqlite3.SQLITE_LIMIT_VARIABLE_NUMBER, 999)
     sids = [logs.log_start_session(db, "system", None, None, float(1000 + i)) for i in range(1000)]
@@ -403,17 +435,17 @@ def test_log_heartbeat_live_writes_end_time(store):
     logs.end_session(ended)
     assert logs.log_heartbeat_live(store, 5_000_000_000.0) == 1
     rows = {r["id"]: r for r in logs.log_sessions(store)}
-    assert rows[live]["end_time"] == 5_000_000_000.0   # 进行中 → end_time 推到心跳值
-    assert rows[ended]["end_time"] is not None          # 已结束保留 end_session 写的精确值
-    assert rows[ended]["end_time"] != 5_000_000_000.0   # 不被心跳覆盖
+    assert rows[live]["end_time"] == 5_000_000_000.0  # 进行中 → end_time 推到心跳值
+    assert rows[ended]["end_time"] is not None  # 已结束保留 end_session 写的精确值
+    assert rows[ended]["end_time"] != 5_000_000_000.0  # 不被心跳覆盖
 
 
 def test_log_sessions_status_uses_live_set(store):
     """status 由内存 live_session_ids 判定,不看 end_time(心跳后 live 会话 end_time 非 NULL 仍 running)。"""
     live = logs.start_session("model", "m1", "m1")
-    logs.log_heartbeat_live(store, 5_000_000_000.0)   # live 的 end_time → 非 NULL
+    logs.log_heartbeat_live(store, 5_000_000_000.0)  # live 的 end_time → 非 NULL
     rows = {r["id"]: r for r in logs.log_sessions(store)}
-    assert rows[live]["status"] == "running"          # 在 _sessions,虽 end_time 非 NULL
-    logs.end_session(live)                            # 移出 _sessions
+    assert rows[live]["status"] == "running"  # 在 _sessions,虽 end_time 非 NULL
+    logs.end_session(live)  # 移出 _sessions
     rows2 = {r["id"]: r for r in logs.log_sessions(store)}
     assert rows2[live]["status"] == "ended"

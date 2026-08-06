@@ -8,6 +8,7 @@ Sessions are opened by the runtime (system boot / model spawn) and closed on sto
 ``end_session`` persists end_time and drops the alias→session mapping (late lines are
 dropped). The system logging handler (data/log_handler.py) feeds ``capture_system``.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -26,8 +27,13 @@ logger = logging.getLogger(__name__)
 _ERR = re.compile(r"error|fail|exception|traceback", re.I)
 _OK = re.compile(r"listening|ready|started|server.*ok", re.I)
 
-_SYS_LEVELS = {"DEBUG": "info", "INFO": "info", "WARNING": "warn",
-               "ERROR": "error", "CRITICAL": "error"}
+_SYS_LEVELS = {
+    "DEBUG": "info",
+    "INFO": "info",
+    "WARNING": "warn",
+    "ERROR": "error",
+    "CRITICAL": "error",
+}
 
 
 def infer_level(text: str, stream: str) -> str:
@@ -48,9 +54,9 @@ def system_level(levelname: str) -> str:
 @dataclass(frozen=True, slots=True)
 class LogLine:
     id: int
-    ts: float            # 墙钟(捕获时刻)
-    stream: str          # "out" | "err" | "sys"
-    level: str           # "info" | "ok" | "warn" | "error"
+    ts: float  # 墙钟(捕获时刻)
+    stream: str  # "out" | "err" | "sys"
+    level: str  # "info" | "ok" | "warn" | "error"
     text: str
 
 
@@ -73,11 +79,13 @@ class _Session:
 _db: Db | None = None
 _sessions: dict[int, _Session] = {}
 _alias_to_session: dict[str, int] = {}
-_pending: list[tuple[int, int, float, str, str, str]] = []   # (session_id, seq, ts, stream, level, text)
+_pending: list[
+    tuple[int, int, float, str, str, str]
+] = []  # (session_id, seq, ts, stream, level, text)
 _system_session_id: int | None = None
 _pending_lock = threading.Lock()
-_mem_sid_seq: int = 0   # 未接线 DB 时的内存会话 id 分配(测试/启动早期)
-_flush_chain: asyncio.Task | None = None   # flush 串行链尾(见 flush 文档)
+_mem_sid_seq: int = 0  # 未接线 DB 时的内存会话 id 分配(测试/启动早期)
+_flush_chain: asyncio.Task | None = None  # flush 串行链尾(见 flush 文档)
 BATCH_SIZE = 200
 FLUSH_INTERVAL = 1.0
 
@@ -102,8 +110,9 @@ def reset() -> None:
     _mem_sid_seq = 0
 
 
-def start_session(type_: str, model_name: str | None = None,
-                  alias: str | None = None, start: float | None = None) -> int:
+def start_session(
+    type_: str, model_name: str | None = None, alias: str | None = None, start: float | None = None
+) -> int:
     """开新会话(落库),登记广播器。alias→session 映射被新会话接管;
     type_="system" 的会话同时登记为当前系统会话。
     未接线 DB(_db 为 None,lifecycle 单测)→ 仅内存会话(不落库,与 end_session 对称)。"""
@@ -196,13 +205,13 @@ def _enqueue(session_id: int, text: str, stream: str, level: str, ts: float) -> 
         return
     with _pending_lock:
         _pending.append((session_id, s.next_seq, ts, stream, level, text))
-        s.next_seq += 1   # 多线程(系统 handler)可并发入队 → seq 递增必须持锁
+        s.next_seq += 1  # 多线程(系统 handler)可并发入队 → seq 递增必须持锁
         trigger = len(_pending) >= BATCH_SIZE
     if trigger:
         try:
             asyncio.get_running_loop().create_task(flush())
         except RuntimeError:
-            pass   # 无运行 loop(测试/启动早期)→ 由 flush_loop 定时兜底
+            pass  # 无运行 loop(测试/启动早期)→ 由 flush_loop 定时兜底
 
 
 async def flush() -> None:
@@ -223,7 +232,7 @@ async def flush() -> None:
         with _pending_lock:
             if not _pending:
                 return
-            if _db is None:          # 🔵2:未接线(测试/启动早期无库可写)→ 清空 pending 安全丢弃,避免无界增长
+            if _db is None:  # 🔵2:未接线(测试/启动早期无库可写)→ 清空 pending 安全丢弃,避免无界增长
                 _pending.clear()
                 return
             batch = _pending[:]
@@ -248,7 +257,9 @@ async def flush() -> None:
             if s is None:
                 continue
             for line, lid in zip(rows, ids):
-                s.bc.publish(LogLine(id=lid, ts=line[1], stream=line[2], level=line[3], text=line[4]))
+                s.bc.publish(
+                    LogLine(id=lid, ts=line[1], stream=line[2], level=line[3], text=line[4])
+                )
     finally:
         if _flush_chain is me:
             _flush_chain = None
@@ -265,7 +276,7 @@ async def flush_loop(stop_event: asyncio.Event) -> None:
             pass
         except asyncio.CancelledError:
             break
-        except Exception:                  # 🔵2:兜底防未料异常静默杀掉日志管线(flush 内部已捕 insert 异常)
+        except Exception:  # 🔵2:兜底防未料异常静默杀掉日志管线(flush 内部已捕 insert 异常)
             logger.exception("flush_loop iteration failed; continuing")
     await flush()
 
@@ -289,7 +300,9 @@ def resolve_session(alias: str) -> int | None:
 # ---------------- log sessions / log lines (SQL 存储层,自 persistence 并入) ----------------
 
 
-def log_start_session(db: Db, type_: str, model_name: str | None, alias: str | None, start: float) -> int:
+def log_start_session(
+    db: Db, type_: str, model_name: str | None, alias: str | None, start: float
+) -> int:
     """开新日志会话(系统或模型);返回会话 id。会话 id 由 start_session 记入内存 _sessions
     (状态/心跳/retention 用);end_time 由心跳维持,不兼任「运行中」标识。"""
     with db.write_lock:
@@ -315,7 +328,8 @@ def log_heartbeat_live(db: Db, now: float) -> int:
     placeholders = ",".join("?" * len(ids))
     with db.write_lock:
         cur = db.conn.execute(
-            f"UPDATE log_sessions SET end_time=? WHERE id IN ({placeholders})", (now, *ids))
+            f"UPDATE log_sessions SET end_time=? WHERE id IN ({placeholders})", (now, *ids)
+        )
         n = cur.rowcount
         db.conn.commit()
         return n
@@ -347,9 +361,10 @@ def delete_model_sessions(db: Db, model_name: str, aliases: tuple[str, ...]) -> 
 
 def log_session_exists(db: Db, session_id: int) -> bool:
     """会话行是否存在(读接口 404 校验用)。"""
-    return db.conn.execute(
-        "SELECT 1 FROM log_sessions WHERE id = ?", (session_id,)
-    ).fetchone() is not None
+    return (
+        db.conn.execute("SELECT 1 FROM log_sessions WHERE id = ?", (session_id,)).fetchone()
+        is not None
+    )
 
 
 def log_resolve_model_name(db: Db, alias_or_name: str) -> str | None:
@@ -367,7 +382,9 @@ def log_resolve_model_name(db: Db, alias_or_name: str) -> str | None:
     return row["model_name"]
 
 
-def log_insert_lines(db: Db, session_id: int, rows: list[tuple[int, float, str, str, str]]) -> list[int]:
+def log_insert_lines(
+    db: Db, session_id: int, rows: list[tuple[int, float, str, str, str]]
+) -> list[int]:
     """批量插行。rows = [(seq, ts, stream, level, text), ...];返回全局行 id(RETURNING)。
 
     注意:CPython 的 executemany 不能用于带 RETURNING 的语句(sqlite3.InterfaceError),
@@ -381,9 +398,12 @@ def log_insert_lines(db: Db, session_id: int, rows: list[tuple[int, float, str, 
     with db.write_lock:
         try:
             for i in range(0, len(rows), chunk_size):
-                chunk = rows[i:i + chunk_size]
-                sql = ("INSERT INTO log_lines (session_id, seq, ts, stream, level, text) VALUES "
-                       + ",".join(["(?,?,?,?,?,?)"] * len(chunk)) + " RETURNING id")
+                chunk = rows[i : i + chunk_size]
+                sql = (
+                    "INSERT INTO log_lines (session_id, seq, ts, stream, level, text) VALUES "
+                    + ",".join(["(?,?,?,?,?,?)"] * len(chunk))
+                    + " RETURNING id"
+                )
                 flat: list = []
                 for r in chunk:
                     flat.append(session_id)
@@ -397,8 +417,14 @@ def log_insert_lines(db: Db, session_id: int, rows: list[tuple[int, float, str, 
         return ids
 
 
-def log_sessions(db: Db, *, type_: str | None = None, model_name: str | None = None,
-                 limit: int = 50, before_id: int | None = None) -> list[sqlite3.Row]:
+def log_sessions(
+    db: Db,
+    *,
+    type_: str | None = None,
+    model_name: str | None = None,
+    limit: int = 50,
+    before_id: int | None = None,
+) -> list[sqlite3.Row]:
     """会话列表倒序(id 降序)。line_count 一次 GROUP BY 算出;status 由内存 live_session_ids
     计算(运行中 = 当前 _sessions 里的会话;end_time 已不兼任此标识,心跳会维持它到 now)。
     before_id = id < before_id 的翻页。"""
@@ -408,10 +434,12 @@ def log_sessions(db: Db, *, type_: str | None = None, model_name: str | None = N
         placeholders = ",".join("?" * len(live))
         status_sql = f"CASE WHEN s.id IN ({placeholders}) THEN 'running' ELSE 'ended' END"
     else:
-        status_sql = "'ended'"   # 无运行中会话(如刚启动)→ 全 ended
-    sql = ("SELECT s.*, COUNT(l.id) AS line_count, " + status_sql + " AS status "
-           "FROM log_sessions s LEFT JOIN log_lines l ON l.session_id = s.id WHERE 1=1")
-    args: list = status_args   # SELECT 里的 IN 占位符在 SQL 中最先出现
+        status_sql = "'ended'"  # 无运行中会话(如刚启动)→ 全 ended
+    sql = (
+        "SELECT s.*, COUNT(l.id) AS line_count, " + status_sql + " AS status "
+        "FROM log_sessions s LEFT JOIN log_lines l ON l.session_id = s.id WHERE 1=1"
+    )
+    args: list = status_args  # SELECT 里的 IN 占位符在 SQL 中最先出现
     if type_ is not None:
         sql += " AND s.type = ?"
         args.append(type_)
@@ -426,8 +454,9 @@ def log_sessions(db: Db, *, type_: str | None = None, model_name: str | None = N
     return db.conn.execute(sql, args).fetchall()
 
 
-def _log_lines_tail(db: Db, session_id: int, limit: int, level: str | None,
-                    before_id: int | None = None) -> list[sqlite3.Row]:
+def _log_lines_tail(
+    db: Db, session_id: int, limit: int, level: str | None, before_id: int | None = None
+) -> list[sqlite3.Row]:
     """会话内最近 limit 行(升序)。before_id 给定则限定 id < before_id(往前翻页)。"""
     sql = "SELECT * FROM log_lines WHERE session_id = ?"
     args: list = [session_id]
@@ -444,20 +473,30 @@ def _log_lines_tail(db: Db, session_id: int, limit: int, level: str | None,
     return rows
 
 
-def log_lines_backfill(db: Db, session_id: int, limit: int = 1500, level: str | None = None) -> list[sqlite3.Row]:
+def log_lines_backfill(
+    db: Db, session_id: int, limit: int = 1500, level: str | None = None
+) -> list[sqlite3.Row]:
     """会话内最近 limit 行(升序)。"""
     return _log_lines_tail(db, session_id, limit, level)
 
 
-def log_lines_before(db: Db, session_id: int, before_id: int, limit: int = 1500,
-                     level: str | None = None) -> list[sqlite3.Row]:
+def log_lines_before(
+    db: Db, session_id: int, before_id: int, limit: int = 1500, level: str | None = None
+) -> list[sqlite3.Row]:
     """id < before_id 的最近 limit 行(升序)——往前翻页。"""
     return _log_lines_tail(db, session_id, limit, level, before_id=before_id)
 
 
-def log_search(db: Db, q: str, *, type_: str | None = None, model_name: str | None = None,
-               session_id: int | None = None, level: str | None = None,
-               limit: int = 500) -> tuple[int, list[sqlite3.Row]]:
+def log_search(
+    db: Db,
+    q: str,
+    *,
+    type_: str | None = None,
+    model_name: str | None = None,
+    session_id: int | None = None,
+    level: str | None = None,
+    limit: int = 500,
+) -> tuple[int, list[sqlite3.Row]]:
     """行级 LIKE 检索,跨会话;返回 (total, rows)。total = 满足过滤条件的真总数(COUNT);
     rows = 按 id 升序 LIMIT 后的匹配行,含 session 归属。SQLite LIKE 对 ASCII
     大小写不敏感。limit 钳 1..5000(默认 500)。"""
@@ -478,17 +517,24 @@ def log_search(db: Db, q: str, *, type_: str | None = None, model_name: str | No
     cond = " AND ".join(where)
     total = db.conn.execute(
         f"SELECT COUNT(*) FROM log_lines l JOIN log_sessions s ON s.id = l.session_id WHERE {cond}",
-        args).fetchone()[0]
+        args,
+    ).fetchone()[0]
     rows = db.conn.execute(
         f"SELECT l.*, s.type AS session_type, s.model_name AS session_model "
         f"FROM log_lines l JOIN log_sessions s ON s.id = l.session_id "
         f"WHERE {cond} ORDER BY l.id LIMIT ?",
-        [*args, max(1, min(limit, 5000))]).fetchall()
+        [*args, max(1, min(limit, 5000))],
+    ).fetchall()
     return int(total), rows
 
 
-def log_cleanup(db: Db, days: int, count: int, now: float | None = None,
-                live_session_ids: set[int] | None = None) -> tuple[int, int]:
+def log_cleanup(
+    db: Db,
+    days: int,
+    count: int,
+    now: float | None = None,
+    live_session_ids: set[int] | None = None,
+) -> tuple[int, int]:
     """保留规则:时间规则删 start_time < now-days 的会话;条数规则删最旧多余会话。
     两规则独立、同时生效、先到先清。返回 (删会话数, 删行数)。now 注入(可测)。
 
@@ -508,7 +554,9 @@ def log_cleanup(db: Db, days: int, count: int, now: float | None = None,
         total = db.conn.execute("SELECT COUNT(*) FROM log_sessions").fetchone()[0]
         if total > count:
             excess = total - count
-            for r in db.conn.execute("SELECT id FROM log_sessions ORDER BY id ASC LIMIT ?", (excess,)):
+            for r in db.conn.execute(
+                "SELECT id FROM log_sessions ORDER BY id ASC LIMIT ?", (excess,)
+            ):
                 doomed.add(r["id"])
         if live_session_ids:
             doomed.difference_update(live_session_ids)
@@ -520,12 +568,12 @@ def log_cleanup(db: Db, days: int, count: int, now: float | None = None,
         removed_s = 0
         try:
             for i in range(0, len(ids), chunk_size):
-                chunk = ids[i:i + chunk_size]
+                chunk = ids[i : i + chunk_size]
                 ph = ",".join("?" * len(chunk))
                 cur = db.conn.execute(f"DELETE FROM log_lines WHERE session_id IN ({ph})", chunk)
                 removed_l += cur.rowcount
             for i in range(0, len(ids), chunk_size):
-                chunk = ids[i:i + chunk_size]
+                chunk = ids[i : i + chunk_size]
                 ph = ",".join("?" * len(chunk))
                 cur = db.conn.execute(f"DELETE FROM log_sessions WHERE id IN ({ph})", chunk)
                 removed_s += cur.rowcount

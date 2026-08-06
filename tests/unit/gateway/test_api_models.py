@@ -72,11 +72,11 @@ async def test_models_stream_yields_initial_then_on_change(tmp_path):
     assert first.startswith("data:")
     assert "routing" in first
 
-    state.set_status("internal-qwen-key", ModelStatus.STOPPED, force=True)   # change → push
+    state.set_status("internal-qwen-key", ModelStatus.STOPPED, force=True)  # change → push
     second = await asyncio.wait_for(gen.__anext__(), timeout=2)
     assert "stopped" in second
 
-    await gen.aclose()   # finally → unsubscribe → loop stops
+    await gen.aclose()  # finally → unsubscribe → loop stops
     assert feed.subscriber_count == 0
     state._reset()
 
@@ -93,9 +93,9 @@ def test_start_unknown_alias_404(tmp_path):
 def test_start_when_routing_409(tmp_path):
     state._reset()
     app = _app(tmp_path)
-    state.set_status("internal-qwen-key", ModelStatus.ROUTING, force=True)   # keyed by primary_name
+    state.set_status("internal-qwen-key", ModelStatus.ROUTING, force=True)  # keyed by primary_name
     with TestClient(app) as c:
-        r = c.post("/api/models/qwen2.5-32b/start")                          # URL uses alias
+        r = c.post("/api/models/qwen2.5-32b/start")  # URL uses alias
     assert r.status_code == 409
     state._reset()
 
@@ -107,11 +107,11 @@ def test_start_accepted_202_and_fires_ensure_running(tmp_path):
     with TestClient(app) as c:
         r = c.post("/api/models/qwen2.5-32b/start")
         assert r.status_code == 202
-        for _ in range(50):                  # 让后台 create_task 在 portal loop 上跑完
+        for _ in range(50):  # 让后台 create_task 在 portal loop 上跑完
             if life.started:
                 break
             time.sleep(0.02)
-    assert life.started == ["internal-qwen-key"]     # ensure_running 收到 primary_name
+    assert life.started == ["internal-qwen-key"]  # ensure_running 收到 primary_name
     state._reset()
 
 
@@ -136,9 +136,16 @@ def test_api_models_reflects_store_reload(tmp_path):
     app = _app(tmp_path)
     with TestClient(app) as c:
         from dataclasses import replace
-        m2 = config.ModelConfig("m2-key", ("m2-served",), "Chat", 8002,
-                                schemes={"s": config.Scheme("s", frozenset({"rtx 4060"}),
-                                                            config.Command(exe="q.bat"), {})})
+
+        m2 = config.ModelConfig(
+            "m2-key",
+            ("m2-served",),
+            "Chat",
+            8002,
+            schemes={
+                "s": config.Scheme("s", frozenset({"rtx 4060"}), config.Command(exe="q.bat"), {})
+            },
+        )
         cur = app.state.config_store.snapshot()
         write_appconfig(app.state.db, replace(cur, models={**cur.models, "m2-key": m2}))
         app.state.config_store.reload()
@@ -155,7 +162,7 @@ def test_restart_accepted_202_and_fires_stop_then_start(tmp_path):
     with TestClient(app) as c:
         r = c.post("/api/models/qwen2.5-32b/restart")
         assert r.status_code == 202
-        for _ in range(50):                 # 让后台 create_task 在 portal loop 上跑完
+        for _ in range(50):  # 让后台 create_task 在 portal loop 上跑完
             if life.stopped and life.started:
                 break
             time.sleep(0.02)

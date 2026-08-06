@@ -3,6 +3,7 @@
 迁移自 legacy(api_server.py 1048-1115 + data_manager.py 数据管理段)。孤立判定:
 models.original_name ∉ AppConfig.models.keys()(usage/runtime 记录的均为 primary_name)。
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -15,7 +16,6 @@ from llm_manager.gateway.api.common import get_config_store, get_db
 
 
 def register_data_routes(api: APIRouter) -> None:
-
     @api.get("/data/storage-stats")
     def storage_stats(request: Request) -> dict:
         db = get_db(request)

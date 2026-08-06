@@ -1,6 +1,7 @@
 """Built-frontend SPA hosting: StaticFiles(/assets) + GET catch-all fallback to
 index.html. Registered LAST (see routes.py) so it never shadows /health,
 /v1/models, /api/*, the proxy catch-alls, or FastAPI built-ins."""
+
 from __future__ import annotations
 
 import logging
@@ -18,11 +19,14 @@ _FRONTEND_DIST = Path(__file__).resolve().parents[3] / "frontend" / "dist"
 
 def register_spa(app: FastAPI) -> None:
     if not _FRONTEND_DIST.is_dir():
-        logger.warning("frontend/dist not found at %s; SPA not mounted (run `npm run build` in frontend/)", _FRONTEND_DIST)
+        logger.warning(
+            "frontend/dist not found at %s; SPA not mounted (run `npm run build` in frontend/)",
+            _FRONTEND_DIST,
+        )
         return
 
     assets_dir = _FRONTEND_DIST / "assets"
-    if assets_dir.is_dir():   # dist 存在但缺 assets/ 时不应让整个网关启动崩溃
+    if assets_dir.is_dir():  # dist 存在但缺 assets/ 时不应让整个网关启动崩溃
         app.mount("/assets", StaticFiles(directory=assets_dir), name="frontend-assets")
 
     @app.get("/{path:path}")

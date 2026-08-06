@@ -1,4 +1,5 @@
 """NVIDIA 适配器:nvidia-smi 查询 → DeviceInfo。"""
+
 from __future__ import annotations
 
 import shutil
@@ -50,9 +51,15 @@ def _run_smi() -> str:
         return ""
     try:
         r = subprocess.run(
-            [smi, "--query-gpu=name,memory.total,memory.used,memory.free,utilization.gpu,temperature.gpu,clocks.gr",
-             "--format=csv,noheader,nounits"],
-            capture_output=True, text=True, timeout=5, check=False,
+            [
+                smi,
+                "--query-gpu=name,memory.total,memory.used,memory.free,utilization.gpu,temperature.gpu,clocks.gr",
+                "--format=csv,noheader,nounits",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
         )
         return r.stdout if r.returncode == 0 else ""
     except Exception:  # noqa: BLE001 — nvidia-smi 子进程异常/超时 → 视作无 NVIDIA,返回空
@@ -67,6 +74,16 @@ class NvidiaAdapter:
 
     def enumerate(self) -> list[DeviceInfo]:
         return [
-            DeviceInfo(row.name, "GPU", "VRAM", row.total_mb, row.free_mb, row.used_mb, row.util_pct, row.temp_c, row.freq_mhz)
+            DeviceInfo(
+                row.name,
+                "GPU",
+                "VRAM",
+                row.total_mb,
+                row.free_mb,
+                row.used_mb,
+                row.util_pct,
+                row.temp_c,
+                row.freq_mhz,
+            )
             for row in _parse_smi(_run_smi())
         ]

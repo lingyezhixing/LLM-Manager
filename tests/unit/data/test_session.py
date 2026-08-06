@@ -2,6 +2,7 @@
 
 Metering semantics (all parsers): cache_tokens = hit, prompt_tokens = miss,
 input_tokens = cache + prompt. So hit_rate = cache_hit / (cache_hit + cache_miss)."""
+
 from __future__ import annotations
 
 from llm_manager.data import session
@@ -14,9 +15,9 @@ def test_add_accumulates_across_calls() -> None:
     s = session.snapshot(123.0)
     assert s.input_tokens == 300
     assert s.output_tokens == 60
-    assert s.cache_hit == 180       # 30 + 150
-    assert s.cache_miss == 120      # 70 + 50
-    assert s.hit_rate == 0.6        # 180 / (180 + 120)
+    assert s.cache_hit == 180  # 30 + 150
+    assert s.cache_miss == 120  # 70 + 50
+    assert s.hit_rate == 0.6  # 180 / (180 + 120)
 
 
 def test_hit_rate_zero_when_no_input() -> None:

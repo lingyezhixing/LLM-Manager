@@ -1,4 +1,5 @@
 """Management API (/api/*). One sub-router per resource group."""
+
 from __future__ import annotations
 
 from fastapi import APIRouter

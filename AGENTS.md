@@ -97,7 +97,8 @@ tray     ── 系统托盘(自重启触发 / WOL / Claude 预设应用)
 
 后端(项目根,conda env `LLM-Manager`):
 ```bash
-python -m pytest tests -q          # 全量(含 smoke);~22s
+python -m pytest tests -q          # 全量(含 smoke);~23s
+ruff format --check .             # 格式(2026-08-06 已全仓库格式化;改完须保持 format 干净)
 ruff check .                     # lint(单路径;0.12.7 多路径参数偶发丢诊断——竞态,勿用 `ruff check src tests`)
 pyright src/llm_manager            # 类型检查(0 errors 基线)
 ```
@@ -140,8 +141,8 @@ npx tsc -b           # 仅类型检查
   `frontend/src/lib/api/{usage,logs,models,config,data}.ts` 的同形 interface(round3 §5-S2
   风险记录仍有效)。若未来进入「频繁改响应模型 × 多消费方」阶段再评估引入,届时一次推完、不留中间态。
 - **S3 CI / pre-commit**:`ruff format --check && ruff check && pyright && pytest -q` +
-  前端 `oxlint && tsc -b`。项目装了 ruff 但未强制 format(37/42 文件会重排)。**待用户定**
-  是否一次性 `ruff format` + 纳入 CI。
+  前端 `oxlint && tsc -b`。已 2026-08-06 一次性 `ruff format`(74/85 重排)并纳入
+  后端验收命令;CI/pre-commit 自动化仍未建(本地手动执行)。
 - **S5 `useSyncedForm<T>` 抽象**:general/wol/claude/model-def-form 四处手写「服务端快照→本地表单」
   同步(已滋生 F1)。抽象 hook 把「baseline 只能在 onSuccess 推进」固化。重构面较大,**留作演进**。
 - **🔵1 create_task 任务集**:6 处 fire-and-forget 任务内部均已捕异常,实际未检索异常风险低;

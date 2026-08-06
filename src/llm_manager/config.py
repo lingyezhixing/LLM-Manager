@@ -1,4 +1,5 @@
 """Config: YAML load → frozen dataclasses. Device names normalized once (lowercase+strip)."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -22,6 +23,7 @@ RETENTION_DEFAULTS: dict[str, str] = {
 
 class ModelMode(str, Enum):
     """Probe selector; string values are config/registry keys."""
+
     CHAT = "Chat"
     EMBEDDING = "Embedding"
     RERANKER = "Reranker"
@@ -47,8 +49,8 @@ class Scheme:
 @dataclass(frozen=True, slots=True)
 class PricingTier:
     tier_index: int
-    min_input: int | None = 0          # None/negative treated as 0 (closed lower bound)
-    max_input: int | None = None       # None/negative = unbounded (legacy -1)
+    min_input: int | None = 0  # None/negative treated as 0 (closed lower bound)
+    max_input: int | None = None  # None/negative = unbounded (legacy -1)
     min_output: int | None = 0
     max_output: int | None = None
     input_price: float = 0.0
@@ -59,16 +61,18 @@ class PricingTier:
 
 @dataclass(frozen=True, slots=True)
 class Pricing:
-    pricing_type: str = "tier"         # "tier" | "hourly"
+    pricing_type: str = "tier"  # "tier" | "hourly"
     hourly_price: float = 0.0
-    support_cache: bool = False        # 模型级:是否支持 prompt 缓存(缓存计费开关)
+    support_cache: bool = False  # 模型级:是否支持 prompt 缓存(缓存计费开关)
     tiers: tuple[PricingTier, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
 class ModelConfig:
     primary_name: str
-    aliases: tuple[str, ...]  # 有序:aliases[0]=主别名=下游 served name(lmdeploy --model-name / llama.cpp -a)
+    aliases: tuple[
+        str, ...
+    ]  # 有序:aliases[0]=主别名=下游 served name(lmdeploy --model-name / llama.cpp -a)
     mode: str
     port: int
     auto_start: bool = False
@@ -137,8 +141,12 @@ def load(path: Path) -> AppConfig:
                 config_source=key,
                 required_devices=frozenset(val.get("required_devices", [])),
                 command=Command(
-                    exe=c["exe"], args=tuple(c.get("args", [])), env=dict(c.get("env", {})),
-                    cwd=c.get("cwd"), conda_env=c.get("conda_env")),
+                    exe=c["exe"],
+                    args=tuple(c.get("args", [])),
+                    env=dict(c.get("env", {})),
+                    cwd=c.get("cwd"),
+                    conda_env=c.get("conda_env"),
+                ),
                 memory_mb={k: int(v) for k, v in val.get("memory_mb", {}).items()},
             )
         models[name] = ModelConfig(
@@ -151,7 +159,9 @@ def load(path: Path) -> AppConfig:
         )
     wol_raw = raw.get("wake_on_lan")
     wol = WakeOnLanConfig(wol_raw["broadcast_address"], wol_raw["mac_address"]) if wol_raw else None
-    return AppConfig(program=program, models=models, wol=wol, claude_configs=raw.get("claude_configs", {}))
+    return AppConfig(
+        program=program, models=models, wol=wol, claude_configs=raw.get("claude_configs", {})
+    )
 
 
 def validate(cfg: AppConfig) -> list[str]:
@@ -163,9 +173,9 @@ def validate(cfg: AppConfig) -> list[str]:
     seen_aliases: dict[str, str] = {}
     valid_modes = {m.value for m in ModelMode}
     for name, m in cfg.models.items():
-        if not name or not name.strip():                       # 空模型名
+        if not name or not name.strip():  # 空模型名
             errors.append("Model name is empty/blank")
-        if not 1 <= m.port <= 65535:                           # 模型端口范围
+        if not 1 <= m.port <= 65535:  # 模型端口范围
             errors.append(f"Model '{name}' port {m.port} out of range (1-65535)")
         if m.port in seen_ports:
             errors.append(f"Port {m.port} shared by models '{seen_ports[m.port]}' and '{name}'")
@@ -174,7 +184,7 @@ def validate(cfg: AppConfig) -> list[str]:
         if not m.aliases:
             errors.append(f"Model '{name}' has no aliases")  # aliases[0]=下游 served name 必须
         for a in m.aliases:
-            if not a or not a.strip():                         # 空串别名
+            if not a or not a.strip():  # 空串别名
                 errors.append(f"Model '{name}' has empty alias")
                 continue
             if a in seen_aliases:
@@ -186,7 +196,9 @@ def validate(cfg: AppConfig) -> list[str]:
             else:
                 seen_aliases[a] = name
         if m.mode not in valid_modes:
-            errors.append(f"Model '{name}' mode '{m.mode}' not supported (supported: {sorted(valid_modes)})")
+            errors.append(
+                f"Model '{name}' mode '{m.mode}' not supported (supported: {sorted(valid_modes)})"
+            )
         if not m.schemes:
             errors.append(f"Model '{name}' has no device scheme")
         for sname, scheme in m.schemes.items():
@@ -199,9 +211,12 @@ def validate(cfg: AppConfig) -> list[str]:
                 errors.append(f"Model '{name}' has duplicate tier_index {t.tier_index}")
             seen_tiers.add(t.tier_index)
         for t in m.pricing.tiers:
-            for pname, pval in (("input_price", t.input_price), ("output_price", t.output_price),
-                                ("cache_write_price", t.cache_write_price),
-                                ("cache_read_price", t.cache_read_price)):
+            for pname, pval in (
+                ("input_price", t.input_price),
+                ("output_price", t.output_price),
+                ("cache_write_price", t.cache_write_price),
+                ("cache_read_price", t.cache_read_price),
+            ):
                 if pval < 0:
                     errors.append(f"Model '{name}' has negative price {pname}")
         if m.pricing.hourly_price < 0:

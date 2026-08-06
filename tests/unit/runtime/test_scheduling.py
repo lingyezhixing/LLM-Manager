@@ -1,6 +1,9 @@
 from llm_manager.devices import DeviceInfo
 from llm_manager.runtime.scheduling import (
-    RunnableInfo, compute_deficit, score_candidates, check_and_free,
+    RunnableInfo,
+    compute_deficit,
+    score_candidates,
+    check_and_free,
 )
 
 
@@ -24,9 +27,11 @@ def test_runnable_info_is_frozen():
 def test_score_orders_by_idle_per_mem_descending():
     now = 1000.0
     runnable = {
-        "a": RunnableInfo(mem_mb={"d": 1024}, pending=0, last_access=900.0),   # idle100/1GB=100
-        "b": RunnableInfo(mem_mb={"d": 2048}, pending=0, last_access=950.0),   # idle50/2GB=25
-        "c": RunnableInfo(mem_mb={"d": 512}, pending=0, last_access=800.0),    # idle200/0.5GB(floor)=400
+        "a": RunnableInfo(mem_mb={"d": 1024}, pending=0, last_access=900.0),  # idle100/1GB=100
+        "b": RunnableInfo(mem_mb={"d": 2048}, pending=0, last_access=950.0),  # idle50/2GB=25
+        "c": RunnableInfo(
+            mem_mb={"d": 512}, pending=0, last_access=800.0
+        ),  # idle200/0.5GB(floor)=400
     }
     assert score_candidates(runnable, {"d"}, now) == ["c", "a", "b"]
 
@@ -68,9 +73,9 @@ def test_check_and_free_no_eviction_when_no_deficit():
 
 
 def test_check_and_free_evicts_until_satisfied():
-    snap = {"d": _dev("d", 0)}    # avail 0, need 4096
+    snap = {"d": _dev("d", 0)}  # avail 0, need 4096
     runnable = {
-        "a": RunnableInfo(mem_mb={"d": 2048}, pending=0, last_access=0.0),    # idle1000/2=500
+        "a": RunnableInfo(mem_mb={"d": 2048}, pending=0, last_access=0.0),  # idle1000/2=500
         "b": RunnableInfo(mem_mb={"d": 2048}, pending=0, last_access=100.0),  # idle900/2=450
     }
     assert check_and_free({"d": 4096}, snap, runnable, now=1000.0) == ["a", "b"]

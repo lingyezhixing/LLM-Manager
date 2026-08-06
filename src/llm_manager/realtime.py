@@ -10,6 +10,7 @@ These are the codebase's first management-class streaming primitives; the reques
 and live-log SSE endpoints will build on the same ``Broadcaster``. Loop-resident
 (asyncio single-thread) → no locks on the subscriber set.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -52,6 +53,7 @@ class Broadcaster(Generic[T]):
 
 class _SnapshotSource(Protocol):
     """Minimal refresh+snapshot surface; DeviceMonitor satisfies it structurally."""
+
     def refresh(self) -> None: ...
     def snapshot(self) -> dict[str, DeviceInfo]: ...
 
@@ -134,7 +136,7 @@ class ModelFeed(Generic[T]):
         if self._bc.subscriber_count == 0 and self._task is not None:
             self._task.cancel()
             self._task = None
-            self._last = None   # resubscribe should re-publish the initial snapshot
+            self._last = None  # resubscribe should re-publish the initial snapshot
 
     @property
     def subscriber_count(self) -> int:

@@ -1,5 +1,6 @@
 """DB-backed config store. 单一源 = 数据库(spec D4)。本模块逐步填充:settings KV → 模型世界读写
 → ConfigStore → bootstrap。config.py 的 load() 被复用为 YAML→DB 一次性导入器。"""
+
 from __future__ import annotations
 
 import json
@@ -59,7 +60,10 @@ def get_setting(db: Db, key: str) -> str | None:
 
 
 def get_all_settings(db: Db) -> dict[str, str]:
-    return {row["key"]: row["value"] for row in db.conn.execute("SELECT key, value FROM system_settings")}
+    return {
+        row["key"]: row["value"]
+        for row in db.conn.execute("SELECT key, value FROM system_settings")
+    }
 
 
 def _int_setting(s: dict[str, str], key: str, default: int) -> int:
@@ -103,8 +107,16 @@ def _write_appconfig_locked(db: Db, cfg: AppConfig) -> None:
             cur = db.conn.execute(
                 "INSERT INTO model_defs (name, mode, port, auto_start, pricing_type, hourly_price, support_cache, ord) "
                 "VALUES (?,?,?,?,?,?,?,?)",
-                (name, m.mode, m.port, int(m.auto_start),
-                 m.pricing.pricing_type, m.pricing.hourly_price, int(m.pricing.support_cache), ord_idx),
+                (
+                    name,
+                    m.mode,
+                    m.port,
+                    int(m.auto_start),
+                    m.pricing.pricing_type,
+                    m.pricing.hourly_price,
+                    int(m.pricing.support_cache),
+                    ord_idx,
+                ),
             )
             mid = cur.lastrowid
             assert mid is not None
@@ -115,13 +127,26 @@ def _write_appconfig_locked(db: Db, cfg: AppConfig) -> None:
                 )
             for s_ord, (src, scheme) in enumerate(m.schemes.items()):
                 c = scheme.command
-                command_json = json.dumps({"exe": c.exe, "args": list(c.args), "env": c.env,
-                                           "cwd": c.cwd, "conda_env": c.conda_env})
+                command_json = json.dumps(
+                    {
+                        "exe": c.exe,
+                        "args": list(c.args),
+                        "env": c.env,
+                        "cwd": c.cwd,
+                        "conda_env": c.conda_env,
+                    }
+                )
                 db.conn.execute(
                     "INSERT INTO model_schemes (model_id, config_source, required_devices, memory_mb, command, ord) "
                     "VALUES (?,?,?,?,?,?)",
-                    (mid, src, json.dumps(sorted(scheme.required_devices)),
-                     json.dumps(scheme.memory_mb), command_json, s_ord),
+                    (
+                        mid,
+                        src,
+                        json.dumps(sorted(scheme.required_devices)),
+                        json.dumps(scheme.memory_mb),
+                        command_json,
+                        s_ord,
+                    ),
                 )
             db.conn.execute("DELETE FROM pricing_tiers WHERE pricing_id=?", (mid,))
             for t in m.pricing.tiers:
@@ -129,9 +154,18 @@ def _write_appconfig_locked(db: Db, cfg: AppConfig) -> None:
                     "INSERT INTO pricing_tiers (pricing_id, tier_index, min_input, max_input, "
                     "min_output, max_output, input_price, output_price, "
                     "cache_write_price, cache_read_price) VALUES (?,?,?,?,?,?,?,?,?,?)",
-                    (mid, t.tier_index, t.min_input, t.max_input, t.min_output, t.max_output,
-                     t.input_price, t.output_price,
-                     t.cache_write_price, t.cache_read_price),
+                    (
+                        mid,
+                        t.tier_index,
+                        t.min_input,
+                        t.max_input,
+                        t.min_output,
+                        t.max_output,
+                        t.input_price,
+                        t.output_price,
+                        t.cache_write_price,
+                        t.cache_read_price,
+                    ),
                 )
     except Exception:
         db.conn.rollback()
@@ -155,8 +189,12 @@ def _read_appconfig_locked(db: Db) -> AppConfig:
         alive_time=_int_setting(s, "alive_time", int(PROGRAM_DEFAULTS["alive_time"])),
         log_level=s.get("log_level", PROGRAM_DEFAULTS["log_level"]),
         claude_settings_path=s.get("claude_settings_path"),
-        log_retention_days=_int_setting(s, "log_retention_days", int(RETENTION_DEFAULTS["log_retention_days"])),
-        log_retention_count=_int_setting(s, "log_retention_count", int(RETENTION_DEFAULTS["log_retention_count"])),
+        log_retention_days=_int_setting(
+            s, "log_retention_days", int(RETENTION_DEFAULTS["log_retention_days"])
+        ),
+        log_retention_count=_int_setting(
+            s, "log_retention_count", int(RETENTION_DEFAULTS["log_retention_count"])
+        ),
     )
     wol = None
     if "wol_broadcast" in s and "wol_mac" in s:
@@ -165,18 +203,30 @@ def _read_appconfig_locked(db: Db) -> AppConfig:
 
     models: dict[str, ModelConfig] = {}
     for row in db.conn.execute(
-            "SELECT id, name, mode, port, auto_start, pricing_type, hourly_price, support_cache "
-            "FROM model_defs ORDER BY ord"):
+        "SELECT id, name, mode, port, auto_start, pricing_type, hourly_price, support_cache "
+        "FROM model_defs ORDER BY ord"
+    ):
         mid = row["id"]
-        aliases = tuple(r["alias"] for r in db.conn.execute(
-            "SELECT alias FROM model_aliases WHERE model_id = ? ORDER BY ord", (mid,)))
+        aliases = tuple(
+            r["alias"]
+            for r in db.conn.execute(
+                "SELECT alias FROM model_aliases WHERE model_id = ? ORDER BY ord", (mid,)
+            )
+        )
         schemes: dict[str, Scheme] = {}
         for srow in db.conn.execute(
-                "SELECT config_source, required_devices, memory_mb, command "
-                "FROM model_schemes WHERE model_id = ? ORDER BY ord", (mid,)):
+            "SELECT config_source, required_devices, memory_mb, command "
+            "FROM model_schemes WHERE model_id = ? ORDER BY ord",
+            (mid,),
+        ):
             d = json.loads(srow["command"] or "{}")
-            command = Command(exe=d.get("exe", ""), args=tuple(d.get("args", [])),
-                              env=dict(d.get("env", {})), cwd=d.get("cwd"), conda_env=d.get("conda_env"))
+            command = Command(
+                exe=d.get("exe", ""),
+                args=tuple(d.get("args", [])),
+                env=dict(d.get("env", {})),
+                cwd=d.get("cwd"),
+                conda_env=d.get("conda_env"),
+            )
             schemes[srow["config_source"]] = Scheme(
                 config_source=srow["config_source"],
                 required_devices=frozenset(json.loads(srow["required_devices"])),
@@ -185,14 +235,23 @@ def _read_appconfig_locked(db: Db) -> AppConfig:
             )
         tiers = tuple(
             PricingTier(
-                tier_index=tr["tier_index"], min_input=tr["min_input"], max_input=tr["max_input"],
-                min_output=tr["min_output"], max_output=tr["max_output"],
-                input_price=tr["input_price"], output_price=tr["output_price"],
-                cache_write_price=tr["cache_write_price"], cache_read_price=tr["cache_read_price"])
+                tier_index=tr["tier_index"],
+                min_input=tr["min_input"],
+                max_input=tr["max_input"],
+                min_output=tr["min_output"],
+                max_output=tr["max_output"],
+                input_price=tr["input_price"],
+                output_price=tr["output_price"],
+                cache_write_price=tr["cache_write_price"],
+                cache_read_price=tr["cache_read_price"],
+            )
             for tr in db.conn.execute(
                 "SELECT tier_index, min_input, max_input, min_output, max_output, "
                 "input_price, output_price, cache_write_price, cache_read_price "
-                "FROM pricing_tiers WHERE pricing_id=? ORDER BY tier_index", (mid,)))
+                "FROM pricing_tiers WHERE pricing_id=? ORDER BY tier_index",
+                (mid,),
+            )
+        )
         pricing = Pricing(
             pricing_type=row["pricing_type"],
             hourly_price=row["hourly_price"],
@@ -200,8 +259,13 @@ def _read_appconfig_locked(db: Db) -> AppConfig:
             tiers=tiers,
         )
         models[row["name"]] = ModelConfig(
-            primary_name=row["name"], aliases=aliases, mode=row["mode"],
-            port=row["port"], auto_start=bool(row["auto_start"]), schemes=schemes, pricing=pricing,
+            primary_name=row["name"],
+            aliases=aliases,
+            mode=row["mode"],
+            port=row["port"],
+            auto_start=bool(row["auto_start"]),
+            schemes=schemes,
+            pricing=pricing,
         )
     return AppConfig(program=program, models=models, wol=wol, claude_configs=claude_configs)
 

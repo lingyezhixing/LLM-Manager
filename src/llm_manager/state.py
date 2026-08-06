@@ -3,6 +3,7 @@
 Module-level functions over a private dict. asyncio single-thread event loop →
 loop-resident state needs no locks (cross-thread resources like sqlite are
 locked separately)."""
+
 from __future__ import annotations
 
 import asyncio
@@ -35,11 +36,11 @@ _ALLOWED: dict[ModelStatus, frozenset[ModelStatus]] = {
 class _Record:
     status: ModelStatus = ModelStatus.STOPPED
     failure_reason: str | None = None
-    last_access: float = 0.0          # monotonic — internal idle reclamation
+    last_access: float = 0.0  # monotonic — internal idle reclamation
     pending: int = 0
     pid: int | None = None
-    started_at: float | None = None   # wall-clock epoch when entered ROUTING (frontend uptime)
-    last_access_wall: float = 0.0     # wall-clock epoch of last activity (frontend idle)
+    started_at: float | None = None  # wall-clock epoch when entered ROUTING (frontend uptime)
+    last_access_wall: float = 0.0  # wall-clock epoch of last activity (frontend idle)
 
 
 _state: dict[str, _Record] = {}
@@ -64,7 +65,9 @@ def get_status(name: str) -> ModelStatus:
     return _rec(name).status
 
 
-def set_status(name: str, status: ModelStatus, *, reason: str | None = None, force: bool = False) -> None:
+def set_status(
+    name: str, status: ModelStatus, *, reason: str | None = None, force: bool = False
+) -> None:
     rec = _rec(name)
     if not force and status not in _ALLOWED.get(rec.status, frozenset()):
         raise ValueError(f"Illegal transition {rec.status.value}->{status.value} for '{name}'")
@@ -72,14 +75,16 @@ def set_status(name: str, status: ModelStatus, *, reason: str | None = None, for
     if status == ModelStatus.FAILED:
         rec.failure_reason = reason
     else:
-        rec.failure_reason = None   # 离开 FAILED(成功重启/停止)→ 清陈旧原因(B3);失败原因只在 FAILED 态有意义
+        rec.failure_reason = (
+            None  # 离开 FAILED(成功重启/停止)→ 清陈旧原因(B3);失败原因只在 FAILED 态有意义
+        )
     if status == ModelStatus.ROUTING:
         now_wall = time.time()
         rec.last_access = time.monotonic()
         rec.last_access_wall = now_wall
         rec.started_at = now_wall
     else:
-        rec.started_at = None   # uptime only while ROUTING
+        rec.started_at = None  # uptime only while ROUTING
 
 
 def is_runnable(name: str) -> bool:
@@ -94,8 +99,8 @@ def record_failure(name: str, reason: str) -> None:
     rec = _rec(name)
     rec.status = ModelStatus.FAILED
     rec.failure_reason = reason
-    rec.pid = None   # 进程已死/将死/未spawn(所有 caller 调用时如此);清 stale pid 防 _reconcile 漏清 + 防 stop 误 kill 被复用的 pid
-    rec.started_at = None   # FAILED → 无 uptime
+    rec.pid = None  # 进程已死/将死/未spawn(所有 caller 调用时如此);清 stale pid 防 _reconcile 漏清 + 防 stop 误 kill 被复用的 pid
+    rec.started_at = None  # FAILED → 无 uptime
 
 
 def get_failure_reason(name: str) -> str | None:
@@ -178,7 +183,7 @@ def claim_start(name: str) -> tuple[asyncio.Future, bool]:
     _inflight[name] = fut
     rec = _rec(name)
     rec.status = ModelStatus.STARTING
-    rec.failure_reason = None   # 新一轮启动:清上次失败原因(B3),防 SSE 携带陈旧 reason
+    rec.failure_reason = None  # 新一轮启动:清上次失败原因(B3),防 SSE 携带陈旧 reason
     return fut, True
 
 
@@ -200,7 +205,7 @@ def finish_start(name: str, status: ModelStatus, *, owner: asyncio.Future | None
         if rec.failure_reason is None:
             rec.failure_reason = "startup failed"
     else:
-        rec.failure_reason = None   # 成功(ROUTING)/STOPPED → 清陈旧失败原因(B3)
+        rec.failure_reason = None  # 成功(ROUTING)/STOPPED → 清陈旧失败原因(B3)
     if fut is not None and not fut.done():
         fut.set_result(status)
 

@@ -9,6 +9,7 @@ frontend fetches it and ticks uptime locally rather than the backend computing a
 Metering semantics (all parsers): ``cache_tokens`` = hit, ``prompt_tokens`` = miss,
 ``input_tokens`` = cache + prompt → hit_rate = cache_hit / (cache_hit + cache_miss).
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -18,7 +19,7 @@ from llm_manager.data.metering import hit_rate
 
 @dataclass(frozen=True, slots=True)
 class SessionTotals:
-    started_at: float        # process start (wall-clock epoch seconds)
+    started_at: float  # process start (wall-clock epoch seconds)
     input_tokens: int
     output_tokens: int
     cache_hit: int
@@ -30,8 +31,8 @@ class SessionTotals:
 class _Counters:
     input_tokens: int = 0
     output_tokens: int = 0
-    cache_tokens: int = 0    # hits
-    prompt_tokens: int = 0   # misses
+    cache_tokens: int = 0  # hits
+    prompt_tokens: int = 0  # misses
 
 
 _c: _Counters = _Counters()

@@ -59,6 +59,7 @@ def test_aggregate_sensors_dedicated_and_shared():
 
 def test_is_lhm_available_no_pythonnet(monkeypatch):
     import builtins
+
     real_import = builtins.__import__
 
     def fake_import(name, *args, **kwargs):
@@ -68,6 +69,7 @@ def test_is_lhm_available_no_pythonnet(monkeypatch):
 
     monkeypatch.setattr(builtins, "__import__", fake_import)
     from llm_manager.devices import common as cm
+
     assert cm.is_lhm_available() is False
 
 
@@ -100,6 +102,7 @@ def test_run_smi_uses_noheader_nounits_format(monkeypatch):
     # 真机验证发现:nvidia-smi 默认输出带 [MiB]/[%] 单位,_parse_smi 的 int() 解析失败 →
     # 必须用 --format=csv,noheader,nounits 让输出纯数字(_parse_smi 纯函数不变)。
     from llm_manager.devices import nvidia as ad
+
     captured = {}
 
     class _R:
@@ -117,8 +120,10 @@ def test_run_smi_uses_noheader_nounits_format(monkeypatch):
 
 def test_parse_smi_handles_multi_gpu_csv_noheader_nounits():
     # nvidia-smi --query-gpu=... --format=csv,noheader,nounits 的实际多 GPU 输出(纯数字)
-    out = ("NVIDIA GeForce RTX 4060 Laptop GPU, 8188, 1692, 6266, 35, 51\n"
-           "Tesla V100-SXM2-32GB, 32768, 0, 32365, 0, 40\n")
+    out = (
+        "NVIDIA GeForce RTX 4060 Laptop GPU, 8188, 1692, 6266, 35, 51\n"
+        "Tesla V100-SXM2-32GB, 32768, 0, 32365, 0, 40\n"
+    )
     rows = _parse_smi(out)
     assert len(rows) == 2
     assert "4060" in rows[0].name.lower() and rows[0].total_mb == 8188
@@ -130,6 +135,7 @@ def test_parse_smi_handles_multi_gpu_csv_noheader_nounits():
 
 def test_tokens_splits_alnum():
     from llm_manager.devices import _tokens
+
     assert _tokens("RTX 4060 Ti") == {"rtx", "4060", "ti"}
     assert _tokens("V100-SXM2") == {"v100", "sxm2"}
     assert _tokens("780M Graphics") == {"780m", "graphics"}
@@ -139,11 +145,13 @@ def test_tokens_splits_alnum():
 def _di(name):
     """测试用 DeviceInfo 构造器(仅 device_name 重要,其余置零)。"""
     from llm_manager.devices import DeviceInfo
+
     return DeviceInfo(name, "GPU", "VRAM", 0, 0, 0, 0.0, None)
 
 
 def test_match_devices_full_match_keyed_by_config_name():
     from llm_manager.devices import match_devices
+
     candidates = [
         _di("NVIDIA GeForce RTX 4060 Ti"),
         _di("Tesla V100-SXM2-32GB"),
@@ -158,6 +166,7 @@ def test_match_devices_full_match_keyed_by_config_name():
 
 def test_match_devices_no_match_returns_empty_and_unmatched_preserved():
     from llm_manager.devices import match_devices
+
     candidates = [_di("NVIDIA GeForce RTX 4060")]
     matched, unmatched = match_devices({"rtx 5090"}, candidates)
     assert matched == {}
@@ -167,6 +176,7 @@ def test_match_devices_no_match_returns_empty_and_unmatched_preserved():
 def test_match_devices_disambiguation_prefers_fewer_extra_tokens():
     # config 'rtx 4060' 同时全子集匹配 'RTX 4060'(多余 2)与 'RTX 4060 Ti'(多余 3)→ 选前者
     from llm_manager.devices import match_devices
+
     candidates = [_di("NVIDIA GeForce RTX 4060 Ti"), _di("NVIDIA GeForce RTX 4060")]
     matched, _ = match_devices({"rtx 4060"}, candidates)
     assert matched["rtx 4060"].device_name == "NVIDIA GeForce RTX 4060"
@@ -174,6 +184,7 @@ def test_match_devices_disambiguation_prefers_fewer_extra_tokens():
 
 def test_match_devices_cpu_token_matches_cpu_candidate():
     from llm_manager.devices import match_devices
+
     matched, unmatched = match_devices({"cpu"}, [_di("CPU")])
     assert "cpu" in matched
     assert unmatched == []
@@ -182,6 +193,7 @@ def test_match_devices_cpu_token_matches_cpu_candidate():
 def test_match_devices_one_candidate_one_name():
     # 重叠 config 名:sorted 先到先得,单候选只配一个
     from llm_manager.devices import match_devices
+
     matched, unmatched = match_devices({"4060", "rtx 4060"}, [_di("NVIDIA GeForce RTX 4060")])
     assert set(matched) == {"4060"}  # sorted: "4060" < "rtx 4060";后者候选已被占用
     assert unmatched == []
@@ -190,6 +202,7 @@ def test_match_devices_one_candidate_one_name():
 def test_match_devices_requires_full_subset_not_partial():
     # 'rtx 4060' {rtx,4060} 对 'RTX 3090' {rtx,3090} 非 full subset(4060 不在)→ 不匹配
     from llm_manager.devices import match_devices
+
     matched, unmatched = match_devices({"rtx 4060"}, [_di("NVIDIA GeForce RTX 3090")])
     assert matched == {}
     assert [c.device_name for c in unmatched] == ["NVIDIA GeForce RTX 3090"]
@@ -200,8 +213,11 @@ def test_match_devices_requires_full_subset_not_partial():
 
 def test_enumerate_nvidia_returns_all_rows_with_raw_names(monkeypatch):
     from llm_manager.devices import nvidia as ad
-    smi = ("NVIDIA GeForce RTX 4060 Laptop GPU, 8188, 1692, 6266, 35, 51\n"
-           "Tesla V100-SXM2-32GB, 32768, 0, 32365, 0, 40\n")
+
+    smi = (
+        "NVIDIA GeForce RTX 4060 Laptop GPU, 8188, 1692, 6266, 35, 51\n"
+        "Tesla V100-SXM2-32GB, 32768, 0, 32365, 0, 40\n"
+    )
     monkeypatch.setattr(ad, "_run_smi", lambda: smi)
     out = ad.NvidiaAdapter().enumerate()
     assert len(out) == 2
@@ -213,6 +229,7 @@ def test_enumerate_nvidia_returns_all_rows_with_raw_names(monkeypatch):
 
 def test_enumerate_nvidia_empty_when_no_smi(monkeypatch):
     from llm_manager.devices import nvidia as ad
+
     monkeypatch.setattr(ad, "_run_smi", lambda: "")
     assert ad.NvidiaAdapter().enumerate() == []
 
@@ -222,6 +239,7 @@ def test_enumerate_nvidia_empty_when_no_smi(monkeypatch):
 
 def test_lhm_computer_unavailable_returns_none(monkeypatch):
     from llm_manager.devices import common as cm
+
     monkeypatch.setattr(cm, "is_lhm_available", lambda: False)
     assert cm._lhm_computer() is None
 
@@ -286,6 +304,7 @@ def test_enumerate_cpu_psutil_failure_degraded(monkeypatch):
 
 def test_lhm_cpu_temp_unavailable_returns_none(monkeypatch):
     from llm_manager.devices import cpu as ad
+
     monkeypatch.setattr(ad, "_lhm_computer", lambda: None)
     assert ad._lhm_cpu_temp() is None
 
@@ -309,17 +328,16 @@ def _fake_cpu_hw(*sensors):
         def Update(self):
             pass
 
-    return types.SimpleNamespace(Hardware=[
-        _FakeHardware([_FakeSensor(*t) for t in sensors])
-    ])
+    return types.SimpleNamespace(Hardware=[_FakeHardware([_FakeSensor(*t) for t in sensors])])
 
 
 def test_lhm_cpu_temp_reads_valid_tctl(monkeypatch):
     """管理员下真实读数:>0 直接返回。"""
     from llm_manager.devices import cpu as ad
 
-    monkeypatch.setattr(ad, "_lhm_computer",
-                        lambda: _fake_cpu_hw(("Temperature", "Core (Tctl/Tdie)", 78.125)))
+    monkeypatch.setattr(
+        ad, "_lhm_computer", lambda: _fake_cpu_hw(("Temperature", "Core (Tctl/Tdie)", 78.125))
+    )
     assert ad._lhm_cpu_temp() == 78.125
 
 
@@ -327,13 +345,17 @@ def test_lhm_cpu_temp_zero_without_corroboration_returns_none(monkeypatch):
     """非管理员 Ryzen:整组 Power=0 / Clock=nan / Tctl=0,Load 正常 → Load 不作佐证 → None。"""
     from llm_manager.devices import cpu as ad
 
-    monkeypatch.setattr(ad, "_lhm_computer", lambda: _fake_cpu_hw(
-        ("Load", "CPU Core #1", 21.8),
-        ("Load", "CPU Total", 20.3),
-        ("Power", "Package", 0.0),
-        ("Clock", "Core #1", float("nan")),
-        ("Temperature", "Core (Tctl/Tdie)", 0.0),
-    ))
+    monkeypatch.setattr(
+        ad,
+        "_lhm_computer",
+        lambda: _fake_cpu_hw(
+            ("Load", "CPU Core #1", 21.8),
+            ("Load", "CPU Total", 20.3),
+            ("Power", "Package", 0.0),
+            ("Clock", "Core #1", float("nan")),
+            ("Temperature", "Core (Tctl/Tdie)", 0.0),
+        ),
+    )
     assert ad._lhm_cpu_temp() is None
 
 
@@ -341,11 +363,15 @@ def test_lhm_cpu_temp_zero_with_corroboration_returns_zero(monkeypatch):
     """真 0°C 制冷:Power/Clock 正常 → 佐证成立 → 0 原样上报。"""
     from llm_manager.devices import cpu as ad
 
-    monkeypatch.setattr(ad, "_lhm_computer", lambda: _fake_cpu_hw(
-        ("Power", "Package", 40.5),
-        ("Clock", "Core #1", 4990.0),
-        ("Temperature", "Core (Tctl/Tdie)", 0.0),
-    ))
+    monkeypatch.setattr(
+        ad,
+        "_lhm_computer",
+        lambda: _fake_cpu_hw(
+            ("Power", "Package", 40.5),
+            ("Clock", "Core #1", 4990.0),
+            ("Temperature", "Core (Tctl/Tdie)", 0.0),
+        ),
+    )
     assert ad._lhm_cpu_temp() == 0.0
 
 
@@ -353,10 +379,14 @@ def test_lhm_cpu_temp_nan_never_returned(monkeypatch):
     """NaN 不是温度读数:即使有佐证也不返回 → None。"""
     from llm_manager.devices import cpu as ad
 
-    monkeypatch.setattr(ad, "_lhm_computer", lambda: _fake_cpu_hw(
-        ("Power", "Package", 40.5),
-        ("Temperature", "Core (Tctl/Tdie)", float("nan")),
-    ))
+    monkeypatch.setattr(
+        ad,
+        "_lhm_computer",
+        lambda: _fake_cpu_hw(
+            ("Power", "Package", 40.5),
+            ("Temperature", "Core (Tctl/Tdie)", float("nan")),
+        ),
+    )
     assert ad._lhm_cpu_temp() is None
 
 
@@ -364,10 +394,14 @@ def test_lhm_cpu_temp_invalid_then_valid_second_sensor(monkeypatch):
     """多 Tctl 传感器:先无效(0)后有效 → 取有效值,不被 0 截断。"""
     from llm_manager.devices import cpu as ad
 
-    monkeypatch.setattr(ad, "_lhm_computer", lambda: _fake_cpu_hw(
-        ("Temperature", "Core (Tctl)", 0.0),
-        ("Temperature", "Core (Tdie)", 55.0),
-    ))
+    monkeypatch.setattr(
+        ad,
+        "_lhm_computer",
+        lambda: _fake_cpu_hw(
+            ("Temperature", "Core (Tctl)", 0.0),
+            ("Temperature", "Core (Tdie)", 55.0),
+        ),
+    )
     assert ad._lhm_cpu_temp() == 55.0
 
 
@@ -403,9 +437,14 @@ def test_cpu_temp_linux_branch_hwmon(monkeypatch):
 
     monkeypatch.setattr(ad.os, "name", "posix")
     monkeypatch.setattr(ad, "_lhm_cpu_temp", boom)
-    monkeypatch.setattr(ad.psutil, "sensors_temperatures", lambda: {
-        "coretemp": [types.SimpleNamespace(label="Package id 0", current=46.0)],
-    }, raising=False)
+    monkeypatch.setattr(
+        ad.psutil,
+        "sensors_temperatures",
+        lambda: {
+            "coretemp": [types.SimpleNamespace(label="Package id 0", current=46.0)],
+        },
+        raising=False,
+    )
     assert ad._cpu_temp() == 46.0
 
 
@@ -415,9 +454,14 @@ def test_cpu_temp_linux_branch_no_temp(monkeypatch):
     from llm_manager.devices import cpu as ad
 
     monkeypatch.setattr(ad.os, "name", "posix")
-    monkeypatch.setattr(ad.psutil, "sensors_temperatures", lambda: {
-        "acpitz": [types.SimpleNamespace(label="", current=27.8)],
-    }, raising=False)
+    monkeypatch.setattr(
+        ad.psutil,
+        "sensors_temperatures",
+        lambda: {
+            "acpitz": [types.SimpleNamespace(label="", current=27.8)],
+        },
+        raising=False,
+    )
     assert ad._cpu_temp() is None
 
 
@@ -425,12 +469,16 @@ def test_lhm_cpu_freq_reads_max_valid(monkeypatch):
     """Windows:Clock/Core 取有效值最大者(升压多核),nan 跳过。"""
     from llm_manager.devices import cpu as ad
 
-    monkeypatch.setattr(ad, "_lhm_computer", lambda: _fake_cpu_hw(
-        ("Clock", "Core #1", 4990.0),
-        ("Clock", "Core #2", 5000.0),
-        ("Clock", "Core #3", float("nan")),
-        ("Clock", "GPU Memory", 2400.0),  # 非 Cpu 硬件的传感器不会出现,防御性验证
-    ))
+    monkeypatch.setattr(
+        ad,
+        "_lhm_computer",
+        lambda: _fake_cpu_hw(
+            ("Clock", "Core #1", 4990.0),
+            ("Clock", "Core #2", 5000.0),
+            ("Clock", "Core #3", float("nan")),
+            ("Clock", "GPU Memory", 2400.0),  # 非 Cpu 硬件的传感器不会出现,防御性验证
+        ),
+    )
     assert ad._lhm_cpu_freq() == 5000.0
 
 
@@ -438,10 +486,14 @@ def test_lhm_cpu_freq_all_invalid_returns_none(monkeypatch):
     """非管理员 Ryzen:Clock 全 nan → None(哨兵跳过,无需佐证)。"""
     from llm_manager.devices import cpu as ad
 
-    monkeypatch.setattr(ad, "_lhm_computer", lambda: _fake_cpu_hw(
-        ("Clock", "Core #1", float("nan")),
-        ("Clock", "Core #2", 0.0),
-    ))
+    monkeypatch.setattr(
+        ad,
+        "_lhm_computer",
+        lambda: _fake_cpu_hw(
+            ("Clock", "Core #1", float("nan")),
+            ("Clock", "Core #2", 0.0),
+        ),
+    )
     assert ad._lhm_cpu_freq() is None
 
 
@@ -450,8 +502,9 @@ def test_cpu_freq_psutil_reads_current(monkeypatch):
     import types
     from llm_manager.devices import cpu as ad
 
-    monkeypatch.setattr(ad.psutil, "cpu_freq",
-                        lambda: types.SimpleNamespace(current=3184.4, min=700.0, max=3400.0))
+    monkeypatch.setattr(
+        ad.psutil, "cpu_freq", lambda: types.SimpleNamespace(current=3184.4, min=700.0, max=3400.0)
+    )
     assert ad._cpu_freq_psutil() == 3184.4
 
 
@@ -491,12 +544,17 @@ def test_cpu_temp_hwmon_prefers_package_label(monkeypatch):
     import types
     from llm_manager.devices import cpu as ad
 
-    monkeypatch.setattr(ad.psutil, "sensors_temperatures", lambda: {
-        "coretemp": [
-            types.SimpleNamespace(label="Core 0", current=45.0),
-            types.SimpleNamespace(label="Package id 0", current=47.0),
-        ],
-    }, raising=False)
+    monkeypatch.setattr(
+        ad.psutil,
+        "sensors_temperatures",
+        lambda: {
+            "coretemp": [
+                types.SimpleNamespace(label="Core 0", current=45.0),
+                types.SimpleNamespace(label="Package id 0", current=47.0),
+            ],
+        },
+        raising=False,
+    )
     assert ad._cpu_temp_hwmon() == 47.0
 
 
@@ -505,10 +563,15 @@ def test_cpu_temp_hwmon_ignores_non_cpu_chips(monkeypatch):
     import types
     from llm_manager.devices import cpu as ad
 
-    monkeypatch.setattr(ad.psutil, "sensors_temperatures", lambda: {
-        "acpitz": [types.SimpleNamespace(label="", current=27.8)],
-        "it8613": [types.SimpleNamespace(label="", current=45.0)],
-    }, raising=False)
+    monkeypatch.setattr(
+        ad.psutil,
+        "sensors_temperatures",
+        lambda: {
+            "acpitz": [types.SimpleNamespace(label="", current=27.8)],
+            "it8613": [types.SimpleNamespace(label="", current=45.0)],
+        },
+        raising=False,
+    )
     assert ad._cpu_temp_hwmon() is None
 
 
@@ -540,7 +603,9 @@ def test_device_monitor_matches_config_names_and_keeps_unmatched():
     def enum_cpu():
         return [DeviceInfo("CPU", "CPU", "RAM", 16384, 8192, 8192, 33.0, None)]
 
-    mon = DeviceMonitor([_FakeAdapter(enum_gpus()), _FakeAdapter(enum_cpu())], lambda: {"rtx 4060", "v100"})
+    mon = DeviceMonitor(
+        [_FakeAdapter(enum_gpus()), _FakeAdapter(enum_cpu())], lambda: {"rtx 4060", "v100"}
+    )
     mon.refresh()
     online = mon.online_devices()
     assert "rtx 4060" in online and "v100" in online  # config 名(已匹配)
@@ -577,6 +642,7 @@ def test_device_monitor_dynamic_referenced_new_config_names_apply_without_restar
 
 def test_device_monitor_unmatched_referenced_is_offline():
     from llm_manager.devices import DeviceMonitor
+
     mon = DeviceMonitor([_FakeAdapter([])], lambda: {"rtx 5090"})  # 什么都没枚举到
     mon.refresh()
     assert "rtx 5090" not in mon.online_devices()
@@ -610,13 +676,32 @@ def test_device_monitor_sorts_cpu_first_then_n_a_i():
         DeviceInfo("NVIDIA GeForce RTX 4060", "GPU", "VRAM", 8188, 6266, 1692, 35.0, 51.0),
         DeviceInfo("NVIDIA GeForce RTX 4090", "GPU", "VRAM", 24564, 23540, 1024, 99.0, 70.0),
     ]
-    amd = [DeviceInfo("AMD Radeon 780M Graphics", "GPU (APU)", "Shared+Ded", 16394, 16376, 17, 0.0, 56.0)]
-    intel = [DeviceInfo("Intel UHD Graphics (Alder Lake-N)", "GPU (iGPU)", "Shared RAM", 15729, 5866, 9863, 0.0, None)]
+    amd = [
+        DeviceInfo(
+            "AMD Radeon 780M Graphics", "GPU (APU)", "Shared+Ded", 16394, 16376, 17, 0.0, 56.0
+        )
+    ]
+    intel = [
+        DeviceInfo(
+            "Intel UHD Graphics (Alder Lake-N)",
+            "GPU (iGPU)",
+            "Shared RAM",
+            15729,
+            5866,
+            9863,
+            0.0,
+            None,
+        )
+    ]
     cpu = [DeviceInfo("CPU", "CPU", "RAM", 16384, 8192, 8192, 33.0, None)]
 
     mon = DeviceMonitor(
-        [_ranked_adapter("NvidiaAdapter", nvidia), _ranked_adapter("AmdAdapter", amd),
-         _ranked_adapter("IntelAdapter", intel), _ranked_adapter("CpuAdapter", cpu)],
+        [
+            _ranked_adapter("NvidiaAdapter", nvidia),
+            _ranked_adapter("AmdAdapter", amd),
+            _ranked_adapter("IntelAdapter", intel),
+            _ranked_adapter("CpuAdapter", cpu),
+        ],
         lambda: {"rtx 4060", "rtx 4090", "780m graphics", "alder lake-n", "cpu"},
     )
     mon.refresh()
@@ -635,10 +720,49 @@ def test_device_monitor_sorts_unmatched_too():
     from llm_manager.devices import DeviceMonitor, DeviceInfo
 
     mon = DeviceMonitor(
-        [_ranked_adapter("NvidiaAdapter", [DeviceInfo("NVIDIA GeForce RTX 4060", "GPU", "VRAM", 8188, 6266, 1692, 35.0, 51.0)]),
-         _ranked_adapter("AmdAdapter", [DeviceInfo("AMD Radeon 780M Graphics", "GPU (APU)", "Shared+Ded", 16394, 16376, 17, 0.0, 56.0)]),
-         _ranked_adapter("IntelAdapter", [DeviceInfo("Intel UHD Graphics (Alder Lake-N)", "GPU (iGPU)", "Shared RAM", 15729, 5866, 9863, 0.0, None)]),
-         _ranked_adapter("CpuAdapter", [DeviceInfo("CPU", "CPU", "RAM", 16384, 8192, 8192, 33.0, None)])],
+        [
+            _ranked_adapter(
+                "NvidiaAdapter",
+                [
+                    DeviceInfo(
+                        "NVIDIA GeForce RTX 4060", "GPU", "VRAM", 8188, 6266, 1692, 35.0, 51.0
+                    )
+                ],
+            ),
+            _ranked_adapter(
+                "AmdAdapter",
+                [
+                    DeviceInfo(
+                        "AMD Radeon 780M Graphics",
+                        "GPU (APU)",
+                        "Shared+Ded",
+                        16394,
+                        16376,
+                        17,
+                        0.0,
+                        56.0,
+                    )
+                ],
+            ),
+            _ranked_adapter(
+                "IntelAdapter",
+                [
+                    DeviceInfo(
+                        "Intel UHD Graphics (Alder Lake-N)",
+                        "GPU (iGPU)",
+                        "Shared RAM",
+                        15729,
+                        5866,
+                        9863,
+                        0.0,
+                        None,
+                    )
+                ],
+            ),
+            _ranked_adapter(
+                "CpuAdapter", [DeviceInfo("CPU", "CPU", "RAM", 16384, 8192, 8192, 33.0, None)]
+            ),
+        ],
         lambda: set(),
     )
     mon.refresh()
@@ -656,12 +780,26 @@ def test_device_monitor_sorts_mixed_matched_and_unmatched():
     from llm_manager.devices import DeviceMonitor, DeviceInfo
 
     nvidia = [DeviceInfo("NVIDIA GeForce RTX 4060", "GPU", "VRAM", 8188, 6266, 1692, 35.0, 51.0)]
-    intel = [DeviceInfo("Intel UHD Graphics (Alder Lake-N)", "GPU (iGPU)", "Shared RAM", 15729, 5866, 9863, 0.0, None)]
+    intel = [
+        DeviceInfo(
+            "Intel UHD Graphics (Alder Lake-N)",
+            "GPU (iGPU)",
+            "Shared RAM",
+            15729,
+            5866,
+            9863,
+            0.0,
+            None,
+        )
+    ]
     cpu = [DeviceInfo("CPU", "CPU", "RAM", 16384, 8192, 8192, 33.0, None)]
 
     mon = DeviceMonitor(
-        [_ranked_adapter("NvidiaAdapter", nvidia), _ranked_adapter("IntelAdapter", intel),
-         _ranked_adapter("CpuAdapter", cpu)],
+        [
+            _ranked_adapter("NvidiaAdapter", nvidia),
+            _ranked_adapter("IntelAdapter", intel),
+            _ranked_adapter("CpuAdapter", cpu),
+        ],
         lambda: {"alder lake-n"},
     )
     mon.refresh()
@@ -684,9 +822,15 @@ class _FakeAdapter:
 def test_build_adapters_always_returns_four_adapters():
     """恒注册 4 个设备适配器;平台/工具检测内移到各适配器 enumerate()。"""
     from llm_manager.devices import build_adapters
+
     ads = build_adapters()
     assert len(ads) == 4
-    assert {type(a).__name__ for a in ads} == {"CpuAdapter", "NvidiaAdapter", "IntelAdapter", "AmdAdapter"}
+    assert {type(a).__name__ for a in ads} == {
+        "CpuAdapter",
+        "NvidiaAdapter",
+        "IntelAdapter",
+        "AmdAdapter",
+    }
 
 
 # ==================== 集成(新模型引用实时匹配)====================
@@ -696,6 +840,7 @@ def test_new_gpu_model_matches_via_config_only(monkeypatch):
     """加设备零改代码:config 写 'rtx 5090',mock nvidia-smi 返回 5090 行 → 匹配成功,无需改 devices.py。"""
     import llm_manager.devices as dev
     from llm_manager.devices import nvidia as ad
+
     smi = "NVIDIA GeForce RTX 5090, 32768, 1000, 31768, 5, 45\n"
     monkeypatch.setattr(ad, "_run_smi", lambda: smi)
     matched, unmatched = dev.match_devices({"rtx 5090"}, ad.NvidiaAdapter().enumerate())
@@ -730,21 +875,29 @@ def test_intel_adapter_metrics_from_gpu_top(monkeypatch, tmp_path):
     monkeypatch.setattr(ad, "_DRM_CLASS", fake_drm)
     monkeypatch.setattr(cm, "_DRM_CLASS", fake_drm)
     # 两帧:初始化帧(period 0.035ms,应跳过)+ 采样帧(1000ms)
-    sample = ('[\n{"period": {"duration": 0.035, "unit": "ms"}, "engines": {"Render/3D": {"busy": 0.0}}}\n,'
-              '{"period": {"duration": 1000.34, "unit": "ms"}, "frequency": {"actual": 2400.0, "requested": 2400.0},'
-              ' "engines": {"Render/3D": {"busy": 12.5}, "Video": {"busy": 5.0}},'
-              ' "power": {"GPU": 3.5, "Package": 2.4}}\n]')
+    sample = (
+        '[\n{"period": {"duration": 0.035, "unit": "ms"}, "engines": {"Render/3D": {"busy": 0.0}}}\n,'
+        '{"period": {"duration": 1000.34, "unit": "ms"}, "frequency": {"actual": 2400.0, "requested": 2400.0},'
+        ' "engines": {"Render/3D": {"busy": 12.5}, "Video": {"busy": 5.0}},'
+        ' "power": {"GPU": 3.5, "Package": 2.4}}\n]'
+    )
     monkeypatch.setattr(ad, "_run_intel_gpu_top", lambda: sample)
-    monkeypatch.setattr(cm.psutil, "virtual_memory", lambda: type("M", (), {"total": 16 * 1024**3, "available": 8 * 1024**3, "used": 8 * 1024**3})())
+    monkeypatch.setattr(
+        cm.psutil,
+        "virtual_memory",
+        lambda: type(
+            "M", (), {"total": 16 * 1024**3, "available": 8 * 1024**3, "used": 8 * 1024**3}
+        )(),
+    )
     out = ad.IntelAdapter().enumerate()
     assert len(out) == 1  # card0 命中;card1(amdgpu)与 connector 跳过
     info = out[0]
     assert info.device_name == "Intel UHD Graphics (Alder Lake-N)"
     assert info.device_type == "GPU (iGPU)" and info.memory_type == "Shared RAM"
-    assert info.usage_percentage == 12.5      # engines busy 取 max
+    assert info.usage_percentage == 12.5  # engines busy 取 max
     assert info.freq_mhz == 2400.0
     assert info.power_watts == 3.5
-    assert info.temperature_celsius is None   # N100 平台无温度传感器
+    assert info.temperature_celsius is None  # N100 平台无温度传感器
 
 
 def test_intel_adapter_gpu_top_failure_degraded(monkeypatch, tmp_path):
@@ -796,18 +949,24 @@ def test_intel_adapter_windows_branch_via_lhm(monkeypatch, tmp_path):
         def Update(self):
             pass
 
-    fake_computer = types.SimpleNamespace(Hardware=[
-        _FakeHardware("GpuIntel", "Intel UHD Graphics", [
-            _FakeSensor("Load", "D3D", 42.0),
-            _FakeSensor("SmallData", "Dedicated Used VRAM", 1000.0),
-            _FakeSensor("SmallData", "Dedicated Total VRAM", 4000.0),
-            _FakeSensor("SmallData", "Shared Used", 500.0),
-            _FakeSensor("SmallData", "Shared Total", 2000.0),
-            _FakeSensor("Temperature", "GPU Temp", 60.0),
-        ]),
-        _FakeHardware("GpuAmd", "AMD Radeon 780M", []),
-        _FakeHardware("GpuNvidia", "NVIDIA GeForce RTX 4060", []),
-    ])
+    fake_computer = types.SimpleNamespace(
+        Hardware=[
+            _FakeHardware(
+                "GpuIntel",
+                "Intel UHD Graphics",
+                [
+                    _FakeSensor("Load", "D3D", 42.0),
+                    _FakeSensor("SmallData", "Dedicated Used VRAM", 1000.0),
+                    _FakeSensor("SmallData", "Dedicated Total VRAM", 4000.0),
+                    _FakeSensor("SmallData", "Shared Used", 500.0),
+                    _FakeSensor("SmallData", "Shared Total", 2000.0),
+                    _FakeSensor("Temperature", "GPU Temp", 60.0),
+                ],
+            ),
+            _FakeHardware("GpuAmd", "AMD Radeon 780M", []),
+            _FakeHardware("GpuNvidia", "NVIDIA GeForce RTX 4060", []),
+        ]
+    )
     # intel 模块 `from .common import _lhm_computer` 直接绑定 → 仅 patch ad 生效
     monkeypatch.setattr(ad, "_lhm_computer", lambda: fake_computer)
     monkeypatch.setattr(ad.os, "name", "nt")
@@ -872,11 +1031,13 @@ def test_run_intel_gpu_top_real_failure_returns_none(monkeypatch):
 def test_parse_intel_gpu_top_skips_init_frame_and_takes_last(monkeypatch):
     from llm_manager.devices.intel import _parse_intel_gpu_top
 
-    sample = ('[\n{"period": {"duration": 0.035, "unit": "ms"}, "engines": {"Render/3D": {"busy": 99.0}}}\n,'
-              '{"period": {"duration": 1000.0, "unit": "ms"}, "frequency": {"actual": 1500.0},'
-              ' "engines": {"Render/3D": {"busy": 10.0}, "Blitter": {"busy": 3.0}}, "power": {"GPU": 1.2}}\n,'
-              '{"period": {"duration": 1000.0, "unit": "ms"}, "frequency": {"actual": 1800.0},'
-              ' "engines": {"Render/3D": {"busy": 25.0}, "Video": {"busy": 5.0}}, "power": {"GPU": 2.2}}\n]')
+    sample = (
+        '[\n{"period": {"duration": 0.035, "unit": "ms"}, "engines": {"Render/3D": {"busy": 99.0}}}\n,'
+        '{"period": {"duration": 1000.0, "unit": "ms"}, "frequency": {"actual": 1500.0},'
+        ' "engines": {"Render/3D": {"busy": 10.0}, "Blitter": {"busy": 3.0}}, "power": {"GPU": 1.2}}\n,'
+        '{"period": {"duration": 1000.0, "unit": "ms"}, "frequency": {"actual": 1800.0},'
+        ' "engines": {"Render/3D": {"busy": 25.0}, "Video": {"busy": 5.0}}, "power": {"GPU": 2.2}}\n]'
+    )
     m = _parse_intel_gpu_top(sample)
     # 初始化帧跳过;两个有效帧 → 取最后帧(1800/25/2.2 胜出,取第一帧的 bug 在此暴露)
     assert m == {"busy_pct": 25.0, "freq_mhz": 1800.0, "power_watts": 2.2}
@@ -886,58 +1047,65 @@ def test_parse_intel_gpu_top_pretty_multiline_real_format(monkeypatch):
     # 真机实测:intel_gpu_top -J 输出为 pretty 多行格式(每帧跨 ~20 行,字段逐行)
     from llm_manager.devices.intel import _parse_intel_gpu_top
 
-    sample = ('[\n'
-              '{\n'
-              '\t"period": {\n'
-              '\t\t"duration": 0.035112,\n'
-              '\t\t"unit": "ms"\n'
-              '\t},\n'
-              '\t"engines": {\n'
-              '\t\t"Render/3D": {\n'
-              '\t\t\t"busy": 0.000000,\n'
-              '\t\t\t"sema": 0.000000,\n'
-              '\t\t\t"wait": 0.000000,\n'
-              '\t\t\t"unit": "%"\n'
-              '\t\t}\n'
-              '\t}\n'
-              '},\n'
-              '{\n'
-              '\t"period": {\n'
-              '\t\t"duration": 1000.342406,\n'
-              '\t\t"unit": "ms"\n'
-              '\t},\n'
-              '\t"frequency": {\n'
-              '\t\t"requested": 2400.000000,\n'
-              '\t\t"actual": 2400.000000,\n'
-              '\t\t"unit": "MHz"\n'
-              '\t},\n'
-              '\t"engines": {\n'
-              '\t\t"Render/3D": {\n'
-              '\t\t\t"busy": 12.500000,\n'
-              '\t\t\t"sema": 0.000000,\n'
-              '\t\t\t"wait": 0.000000,\n'
-              '\t\t\t"unit": "%"\n'
-              '\t\t},\n'
-              '\t\t"Video": {\n'
-              '\t\t\t"busy": 5.000000,\n'
-              '\t\t\t"sema": 0.000000,\n'
-              '\t\t\t"wait": 0.000000,\n'
-              '\t\t\t"unit": "%"\n'
-              '\t\t}\n'
-              '\t},\n'
-              '\t"power": {\n'
-              '\t\t"GPU": 3.500000,\n'
-              '\t\t"Package": 2.389197,\n'
-              '\t\t"unit": "W"\n'
-              '\t}\n'
-              '}\n'
-              ']')
+    sample = (
+        "[\n"
+        "{\n"
+        '\t"period": {\n'
+        '\t\t"duration": 0.035112,\n'
+        '\t\t"unit": "ms"\n'
+        "\t},\n"
+        '\t"engines": {\n'
+        '\t\t"Render/3D": {\n'
+        '\t\t\t"busy": 0.000000,\n'
+        '\t\t\t"sema": 0.000000,\n'
+        '\t\t\t"wait": 0.000000,\n'
+        '\t\t\t"unit": "%"\n'
+        "\t\t}\n"
+        "\t}\n"
+        "},\n"
+        "{\n"
+        '\t"period": {\n'
+        '\t\t"duration": 1000.342406,\n'
+        '\t\t"unit": "ms"\n'
+        "\t},\n"
+        '\t"frequency": {\n'
+        '\t\t"requested": 2400.000000,\n'
+        '\t\t"actual": 2400.000000,\n'
+        '\t\t"unit": "MHz"\n'
+        "\t},\n"
+        '\t"engines": {\n'
+        '\t\t"Render/3D": {\n'
+        '\t\t\t"busy": 12.500000,\n'
+        '\t\t\t"sema": 0.000000,\n'
+        '\t\t\t"wait": 0.000000,\n'
+        '\t\t\t"unit": "%"\n'
+        "\t\t},\n"
+        '\t\t"Video": {\n'
+        '\t\t\t"busy": 5.000000,\n'
+        '\t\t\t"sema": 0.000000,\n'
+        '\t\t\t"wait": 0.000000,\n'
+        '\t\t\t"unit": "%"\n'
+        "\t\t}\n"
+        "\t},\n"
+        '\t"power": {\n'
+        '\t\t"GPU": 3.500000,\n'
+        '\t\t"Package": 2.389197,\n'
+        '\t\t"unit": "W"\n'
+        "\t}\n"
+        "}\n"
+        "]"
+    )
     m = _parse_intel_gpu_top(sample)
-    assert m == {"busy_pct": 12.5, "freq_mhz": 2400.0, "power_watts": 3.5}  # 初始化帧跳过、busy 取 max
+    assert m == {
+        "busy_pct": 12.5,
+        "freq_mhz": 2400.0,
+        "power_watts": 3.5,
+    }  # 初始化帧跳过、busy 取 max
 
 
 def test_parse_intel_gpu_top_unparseable_returns_none():
     from llm_manager.devices.intel import _parse_intel_gpu_top
+
     assert _parse_intel_gpu_top("") is None
     assert _parse_intel_gpu_top("garbage\nnot json") is None
 
@@ -947,6 +1115,7 @@ def test_parse_intel_gpu_top_unparseable_returns_none():
 
 def test_device_info_new_fields_default_none():
     from llm_manager.devices import DeviceInfo
+
     d = DeviceInfo("X", "GPU", "VRAM", 1, 1, 0, 5.0, None)
     assert d.freq_mhz is None and d.power_watts is None  # 默认值 → 现有构造点零改动
 
@@ -954,19 +1123,30 @@ def test_device_info_new_fields_default_none():
 def test_device_info_response_accepts_new_fields():
     # _to_schema 用 asdict(d) 展开:Pydantic 模型必须同步带两字段,否则 TypeError
     from llm_manager.gateway.api.devices import DeviceInfoResponse
-    resp = DeviceInfoResponse(**{
-        "device_name": "Intel UHD Graphics (Alder Lake-N)", "device_type": "GPU (iGPU)",
-        "memory_type": "Shared RAM", "total_memory_mb": 16384, "available_memory_mb": 8192,
-        "used_memory_mb": 8192, "usage_percentage": 42.0, "temperature_celsius": None,
-        "freq_mhz": 2400.0, "power_watts": 3.5,
-    })
+
+    resp = DeviceInfoResponse(
+        **{
+            "device_name": "Intel UHD Graphics (Alder Lake-N)",
+            "device_type": "GPU (iGPU)",
+            "memory_type": "Shared RAM",
+            "total_memory_mb": 16384,
+            "available_memory_mb": 8192,
+            "used_memory_mb": 8192,
+            "usage_percentage": 42.0,
+            "temperature_celsius": None,
+            "freq_mhz": 2400.0,
+            "power_watts": 3.5,
+        }
+    )
     assert resp.freq_mhz == 2400.0 and resp.power_watts == 3.5
 
 
 # ==================== AMD(amdgpu sysfs)====================
 
 
-def _make_amdgpu_sysfs(tmp_path, busy="55", vram_total=8 * 1024**3, vram_used=3 * 1024**3, temp_mc=55000):
+def _make_amdgpu_sysfs(
+    tmp_path, busy="55", vram_total=8 * 1024**3, vram_used=3 * 1024**3, temp_mc=55000
+):
     """假 /sys/class/drm 树:card0 = amdgpu(带 vram/busy/hwmon)。"""
     drm = tmp_path / "sys" / "class" / "drm"
     card0 = drm / "card0" / "device"
@@ -992,11 +1172,11 @@ def test_amd_adapter_basic(monkeypatch, tmp_path):
     out = ad.AmdAdapter().enumerate()
     assert len(out) == 1
     info = out[0]
-    assert info.device_name == "AMD Radeon 780M Graphics"   # 1002:15fe 映射
+    assert info.device_name == "AMD Radeon 780M Graphics"  # 1002:15fe 映射
     assert info.device_type == "GPU (APU)" and info.memory_type == "VRAM"
     assert info.usage_percentage == 55.0
     assert info.total_memory_mb == 8 * 1024 and info.used_memory_mb == 3 * 1024
-    assert info.temperature_celsius == 55.0                 # 55000 m°C → 55°C
+    assert info.temperature_celsius == 55.0  # 55000 m°C → 55°C
 
 
 def test_amd_adapter_missing_fields_degraded(monkeypatch, tmp_path):
@@ -1065,18 +1245,24 @@ def test_amd_adapter_windows_branch_via_lhm(monkeypatch, tmp_path):
         def Update(self):
             pass
 
-    fake_computer = types.SimpleNamespace(Hardware=[
-        _FakeHardware("GpuAmd", "AMD Radeon 780M Graphics", [
-            _FakeSensor("Load", "D3D", 55.0),
-            _FakeSensor("SmallData", "Dedicated Used VRAM", 3000.0),
-            _FakeSensor("SmallData", "Dedicated Total VRAM", 8000.0),
-            _FakeSensor("SmallData", "Shared Used", 500.0),
-            _FakeSensor("SmallData", "Shared Total", 2000.0),
-            _FakeSensor("Temperature", "GPU Temp", 55.0),
-        ]),
-        _FakeHardware("GpuIntel", "Intel UHD Graphics", []),
-        _FakeHardware("GpuNvidia", "NVIDIA GeForce RTX 4060", []),
-    ])
+    fake_computer = types.SimpleNamespace(
+        Hardware=[
+            _FakeHardware(
+                "GpuAmd",
+                "AMD Radeon 780M Graphics",
+                [
+                    _FakeSensor("Load", "D3D", 55.0),
+                    _FakeSensor("SmallData", "Dedicated Used VRAM", 3000.0),
+                    _FakeSensor("SmallData", "Dedicated Total VRAM", 8000.0),
+                    _FakeSensor("SmallData", "Shared Used", 500.0),
+                    _FakeSensor("SmallData", "Shared Total", 2000.0),
+                    _FakeSensor("Temperature", "GPU Temp", 55.0),
+                ],
+            ),
+            _FakeHardware("GpuIntel", "Intel UHD Graphics", []),
+            _FakeHardware("GpuNvidia", "NVIDIA GeForce RTX 4060", []),
+        ]
+    )
     # amd 模块 `from .common import _lhm_computer` 直接绑定 → 仅 patch ad 生效
     monkeypatch.setattr(ad, "_lhm_computer", lambda: fake_computer)
     monkeypatch.setattr(ad.os, "name", "nt")
@@ -1110,4 +1296,3 @@ def test_amd_adapter_linux_missing_sysfs_returns_empty(monkeypatch, tmp_path):
     monkeypatch.setattr(ad, "_DRM_CLASS", missing)
     monkeypatch.setattr(cm, "_DRM_CLASS", missing)
     assert ad.AmdAdapter().enumerate() == []
-

@@ -2,6 +2,7 @@
 shared start_time/timeout budget. httpx (no openai SDK). Never raises:未知 mode
 返回失败结果(不抛),所有路径产出 ProbeResult。预算用 time.monotonic()(墙钟跳变
 如 NTP 校时不扭曲超时预算)。"""
+
 from __future__ import annotations
 
 import time
@@ -25,15 +26,25 @@ def _deep_request(mode: str) -> tuple[str, dict] | None:
     """Pure: (path, json_body_template_without_model) relative to base /v1。
     未知 mode 返回 None(_probe 转失败结果,不抛——契约 Never raises)。"""
     if mode == "Chat":
-        return "/chat/completions", {"messages": [{"role": "user", "content": "hello"}], "max_tokens": 1, "stream": False}
+        return "/chat/completions", {
+            "messages": [{"role": "user", "content": "hello"}],
+            "max_tokens": 1,
+            "stream": False,
+        }
     if mode == "Embedding":
         return "/embeddings", {"input": "hello", "encoding_format": "float"}
     if mode == "Reranker":
-        return "/rerank", {"query": "hello", "documents": ["hello world", "test document"], "top_n": 1}
+        return "/rerank", {
+            "query": "hello",
+            "documents": ["hello world", "test document"],
+            "top_n": 1,
+        }
     return None
 
 
-def _probe(mode: str, label: str, alias: str, port: int, start_time: float | None, timeout: float) -> ProbeResult:
+def _probe(
+    mode: str, label: str, alias: str, port: int, start_time: float | None, timeout: float
+) -> ProbeResult:
     if start_time is None:
         start_time = time.monotonic()
     client = _make_client(port)

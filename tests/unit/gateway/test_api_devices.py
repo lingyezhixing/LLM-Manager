@@ -1,4 +1,5 @@
 """The device SSE stream generator + one-shot snapshot endpoint."""
+
 from __future__ import annotations
 
 import asyncio
@@ -14,8 +15,11 @@ from llm_manager.realtime import DeviceFeed
 class _FakeMonitor:
     def __init__(self, snapshot: dict[str, DeviceInfo] | None = None) -> None:
         self.calls = 0
-        self._snapshot = snapshot if snapshot is not None else {
-            "GPU0": DeviceInfo("RTX 4060", "GPU", "VRAM", 8192, 4096, 4096, 47.0, 62.0)}
+        self._snapshot = (
+            snapshot
+            if snapshot is not None
+            else {"GPU0": DeviceInfo("RTX 4060", "GPU", "VRAM", 8192, 4096, 4096, 47.0, 62.0)}
+        )
 
     def refresh(self) -> None:
         self.calls += 1
@@ -34,7 +38,7 @@ async def test_device_stream_yields_initial_then_refreshed() -> None:
     # subsequent frame arrives after the next refresh tick
     second = await asyncio.wait_for(gen.__anext__(), timeout=2)
     assert second.startswith("data:")
-    await gen.aclose()   # triggers finally → unsubscribe → loop stops
+    await gen.aclose()  # triggers finally → unsubscribe → loop stops
     assert feed.subscriber_count == 0
 
 
@@ -54,13 +58,13 @@ def test_list_devices_one_shot_uses_cached_snapshot() -> None:
     app.include_router(router)
     client = TestClient(app)
 
-    fake.refresh()   # 模拟 app 启动时已刷过快照
+    fake.refresh()  # 模拟 app 启动时已刷过快照
     assert fake.calls == 1
     res = client.get("/api/devices")
     assert res.status_code == 200
     body = res.json()
     assert [d["device_name"] for d in body["data"]] == ["RTX 4060"]
-    assert fake.calls == 1   # 快照非空 → 零额外刷新
+    assert fake.calls == 1  # 快照非空 → 零额外刷新
 
 
 def test_list_devices_refreshes_when_snapshot_empty() -> None:
@@ -69,7 +73,7 @@ def test_list_devices_refreshes_when_snapshot_empty() -> None:
 
     from llm_manager.gateway.api.devices import register_devices_routes
 
-    fake = _FakeMonitor(snapshot={})   # 空快照
+    fake = _FakeMonitor(snapshot={})  # 空快照
     feed = DeviceFeed(fake, interval=60)
     app = FastAPI()
     app.state.monitor = fake
@@ -82,4 +86,4 @@ def test_list_devices_refreshes_when_snapshot_empty() -> None:
     res = client.get("/api/devices")
     assert res.status_code == 200
     assert res.json()["data"] == []
-    assert fake.calls == 1   # 空快照 → 兜底刷新一次
+    assert fake.calls == 1  # 空快照 → 兜底刷新一次

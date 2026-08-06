@@ -3,6 +3,7 @@ total exception safety (a raise in stream-finally truncates the client stream).
 Ported from legacy core/token_parsers.py (behavior preserved verbatim)。
 
 另含共享用量指标 helper(hit_rate),供 session/usage 引用。"""
+
 from __future__ import annotations
 
 import json
@@ -28,6 +29,7 @@ def _safe(parser: Callable[[bytes], TokenUsage]) -> Callable[[bytes], TokenUsage
         except Exception as e:
             logger.debug("[parser] %s failed: %s", parser.__name__, e)
             return TokenUsage(0, 0, 0, 0)
+
     wrapped.__name__ = parser.__name__
     return wrapped
 
@@ -100,7 +102,9 @@ def parse_openai(body: bytes) -> TokenUsage:
             if prompt_tokens or completion_tokens:
                 details = u.get("prompt_tokens_details") or {}
                 cached = min(_to_int(details.get("cached_tokens")), prompt_tokens)
-                return TokenUsage(prompt_tokens, completion_tokens, cached, max(0, prompt_tokens - cached))
+                return TokenUsage(
+                    prompt_tokens, completion_tokens, cached, max(0, prompt_tokens - cached)
+                )
     return TokenUsage(0, 0, 0, 0)
 
 

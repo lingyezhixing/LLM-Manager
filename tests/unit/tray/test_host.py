@@ -5,6 +5,7 @@ the import-guard + action methods are tested. The async-marshal seam is
 ``_run_coro_threadsafe`` (overridden on the instance to capture + run the coro
 on the test loop); the exit seam is the loop/server pair.
 """
+
 import asyncio
 
 import pytest
@@ -15,8 +16,13 @@ from llm_manager.tray import host
 
 def _cfg(claude_configs=None):
     return AppConfig(
-        program=ProgramConfig(host="0.0.0.0", port=8080, alive_time=60, log_level="INFO",
-                              claude_settings_path="s.json"),
+        program=ProgramConfig(
+            host="0.0.0.0",
+            port=8080,
+            alive_time=60,
+            log_level="INFO",
+            claude_settings_path="s.json",
+        ),
         models={},
         wol=None,
         claude_configs=claude_configs or {},
@@ -51,9 +57,14 @@ class _FakeLoop:
 
 def _make_tray(**over):
     base = dict(
-        lifecycle=_FakeLife(), get_cfg=lambda: _cfg(), monitor=object(),
-        loop=_FakeLoop(), server=_FakeServer(),
-        settings_path="s.json", startup_timeout=60.0, auto_start_margin=30.0,
+        lifecycle=_FakeLife(),
+        get_cfg=lambda: _cfg(),
+        monitor=object(),
+        loop=_FakeLoop(),
+        server=_FakeServer(),
+        settings_path="s.json",
+        startup_timeout=60.0,
+        auto_start_margin=30.0,
     )
     base.update(over)
     return host.SystemTray(**base)
@@ -81,10 +92,14 @@ def test_is_headless_display_posix_without_display(monkeypatch):
 # ---------- Claude preset ----------
 def test_apply_claude_delegates_to_apply_preset(monkeypatch, tmp_path):
     settings = tmp_path / "settings.json"
-    tray = _make_tray(get_cfg=lambda: _cfg(claude_configs={"Local": {"ANTHROPIC_BASE_URL": "http://x"}}),
-                      settings_path=settings)
+    tray = _make_tray(
+        get_cfg=lambda: _cfg(claude_configs={"Local": {"ANTHROPIC_BASE_URL": "http://x"}}),
+        settings_path=settings,
+    )
     called = []
-    monkeypatch.setattr(host.claude, "apply_preset", lambda path, preset: called.append((path, preset)))
+    monkeypatch.setattr(
+        host.claude, "apply_preset", lambda path, preset: called.append((path, preset))
+    )
     tray.apply_claude("Local")
     assert called == [(settings, {"ANTHROPIC_BASE_URL": "http://x"})]
 
@@ -123,7 +138,9 @@ async def test_unload_all_marshals_lifecycle_unload_all():
 
     def fake_schedule(coro):
         task = asyncio.ensure_future(coro)
-        captured.append(task)   # 捕获 task 而非 coro:ensure_future 已驱动 coro,再 await 原始 coro 会报 "cannot reuse already awaited coroutine"
+        captured.append(
+            task
+        )  # 捕获 task 而非 coro:ensure_future 已驱动 coro,再 await 原始 coro 会报 "cannot reuse already awaited coroutine"
         return task
 
     tray._run_coro_threadsafe = fake_schedule
@@ -135,12 +152,14 @@ async def test_unload_all_marshals_lifecycle_unload_all():
 
 async def test_restart_auto_start_unloads_then_autostarts(monkeypatch):
     life = _FakeLife()
-    tray = _make_tray(lifecycle=life, get_cfg=lambda: _cfg())          # models empty → auto_models []
+    tray = _make_tray(lifecycle=life, get_cfg=lambda: _cfg())  # models empty → auto_models []
     captured = []
 
     def fake_schedule(coro):
         task = asyncio.ensure_future(coro)
-        captured.append(task)   # 捕获 task 而非 coro:ensure_future 已驱动 coro,再 await 原始 coro 会报 "cannot reuse already awaited coroutine"
+        captured.append(
+            task
+        )  # 捕获 task 而非 coro:ensure_future 已驱动 coro,再 await 原始 coro 会报 "cannot reuse already awaited coroutine"
         return task
 
     tray._run_coro_threadsafe = fake_schedule
@@ -154,7 +173,7 @@ async def test_restart_auto_start_unloads_then_autostarts(monkeypatch):
     assert len(captured) == 1
     await captured[0]
     assert life.unload_called is True
-    assert autostart_calls == [([], 90.0)]                  # startup_timeout 60 + margin 30
+    assert autostart_calls == [([], 90.0)]  # startup_timeout 60 + margin 30
 
 
 # ---------- exit ----------
@@ -165,7 +184,7 @@ def test_exit_app_sets_server_should_exit():
     tray.exit_app()
     assert len(loop.scheduled) == 1
     cb, args = loop.scheduled[0]
-    cb(*args)                                               # execute setattr(server, "should_exit", True)
+    cb(*args)  # execute setattr(server, "should_exit", True)
     assert server.should_exit is True
 
 
@@ -176,15 +195,22 @@ def test_run_coro_threadsafe_closes_coro_when_loop_closed():
     async def never_run():
         pytest.fail("coroutine should not run on a closed loop")
 
-    tray._run_coro_threadsafe(never_run())                 # must not raise; coro closed cleanly
+    tray._run_coro_threadsafe(never_run())  # must not raise; coro closed cleanly
 
 
 def test_send_wol_uses_fresh_wol_from_store(monkeypatch, tmp_path):
     from llm_manager.config import AppConfig, ProgramConfig, WakeOnLanConfig
+
     current = {"wol": WakeOnLanConfig("10.0.0.255", "aa:bb:cc:dd:ee:ff")}
+
     def get_cfg():
-        return AppConfig(program=ProgramConfig("0.0.0.0", 8080, 60, "INFO"),
-                         models={}, wol=current["wol"], claude_configs={})
+        return AppConfig(
+            program=ProgramConfig("0.0.0.0", 8080, 60, "INFO"),
+            models={},
+            wol=current["wol"],
+            claude_configs={},
+        )
+
     tray = _make_tray(get_cfg=get_cfg)
     sent = []
     monkeypatch.setattr(host.wol, "send_wol", lambda mac, bcast: sent.append((mac, bcast)))

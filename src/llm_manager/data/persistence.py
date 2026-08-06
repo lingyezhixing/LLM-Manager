@@ -1,4 +1,5 @@
 """DB open/schema/migration + storage stats & orphaned-model maintenance。usage 聚合在 data/usage.py,日志存储 in data/logs.py。"""
+
 from __future__ import annotations
 
 import logging
@@ -141,21 +142,28 @@ def _migrate(conn: sqlite3.Connection) -> None:
         # 回改:support_cache 从阶梯级上移到模型级(model_pricing)。
         # 旧库:model_pricing 无该列则补;pricing_tiers 有该列则删(SQLite ≥3.35 支持 DROP COLUMN)。
         # 新库已无 model_pricing(代码优化 2026-08-03 并入 model_defs)→ 存在性判定防 no such table。
-        if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='model_pricing'").fetchone():
+        if conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='model_pricing'"
+        ).fetchone():
             mp_cols = {row[1] for row in conn.execute("PRAGMA table_info(model_pricing)")}
             if "support_cache" not in mp_cols:
-                conn.execute("ALTER TABLE model_pricing ADD COLUMN support_cache INTEGER NOT NULL DEFAULT 0")
+                conn.execute(
+                    "ALTER TABLE model_pricing ADD COLUMN support_cache INTEGER NOT NULL DEFAULT 0"
+                )
         pt_cols = {row[1] for row in conn.execute("PRAGMA table_info(pricing_tiers)")}
         if "support_cache" in pt_cols:
             conn.execute("ALTER TABLE pricing_tiers DROP COLUMN support_cache")
         # === 代码优化(2026-08-03):model_scripts → model_schemes.command 列 ===
-        if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='model_schemes'").fetchone():
+        if conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='model_schemes'"
+        ).fetchone():
             sc_cols = {row[1] for row in conn.execute("PRAGMA table_info(model_schemes)")}
             if "command" not in sc_cols:
                 conn.execute("ALTER TABLE model_schemes ADD COLUMN command TEXT")
                 conn.execute(
                     "UPDATE model_schemes SET command = "
-                    "(SELECT s.command FROM model_scripts s WHERE s.scheme_id = model_schemes.id)")
+                    "(SELECT s.command FROM model_scripts s WHERE s.scheme_id = model_schemes.id)"
+                )
                 conn.execute("DROP TABLE IF EXISTS model_scripts")
             # 无 scripts 行的 scheme(或此前中断残留的 NULL)→ 归一为新库 DEFAULT '{}' 形态
             conn.execute("UPDATE model_schemes SET command='{}' WHERE command IS NULL")
@@ -165,14 +173,19 @@ def _migrate(conn: sqlite3.Connection) -> None:
             conn.execute("ALTER TABLE model_defs ADD COLUMN pricing_type TEXT")
             conn.execute("ALTER TABLE model_defs ADD COLUMN hourly_price REAL")
             conn.execute("ALTER TABLE model_defs ADD COLUMN support_cache INTEGER")
-            if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='model_pricing'").fetchone():
+            if conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='model_pricing'"
+            ).fetchone():
                 conn.execute(
                     "UPDATE model_defs SET "
                     "pricing_type = COALESCE((SELECT pricing_type FROM model_pricing WHERE model_id = model_defs.id), 'tier'), "
                     "hourly_price = COALESCE((SELECT hourly_price FROM model_pricing WHERE model_id = model_defs.id), 0), "
-                    "support_cache = COALESCE((SELECT support_cache FROM model_pricing WHERE model_id = model_defs.id), 0)")
+                    "support_cache = COALESCE((SELECT support_cache FROM model_pricing WHERE model_id = model_defs.id), 0)"
+                )
         # 无 model_pricing 行的模型 → 归一为新库 NOT NULL DEFAULT 形态
-        conn.execute("UPDATE model_defs SET pricing_type='tier', hourly_price=0, support_cache=0 WHERE pricing_type IS NULL")
+        conn.execute(
+            "UPDATE model_defs SET pricing_type='tier', hourly_price=0, support_cache=0 WHERE pricing_type IS NULL"
+        )
         # === pricing_tiers 重建改 FK → model_defs(id)(必须在 DROP model_pricing 前 COPY) ===
         pt_fks = {row[2] for row in conn.execute("PRAGMA foreign_key_list(pricing_tiers)")}
         if "model_pricing" in pt_fks:
@@ -191,7 +204,9 @@ def _migrate(conn: sqlite3.Connection) -> None:
             conn.execute("DROP TABLE pricing_tiers")
             conn.execute("ALTER TABLE pricing_tiers_new RENAME TO pricing_tiers")
         # === 旧 model_pricing 表删除(数据已搬,此时 tiers 已重建) ===
-        if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='model_pricing'").fetchone():
+        if conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='model_pricing'"
+        ).fetchone():
             conn.execute("DROP TABLE model_pricing")
     except Exception:
         try:
@@ -205,6 +220,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
 @dataclass(frozen=True, slots=True)
 class ModelDataStats:
     """单模型积累数据量(请求 + 运行段)。"""
+
     request_count: int
     has_runtime_data: bool
 
@@ -212,6 +228,7 @@ class ModelDataStats:
 @dataclass(frozen=True, slots=True)
 class StorageStats:
     """数据库存储统计(数据管理页)。size_bytes 由调用方传入(API 层从 resolved_db 取)。"""
+
     size_bytes: int | None
     total_requests: int
     total_models_with_data: int

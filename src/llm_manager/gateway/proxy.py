@@ -5,6 +5,7 @@ end_request 分布三处(非 stream return 前 / 各 except / _stream_wrapper fi
 防 pending 泄漏。_record_usage best-effort(写库失败不污染透传、不短路 end_request)。
 响应头 _strip_headers(extra=connection/content-encoding) 去 hop-by-hop 头
 (proxy 是 response 方向 hop-by-hop 参与者)。"""
+
 from __future__ import annotations
 
 import asyncio
@@ -69,6 +70,7 @@ def _get_or_create_client(pool: dict, port: int) -> httpx.AsyncClient:
 
 def _inject_include_usage(body: dict, path: str) -> dict:
     from llm_manager.data import metering
+
     if metering.needs_include_usage(path):
         so = dict(body.get("stream_options") or {})
         so.setdefault("include_usage", True)
@@ -82,14 +84,24 @@ async def _record_usage(db, model, path, body_bytes, start, end) -> None:
     from llm_manager.data import metering
     from llm_manager.data import session as _s
     from llm_manager.data import usage as _u
+
     try:
         usage = metering.parse_tokens(path, body_bytes)
-        if not any([usage.input_tokens, usage.output_tokens, usage.cache_tokens, usage.prompt_tokens]):
+        if not any(
+            [usage.input_tokens, usage.output_tokens, usage.cache_tokens, usage.prompt_tokens]
+        ):
             return
         _s.add(usage.input_tokens, usage.output_tokens, usage.cache_tokens, usage.prompt_tokens)
         await asyncio.to_thread(
-            _u.record_usage, db, model, start, end,
-            usage.input_tokens, usage.output_tokens, usage.cache_tokens, usage.prompt_tokens,
+            _u.record_usage,
+            db,
+            model,
+            start,
+            end,
+            usage.input_tokens,
+            usage.output_tokens,
+            usage.cache_tokens,
+            usage.prompt_tokens,
         )
     except Exception:
         logger.exception("record_usage failed for model=%s path=%s", model, path)
@@ -128,6 +140,7 @@ class _StreamSample:
 
 async def _stream_wrapper(resp, path, model, db, request_start):
     from llm_manager import state
+
     sample = _StreamSample()
     try:
         async for chunk in resp.aiter_bytes():
@@ -167,23 +180,34 @@ async def forward(request: Request, path: str, lifecycle, cfg, db, client_pool) 
         port = cfg.models[primary].port
         client = _get_or_create_client(client_pool, port)
         resp = await client.send(
-            client.build_request(request.method, path,
-                headers=_strip_headers(request.headers, extra=("host",)), content=request_data,
-                params=request.query_params),
-            stream=True)
+            client.build_request(
+                request.method,
+                path,
+                headers=_strip_headers(request.headers, extra=("host",)),
+                content=request_data,
+                params=request.query_params,
+            ),
+            stream=True,
+        )
         if _detect_sse(resp):
-            logger.info("RESP %d stream model=%s %.2fs", resp.status_code, primary, time.monotonic() - t0)
+            logger.info(
+                "RESP %d stream model=%s %.2fs", resp.status_code, primary, time.monotonic() - t0
+            )
             return StreamingResponse(
                 _stream_wrapper(resp, path, primary, db, request_start),
                 status_code=resp.status_code,
-                headers=_strip_headers(resp.headers, extra=("connection", "content-encoding")))
+                headers=_strip_headers(resp.headers, extra=("connection", "content-encoding")),
+            )
         content = await resp.aread()
         await resp.aclose()
         await _record_usage(db, primary, path, content, request_start, time.time())
         state.end_request(primary)
         logger.info("RESP %d model=%s %.2fs", resp.status_code, primary, time.monotonic() - t0)
-        return Response(content=content, status_code=resp.status_code,
-                        headers=_strip_headers(resp.headers, extra=("connection", "content-encoding")))
+        return Response(
+            content=content,
+            status_code=resp.status_code,
+            headers=_strip_headers(resp.headers, extra=("connection", "content-encoding")),
+        )
     except HTTPException:
         state.end_request(primary)
         raise
@@ -198,13 +222,17 @@ async def forward(request: Request, path: str, lifecycle, cfg, db, client_pool) 
 
 
 def register_proxy_routes(
-    app: FastAPI, lifecycle, db, client_pool,
+    app: FastAPI,
+    lifecycle,
+    db,
+    client_pool,
 ) -> None:
     """挂载 OpenAI 兼容代理的 catch-all(POST/PUT/DELETE/PATCH)。一方法一 handler,
     各自独立 operationId(单 api_route 4 方法会撞同 operationId,产生重复键破坏
     OpenAPI 消费者如前端 codegen)。读穿:_forward 每请求从 ConfigStore 取 fresh cfg。"""
+
     async def _forward(path: str, request: Request) -> Response:
-        cfg = request.app.state.config_store.snapshot()   # 读穿:每请求 fresh(CRUD 后新别名可路由)
+        cfg = request.app.state.config_store.snapshot()  # 读穿:每请求 fresh(CRUD 后新别名可路由)
         return await forward(request, path, lifecycle, cfg, db, client_pool)
 
     @app.post("/{path:path}", operation_id="catch_all__path__post")

@@ -4,6 +4,7 @@ fires first cleans first. Reads fresh days/count from the injected get_settings
 each round, mirrors idle_reclamation_loop (stop_event-interruptible sleep,
 error-guarded). ``retention_from_store`` 提供 store→get_settings 适配(loop 每轮注入)。
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -27,19 +28,26 @@ def retention_from_store(store: ConfigStore) -> tuple[int, int]:
     return p.log_retention_days, p.log_retention_count
 
 
-async def log_retention_loop(db, get_settings, stop_event: asyncio.Event,
-                             *, period: float = 60.0, now: float | None = None) -> None:
+async def log_retention_loop(
+    db, get_settings, stop_event: asyncio.Event, *, period: float = 60.0, now: float | None = None
+) -> None:
     """每轮取 fresh 保留规则执行 log_cleanup。get_settings 注入(可测)。"""
     while not stop_event.is_set():
         try:
             days, count = get_settings()
             if days > 0 and count > 0:
                 removed_s, removed_l = await asyncio.to_thread(
-                    _logs.log_cleanup, db, days, count, now,
-                    live_session_ids=_logs.live_session_ids())
+                    _logs.log_cleanup,
+                    db,
+                    days,
+                    count,
+                    now,
+                    live_session_ids=_logs.live_session_ids(),
+                )
                 if removed_s:
-                    logger.info("log retention cleaned %d sessions / %d lines",
-                                removed_s, removed_l)
+                    logger.info(
+                        "log retention cleaned %d sessions / %d lines", removed_s, removed_l
+                    )
         except Exception as e:
             logger.error("log retention iteration error: %s", e)
         try:

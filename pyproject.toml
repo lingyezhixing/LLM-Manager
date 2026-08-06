@@ -30,6 +30,8 @@ testpaths = ["tests"]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+# 仓库内 .py 仅分布于 src/ 与 tests/,默认扫描(include 默认 *.py)即全覆盖。
+# 注意:0.12.7 多路径参数偶发丢诊断——验收用单路径 `ruff check .`,勿用 `ruff check src tests`。
 
 [tool.pyright]
 include = ["src/llm_manager"]

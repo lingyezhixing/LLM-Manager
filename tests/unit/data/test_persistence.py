@@ -1,6 +1,7 @@
 """DB schema/migration + 存储管理(data/persistence.py)与 usage 域聚合
 (record_usage / record_runtime / usage_series / usage_cost 等,data/usage.py)的测试;
 日志 SQL 存储层测试在 tests/unit/data/test_logs.py(与 src 布局对齐)。"""
+
 import json
 import sqlite3
 import threading
@@ -34,6 +35,7 @@ def _clear_live_segments():
     """record_runtime_start 把段 id 加入模块全局 _live_segments(心跳/关闭用)。
     清空它防跨测试残留污染(配对 start/end 的测试本身干净,不配对的会残留)。"""
     from llm_manager.data.usage import _live_segments
+
     _live_segments.clear()
     yield
     _live_segments.clear()
@@ -50,8 +52,12 @@ def test_open_db_sets_pragmas_and_creates_schema(tmp_path):
 
 def test_record_usage_writes_start_end_tokens(tmp_path):
     db = open_db(tmp_path / "t.db")
-    record_usage(db, "m1", start=100.0, end=200.0, input_tokens=5, output_tokens=10, cache_n=1, prompt_n=4)
-    row = db.conn.execute("SELECT start_time, end_time, input_tokens FROM model_requests").fetchone()
+    record_usage(
+        db, "m1", start=100.0, end=200.0, input_tokens=5, output_tokens=10, cache_n=1, prompt_n=4
+    )
+    row = db.conn.execute(
+        "SELECT start_time, end_time, input_tokens FROM model_requests"
+    ).fetchone()
     assert row["start_time"] == 100.0
     assert row["end_time"] == 200.0
     assert row["input_tokens"] == 5
@@ -59,7 +65,16 @@ def test_record_usage_writes_start_end_tokens(tmp_path):
 
 def test_record_usage_auto_creates_model_round_trips(tmp_path):
     db = open_db(tmp_path / "t.db")
-    record_usage(db, "Qwen3-4B", start=1.0, end=2.0, input_tokens=100, output_tokens=50, cache_n=20, prompt_n=80)
+    record_usage(
+        db,
+        "Qwen3-4B",
+        start=1.0,
+        end=2.0,
+        input_tokens=100,
+        output_tokens=50,
+        cache_n=20,
+        prompt_n=80,
+    )
     rows = db.conn.execute(
         "SELECT r.input_tokens, r.output_tokens FROM model_requests r "
         "JOIN models m ON r.model_id = m.id WHERE m.original_name = 'Qwen3-4B'"
@@ -82,7 +97,16 @@ def test_concurrent_writes_serialized_by_lock(tmp_path):
     def write():
         try:
             for _ in range(20):
-                record_usage(db, "M", start=0.0, end=0.1, input_tokens=1, output_tokens=1, cache_n=0, prompt_n=1)
+                record_usage(
+                    db,
+                    "M",
+                    start=0.0,
+                    end=0.1,
+                    input_tokens=1,
+                    output_tokens=1,
+                    cache_n=0,
+                    prompt_n=1,
+                )
         except Exception as e:
             errors.append(e)
 
@@ -104,8 +128,8 @@ def test_usage_series_buckets_per_model_and_total(tmp_path):
     record_usage(db, "m2", start=19, end=20, input_tokens=2, output_tokens=2, cache_n=0, prompt_n=2)
     result = usage_series(db, start_ts=0, end_ts=120, bucket_seconds=60)
     assert result.buckets == [0, 60]
-    assert result.models["m1"] == [10, 6]   # 5+5 in bucket 0, 3+3 in bucket 1
-    assert result.models["m2"] == [4, 0]    # 2+2 in bucket 0, none → 0-filled
+    assert result.models["m1"] == [10, 6]  # 5+5 in bucket 0, 3+3 in bucket 1
+    assert result.models["m2"] == [4, 0]  # 2+2 in bucket 0, none → 0-filled
     assert result.total == [14, 6]
 
 
@@ -120,16 +144,19 @@ def test_usage_series_buckets_are_clock_aligned_not_start_relative(tmp_path):
     """Buckets align to the clock (multiples of bucket_seconds), independent of the window
     start — so a sliding window scrolls the chart rather than reshuffling each request."""
     db = open_db(tmp_path / "t.db")
-    record_usage(db, "m1", start=69, end=70, input_tokens=1, output_tokens=1, cache_n=0, prompt_n=0)  # end=70 → absolute bucket 60
+    record_usage(
+        db, "m1", start=69, end=70, input_tokens=1, output_tokens=1, cache_n=0, prompt_n=0
+    )  # end=70 → absolute bucket 60
     result = usage_series(db, start_ts=10, end_ts=130, bucket_seconds=60)  # unaligned start
-    assert result.buckets == [0, 60, 120]            # first = floor(10/60)*60 = 0
-    assert result.models["m1"] == [0, 2, 0]          # end=70 → bucket 60 → idx 1
+    assert result.buckets == [0, 60, 120]  # first = floor(10/60)*60 = 0
+    assert result.models["m1"] == [0, 2, 0]  # end=70 → bucket 60 → idx 1
 
 
 def test_migrate_drops_legacy_ts_column(tmp_path):
     """A Round-2 DB with a ts column gets it dropped on open (Option A folds the timestamp
     back into start_time/end_time, now wall-clock as in legacy)."""
     import sqlite3
+
     p = tmp_path / "legacy.db"
     conn = sqlite3.connect(str(p))
     conn.executescript(
@@ -144,7 +171,7 @@ def test_migrate_drops_legacy_ts_column(tmp_path):
     conn.commit()
     conn.close()
 
-    db = open_db(p)   # migration drops ts
+    db = open_db(p)  # migration drops ts
     cols = {r[1] for r in db.conn.execute("PRAGMA table_info(model_requests)")}
     assert "ts" not in cols
     assert "start_time" in cols and "end_time" in cols
@@ -152,9 +179,15 @@ def test_migrate_drops_legacy_ts_column(tmp_path):
 
 def test_usage_summary_aggregates_half_open_range(tmp_path):
     db = open_db(tmp_path / "t.db")
-    record_usage(db, "m1", start=5.0, end=10.0, input_tokens=100, output_tokens=20, cache_n=60, prompt_n=40)
-    record_usage(db, "m1", start=15.0, end=20.0, input_tokens=50, output_tokens=10, cache_n=0, prompt_n=50)
-    record_usage(db, "m2", start=25.0, end=30.0, input_tokens=10, output_tokens=5, cache_n=10, prompt_n=0)
+    record_usage(
+        db, "m1", start=5.0, end=10.0, input_tokens=100, output_tokens=20, cache_n=60, prompt_n=40
+    )
+    record_usage(
+        db, "m1", start=15.0, end=20.0, input_tokens=50, output_tokens=10, cache_n=0, prompt_n=50
+    )
+    record_usage(
+        db, "m2", start=25.0, end=30.0, input_tokens=10, output_tokens=5, cache_n=10, prompt_n=0
+    )
     # half-open [0, 25): includes end=10,20; excludes end=30
     s = usage_summary(db, start_ts=0.0, end_ts=25.0)
     assert s.request_count == 2
@@ -176,17 +209,23 @@ def test_usage_summary_empty_range_returns_zeros(tmp_path):
 
 def test_usage_by_model_groups_orders_shares_and_latency(tmp_path):
     db = open_db(tmp_path / "t.db")
-    record_usage(db, "m1", start=5.0, end=10.0, input_tokens=60, output_tokens=20, cache_n=40, prompt_n=20)   # lat 5s
-    record_usage(db, "m1", start=12.0, end=15.0, input_tokens=40, output_tokens=10, cache_n=20, prompt_n=20)  # lat 3s
-    record_usage(db, "m2", start=15.0, end=18.0, input_tokens=50, output_tokens=10, cache_n=0, prompt_n=50)   # lat 3s
+    record_usage(
+        db, "m1", start=5.0, end=10.0, input_tokens=60, output_tokens=20, cache_n=40, prompt_n=20
+    )  # lat 5s
+    record_usage(
+        db, "m1", start=12.0, end=15.0, input_tokens=40, output_tokens=10, cache_n=20, prompt_n=20
+    )  # lat 3s
+    record_usage(
+        db, "m2", start=15.0, end=18.0, input_tokens=50, output_tokens=10, cache_n=0, prompt_n=50
+    )  # lat 3s
     rows = usage_by_model(db, start_ts=0.0, end_ts=25.0)
-    assert [r.model for r in rows] == ["m1", "m2"]   # ordered by input desc
+    assert [r.model for r in rows] == ["m1", "m2"]  # ordered by input desc
     assert rows[0].input_tokens == 100
     assert rows[0].request_count == 2
     assert rows[0].cache_n == 60
     assert rows[0].share == 100 / 150
     assert rows[0].hit_rate == 0.6
-    assert rows[0].latency_ms == 4000.0              # AVG(5s, 3s) = 4s
+    assert rows[0].latency_ms == 4000.0  # AVG(5s, 3s) = 4s
     assert rows[1].model == "m2"
     assert rows[1].request_count == 1
     assert rows[1].share == 50 / 150
@@ -201,10 +240,21 @@ def test_usage_by_model_empty_returns_empty_list(tmp_path):
 
 def test_open_db_creates_config_tables(tmp_path):
     db = open_db(tmp_path / "t.db")
-    for t in ("system_settings", "model_defs", "model_aliases", "model_schemes",
-              "pricing_tiers", "log_sessions", "log_lines"):
-        assert db.conn.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (t,)).fetchone() is not None
+    for t in (
+        "system_settings",
+        "model_defs",
+        "model_aliases",
+        "model_schemes",
+        "pricing_tiers",
+        "log_sessions",
+        "log_lines",
+    ):
+        assert (
+            db.conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (t,)
+            ).fetchone()
+            is not None
+        )
 
 
 def test_open_db_creates_model_runtime_table(tmp_path):
@@ -219,7 +269,8 @@ def test_record_runtime_start_end_round_trip(tmp_path):
     record_runtime_end(db, seg, end=250.0)
     row = db.conn.execute(
         "SELECT start_time, end_time FROM model_runtime r JOIN models m ON r.model_id=m.id "
-        "WHERE m.original_name='m1'").fetchone()
+        "WHERE m.original_name='m1'"
+    ).fetchone()
     assert row["start_time"] == 100.0
     assert row["end_time"] == 250.0
 
@@ -228,17 +279,18 @@ def test_record_runtime_end_closes_by_segment_id(tmp_path):
     """record_runtime_end 按 segment_id 关段(不再靠 end_time IS NULL 找最新)。
     开两段拿 id,只关指定段;另一段仍开;已关段再关幂等 no-op。"""
     db = open_db(tmp_path / "t.db")
-    record_runtime_start(db, "m1", start=100.0)   # 段 1(id 不用,仅造"另一段仍开")
+    record_runtime_start(db, "m1", start=100.0)  # 段 1(id 不用,仅造"另一段仍开")
     seg2 = record_runtime_start(db, "m1", start=200.0)
-    record_runtime_end(db, seg2, end=300.0)        # 按 id 只关 seg2
+    record_runtime_end(db, seg2, end=300.0)  # 按 id 只关 seg2
     rows = db.conn.execute(
         "SELECT start_time, end_time FROM model_runtime r JOIN models m ON r.model_id=m.id "
-        "WHERE m.original_name='m1' ORDER BY start_time").fetchall()
-    assert rows[0]["end_time"] is None             # seg1 仍开
-    assert rows[1]["end_time"] == 300.0            # seg2 已关
-    record_runtime_end(db, seg2, end=999.0)        # 幂等:seg2 已移出 _live_segments → no-op
+        "WHERE m.original_name='m1' ORDER BY start_time"
+    ).fetchall()
+    assert rows[0]["end_time"] is None  # seg1 仍开
+    assert rows[1]["end_time"] == 300.0  # seg2 已关
+    record_runtime_end(db, seg2, end=999.0)  # 幂等:seg2 已移出 _live_segments → no-op
     again = db.conn.execute("SELECT end_time FROM model_runtime WHERE id=?", (seg2,)).fetchone()
-    assert again["end_time"] == 300.0              # 未被二次覆盖
+    assert again["end_time"] == 300.0  # 未被二次覆盖
 
 
 def test_runtime_heartbeat_live_writes_end_time(tmp_path):
@@ -246,14 +298,15 @@ def test_runtime_heartbeat_live_writes_end_time(tmp_path):
     db = open_db(tmp_path / "t.db")
     seg1 = record_runtime_start(db, "m1", start=100.0)
     record_runtime_end(db, seg1, end=200.0)
-    record_runtime_start(db, "m2", start=300.0)    # 仍开(在 _live_segments)
+    record_runtime_start(db, "m2", start=300.0)  # 仍开(在 _live_segments)
     assert runtime_heartbeat_live(db, 500.0) == 1
     rows = db.conn.execute(
         "SELECT m.original_name AS name, r.end_time AS end_time FROM model_runtime r "
-        "JOIN models m ON r.model_id=m.id ORDER BY r.start_time").fetchall()
+        "JOIN models m ON r.model_id=m.id ORDER BY r.start_time"
+    ).fetchall()
     by_name = {r["name"]: r["end_time"] for r in rows}
-    assert by_name["m2"] == 500.0                  # 进行中 → end_time 推到心跳值
-    assert by_name["m1"] == 200.0                  # 已结束 → 精确值不动
+    assert by_name["m2"] == 500.0  # 进行中 → end_time 推到心跳值
+    assert by_name["m1"] == 200.0  # 已结束 → 精确值不动
     assert runtime_heartbeat_live(db, 600.0) == 1  # 仍只一条进行中
 
 
@@ -267,20 +320,37 @@ def test_open_db_has_no_last_active_column(tmp_path):
 
 def test_tier_cost_no_cache_matches_and_divides_by_million(tmp_path):
     from llm_manager.config import Pricing, PricingTier
-    db = open_db(tmp_path / "t.db")   # unused but keeps style consistent  # noqa: F841
-    pricing = Pricing(tiers=(PricingTier(tier_index=1, min_input=0, max_input=32768,
-                                         input_price=3.0, output_price=9.0),))
+
+    db = open_db(tmp_path / "t.db")  # unused but keeps style consistent  # noqa: F841
+    pricing = Pricing(
+        tiers=(
+            PricingTier(
+                tier_index=1, min_input=0, max_input=32768, input_price=3.0, output_price=9.0
+            ),
+        )
+    )
     # 1000 input @ 3/M + 500 output @ 9/M = (3000 + 4500)/1e6
     assert tier_cost(pricing, 1000, 500, 0, 0) == (1000 * 3.0 + 500 * 9.0) / 1_000_000
 
 
 def test_tier_cost_cache_formula(tmp_path):
     from llm_manager.config import Pricing, PricingTier
+
     # support_cache 是模型级开关(Pricing 上),缓存价仍在阶梯上
-    pricing = Pricing(support_cache=True, tiers=(
-        PricingTier(tier_index=1, min_input=0, max_input=None,
-                    input_price=3.0, output_price=9.0,
-                    cache_write_price=3.75, cache_read_price=0.3),))
+    pricing = Pricing(
+        support_cache=True,
+        tiers=(
+            PricingTier(
+                tier_index=1,
+                min_input=0,
+                max_input=None,
+                input_price=3.0,
+                output_price=9.0,
+                cache_write_price=3.75,
+                cache_read_price=0.3,
+            ),
+        ),
+    )
     # cache_n*read + prompt_n*(input+write) + output*output, /1e6
     expected = (200 * 0.3 + 800 * (3.0 + 3.75) + 500 * 9.0) / 1_000_000
     assert tier_cost(pricing, 1000, 500, 200, 800) == expected
@@ -289,44 +359,89 @@ def test_tier_cost_cache_formula(tmp_path):
 def test_tier_cost_cache_off_uses_plain_formula(tmp_path):
     """support_cache=False(默认)→ 即使阶梯带缓存价也走无缓存公式。"""
     from llm_manager.config import Pricing, PricingTier
-    pricing = Pricing(tiers=(
-        PricingTier(tier_index=1, min_input=0, max_input=None,
-                    input_price=3.0, output_price=9.0,
-                    cache_write_price=3.75, cache_read_price=0.3),))
-    expected = (1000 * 3.0 + 500 * 9.0) / 1_000_000   # 无缓存公式,忽略缓存价
+
+    pricing = Pricing(
+        tiers=(
+            PricingTier(
+                tier_index=1,
+                min_input=0,
+                max_input=None,
+                input_price=3.0,
+                output_price=9.0,
+                cache_write_price=3.75,
+                cache_read_price=0.3,
+            ),
+        )
+    )
+    expected = (1000 * 3.0 + 500 * 9.0) / 1_000_000  # 无缓存公式,忽略缓存价
     assert tier_cost(pricing, 1000, 500, 200, 800) == expected
 
 
 def test_tier_cost_no_match_returns_zero(tmp_path):
     from llm_manager.config import Pricing, PricingTier
-    pricing = Pricing(tiers=(PricingTier(tier_index=1, min_input=0, max_input=100,
-                                         input_price=3.0, output_price=9.0),))
-    assert tier_cost(pricing, 9999, 0, 0, 0) == 0.0      # outside the tier window
+
+    pricing = Pricing(
+        tiers=(
+            PricingTier(
+                tier_index=1, min_input=0, max_input=100, input_price=3.0, output_price=9.0
+            ),
+        )
+    )
+    assert tier_cost(pricing, 9999, 0, 0, 0) == 0.0  # outside the tier window
 
 
 def test_tier_cost_min_zero_closed_min_nonzero_open(tmp_path):
     from llm_manager.config import Pricing, PricingTier
-    pricing = Pricing(tiers=(PricingTier(tier_index=1, min_input=100, max_input=None,
-                                         input_price=1.0, output_price=0.0),))
-    assert tier_cost(pricing, 100, 0, 0, 0) == 0.0       # min=100 (nonzero) → open → 100 not included
+
+    pricing = Pricing(
+        tiers=(
+            PricingTier(
+                tier_index=1, min_input=100, max_input=None, input_price=1.0, output_price=0.0
+            ),
+        )
+    )
+    assert tier_cost(pricing, 100, 0, 0, 0) == 0.0  # min=100 (nonzero) → open → 100 not included
     assert tier_cost(pricing, 101, 0, 0, 0) == 101 * 1.0 / 1_000_000
 
 
 def _cfg_with(pricing):
     from llm_manager.config import AppConfig, Command, ModelConfig, ProgramConfig, Scheme
+
     return AppConfig(
         program=ProgramConfig("0.0.0.0", 8080, 60, "INFO"),
-        models={"m1": ModelConfig("m1", ("m1",), "Chat", 1, False,
-                                  {"s": Scheme("s", frozenset({"gpu"}), Command(exe="x"), {"gpu": 1})},
-                                  pricing=pricing)},
-        wol=None, claude_configs={})
+        models={
+            "m1": ModelConfig(
+                "m1",
+                ("m1",),
+                "Chat",
+                1,
+                False,
+                {"s": Scheme("s", frozenset({"gpu"}), Command(exe="x"), {"gpu": 1})},
+                pricing=pricing,
+            )
+        },
+        wol=None,
+        claude_configs={},
+    )
 
 
 def test_usage_cost_tier_model_sums_requests(tmp_path):
     from llm_manager.config import Pricing, PricingTier
+
     db = open_db(tmp_path / "t.db")
-    record_usage(db, "m1", start=5.0, end=10.0, input_tokens=1000, output_tokens=500, cache_n=0, prompt_n=1000)
-    record_usage(db, "m1", start=12.0, end=15.0, input_tokens=2000, output_tokens=0, cache_n=0, prompt_n=2000)
+    record_usage(
+        db,
+        "m1",
+        start=5.0,
+        end=10.0,
+        input_tokens=1000,
+        output_tokens=500,
+        cache_n=0,
+        prompt_n=1000,
+    )
+    record_usage(
+        db, "m1", start=12.0, end=15.0, input_tokens=2000, output_tokens=0, cache_n=0, prompt_n=2000
+    )
     cfg = _cfg_with(Pricing(tiers=(PricingTier(tier_index=1, input_price=3.0, output_price=9.0),)))
     s = usage_cost(db, cfg, start_ts=0.0, end_ts=100.0)
     expected = ((1000 * 3.0 + 500 * 9.0) + (2000 * 3.0)) / 1_000_000
@@ -336,63 +451,93 @@ def test_usage_cost_tier_model_sums_requests(tmp_path):
 
 def test_usage_cost_hourly_model_uses_runtime_overlap(tmp_path):
     from llm_manager.config import Pricing
+
     db = open_db(tmp_path / "t.db")
     seg = record_runtime_start(db, "m1", start=0.0)
-    record_runtime_end(db, seg, end=7200.0)            # 2 hours loaded
+    record_runtime_end(db, seg, end=7200.0)  # 2 hours loaded
     cfg = _cfg_with(Pricing(pricing_type="hourly", hourly_price=10.0))
-    s = usage_cost(db, cfg, start_ts=0.0, end_ts=3600.0, now=9999.0)   # window = 1 hour
-    assert s.total_cost == 10.0                          # 1h × 10/h
+    s = usage_cost(db, cfg, start_ts=0.0, end_ts=3600.0, now=9999.0)  # window = 1 hour
+    assert s.total_cost == 10.0  # 1h × 10/h
     assert s.by_model[0].pricing_type == "hourly"
 
 
 def test_usage_cost_open_session_uses_now(tmp_path):
     from llm_manager.config import Pricing
+
     db = open_db(tmp_path / "t.db")
-    record_runtime_start(db, "m1", start=0.0)           # never closed
+    record_runtime_start(db, "m1", start=0.0)  # never closed
     cfg = _cfg_with(Pricing(pricing_type="hourly", hourly_price=10.0))
-    s = usage_cost(db, cfg, start_ts=0.0, end_ts=3600.0, now=3600.0)   # now caps the session at 1h
+    s = usage_cost(db, cfg, start_ts=0.0, end_ts=3600.0, now=3600.0)  # now caps the session at 1h
     assert s.total_cost == 10.0
 
 
 def test_usage_cost_free_model_yields_zero_and_is_omitted(tmp_path):
     db = open_db(tmp_path / "t.db")
-    record_usage(db, "m1", start=5.0, end=10.0, input_tokens=1000, output_tokens=500, cache_n=0, prompt_n=1000)
+    record_usage(
+        db,
+        "m1",
+        start=5.0,
+        end=10.0,
+        input_tokens=1000,
+        output_tokens=500,
+        cache_n=0,
+        prompt_n=1000,
+    )
     from llm_manager.config import AppConfig, Command, ModelConfig, ProgramConfig, Scheme
-    cfg = AppConfig(program=ProgramConfig("0.0.0.0", 8080, 60, "INFO"),
-                    models={"m1": ModelConfig("m1", ("m1",), "Chat", 1, False,
-                              {"s": Scheme("s", frozenset({"gpu"}), Command(exe="x"), {"gpu": 1})})},
-                    wol=None, claude_configs={})
+
+    cfg = AppConfig(
+        program=ProgramConfig("0.0.0.0", 8080, 60, "INFO"),
+        models={
+            "m1": ModelConfig(
+                "m1",
+                ("m1",),
+                "Chat",
+                1,
+                False,
+                {"s": Scheme("s", frozenset({"gpu"}), Command(exe="x"), {"gpu": 1})},
+            )
+        },
+        wol=None,
+        claude_configs={},
+    )
     s = usage_cost(db, cfg, start_ts=0.0, end_ts=100.0)
     assert s.total_cost == 0.0 and s.by_model == []
 
 
 def test_usage_cost_series_buckets_tier_cost_by_end_time(tmp_path):
     from llm_manager.config import Pricing, PricingTier
+
     db = open_db(tmp_path / "t.db")
-    record_usage(db, "m1", start=9, end=10, input_tokens=1000, output_tokens=0, cache_n=0, prompt_n=1000)
-    record_usage(db, "m1", start=69, end=70, input_tokens=2000, output_tokens=0, cache_n=0, prompt_n=2000)
+    record_usage(
+        db, "m1", start=9, end=10, input_tokens=1000, output_tokens=0, cache_n=0, prompt_n=1000
+    )
+    record_usage(
+        db, "m1", start=69, end=70, input_tokens=2000, output_tokens=0, cache_n=0, prompt_n=2000
+    )
     cfg = _cfg_with(Pricing(tiers=(PricingTier(tier_index=1, input_price=3.0, output_price=0.0),)))
     res = usage_cost_series(db, cfg, start_ts=0, end_ts=120, bucket_seconds=60)
     assert res.buckets == [0, 60]
-    assert res.models["m1"][0] == 1000 * 3.0 / 1_000_000   # end=10 → bucket 0
-    assert res.models["m1"][1] == 2000 * 3.0 / 1_000_000   # end=70 → bucket 60
+    assert res.models["m1"][0] == 1000 * 3.0 / 1_000_000  # end=10 → bucket 0
+    assert res.models["m1"][1] == 2000 * 3.0 / 1_000_000  # end=70 → bucket 60
     assert res.total[0] == res.models["m1"][0]
     assert res.total[1] == res.models["m1"][1]
 
 
 def test_usage_cost_series_hourly_spreads_across_buckets(tmp_path):
     from llm_manager.config import Pricing
+
     db = open_db(tmp_path / "t.db")
     seg = record_runtime_start(db, "m1", start=0.0)
-    record_runtime_end(db, seg, end=120.0)               # 2 minutes loaded
+    record_runtime_end(db, seg, end=120.0)  # 2 minutes loaded
     cfg = _cfg_with(Pricing(pricing_type="hourly", hourly_price=3600.0))  # 1 元/s
     res = usage_cost_series(db, cfg, start_ts=0, end_ts=120, bucket_seconds=60, now=9999.0)
     assert res.buckets == [0, 60]
-    assert res.total == [60.0, 60.0]                       # 60s each × 1 元/s
+    assert res.total == [60.0, 60.0]  # 60s each × 1 元/s
 
 
 def test_usage_cost_series_empty_range_returns_no_buckets(tmp_path):
     from llm_manager.config import Pricing
+
     db = open_db(tmp_path / "t.db")
     cfg = _cfg_with(Pricing())
     res = usage_cost_series(db, cfg, start_ts=0, end_ts=0, bucket_seconds=60)
@@ -404,6 +549,7 @@ def test_migrate_moves_support_cache_to_model_pricing(tmp_path):
     叠加 2026-08-03 代码优化迁移:model_pricing 随后并入 model_defs、pricing_tiers 重建改 FK、
     旧表删除——最终 support_cache 落在 model_defs 上。"""
     import sqlite3
+
     p = tmp_path / "legacy.db"
     conn = sqlite3.connect(str(p))
     conn.executescript(
@@ -422,7 +568,7 @@ def test_migrate_moves_support_cache_to_model_pricing(tmp_path):
     conn.commit()
     conn.close()
 
-    db = open_db(p)   # 迁移:model_pricing 补列 → 并入 model_defs;pricing_tiers 删列重建
+    db = open_db(p)  # 迁移:model_pricing 补列 → 并入 model_defs;pricing_tiers 删列重建
     md_cols = {r[1] for r in db.conn.execute("PRAGMA table_info(model_defs)")}
     pt_cols = {r[1] for r in db.conn.execute("PRAGMA table_info(pricing_tiers)")}
     tables = {r[0] for r in db.conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
@@ -553,19 +699,23 @@ def test_migrate_folds_scripts_and_pricing_into_parents(tmp_path):
     conn.commit()
     conn.close()
 
-    db = open_db(p)   # 迁移
+    db = open_db(p)  # 迁移
     tables = {r[0] for r in db.conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     assert "model_scripts" not in tables and "model_pricing" not in tables
     sc = db.conn.execute("SELECT command FROM model_schemes").fetchone()
     assert json.loads(sc["command"]) == {"exe": "q.bat"}
-    md = db.conn.execute("SELECT pricing_type, hourly_price, support_cache FROM model_defs").fetchone()
+    md = db.conn.execute(
+        "SELECT pricing_type, hourly_price, support_cache FROM model_defs"
+    ).fetchone()
     assert (md["pricing_type"], md["hourly_price"], md["support_cache"]) == ("hourly", 2.5, 1)
     t = db.conn.execute("SELECT pricing_id, tier_index, input_price FROM pricing_tiers").fetchone()
     assert (t["pricing_id"], t["tier_index"], t["input_price"]) == (1, 1, 3.0)
     fks = {row[2] for row in db.conn.execute("PRAGMA foreign_key_list(pricing_tiers)")}
     assert fks == {"model_defs"}
-    db2 = open_db(p)   # 幂等:二次打开不抛、结构不变
-    assert "model_scripts" not in {r[0] for r in db2.conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    db2 = open_db(p)  # 幂等:二次打开不抛、结构不变
+    assert "model_scripts" not in {
+        r[0] for r in db2.conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+    }
 
 
 def test_migrate_new_fk_cascades_from_model_defs(tmp_path):
@@ -573,7 +723,9 @@ def test_migrate_new_fk_cascades_from_model_defs(tmp_path):
     db = open_db(tmp_path / "t.db")
     with db.write_lock:
         cur = db.conn.execute("INSERT INTO model_defs (name, mode, port) VALUES ('M', 'Chat', 1)")
-        db.conn.execute("INSERT INTO pricing_tiers (pricing_id, tier_index) VALUES (?, 1)", (cur.lastrowid,))
+        db.conn.execute(
+            "INSERT INTO pricing_tiers (pricing_id, tier_index) VALUES (?, 1)", (cur.lastrowid,)
+        )
         db.conn.commit()
     with db.write_lock:
         db.conn.execute("DELETE FROM model_defs WHERE name='M'")

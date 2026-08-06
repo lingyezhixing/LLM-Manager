@@ -1,4 +1,5 @@
 """Background loops: idle reclamation + auto-start."""
+
 from __future__ import annotations
 
 import asyncio
@@ -30,11 +31,16 @@ def _plan_batches(models_schemes: list) -> tuple[list[str], list[str]]:
 def select_idle_candidates(alive_sec: float, now: float) -> list[str]:
     """只读 state:ROUTING ∩ pending==0 ∩ idle>alive_sec。now 注入(可测)。
     相对 state 全局确定,但非引用透明:读模块级 _state(区别于 scheduling 注入快照的纯函数)。"""
-    return [n for n in state.routing_names()
-            if state.pending_count(n) == 0 and (now - state.get_last_access(n)) > alive_sec]
+    return [
+        n
+        for n in state.routing_names()
+        if state.pending_count(n) == 0 and (now - state.get_last_access(n)) > alive_sec
+    ]
 
 
-async def idle_reclamation_loop(lifecycle, get_cfg, stop_event: asyncio.Event, *, period: float = 30.0) -> None:
+async def idle_reclamation_loop(
+    lifecycle, get_cfg, stop_event: asyncio.Event, *, period: float = 30.0
+) -> None:
     """每轮从 get_cfg() 取 fresh alive_time(P1 写回后即时生效)。alive_time<=0 禁用。"""
     while not stop_event.is_set():
         try:
@@ -48,7 +54,9 @@ async def idle_reclamation_loop(lifecycle, get_cfg, stop_event: asyncio.Event, *
                     if state.pending_count(name) > 0:
                         logger.info("skip reclaim %s: new request in flight", name)
                         continue
-                    logger.info("idle reclaim %s (idle %.0fs)", name, now - state.get_last_access(name))
+                    logger.info(
+                        "idle reclaim %s (idle %.0fs)", name, now - state.get_last_access(name)
+                    )
                     try:
                         await lifecycle.stop(name)
                     except Exception as e:
@@ -56,12 +64,14 @@ async def idle_reclamation_loop(lifecycle, get_cfg, stop_event: asyncio.Event, *
         except Exception as e:
             logger.error("idle reclamation iteration error: %s", e)
         try:
-            await asyncio.wait_for(stop_event.wait(), timeout=period)   # 可中断 sleep
+            await asyncio.wait_for(stop_event.wait(), timeout=period)  # 可中断 sleep
         except asyncio.TimeoutError:
             pass
 
 
-async def auto_start(lifecycle, models: list[str], cfg, monitor, *, timeout: float, stop_event: asyncio.Event) -> None:
+async def auto_start(
+    lifecycle, models: list[str], cfg, monitor, *, timeout: float, stop_event: asyncio.Event
+) -> None:
     """设备隔离分批调度:扫描硬件 → select_adaptive → _plan_batches
     → parallel gather(spawn 锁串行 spawn,probe 并行)+ serial 逐一(refresh 缓存刷新)。"""
     if not models:
@@ -89,9 +99,15 @@ async def auto_start(lifecycle, models: list[str], cfg, monitor, *, timeout: flo
     for name in models:
         scheme = _cfg.select_adaptive(cfg.models[name], online)
         if scheme is None:
-            required = sorted({d for s in cfg.models[name].schemes.values() for d in s.required_devices})
-            logger.info("auto_start skip %s: no adaptive scheme (required %s, online %s)",
-                        name, required, sorted(online))
+            required = sorted(
+                {d for s in cfg.models[name].schemes.values() for d in s.required_devices}
+            )
+            logger.info(
+                "auto_start skip %s: no adaptive scheme (required %s, online %s)",
+                name,
+                required,
+                sorted(online),
+            )
         else:
             planned.append((name, scheme))
     # 3. 设备隔离分批

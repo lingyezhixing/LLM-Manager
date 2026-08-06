@@ -4,6 +4,7 @@
 - log_cleanup 的 live_session_ids 排除参数(两个规则都生效);
 - retention 循环把模块级 live 会话 id 传给 log_cleanup(wiring 回归)。
 """
+
 import asyncio
 
 from llm_manager.data import logs
@@ -17,16 +18,16 @@ def test_flush_survives_deleted_session(tmp_path):
     db = open_db(tmp_path / "t.db")
     logs.init(db)
     try:
-        sid = logs.start_session("system", None, None, start=1000.0)   # live(最旧)
+        sid = logs.start_session("system", None, None, start=1000.0)  # live(最旧)
         for i in range(12):
             logs.log_start_session(db, "model", f"m{i}", f"m{i}", float(2000 + i))
         removed_s, removed_l = logs.log_cleanup(db, days=9999, count=10, now=99999.0)
-        assert sid not in [r["id"] for r in logs.log_sessions(db)]       # live 行已被删
+        assert sid not in [r["id"] for r in logs.log_sessions(db)]  # live 行已被删
         assert removed_s == 3 and removed_l == 0
 
-        logs.capture_system("x", 1.0, "INFO")                          # 排入死会话行
-        asyncio.run(logs.flush())                                      # 不抛
-        assert logs.subscribe(sid) is None                             # 会话已被丢弃
+        logs.capture_system("x", 1.0, "INFO")  # 排入死会话行
+        asyncio.run(logs.flush())  # 不抛
+        assert logs.subscribe(sid) is None  # 会话已被丢弃
         assert logs.current_system_session_id() is None
 
         # 管线存活:新会话 capture+flush 正常落库,无死会话的残留/半截行
@@ -47,11 +48,12 @@ def test_log_cleanup_skips_live_sessions(tmp_path):
     live = logs.log_start_session(db, "system", None, None, 1000.0)
     for i in range(12):
         logs.log_start_session(db, "model", f"m{i}", f"m{i}", float(2000 + i))
-    removed_s, removed_l = logs.log_cleanup(db, days=9999, count=10, now=99999.0,
-                                          live_session_ids={live})
+    removed_s, removed_l = logs.log_cleanup(
+        db, days=9999, count=10, now=99999.0, live_session_ids={live}
+    )
     rows = [r["id"] for r in logs.log_sessions(db)]
     assert live in rows
-    assert sorted(rows) == [live] + list(range(4, 14))   # 删了最旧 3 个中的 2 个(非 live)
+    assert sorted(rows) == [live] + list(range(4, 14))  # 删了最旧 3 个中的 2 个(非 live)
     assert (removed_s, removed_l) == (2, 0)
     db.conn.close()
 
@@ -60,9 +62,14 @@ def test_log_cleanup_time_rule_skips_live(tmp_path):
     """时间规则同样排除 live_session_ids(belt-and-braces 两规则都生效)。"""
     db = open_db(tmp_path / "t.db")
     live = logs.log_start_session(db, "system", None, None, 1000.0)
-    logs.log_start_session(db, "model", "m", "m", 1005.0)   # 旧会话(被时间规则删除)
-    removed_s, _ = logs.log_cleanup(db, days=2, count=100, now=200000.0,   # cutoff=27200
-                                  live_session_ids={live})
+    logs.log_start_session(db, "model", "m", "m", 1005.0)  # 旧会话(被时间规则删除)
+    removed_s, _ = logs.log_cleanup(
+        db,
+        days=2,
+        count=100,
+        now=200000.0,  # cutoff=27200
+        live_session_ids={live},
+    )
     assert [r["id"] for r in logs.log_sessions(db)] == [live]
     assert removed_s == 1
     db.conn.close()
@@ -74,14 +81,17 @@ def test_loop_skips_live_sessions_in_module(tmp_path):
     db = open_db(tmp_path / "t.db")
     logs.init(db)
     try:
-        logs.start_session("system", None, None, start=1000.0)   # live 会话(下方 id 1)
+        logs.start_session("system", None, None, start=1000.0)  # live 会话(下方 id 1)
         for i in range(5):
             logs.log_start_session(db, "model", f"m{i}", f"m{i}", float(2000 + i))
         stop = asyncio.Event()
 
         async def go():
-            loop = asyncio.create_task(log_retention.log_retention_loop(
-                db, lambda: (9999, 1), stop, period=0.05, now=99999.0))
+            loop = asyncio.create_task(
+                log_retention.log_retention_loop(
+                    db, lambda: (9999, 1), stop, period=0.05, now=99999.0
+                )
+            )
             await asyncio.sleep(0.15)
             stop.set()
             await asyncio.wait_for(loop, timeout=1.0)

@@ -1,4 +1,5 @@
 """Intel GPU 适配器:Linux(i915 + intel_gpu_top)/Windows(LHM)统一接口。"""
+
 from __future__ import annotations
 
 import os
@@ -8,8 +9,11 @@ from pathlib import Path
 
 from . import DeviceInfo
 from .common import (
-    _DRM_CLASS, _drm_cards, _system_mem,
-    _lhm_computer, _aggregate_sensors,  # Windows LHM 运行时
+    _DRM_CLASS,
+    _drm_cards,
+    _system_mem,
+    _lhm_computer,
+    _aggregate_sensors,  # Windows LHM 运行时
 )
 
 # ==================== Intel iGPU(i915 + intel_gpu_top)====================
@@ -22,7 +26,9 @@ _INTEL_IGPU_NAMES = {
 def _intel_gpu_name(dev: Path) -> str:
     """uevent 的 PCI_ID(如 8086:46d1)→ 已知映射名,未知 → 'Intel UHD Graphics (8086:xxxx)'。"""
     try:
-        for line in dev.joinpath("uevent").read_text(encoding="ascii", errors="ignore").splitlines():
+        for line in (
+            dev.joinpath("uevent").read_text(encoding="ascii", errors="ignore").splitlines()
+        ):
             if line.startswith("PCI_ID="):
                 pci_id = line.split("=", 1)[1].strip().lower()
                 return _INTEL_IGPU_NAMES.get(pci_id, f"Intel UHD Graphics ({pci_id})")
@@ -49,9 +55,14 @@ def _run_intel_gpu_top() -> str | None:
     try:
         r = subprocess.run(
             ["timeout", "2", "intel_gpu_top", "-J", "-s", "1000"],
-            capture_output=True, text=True, timeout=4, check=False,
+            capture_output=True,
+            text=True,
+            timeout=4,
+            check=False,
         )
-        return r.stdout if r.returncode in (0, 124) else None  # 124=timeout 杀进程,stdout 含完整采样帧
+        return (
+            r.stdout if r.returncode in (0, 124) else None
+        )  # 124=timeout 杀进程,stdout 含完整采样帧
     except Exception:  # noqa: BLE001 — 子进程异常/超时 → None,指标降级
         return None
 
@@ -63,6 +74,7 @@ def _parse_intel_gpu_top(stdout: str | None) -> dict | None:
     if not stdout:
         return None
     import json
+
     decoder = json.JSONDecoder()
     buf, last = stdout, None
     while True:
@@ -113,11 +125,21 @@ class IntelAdapter:
         if not cards:
             return []
         metrics = _parse_intel_gpu_top(_run_intel_gpu_top()) or {}
-        return [DeviceInfo(
-            _intel_gpu_name(c / "device"), "GPU (iGPU)", "Shared RAM",
-            total, avail, used, metrics.get("busy_pct", 0.0),
-            None, metrics.get("freq_mhz"), metrics.get("power_watts"),
-        ) for c in cards]  # 多 i915 卡:按卡命名;指标共享同一次 intel_gpu_top 采样
+        return [
+            DeviceInfo(
+                _intel_gpu_name(c / "device"),
+                "GPU (iGPU)",
+                "Shared RAM",
+                total,
+                avail,
+                used,
+                metrics.get("busy_pct", 0.0),
+                None,
+                metrics.get("freq_mhz"),
+                metrics.get("power_watts"),
+            )
+            for c in cards
+        ]  # 多 i915 卡:按卡命名;指标共享同一次 intel_gpu_top 采样
 
     def _enumerate_windows(self) -> list[DeviceInfo]:
         """Windows Intel GPU:LHM GpuIntel 硬件 → 经 _aggregate_sensors → DeviceInfo。

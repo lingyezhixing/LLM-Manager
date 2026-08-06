@@ -4,6 +4,7 @@
 restart 检测:对比 snapshot.program 的 host/port/claude_settings_path/log_level 与 app.state.boot_program(启动期捕获)。
 读穿仅 system_settings 影响的消费方(idle 循环/tray/logging)——lifecycle/catalog/models 随模型 CRUD。
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -32,6 +33,7 @@ from llm_manager.tray import claude
 
 try:
     from importlib.metadata import PackageNotFoundError, version as _pkg_version
+
     try:
         _VERSION = _pkg_version("llm-manager")
     except PackageNotFoundError:
@@ -56,14 +58,17 @@ class ProgramUpdate(BaseModel):
 
 
 class WolUpdate(BaseModel):
-    broadcast_address: str = Field(min_length=1)   # B8:必填非空(清除走 DELETE,不靠空串半残配置)
+    broadcast_address: str = Field(min_length=1)  # B8:必填非空(清除走 DELETE,不靠空串半残配置)
     mac_address: str = Field(min_length=1)
+
 
 class ClaudeConfigsUpdate(BaseModel):
     configs: dict[str, dict[str, str]]
 
+
 class LogRetentionUpdate(BaseModel):
     """日志保留规则:恒生效的两个参数(按时间保留 N 天 + 按条数保留 N 条,系统与模型日志同时适用)。"""
+
     days: int | None = Field(default=None, ge=1)
     count: int | None = Field(default=None, ge=1)
 
@@ -108,11 +113,11 @@ class PricingInput(BaseModel):
 
 class ModelDefInput(BaseModel):
     name: str
-    mode: str                              # config.validate 校验 Chat/Embedding/Reranker
+    mode: str  # config.validate 校验 Chat/Embedding/Reranker
     port: int = Field(ge=1, le=65535)
     auto_start: bool = False
-    aliases: list[str]                     # 非空(validate)
-    schemes: list[SchemeInput]             # 非空(validate)
+    aliases: list[str]  # 非空(validate)
+    schemes: list[SchemeInput]  # 非空(validate)
     pricing: PricingInput = Field(default_factory=PricingInput)
 
 
@@ -126,20 +131,33 @@ def _to_model_config(body: ModelDefInput) -> ModelConfig:
         schemes[s.config_source] = Scheme(
             config_source=s.config_source,
             required_devices=frozenset(s.required_devices),
-            command=Command(exe=s.command.exe, args=tuple(s.command.args),
-                            env=dict(s.command.env), cwd=s.command.cwd, conda_env=s.command.conda_env),
+            command=Command(
+                exe=s.command.exe,
+                args=tuple(s.command.args),
+                env=dict(s.command.env),
+                cwd=s.command.cwd,
+                conda_env=s.command.conda_env,
+            ),
             memory_mb=dict(s.memory_mb),
         )
     pricing = Pricing(
         pricing_type=body.pricing.pricing_type,
         hourly_price=body.pricing.hourly_price,
         support_cache=body.pricing.support_cache,
-        tiers=tuple(PricingTier(
-            tier_index=t.tier_index, min_input=t.min_input, max_input=t.max_input,
-            min_output=t.min_output, max_output=t.max_output,
-            input_price=t.input_price, output_price=t.output_price,
-            cache_write_price=t.cache_write_price,
-            cache_read_price=t.cache_read_price) for t in body.pricing.tiers),
+        tiers=tuple(
+            PricingTier(
+                tier_index=t.tier_index,
+                min_input=t.min_input,
+                max_input=t.max_input,
+                min_output=t.min_output,
+                max_output=t.max_output,
+                input_price=t.input_price,
+                output_price=t.output_price,
+                cache_write_price=t.cache_write_price,
+                cache_read_price=t.cache_read_price,
+            )
+            for t in body.pricing.tiers
+        ),
     )
     return ModelConfig(
         primary_name=body.name,
@@ -158,11 +176,17 @@ def _pricing_dict(p):
         "hourly_price": p.hourly_price,
         "support_cache": p.support_cache,
         "tiers": [
-            {"tier_index": t.tier_index, "min_input": t.min_input, "max_input": t.max_input,
-             "min_output": t.min_output, "max_output": t.max_output,
-             "input_price": t.input_price, "output_price": t.output_price,
-             "cache_write_price": t.cache_write_price,
-             "cache_read_price": t.cache_read_price}
+            {
+                "tier_index": t.tier_index,
+                "min_input": t.min_input,
+                "max_input": t.max_input,
+                "min_output": t.min_output,
+                "max_output": t.max_output,
+                "input_price": t.input_price,
+                "output_price": t.output_price,
+                "cache_write_price": t.cache_write_price,
+                "cache_read_price": t.cache_read_price,
+            }
             for t in p.tiers
         ],
     }
@@ -200,6 +224,7 @@ def _rename_migrator(old: str, new: str) -> "Callable":
     - log_sessions.alias(日志显示的服务名快照):同步为改名后配置的 aliases[0]——
       日志页按别名显示,不同步会残留旧别名快照(出现「两个名字」)。
     """
+
     def migrate(db, _old_cfg, new_cfg):
         db.conn.execute("UPDATE models SET original_name=? WHERE original_name=?", (new, old))
         new_alias = new_cfg.models[new].aliases[0] if new_cfg.models[new].aliases else new
@@ -207,6 +232,7 @@ def _rename_migrator(old: str, new: str) -> "Callable":
             "UPDATE log_sessions SET model_name=?, alias=? WHERE model_name=?",
             (new, new_alias, old),
         )
+
     return migrate
 
 
@@ -217,6 +243,7 @@ def _delete_old_sessions(old: str) -> "Callable":
     匹配 model_name 或 alias ∈ {old} ∪ 旧别名(别名从 old_cfg 取改名前的值)。
     在改名同事务内执行(commit 前),与配置写原子。
     """
+
     def drop(db, old_cfg, _new_cfg):
         aliases = old_cfg.models[old].aliases if old in old_cfg.models else ()
         terms = {old, *aliases}
@@ -227,6 +254,7 @@ def _delete_old_sessions(old: str) -> "Callable":
             f"DELETE FROM log_sessions WHERE model_name IN ({ph}) OR alias IN ({ph})",
             (*terms, *terms),
         )
+
     return drop
 
 
@@ -235,12 +263,14 @@ def _alias_migrator(primary: str) -> "Callable":
 
     日志页按别名显示;改别名若不迁移日志,旧日志残留旧别名快照(日志页显示旧名,
     出现「两个名字」)。与改名迁移(_rename_migrator)对齐:别名变更即同步快照。"""
+
     def sync(db, _old_cfg, new_cfg):
         new_alias = new_cfg.models[primary].aliases[0]
         db.conn.execute(
             "UPDATE log_sessions SET alias=? WHERE model_name=?",
             (new_alias, primary),
         )
+
     return sync
 
 
@@ -262,6 +292,7 @@ def _restart_fields(snapshot, boot: dict) -> list[str]:
 def _serving() -> list[str]:
     """当前正在服务(ROUTING 且 pending>0)的模型——restart 会中断它们。"""
     from llm_manager import state
+
     return [n for n in state.routing_names() if state.pending_count(n) > 0]
 
 
@@ -276,13 +307,13 @@ def _routing_served(primary: str, cfg: AppConfig) -> list[str]:
     DELETE 的 ROUTING 拦截在端点处(404/409 之前)。"""
     from llm_manager import state
     from llm_manager.state import ModelStatus
+
     if state.get_status(primary) == ModelStatus.ROUTING:
         return [cfg.models[primary].aliases[0]]
     return []
 
 
 def register_config_routes(api: APIRouter) -> None:
-
     @api.get("/system/info")
     def system_info(request: Request) -> dict:
         started_at = getattr(request.app.state, "started_at", None) or time.time()
@@ -301,12 +332,17 @@ def register_config_routes(api: APIRouter) -> None:
         p = cfg.program
         return {
             "program": {
-                "host": p.host, "port": p.port, "alive_time": p.alive_time,
+                "host": p.host,
+                "port": p.port,
+                "alive_time": p.alive_time,
                 "log_level": p.log_level,
                 "claude_settings_path": p.claude_settings_path,
             },
-            "wol": ({"broadcast_address": cfg.wol.broadcast_address,
-                     "mac_address": cfg.wol.mac_address} if cfg.wol is not None else None),
+            "wol": (
+                {"broadcast_address": cfg.wol.broadcast_address, "mac_address": cfg.wol.mac_address}
+                if cfg.wol is not None
+                else None
+            ),
             "claude": cfg.claude_configs,
             "logs": {"days": p.log_retention_days, "count": p.log_retention_count},
             "restart_fields": _restart_fields(cfg, boot),
@@ -332,10 +368,13 @@ def register_config_routes(api: APIRouter) -> None:
     def put_wol(request: Request, body: WolUpdate) -> dict:
         # 两字段均必填非空(WolUpdate min_length=1);清除走 DELETE。原 `is not None` 是死分支
         # (Pydantic 必填 str 恒非 None)。整组写,与 delete_wol 对称。
-        set_settings(get_db(request), {
-            "wol_broadcast": body.broadcast_address,
-            "wol_mac": body.mac_address,
-        })
+        set_settings(
+            get_db(request),
+            {
+                "wol_broadcast": body.broadcast_address,
+                "wol_mac": body.mac_address,
+            },
+        )
         cfg = get_config_store(request).reload()
         return _config_write_result(request, cfg)
 
@@ -355,6 +394,7 @@ def register_config_routes(api: APIRouter) -> None:
         """立即发送魔术包(WebUI「发送魔术包」;按请求体地址,与托盘 send_wol 同款)。
         广播/MAC 非法(如 build_magic_packet 校验失败)→ 422。"""
         from llm_manager.tray import wol as wol_impl
+
         try:
             wol_impl.send_wol(body.mac_address, body.broadcast_address)
         except Exception as e:
@@ -363,7 +403,9 @@ def register_config_routes(api: APIRouter) -> None:
 
     @api.put("/config/claude")
     def put_claude(request: Request, body: ClaudeConfigsUpdate) -> dict:
-        set_settings(get_db(request), {"claude_configs": json.dumps(body.configs, ensure_ascii=False)})
+        set_settings(
+            get_db(request), {"claude_configs": json.dumps(body.configs, ensure_ascii=False)}
+        )
         cfg = get_config_store(request).reload()
         return _config_write_result(request, cfg)
 
@@ -400,7 +442,7 @@ def register_config_routes(api: APIRouter) -> None:
             updates["log_retention_count"] = str(body.count)
         if updates:
             set_settings(get_db(request), updates)
-        get_config_store(request).reload()                  # 日志规则已并入 AppConfig 快照;reload 保持新鲜
+        get_config_store(request).reload()  # 日志规则已并入 AppConfig 快照;reload 保持新鲜
         return _config_write_result(request, get_config_store(request).snapshot())
 
     @api.get("/config/restart-status")
@@ -416,23 +458,35 @@ def register_config_routes(api: APIRouter) -> None:
         request.app.state.restart_requested = True
         server = getattr(request.app.state, "uvicorn_server", None)
         if server is not None:
+
             async def _delayed_exit() -> None:
                 await asyncio.sleep(0.5)
                 server.should_exit = True
+
             asyncio.create_task(_delayed_exit())
         else:
+
             async def _dev_exit() -> None:
                 await asyncio.sleep(0.5)
                 os._exit(RESTART_EXIT_CODE)
+
             asyncio.create_task(_dev_exit())
         return {}
 
     @api.get("/config/models")
     def list_model_defs(request: Request) -> list[dict]:
         cfg = get_config_store(request).snapshot()
-        return [{"name": name, "mode": m.mode, "port": m.port, "auto_start": m.auto_start,
-                 "aliases": list(m.aliases), "schemes": list(m.schemes)}
-                for name, m in cfg.models.items()]
+        return [
+            {
+                "name": name,
+                "mode": m.mode,
+                "port": m.port,
+                "auto_start": m.auto_start,
+                "aliases": list(m.aliases),
+                "schemes": list(m.schemes),
+            }
+            for name, m in cfg.models.items()
+        ]
 
     @api.post("/config/models", status_code=201)
     def create_model_def(request: Request, body: ModelDefInput) -> dict:
@@ -447,7 +501,7 @@ def register_config_routes(api: APIRouter) -> None:
         except ValueError as e:
             raise HTTPException(422, detail=str(e))
         store.reload()
-        return {"affected_routing": [], "hint": None}      # 新模型必未路由
+        return {"affected_routing": [], "hint": None}  # 新模型必未路由
 
     @api.get("/config/models/{name}")
     def get_model_def(name: str, request: Request) -> dict:
@@ -455,16 +509,29 @@ def register_config_routes(api: APIRouter) -> None:
         if name not in cfg.models:
             raise HTTPException(404, f"model '{name}' not found")
         m = cfg.models[name]
-        return {"name": name, "mode": m.mode, "port": m.port, "auto_start": m.auto_start,
-                "aliases": list(m.aliases),
-                "schemes": [{"config_source": s.config_source,
-                             "required_devices": sorted(s.required_devices),
-                             "command": {"exe": s.command.exe, "args": list(s.command.args),
-                                         "env": s.command.env, "cwd": s.command.cwd,
-                                         "conda_env": s.command.conda_env},
-                             "memory_mb": dict(s.memory_mb)}
-                            for s in m.schemes.values()],
-                "pricing": _pricing_dict(m.pricing)}
+        return {
+            "name": name,
+            "mode": m.mode,
+            "port": m.port,
+            "auto_start": m.auto_start,
+            "aliases": list(m.aliases),
+            "schemes": [
+                {
+                    "config_source": s.config_source,
+                    "required_devices": sorted(s.required_devices),
+                    "command": {
+                        "exe": s.command.exe,
+                        "args": list(s.command.args),
+                        "env": s.command.env,
+                        "cwd": s.command.cwd,
+                        "conda_env": s.command.conda_env,
+                    },
+                    "memory_mb": dict(s.memory_mb),
+                }
+                for s in m.schemes.values()
+            ],
+            "pricing": _pricing_dict(m.pricing),
+        }
 
     @api.put("/config/models/{name}")
     def put_model_def(
@@ -477,13 +544,17 @@ def register_config_routes(api: APIRouter) -> None:
             # 运行中拦截:活跃态改名会与 state(primary_name keyed)/lifecycle 错位
             from llm_manager import state
             from llm_manager.state import ModelStatus
+
             st = state.get_status(name)
             if st not in (ModelStatus.STOPPED, ModelStatus.FAILED):
                 raise HTTPException(409, f"model '{name}' is {st.value}; stop it before renaming")
             # UNIQUE 预检:迁移时新名不得已被孤立数据占用(否则 UPDATE models 撞 UNIQUE)
-            if migrate_data and db.conn.execute(
-                "SELECT 1 FROM models WHERE original_name = ?", (body.name,)
-            ).fetchone():
+            if (
+                migrate_data
+                and db.conn.execute(
+                    "SELECT 1 FROM models WHERE original_name = ?", (body.name,)
+                ).fetchone()
+            ):
                 raise HTTPException(
                     422,
                     f"new name '{body.name}' is occupied by orphaned data; "
@@ -497,8 +568,11 @@ def register_config_routes(api: APIRouter) -> None:
             # 非改名但 aliases[0] 变更:同步日志别名快照(日志页按别名显示,不残留旧名)。
             # 变更判定用改前快照(store.snapshot);sync 用 post_write 传入的 new_cfg 取新别名。
             old_cfg = store.snapshot()
-            if body.aliases and name in old_cfg.models \
-                    and body.aliases[0] != old_cfg.models[name].aliases[0]:
+            if (
+                body.aliases
+                and name in old_cfg.models
+                and body.aliases[0] != old_cfg.models[name].aliases[0]
+            ):
                 post = _alias_migrator(name)
             else:
                 post = None
@@ -526,9 +600,10 @@ def register_config_routes(api: APIRouter) -> None:
             raise HTTPException(404, f"model '{name}' not found")
         from llm_manager import state
         from llm_manager.state import ModelStatus
+
         if state.get_status(name) == ModelStatus.ROUTING:
             raise HTTPException(409, f"model '{name}' is routing; stop it before deleting")
-        aliases = cfg.models[name].aliases   # 快照仍在,先取别名(删日志匹配用)
+        aliases = cfg.models[name].aliases  # 快照仍在,先取别名(删日志匹配用)
         try:
             mutate_appconfig(get_db(request), lambda c: _delete_model(c, name))
         except ModelNotFound:

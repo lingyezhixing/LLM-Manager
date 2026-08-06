@@ -1,4 +1,5 @@
 """AMD GPU 适配器:Linux(amdgpu sysfs)/Windows(LHM)统一接口。"""
+
 from __future__ import annotations
 
 import os
@@ -6,8 +7,13 @@ from pathlib import Path
 
 from . import DeviceInfo
 from .common import (
-    _DRM_CLASS, _drm_cards, _hwmon_temp1, _read_float, _read_int_mb,
-    _lhm_computer, _aggregate_sensors,  # Windows LHM 运行时
+    _DRM_CLASS,
+    _drm_cards,
+    _hwmon_temp1,
+    _read_float,
+    _read_int_mb,
+    _lhm_computer,
+    _aggregate_sensors,  # Windows LHM 运行时
 )
 
 # ==================== AMD(amdgpu sysfs + LHM)====================
@@ -37,7 +43,9 @@ _AMD_GPU_NAMES = {
 def _amd_gpu_name(dev: Path) -> str:
     """uevent 的 PCI_ID(如 1002:15fe)→ 已知映射名,未知 → 'AMD Radeon (1002:xxxx)'。"""
     try:
-        for line in dev.joinpath("uevent").read_text(encoding="ascii", errors="ignore").splitlines():
+        for line in (
+            dev.joinpath("uevent").read_text(encoding="ascii", errors="ignore").splitlines()
+        ):
             if line.startswith("PCI_ID="):
                 pci_id = line.split("=", 1)[1].strip().lower()
                 return _AMD_GPU_NAMES.get(pci_id, f"AMD Radeon ({pci_id})")
@@ -69,9 +77,18 @@ class AmdAdapter:
                 continue
             total, used = _amd_vram(dev)
             busy = _read_float(dev / "gpu_busy_percent")
-            out.append(DeviceInfo(
-                _amd_gpu_name(dev), "GPU (APU)", "VRAM",
-                total, max(total - used, 0), used, busy, _hwmon_temp1(dev)))
+            out.append(
+                DeviceInfo(
+                    _amd_gpu_name(dev),
+                    "GPU (APU)",
+                    "VRAM",
+                    total,
+                    max(total - used, 0),
+                    used,
+                    busy,
+                    _hwmon_temp1(dev),
+                )
+            )
         return out
 
     def _enumerate_windows(self) -> list[DeviceInfo]:

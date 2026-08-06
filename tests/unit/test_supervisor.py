@@ -46,6 +46,7 @@ def test_on_exit_callback_fires_when_process_exits():
 
 def test_kill_tree_clears_process_tables():
     """#5:kill_tree 后 _procs/_exit_cbs 清(_wait 自清 _wait_tasks),防 start/stop 循环累积 Popen 句柄/内存。"""
+
     async def main():
         sup = Supervisor()
         rec = await sup.spawn([sys.executable, "-c", "import time; time.sleep(30)"], shell=False)
@@ -53,9 +54,9 @@ def test_kill_tree_clears_process_tables():
         await asyncio.sleep(0.3)
         assert rec.pid in sup._procs and rec.pid in sup._wait_tasks and rec.pid in sup._exit_cbs
         await sup.kill_tree(rec.pid)
-        assert rec.pid not in sup._procs        # kill_tree finally 清
-        assert rec.pid not in sup._exit_cbs     # kill_tree finally 清
-        await asyncio.sleep(0.5)                # _wait 收尾(popen.wait 返回)+ 自清 _wait_tasks
+        assert rec.pid not in sup._procs  # kill_tree finally 清
+        assert rec.pid not in sup._exit_cbs  # kill_tree finally 清
+        await asyncio.sleep(0.5)  # _wait 收尾(popen.wait 返回)+ 自清 _wait_tasks
         assert rec.pid not in sup._wait_tasks
 
     asyncio.run(main())
@@ -63,15 +64,19 @@ def test_kill_tree_clears_process_tables():
 
 def test_spawn_captures_stdout_and_stderr_via_on_output():
     received = []
+
     async def go():
         sup = Supervisor()
+
         def on_output(line, stream):
             received.append((line, stream))
+
         # 用 chr(10) 生成换行,避免不同 shell (MSYS/Git Bash/POSIX) 对 \n 转义的解析差异。
         cmd = 'python -c "import sys; print(\\"out-line\\"); sys.stderr.write(\\"err-line\\" + chr(10)); sys.stderr.flush()"'
         rec = await sup.spawn(cmd, on_output=on_output)
-        await sup._wait_tasks[rec.pid]   # wait for process exit → reader EOF
-        await asyncio.sleep(0.05)        # let call_soon_threadsafe callbacks land
+        await sup._wait_tasks[rec.pid]  # wait for process exit → reader EOF
+        await asyncio.sleep(0.05)  # let call_soon_threadsafe callbacks land
+
     asyncio.run(go())
     assert ("out-line", "out") in received
     assert ("err-line", "err") in received
@@ -79,6 +84,7 @@ def test_spawn_captures_stdout_and_stderr_via_on_output():
 
 def test_natural_exit_cleans_all_tables():
     """自然退出:_wait 路径清空 _procs/_exit_cbs/_readers/_wait_tasks(修复累积泄漏)。"""
+
     async def main():
         sup = Supervisor()
         exited = asyncio.Event()
@@ -87,7 +93,7 @@ def test_natural_exit_cleans_all_tables():
         assert proc.pid in sup._procs
         sup.on_exit(proc.pid, lambda _rc: exited.set())
         await asyncio.wait_for(exited.wait(), timeout=5)
-        for _ in range(100):   # _wait 清理在回调后执行,轮询等收敛
+        for _ in range(100):  # _wait 清理在回调后执行,轮询等收敛
             if not sup._procs and not sup._readers and not sup._wait_tasks:
                 break
             await asyncio.sleep(0.02)
@@ -101,10 +107,12 @@ def test_natural_exit_cleans_all_tables():
 
 def test_kill_cleans_all_tables():
     """kill 路径:kill_tree finally 清空 _procs/_exit_cbs/_readers(修复累积泄漏)。"""
+
     async def main():
         sup = Supervisor()
-        proc = await sup.spawn([sys.executable, "-c", "import time; time.sleep(60)"],
-                               on_output=lambda _line, _s: None)
+        proc = await sup.spawn(
+            [sys.executable, "-c", "import time; time.sleep(60)"], on_output=lambda _line, _s: None
+        )
         assert proc.pid in sup._readers
         assert proc.pid in sup._procs
         assert await sup.kill_tree(proc.pid)
@@ -117,12 +125,13 @@ def test_kill_cleans_all_tables():
 
 def test_fast_kill_does_not_leak_wait_tasks():
     """spawn→立即 kill:_wait 早退路径自清 _wait_tasks(修复快杀循环残留)。"""
+
     async def main():
         sup = Supervisor()
         for _ in range(3):
             proc = await sup.spawn([sys.executable, "-c", "import time; time.sleep(60)"])
             assert await sup.kill_tree(proc.pid)
-        for _ in range(100):   # _wait 早退在 kill_tree 同步 finally 后执行,轮询等收敛
+        for _ in range(100):  # _wait 早退在 kill_tree 同步 finally 后执行,轮询等收敛
             if not sup._wait_tasks:
                 break
             await asyncio.sleep(0.02)

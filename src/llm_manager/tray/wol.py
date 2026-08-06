@@ -1,4 +1,5 @@
 """Wake-on-LAN magic packet + send."""
+
 from __future__ import annotations
 
 import socket

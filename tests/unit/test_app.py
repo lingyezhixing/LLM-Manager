@@ -29,16 +29,18 @@ def test_lifespan_starts_and_stops_background(tmp_path, monkeypatch):
     # 探针秒失败(跳过真实 60s 重试循环):仍证明 auto_start 后台真起 + 失败容错(不抛)+ 不阻塞 /health。
     # 测试的真实契约是「后台任务起 + 失败路径走通 + /health 不阻塞」,「重试 60s」只是 startup_timeout 的副作用。
     from llm_manager.probes import probe_registry, ProbeResult
+
     monkeypatch.setitem(
-        probe_registry, "Chat",
+        probe_registry,
+        "Chat",
         lambda alias, port, start_time=None, timeout=300: ProbeResult(False, "test fast-fail"),
     )
     cfg_path = tmp_path / "config.yaml"
     cfg_path.write_text(_CFG_BODY, encoding="utf-8")
     app = create_app(db_path=tmp_path / "t.db", legacy_yaml=cfg_path)
     with TestClient(app) as c:
-        assert c.get("/health").status_code == 200   # fire-and-forget:就绪不等 auto_start
-        deadline = time.monotonic() + 10              # 秒失败探针:m1 应 <2s FAILED(留余量)
+        assert c.get("/health").status_code == 200  # fire-and-forget:就绪不等 auto_start
+        deadline = time.monotonic() + 10  # 秒失败探针:m1 应 <2s FAILED(留余量)
         while time.monotonic() < deadline and state.get_status("m1") != ModelStatus.FAILED:
             time.sleep(0.05)
         assert state.get_status("m1") == ModelStatus.FAILED
@@ -49,50 +51,69 @@ def test_create_app_warm_start_skips_import(tmp_path):
     """同库二次 create_app(无 legacy_yaml)→ 已 initialized → 跳过导入,保留 DB 状态。"""
     cfg_path = tmp_path / "config.yaml"
     cfg_path.write_text(_CFG_BODY, encoding="utf-8")
-    create_app(db_path=tmp_path / "t.db", legacy_yaml=cfg_path)          # 首次:导入
+    create_app(db_path=tmp_path / "t.db", legacy_yaml=cfg_path)  # 首次:导入
     # 二次:不带 legacy_yaml,库已 initialized → seed/import 都跳过,仅 env 写库
     app2 = create_app(db_path=tmp_path / "t.db")
-    assert "m1" in app2.state.config_store.snapshot().models             # 保留首次导入的模型
+    assert "m1" in app2.state.config_store.snapshot().models  # 保留首次导入的模型
 
 
 def test_create_app_closes_db_on_bootstrap_error(tmp_path):
     cfg_path = tmp_path / "config.yaml"
     cfg_path.write_text(
         "program: {host: 0.0.0.0, port: 8080, alive_time: 60, log_level: INFO}\n"
-        "Local-Models:\n  A: {aliases: [x], mode: Chat, port: 1}\n"      # 无 scheme → validate 报错
-        "  B: {aliases: [x], mode: Chat, port: 1}\n",                    # alias/port 冲突
-        encoding="utf-8")
+        "Local-Models:\n  A: {aliases: [x], mode: Chat, port: 1}\n"  # 无 scheme → validate 报错
+        "  B: {aliases: [x], mode: Chat, port: 1}\n",  # alias/port 冲突
+        encoding="utf-8",
+    )
     db_path = tmp_path / "t.db"
     with pytest.raises(ValueError):
         create_app(db_path=db_path, legacy_yaml=cfg_path)
     # db.conn 应已关闭:可重新打开(Windows 上未关会锁文件)
     from llm_manager.data.persistence import open_db
-    open_db(db_path).conn.execute("SELECT 1").fetchone()                 # 不抛
+
+    open_db(db_path).conn.execute("SELECT 1").fetchone()  # 不抛
 
 
 def test_crud_then_catalog_reflects_without_restart(tmp_path, monkeypatch):
     """核心契约:POST /api/config/models 后,不重启即见 /v1/models + /api/config/models(读穿)。"""
-    monkeypatch.setattr("llm_manager.devices.common.is_lhm_available", lambda: False)  # 隔离 LHM 慢枚举
+    monkeypatch.setattr(
+        "llm_manager.devices.common.is_lhm_available", lambda: False
+    )  # 隔离 LHM 慢枚举
     cfg_path = tmp_path / "config.yaml"
     cfg_path.write_text(
         "program: {host: 0.0.0.0, port: 8080, alive_time: 60, log_level: INFO}\n"
         "Local-Models:\n  A: {aliases: [a], mode: Chat, port: 9001,"
         "    S: {required_devices: [gpu], command: {exe: a.bat}, memory_mb: {gpu: 1}}}\n",
-        encoding="utf-8")
+        encoding="utf-8",
+    )
     app = create_app(db_path=tmp_path / "t.db", legacy_yaml=cfg_path)
     with TestClient(app) as c:
         # 初始:A 在册
         assert "a" in {m["id"] for m in c.get("/v1/models").json()["data"]}
         # CRUD 加 B
-        r = c.post("/api/config/models", json={
-            "name": "B", "mode": "Chat", "port": 9002, "auto_start": False, "aliases": ["b"],
-            "schemes": [{"config_source": "S", "required_devices": ["gpu"],
-                         "command": {"exe": "b.bat"}, "memory_mb": {"gpu": 1}}]})
+        r = c.post(
+            "/api/config/models",
+            json={
+                "name": "B",
+                "mode": "Chat",
+                "port": 9002,
+                "auto_start": False,
+                "aliases": ["b"],
+                "schemes": [
+                    {
+                        "config_source": "S",
+                        "required_devices": ["gpu"],
+                        "command": {"exe": "b.bat"},
+                        "memory_mb": {"gpu": 1},
+                    }
+                ],
+            },
+        )
         assert r.status_code == 201
         # 不重启即见 B(读穿:/v1/models 与 /api/config/models 都走 config_store.snapshot)
         v1 = {m["id"] for m in c.get("/v1/models").json()["data"]}
         api = {m["name"] for m in c.get("/api/config/models").json()}
-        assert "b" in v1 and "B" in api     # v1 用 alias "b";config 列表用 name "B"
+        assert "b" in v1 and "B" in api  # v1 用 alias "b";config 列表用 name "B"
         # CRUD 删 A → 反映
         c.delete("/api/config/models/A")
         v1b = {m["id"] for m in c.get("/v1/models").json()["data"]}
@@ -104,8 +125,9 @@ def test_log_level_from_config_applied(tmp_path, monkeypatch):
     只捕获调用参数,不触发真实 logging 副作用(conftest _isolate_logging 隔离)。"""
     monkeypatch.setattr("llm_manager.devices.common.is_lhm_available", lambda: False)
     levels: list[str] = []
-    monkeypatch.setattr("llm_manager.app.setup_logging",
-                        lambda level="INFO", **kw: levels.append(level))
+    monkeypatch.setattr(
+        "llm_manager.app.setup_logging", lambda level="INFO", **kw: levels.append(level)
+    )
     cfg_path = tmp_path / "config.yaml"
     cfg_path.write_text(_CFG_BODY.replace("log_level: INFO", "log_level: DEBUG"), encoding="utf-8")
     create_app(db_path=tmp_path / "t.db", legacy_yaml=cfg_path)
@@ -122,14 +144,17 @@ def test_create_dev_app_leaves_no_fake_server(tmp_path, monkeypatch):
 
 def test_exit_code_for_returns_sentinel_only_when_requested():
     from llm_manager.app import RESTART_EXIT_CODE, exit_code_for
+
     assert exit_code_for(False) == 0
     assert exit_code_for(True) == RESTART_EXIT_CODE == 81
 
 
 # ---------- parent 监督器辅助(Task 1) ----------
 
+
 def test_should_respawn_only_on_restart_sentinel():
     from llm_manager.app import _should_respawn, RESTART_EXIT_CODE
+
     assert _should_respawn(RESTART_EXIT_CODE) is True
     assert _should_respawn(0) is False
     assert _should_respawn(1) is False
@@ -139,6 +164,7 @@ def test_should_respawn_only_on_restart_sentinel():
 
 def test_worker_command_contains_executable_and_flag():
     from llm_manager.app import _worker_command, _WORKER_FLAG
+
     cmd = _worker_command()
     assert cmd[0] == sys.executable
     assert "-m" in cmd and "llm_manager" in cmd
@@ -148,6 +174,7 @@ def test_worker_command_contains_executable_and_flag():
 def test_spawn_kwargs_windows_uses_process_group(monkeypatch):
     import subprocess
     import llm_manager.app as appmod
+
     monkeypatch.setattr(appmod.os, "name", "nt")
     kw = appmod._spawn_kwargs()
     assert kw["creationflags"] == subprocess.CREATE_NEW_PROCESS_GROUP
@@ -155,6 +182,7 @@ def test_spawn_kwargs_windows_uses_process_group(monkeypatch):
 
 def test_spawn_kwargs_posix_uses_new_session(monkeypatch):
     import llm_manager.app as appmod
+
     monkeypatch.setattr(appmod.os, "name", "posix")
     kw = appmod._spawn_kwargs()
     assert kw["start_new_session"] is True
@@ -163,9 +191,11 @@ def test_spawn_kwargs_posix_uses_new_session(monkeypatch):
 
 # ---------- 信号转发辅助(Task 2) ----------
 
+
 def test_forwardable_signals_per_os(monkeypatch):
     import signal as _sig
     import llm_manager.app as appmod
+
     monkeypatch.setattr(appmod.os, "name", "nt")
     assert appmod._forwardable_signals() == [_sig.SIGINT]
     monkeypatch.setattr(appmod.os, "name", "posix")
@@ -176,6 +206,7 @@ def test_forwardable_signals_per_os(monkeypatch):
 def test_send_shutdown_windows_sends_ctrl_break(monkeypatch):
     import signal as _sig
     import llm_manager.app as appmod
+
     monkeypatch.setattr(appmod.os, "name", "nt")
     sent = {}
 
@@ -192,11 +223,17 @@ def test_send_shutdown_windows_sends_ctrl_break(monkeypatch):
 def test_send_shutdown_posix_killpg(monkeypatch):
     import signal as _sig
     import llm_manager.app as appmod
+
     monkeypatch.setattr(appmod.os, "name", "posix")
     killed = {}
     # getpgid/killpg 在 Windows 不存在,raising=False 允许注入以测 POSIX 分支
     monkeypatch.setattr(appmod.os, "getpgid", lambda pid: 999, raising=False)
-    monkeypatch.setattr(appmod.os, "killpg", lambda pgid, sig: killed.__setitem__("args", (pgid, sig)), raising=False)
+    monkeypatch.setattr(
+        appmod.os,
+        "killpg",
+        lambda pgid, sig: killed.__setitem__("args", (pgid, sig)),
+        raising=False,
+    )
 
     class FakeProc:
         pid = 123
@@ -207,6 +244,7 @@ def test_send_shutdown_posix_killpg(monkeypatch):
 
 def test_send_shutdown_missing_process_is_silent(monkeypatch):
     import llm_manager.app as appmod
+
     monkeypatch.setattr(appmod.os, "name", "posix")
 
     def _raise_ple(pid):
@@ -220,16 +258,17 @@ def test_send_shutdown_missing_process_is_silent(monkeypatch):
     class FakeProc:
         pid = 123
 
-    appmod._send_shutdown(FakeProc())   # 不抛
+    appmod._send_shutdown(FakeProc())  # 不抛
 
 
 def test_force_kill_when_still_running():
     import llm_manager.app as appmod
+
     killed = {}
 
     class FakeProc:
         def poll(self):
-            return None   # 仍运行
+            return None  # 仍运行
 
         def kill(self):
             killed["killed"] = True
@@ -243,7 +282,7 @@ def test_force_kill_noop_when_exited():
 
     class FakeProc:
         def poll(self):
-            return 0      # 已退出
+            return 0  # 已退出
 
         def kill(self):
             raise AssertionError("不应 kill 已退出的进程")
@@ -253,8 +292,10 @@ def test_force_kill_noop_when_exited():
 
 # ---------- 入口分派(Task 3) ----------
 
+
 def test_main_dispatches_to_worker_when_flag(monkeypatch):
     import llm_manager.app as appmod
+
     called = {}
     monkeypatch.setattr(appmod, "_run_worker", lambda: called.__setitem__("w", True))
     monkeypatch.setattr(appmod, "_run_parent", lambda: called.__setitem__("p", True))
@@ -265,6 +306,7 @@ def test_main_dispatches_to_worker_when_flag(monkeypatch):
 
 def test_main_dispatches_to_parent_by_default(monkeypatch):
     import llm_manager.app as appmod
+
     called = {}
     monkeypatch.setattr(appmod, "_run_worker", lambda: called.__setitem__("w", True))
     monkeypatch.setattr(appmod, "_run_parent", lambda: called.__setitem__("p", True))

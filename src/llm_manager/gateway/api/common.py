@@ -1,4 +1,5 @@
 """/api/* 子路由共享的每请求访问器与 SSE 帧格式化。"""
+
 from __future__ import annotations
 
 from fastapi import Request

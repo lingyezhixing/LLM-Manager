@@ -11,6 +11,7 @@ silent operation — ``is_tray_available`` gates ``start``. The Icon/run() loop 
 not unit-testable; action methods are kept free of pystray objects so they can
 be exercised in isolation via the ``_run_coro_threadsafe`` seam.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -31,6 +32,7 @@ logger = logging.getLogger(__name__)
 try:
     import pystray as _pystray  # type: ignore[import-not-found]
     from PIL import Image as _pil_image  # type: ignore[import-not-found]
+
     _PYSTRAY_AVAILABLE = True
 except ImportError:
     _pystray = None
@@ -106,10 +108,17 @@ class SystemTray:
         单帧 256 会让系统硬缩 → 高 DPI 下模糊。sizes 生成的多帧文件经
         pystray 二次保存仍保留全部帧(Pillow 从 image.info['sizes'] 继承)。"""
         icon = Path(__file__).resolve().parents[1] / "assets" / "icon.ico"
-        src = (Image.open(icon).convert("RGBA") if icon.exists()
-               else Image.new("RGBA", (256, 256), (0, 0, 0, 0)))
+        src = (
+            Image.open(icon).convert("RGBA")
+            if icon.exists()
+            else Image.new("RGBA", (256, 256), (0, 0, 0, 0))
+        )
         buf = io.BytesIO()
-        src.save(buf, "ICO", sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)])
+        src.save(
+            buf,
+            "ICO",
+            sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)],
+        )
         buf.seek(0)
         return Image.open(buf)
 
@@ -127,7 +136,9 @@ class SystemTray:
         # 托盘其余功能(WebUI/WOL/启停/退出)照常可用
         if cfg.claude_configs and cfg.program.claude_settings_path:
             submenu = pystray.Menu(*[self._preset_menuitem(n) for n in cfg.claude_configs])
-            items.append(pystray.MenuItem("Claude 配置", submenu))  # action=Menu 即子菜单(本版无 submenu kwarg)
+            items.append(
+                pystray.MenuItem("Claude 配置", submenu)
+            )  # action=Menu 即子菜单(本版无 submenu kwarg)
         items += [
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("重启自启模型", self.restart_auto_start),
@@ -153,7 +164,9 @@ class SystemTray:
         # 中途配置路径未重启时可能出现 None(Path(None) 会炸)。
         if not self._settings_path:
             return "(未知)"
-        return claude.detect_current_preset(self._settings_path, dict(self._get_cfg().claude_configs))
+        return claude.detect_current_preset(
+            self._settings_path, dict(self._get_cfg().claude_configs)
+        )
 
     # ---------- actions (unit-testable; no pystray objects) ----------
     def open_webui(self, icon=None, item=None) -> None:
@@ -203,7 +216,7 @@ class SystemTray:
     def _run_coro_threadsafe(self, coro) -> None:
         if self._loop.is_closed():
             logger.warning("事件循环已关闭,操作取消")
-            coro.close()        # 避免 "coroutine never awaited" 警告
+            coro.close()  # 避免 "coroutine never awaited" 警告
             return
         asyncio.run_coroutine_threadsafe(coro, self._loop)
 
@@ -214,7 +227,10 @@ class SystemTray:
         auto_models = config.auto_start_models(cfg)
         stop_event = asyncio.Event()
         await background.auto_start(
-            self._lifecycle, auto_models, cfg, self._monitor,
+            self._lifecycle,
+            auto_models,
+            cfg,
+            self._monitor,
             timeout=self._startup_timeout + self._auto_start_margin,
             stop_event=stop_event,
         )

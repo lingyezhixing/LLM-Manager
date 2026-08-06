@@ -2,6 +2,7 @@
 
 Stop side-effects are NOT here — Lifecycle executes the returned decisions.
 Pure → unit-testable without fakes."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -11,7 +12,7 @@ from llm_manager.devices import DeviceInfo
 
 @dataclass(frozen=True, slots=True)
 class RunnableInfo:
-    mem_mb: dict[str, int]    # per-device occupancy of this running model
+    mem_mb: dict[str, int]  # per-device occupancy of this running model
     pending: int
     last_access: float
 
@@ -75,5 +76,5 @@ def check_and_free(
             working[dev] = working.get(dev, 0) + mb
         deficit_devs = set(compute_deficit(required, working))
     if deficit_devs:
-        return []      # 模拟无可满足:不返回部分驱逐名单(白停),交由 lifecycle 判 FAILED
+        return []  # 模拟无可满足:不返回部分驱逐名单(白停),交由 lifecycle 判 FAILED
     return stopped

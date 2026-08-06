@@ -6,6 +6,7 @@ search. ``model`` query param accepts alias (resolved to primary_name via
 config.resolve_alias, falling back to session history for deleted-model
 residuals); logs API reads ``get_db(request)``.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -19,8 +20,12 @@ from llm_manager import config
 from llm_manager.data import logs as _logs
 from llm_manager.gateway.api.common import get_config_store, get_db, sse_frame
 from llm_manager.gateway.api.logs_schemas import (
-    LogLineResponse, LogSearchMatch, LogSearchResponse, LogSessionResponse,
-    _to_line, _to_session,
+    LogLineResponse,
+    LogSearchMatch,
+    LogSearchResponse,
+    LogSessionResponse,
+    _to_line,
+    _to_session,
 )
 
 
@@ -50,7 +55,8 @@ async def _session_stream(session_id: int, level: str | None, db, q) -> AsyncIte
     try:
         # 🔵3:回填 2048 行的同步 SQL 移出事件循环线程,避免长订阅首帧阻塞其它请求。
         backfill = await asyncio.to_thread(
-            _logs.log_lines_backfill, db, session_id, limit=2048, level=level)
+            _logs.log_lines_backfill, db, session_id, limit=2048, level=level
+        )
         for r in backfill:
             yield sse_frame(_to_line(r))
         while True:
@@ -63,49 +69,74 @@ async def _session_stream(session_id: int, level: str | None, db, q) -> AsyncIte
 
 def register_logs_routes(api: APIRouter) -> None:
     @api.get("/logs/sessions", response_model=list[LogSessionResponse])
-    def list_sessions(request: Request, type: Literal["system", "model"] | None = None,
-                      model: str | None = None, limit: int = 50,
-                      before: int | None = None) -> list[LogSessionResponse]:
+    def list_sessions(
+        request: Request,
+        type: Literal["system", "model"] | None = None,
+        model: str | None = None,
+        limit: int = 50,
+        before: int | None = None,
+    ) -> list[LogSessionResponse]:
         m = _resolve_model(request, model)
-        rows = _logs.log_sessions(get_db(request), type_=type, model_name=m,
-                               limit=limit, before_id=before)
+        rows = _logs.log_sessions(
+            get_db(request), type_=type, model_name=m, limit=limit, before_id=before
+        )
         return [_to_session(r) for r in rows]
 
     @api.get("/logs/sessions/{session_id}/lines", response_model=list[LogLineResponse])
-    def session_lines(session_id: int, request: Request, before: int | None = None,
-                      limit: int = 1500,
-                      level: Literal["info", "ok", "warn", "error"] | None = None
-                      ) -> list[LogLineResponse]:
+    def session_lines(
+        session_id: int,
+        request: Request,
+        before: int | None = None,
+        limit: int = 1500,
+        level: Literal["info", "ok", "warn", "error"] | None = None,
+    ) -> list[LogLineResponse]:
         limit = max(1, min(limit, 5000))
         if not _logs.log_session_exists(get_db(request), session_id):
             raise HTTPException(404, "会话不存在")
-        rows = (_logs.log_lines_before(get_db(request), session_id, before, limit, level)
-                if before is not None
-                else _logs.log_lines_backfill(get_db(request), session_id, limit, level))
+        rows = (
+            _logs.log_lines_before(get_db(request), session_id, before, limit, level)
+            if before is not None
+            else _logs.log_lines_backfill(get_db(request), session_id, limit, level)
+        )
         return [_to_line(r) for r in rows]
 
     @api.get("/logs/sessions/{session_id}/stream")
-    async def stream_session(session_id: int, request: Request,
-                             level: Literal["info", "ok", "warn", "error"] | None = None
-                             ) -> StreamingResponse:
+    async def stream_session(
+        session_id: int,
+        request: Request,
+        level: Literal["info", "ok", "warn", "error"] | None = None,
+    ) -> StreamingResponse:
         q = _logs.subscribe(session_id)
         if q is None:
             raise HTTPException(404, "会话不存在")
         return StreamingResponse(
-            _session_stream(session_id, level, get_db(request), q),
-            media_type="text/event-stream")
+            _session_stream(session_id, level, get_db(request), q), media_type="text/event-stream"
+        )
 
     @api.get("/logs/search", response_model=LogSearchResponse)
-    def search_logs(request: Request, q: str = "",
-                    type: Literal["system", "model"] | None = None,
-                    model: str | None = None, session_id: int | None = None,
-                    level: Literal["info", "ok", "warn", "error"] | None = None,
-                    limit: int = 500) -> LogSearchResponse:
+    def search_logs(
+        request: Request,
+        q: str = "",
+        type: Literal["system", "model"] | None = None,
+        model: str | None = None,
+        session_id: int | None = None,
+        level: Literal["info", "ok", "warn", "error"] | None = None,
+        limit: int = 500,
+    ) -> LogSearchResponse:
         if not q.strip():
-            return LogSearchResponse(total=0, matches=[])   # 🔵5:空查询无意义,拒空串避免 LIKE '%%' 全表扫描
+            return LogSearchResponse(
+                total=0, matches=[]
+            )  # 🔵5:空查询无意义,拒空串避免 LIKE '%%' 全表扫描
         m = _resolve_model(request, model)
-        total, rows = _logs.log_search(get_db(request), q, type_=type, model_name=m,
-                                    session_id=session_id, level=level, limit=limit)
+        total, rows = _logs.log_search(
+            get_db(request),
+            q,
+            type_=type,
+            model_name=m,
+            session_id=session_id,
+            level=level,
+            limit=limit,
+        )
         return LogSearchResponse(
             total=total,
             matches=[LogSearchMatch(session_id=r["session_id"], line=_to_line(r)) for r in rows],

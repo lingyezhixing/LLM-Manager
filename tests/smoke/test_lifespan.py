@@ -1,4 +1,3 @@
-
 import time
 
 from fastapi.testclient import TestClient
@@ -38,17 +37,17 @@ def test_lifespan_opens_and_closes_system_session(tmp_path):
     app = create_app(db_path=tmp_path / "t.db")
     with TestClient(app):
         sid = logs.current_system_session_id()
-        assert sid is not None                        # lifespan 已开系统会话
+        assert sid is not None  # lifespan 已开系统会话
         rows = logs.log_sessions(app.state.db, type_="system")
-        assert rows[0]["end_time"] is None            # 进行中
+        assert rows[0]["end_time"] is None  # 进行中
     # shutdown 后连接已关:重开检查 end_time 落库
     db2 = open_db(tmp_path / "t.db")
     try:
         rows = logs.log_sessions(db2, type_="system")
-        assert rows[0]["end_time"] is not None        # shutdown 收口
+        assert rows[0]["end_time"] is not None  # shutdown 收口
     finally:
         db2.conn.close()
-    assert logs.current_system_session_id() is None   # 内存登记已清除
+    assert logs.current_system_session_id() is None  # 内存登记已清除
 
 
 def test_lifespan_new_system_session_after_crash(tmp_path):
@@ -65,14 +64,14 @@ def test_lifespan_new_system_session_after_crash(tmp_path):
     with TestClient(app):
         rows = logs.log_sessions(app.state.db, type_="system")
         by_id = {r["id"]: r for r in rows}
-        assert by_id[resid]["status"] == "ended"        # 不在 live_session_ids → ended(无需收口)
+        assert by_id[resid]["status"] == "ended"  # 不在 live_session_ids → ended(无需收口)
         current = logs.current_system_session_id()
-        assert current is not None and current != resid   # 新会话已开
+        assert current is not None and current != resid  # 新会话已开
         assert by_id[current]["status"] == "running"
     # shutdown 关闭新会话(current 的 end_time 被写;resid 是 SQL 直插假残留,end_time 未经心跳)
     db2 = open_db(db_path)
     try:
         rows = {r["id"]: r for r in logs.log_sessions(db2, type_="system")}
-        assert rows[current]["end_time"] is not None    # 新会话 shutdown 时关闭
+        assert rows[current]["end_time"] is not None  # 新会话 shutdown 时关闭
     finally:
         db2.conn.close()
