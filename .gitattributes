@@ -1,0 +1,3 @@
+# Windows 批处理必须用 CRLF:cmd.exe 对 LF-only 的 .bat 解析错乱
+# (echo/重定向/引号行被错误切分)。eol=crlf 保证工作树恒为 CRLF。
+*.bat text eol=crlf
