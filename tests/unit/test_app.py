@@ -249,3 +249,25 @@ def test_force_kill_noop_when_exited():
             raise AssertionError("不应 kill 已退出的进程")
 
     appmod._force_kill(FakeProc())
+
+
+# ---------- 入口分派(Task 3) ----------
+
+def test_main_dispatches_to_worker_when_flag(monkeypatch):
+    import llm_manager.app as appmod
+    called = {}
+    monkeypatch.setattr(appmod, "_run_worker", lambda: called.__setitem__("w", True))
+    monkeypatch.setattr(appmod, "_run_parent", lambda: called.__setitem__("p", True))
+    monkeypatch.setattr(appmod.sys, "argv", ["llm_manager", "--worker"])
+    appmod.main()
+    assert called == {"w": True}
+
+
+def test_main_dispatches_to_parent_by_default(monkeypatch):
+    import llm_manager.app as appmod
+    called = {}
+    monkeypatch.setattr(appmod, "_run_worker", lambda: called.__setitem__("w", True))
+    monkeypatch.setattr(appmod, "_run_parent", lambda: called.__setitem__("p", True))
+    monkeypatch.setattr(appmod.sys, "argv", ["llm_manager"])
+    appmod.main()
+    assert called == {"p": True}

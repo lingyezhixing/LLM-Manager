@@ -216,6 +216,16 @@ def _force_kill(proc) -> None:
 
 
 def main() -> None:
+    """入口分派:`--worker` → 跑应用(worker);否则 → parent 监督器。"""
+    if _WORKER_FLAG in sys.argv[1:]:
+        _run_worker()
+    else:
+        _run_parent()
+
+
+def _run_worker() -> None:
+    """worker:实际应用(create_app + server.run)。退出码 81=请求重启,0=正常;
+    parent 监督器在其退出码上决定拉新 / 退出。"""
     import uvicorn
     app = create_app(legacy_yaml=Path("config.yaml"))
     cfg = app.state.config_store.snapshot()
@@ -224,3 +234,49 @@ def main() -> None:
     app.state.uvicorn_server = server
     server.run()
     sys.exit(exit_code_for(getattr(app.state, "restart_requested", False)))
+
+
+def _run_parent() -> None:
+    """parent 监督器:常驻,不碰 DB / 不持 app 状态。spawn worker、转发 Ctrl-C/SIGTERM、
+    按 worker 退出码决定拉新(81)/ 退出(0 或崩溃)。严格顺序:等 rc 到手才 spawn 下一个,
+    故无双 worker 并存、无端口竞争。崩溃不自愈(可见失败)。"""
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s", datefmt="%H:%M:%S")
+    while True:
+        proc = _spawn_worker()
+        _forward_signals(proc)
+        rc = proc.wait()
+        if _should_respawn(rc) and not _shutting_down:
+            logger.info("worker 请求重启(exit %s),拉起新 worker...", rc)
+            continue
+        logger.info("worker 退出(码 %s),parent 退出。", rc)
+        sys.exit(rc if isinstance(rc, int) else 0)
+
+
+def _spawn_worker():
+    """spawn 一个 worker(继承 stdio,日志直通 parent 控制台)。"""
+    return subprocess.Popen(_worker_command(), **_spawn_kwargs())
+
+
+_shutting_down = False   # 信号转发置位;防止重启间隙收到的信号误触发新 worker 关闭
+
+
+def _forward_signals(proc) -> None:
+    """安装信号转发:parent 收 Ctrl-C/SIGTERM → 转发 worker 进程组使其优雅关闭;
+    并起超时定时器,_SHUTDOWN_GRACE 秒后仍存活 → 强杀(防 worker 卡死拽死 parent)。
+    每轮 worker 重装(指向当轮 proc);_shutting_down 复位。"""
+    global _shutting_down
+    _shutting_down = False
+
+    def _on_signal(signum, frame):
+        global _shutting_down
+        if _shutting_down:
+            return
+        _shutting_down = True
+        logger.info("收到信号 %s,转发给 worker 优雅关闭...", signum)
+        _send_shutdown(proc)
+        watchdog = threading.Timer(_SHUTDOWN_GRACE, _force_kill, args=(proc,))
+        watchdog.daemon = True
+        watchdog.start()
+
+    for sig in _forwardable_signals():
+        signal.signal(sig, _on_signal)
