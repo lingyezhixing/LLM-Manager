@@ -115,7 +115,7 @@ npx tsc -b           # 仅类型检查
 | `state` | `_state` / `_inflight` | 模型状态机 + 单派发 Future |
 | `data.logs` | `_sessions` / `_alias_to_session` / `_pending` / `_db` / `_flush_chain` | 日志会话 live 集 + alias↔会话映射 + 待落库 + flush 串行链 |
 | `data.usage` | `_live_segments` | 运行中计费段(崩溃随进程消失) |
-| `devices` | `_LHM_COMPUTER`(LibreHardwareMonitor) | 780M 核显传感器单例(Windows);Linux Intel iGPU 走 i915 sysfs(无单例) |
+| `devices` | `_LHM_COMPUTER`(LibreHardwareMonitor) | 780M/Intel 核显传感器单例(Windows);Linux Intel iGPU 走 i915 识别 + intel_gpu_top 采样、AMD 走 amdgpu sysfs(均无单例) |
 | `data.session` | `_c`(进程内用量计数器) | 概览 session-stats 卡的 token 累计(重启清零) |
 
 测试接缝:state/session 有 `_reset()`、logs 有 `reset()`;usage 无 `_reset`,

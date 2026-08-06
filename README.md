@@ -23,7 +23,7 @@
 - **按需启动**：请求到达时自动启动模型，空闲超时后自动关闭以释放显存。
 - **环境适配**：根据当前在线显卡型号自动选择匹配的启动方案（scheme），设备不满足时自动回退到下一个方案。
 - **并发安全**：单派发 Future 去重 + 全局 spawn 锁 + owner-token guard，高并发冷启动不串槽。
-- **健康探测**：纯函数 `probe_registry` 按模型模式（Chat / Embedding / Reranker）分派探测方式；设备监控覆盖 NVIDIA GPU（nvidia-smi）、Linux Intel iGPU（i915 sysfs）与 AMD 780M 核显（LibreHardwareMonitor，Windows）。
+- **健康探测**：纯函数 `probe_registry` 按模型模式（Chat / Embedding / Reranker）分派探测方式；设备监控覆盖 NVIDIA GPU（nvidia-smi，全平台）、Linux Intel iGPU（intel_gpu_top）/ AMD（amdgpu sysfs）、Windows AMD/Intel 核显（LibreHardwareMonitor）。
 
 ### 3. 全量 Token 追踪
 - 按请求路径自动分派解析器（OpenAI / Anthropic / Responses 三种格式），流量自动纳入统计，无需白名单配置。
