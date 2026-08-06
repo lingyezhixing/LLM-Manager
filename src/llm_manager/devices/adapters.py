@@ -65,7 +65,10 @@ def _run_smi() -> str:
 
 
 class NvidiaAdapter:
-    """nvidia-smi → DeviceInfo(device_name=产品原始名)。无 nvidia-smi / 无 NVIDIA → []。"""
+    """nvidia-smi → DeviceInfo(device_name=产品原始名)。无 nvidia-smi / 无 NVIDIA → []。
+    字段映射(复用 _GpuRow):total_memory_mb=memory.total;used_memory_mb=memory.used;
+    available_memory_mb=memory.free;usage_percentage=utilization.gpu;
+    temperature_celsius=temperature.gpu。"""
 
     def enumerate(self) -> list[DeviceInfo]:
         return [
@@ -116,8 +119,9 @@ def _intel_gpu_name(dev: Path) -> str:
     return "Intel UHD Graphics"
 
 
-def _intel_gpu_temp(dev: Path) -> float | None:
-    """i915 hwmon 封装温度(temp1_input,单位 10⁻³ °C)→ 摄氏度;无 hwmon/读失败 → None。"""
+def _hwmon_temp1(dev: Path) -> float | None:
+    """GPU hwmon 封装温度(temp1_input,单位 10⁻³ °C)→ 摄氏度;无 hwmon/读失败 → None。
+    Intel i915 与 AMD amdgpu 共用。"""
     try:
         for hwmon in dev.glob("hwmon/hwmon*"):
             raw = hwmon.joinpath("temp1_input").read_text(encoding="ascii").strip()
@@ -158,7 +162,7 @@ class IntelLinuxAdapter:
                 busy = 0.0
             out.append(DeviceInfo(
                 _intel_gpu_name(dev), "GPU (iGPU)", "Shared RAM",
-                total, avail, used, busy, _intel_gpu_temp(dev)))
+                total, avail, used, busy, _hwmon_temp1(dev)))
         return out
 
 
@@ -181,7 +185,7 @@ class AmdLinuxAdapter:
             busy = _read_float(dev / "gpu_busy_percent")
             out.append(DeviceInfo(
                 _amd_gpu_name(dev), "GPU (APU)", "VRAM",
-                total, max(total - used, 0), used, busy, _intel_gpu_temp(dev)))
+                total, max(total - used, 0), used, busy, _hwmon_temp1(dev)))
         return out
 
 
@@ -261,7 +265,8 @@ def _close_lhm() -> None:
 
 def _lhm_computer():
     """共享 LHM Computer 单例。**契约:永不抛**(返回 Computer | None)——初始化失败→None,
-    使 enumerate_cpu/enumerate_lhm_gpus 降级而非 raise(防 _lhm_cpu_temp 在 enumerate_cpu 的 try 外调用时穿透)。
+    使 CpuAdapter.enumerate/LhmAdapter.enumerate 降级而非 raise(防 _lhm_cpu_temp 在
+    CpuAdapter.enumerate 的 try 外调用时穿透)。
     惰性首次调用初始化(非模块加载时):import clr + AddReference + Computer() + Open() 只首次发生(Lock double-check);
     其后 fast-path = 缓存返回。is_lhm_available() 为假→直接 None。IsCpu+IsGpu 一次开,共用。"""
     global _LHM_COMPUTER

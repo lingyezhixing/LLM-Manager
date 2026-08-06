@@ -26,15 +26,19 @@ class DeviceInfo:
 
 # DeviceInfo 必须先于 adapters 导入定义:adapters.py 顶层 `from . import DeviceInfo`,
 # 若包仍处部分初始化(DeviceInfo 未绑定)则 ImportError(拆包循环导入陷阱)。
-from .adapters import *  # noqa: F401,F403,E402 — re-export 全部适配器符号(公共+测试私有接缝)
 from . import adapters as _adapters  # noqa: E402
-# 私有测试接缝:`import *` 不含下划线名(adapters 无 __all__),显式 re-export 保持
-# `from llm_manager.devices import _parse_smi, _aggregate_sensors`(test_devices 顶部)不破。
-from .adapters import _parse_smi, _aggregate_sensors  # noqa: F401,E402
+from .adapters import (  # noqa: E402,F401 — 显式 re-export(AmdLinuxAdapter 供 Task 3 装配)
+    NvidiaAdapter,
+    CpuAdapter,
+    IntelLinuxAdapter,
+    AmdLinuxAdapter,
+    LhmAdapter,
+    is_lhm_available,
+)
 
 
-# 兼容转发:现有测试 `import llm_manager.devices as dev; dev.enumerate_cpu()` 不破。
-# 注意:函数体全局名在 adapters 模块解析,monkeypatch 必须 setattr(adapters, ...)。
+# 兼容转发:app.py 的 ENUMERATORS 仍消费这 4 个函数(测试已直连适配器类),
+# Task 3 换 build_adapters() 后连同 ENUMERATORS 一并删除。
 def enumerate_nvidia() -> list["DeviceInfo"]:
     return _adapters.NvidiaAdapter().enumerate()
 
