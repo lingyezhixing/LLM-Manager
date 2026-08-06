@@ -100,7 +100,7 @@ class CpuAdapter:
         return [DeviceInfo("CPU", "CPU", "RAM", total, avail, used, usage, _lhm_cpu_temp())]
 
 
-# ==================== Intel iGPU(i915 sysfs)====================
+# ==================== Intel iGPU(i915 + intel_gpu_top)====================
 _INTEL_IGPU_NAMES = {
     "8086:46d0": "Intel UHD Graphics (Alder Lake-N)",
     "8086:46d1": "Intel UHD Graphics (Alder Lake-N)",
@@ -117,6 +117,64 @@ def _intel_gpu_name(dev: Path) -> str:
     except OSError:
         pass
     return "Intel UHD Graphics"
+
+
+def _is_i915(dev: Path) -> bool:
+    """uevent 含 DRIVER=i915 → Intel GPU(比 vendor 更准,不依赖 gpu_busy_percent 文件)。"""
+    try:
+        uevent = dev.joinpath("uevent").read_text(encoding="ascii", errors="ignore")
+    except OSError:
+        return False
+    return "DRIVER=i915" in uevent
+
+
+def _run_intel_gpu_top() -> str | None:
+    """intel_gpu_top -J 采样输出(JSON 流)或 None(工具缺失/超时/失败)。
+    -s 1000 采样 1s;timeout 2 兜底;每轮 refresh 短进程(与 nvidia-smi 同模式)。"""
+    if shutil.which("intel_gpu_top") is None:
+        return None
+    try:
+        r = subprocess.run(
+            ["timeout", "2", "intel_gpu_top", "-J", "-s", "1000"],
+            capture_output=True, text=True, timeout=4, check=False,
+        )
+        return r.stdout if r.returncode == 0 else None
+    except Exception:  # noqa: BLE001 — 子进程异常/超时 → None,指标降级
+        return None
+
+
+def _parse_intel_gpu_top(stdout: str | None) -> dict | None:
+    """解析 intel_gpu_top -J 输出,取**最后一帧**完整采样(跳过 period.duration<100ms 的
+    初始化帧)。返回 {busy_pct, freq_mhz, power_watts};无有效帧/不可解析 → None。"""
+    if not stdout:
+        return None
+    import json
+    last = None
+    for line in stdout.splitlines():
+        line = line.strip()
+        if not line or line in ("[", "]"):
+            continue
+        if line.endswith(","):
+            line = line[:-1]
+        if line.startswith(","):  # intel_gpu_top 记录分隔逗号在行首(实测样本)
+            line = line[1:]
+        try:
+            frame = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if frame.get("period", {}).get("duration", 0) < 100:
+            continue  # 初始化帧(period≈0.035ms),无采样意义
+        last = frame
+    if last is None:
+        return None
+    busy = max((e.get("busy", 0.0) for e in last.get("engines", {}).values()), default=0.0)
+    freq = last.get("frequency", {}).get("actual")
+    power = last.get("power", {}).get("GPU")
+    return {
+        "busy_pct": busy,
+        "freq_mhz": float(freq) if isinstance(freq, (int, float)) else None,
+        "power_watts": float(power) if isinstance(power, (int, float)) else None,
+    }
 
 
 def _hwmon_temp1(dev: Path) -> float | None:
@@ -140,30 +198,23 @@ def _drm_cards() -> list[Path]:
 
 
 class IntelLinuxAdapter:
-    """主机/容器 Intel iGPU:扫 /sys/class/drm/cardN(0x8086 且 gpu_busy_percent 存在)→ DeviceInfo
-    (device_type='GPU (iGPU)', 内存=系统 RAM 快照)。非 Linux / 无 Intel / 无 busy 接口 → []。永不抛。"""
+    """Linux Intel iGPU:uevent DRIVER=i915 识别;利用率/频率/功耗来自 intel_gpu_top
+    (sysfs 实测无 busy 接口)。识别与指标解耦:工具缺失 → 设备照常出现,指标 None/0。
+    温度:None(N100 平台无 hwmon 传感器,诚实标注)。内存:共享系统 RAM。"""
 
     def enumerate(self) -> list[DeviceInfo]:
         if os.name == "nt" or not _DRM_CLASS.is_dir():
             return []
         total, avail, used = _system_mem()
-        out: list[DeviceInfo] = []
-        for card in _drm_cards():
-            dev = card / "device"
-            try:
-                vendor = dev.joinpath("vendor").read_text(encoding="ascii").strip().lower()
-            except OSError:
-                continue
-            if vendor != "0x8086" or not dev.joinpath("gpu_busy_percent").is_file():
-                continue
-            try:
-                busy = float(dev.joinpath("gpu_busy_percent").read_text(encoding="ascii").strip())
-            except (OSError, ValueError):
-                busy = 0.0
-            out.append(DeviceInfo(
-                _intel_gpu_name(dev), "GPU (iGPU)", "Shared RAM",
-                total, avail, used, busy, _hwmon_temp1(dev)))
-        return out
+        cards = [c for c in _drm_cards() if _is_i915(c / "device")]
+        if not cards:
+            return []
+        metrics = _parse_intel_gpu_top(_run_intel_gpu_top()) or {}
+        return [DeviceInfo(
+            _intel_gpu_name(cards[0] / "device"), "GPU (iGPU)", "Shared RAM",
+            total, avail, used, metrics.get("busy_pct", 0.0),
+            None, metrics.get("freq_mhz"), metrics.get("power_watts"),
+        ) for _ in cards]
 
 
 # ==================== AMD(amdgpu sysfs,待 780M 实测校准)====================

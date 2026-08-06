@@ -391,105 +391,95 @@ def test_new_gpu_model_matches_via_config_only(monkeypatch):
     assert unmatched == []
 
 
-# ==================== Intel iGPU(i915 sysfs)====================
+# ==================== Intel iGPU(i915 + intel_gpu_top)====================
 
 
-def _make_fake_sysfs(tmp_path, *, vendor="0x8086", busy="42", pci_id="8086:46d1", temp_mc=None):
-    """构造假 /sys/class/drm 树:card0(Intel)+ card1(非 Intel)+ card0-DP-1(connector)。"""
+def _make_i915_sysfs(tmp_path, pci_id="8086:46d1"):
+    """假 /sys/class/drm 树:card0 = i915 设备;card1 = amdgpu;card0-DP-1 = connector。"""
     drm = tmp_path / "sys" / "class" / "drm"
     card0 = drm / "card0" / "device"
     card0.mkdir(parents=True)
-    card0.joinpath("vendor").write_text(vendor)
-    card0.joinpath("uevent").write_text(f"PCI_ID={pci_id}\nDRIVER=i915\n")
-    if busy is not None:
-        card0.joinpath("gpu_busy_percent").write_text(busy)
-    if temp_mc is not None:
-        hwmon = card0 / "hwmon" / "hwmon0"
-        hwmon.mkdir(parents=True)
-        hwmon.joinpath("temp1_input").write_text(str(temp_mc))
-    # 非 Intel 卡 + connector 节点:都不应被枚举
+    card0.joinpath("uevent").write_text(f"DRIVER=i915\nPCI_ID={pci_id}\n")
     card1 = drm / "card1" / "device"
     card1.mkdir(parents=True)
-    card1.joinpath("vendor").write_text("0x10de")  # NVIDIA
+    card1.joinpath("uevent").write_text("DRIVER=amdgpu\nPCI_ID=1002:15fe\n")
     drm.joinpath("card0-DP-1").mkdir(parents=True)
     return drm
 
 
-def test_enumerate_intel_igpus_basic(monkeypatch, tmp_path):
+def test_intel_adapter_metrics_from_gpu_top(monkeypatch, tmp_path):
     from llm_manager.devices import adapters as ad
 
-    drm = _make_fake_sysfs(tmp_path, busy="42", temp_mc=48000)
     monkeypatch.setattr(ad.os, "name", "posix")
-    monkeypatch.setattr(ad, "_DRM_CLASS", drm)
-
-    class _Mem:
-        total = 16 * 1024**3
-        available = 8 * 1024**3
-        used = 8 * 1024**3
-
-    monkeypatch.setattr(ad.psutil, "virtual_memory", lambda: _Mem())
+    monkeypatch.setattr(ad, "_DRM_CLASS", _make_i915_sysfs(tmp_path))
+    # 两帧:初始化帧(period 0.035ms,应跳过)+ 采样帧(1000ms)
+    sample = ('[\n{"period": {"duration": 0.035, "unit": "ms"}, "engines": {"Render/3D": {"busy": 0.0}}}\n,'
+              '{"period": {"duration": 1000.34, "unit": "ms"}, "frequency": {"actual": 2400.0, "requested": 2400.0},'
+              ' "engines": {"Render/3D": {"busy": 12.5}, "Video": {"busy": 5.0}},'
+              ' "power": {"GPU": 3.5, "Package": 2.4}}\n]')
+    monkeypatch.setattr(ad, "_run_intel_gpu_top", lambda: sample)
+    monkeypatch.setattr(ad.psutil, "virtual_memory", lambda: type("M", (), {"total": 16 * 1024**3, "available": 8 * 1024**3, "used": 8 * 1024**3})())
     out = ad.IntelLinuxAdapter().enumerate()
-    assert len(out) == 1  # 只命中 card0;card1(NVIDIA)与 connector 跳过
+    assert len(out) == 1  # card0 命中;card1(amdgpu)与 connector 跳过
     info = out[0]
-    assert info.device_name == "Intel UHD Graphics (Alder Lake-N)"  # 46d1 映射
+    assert info.device_name == "Intel UHD Graphics (Alder Lake-N)"
     assert info.device_type == "GPU (iGPU)" and info.memory_type == "Shared RAM"
-    assert info.usage_percentage == 42.0
-    assert info.temperature_celsius == 48.0  # temp1_input 48000 m°C → 48°C
-    assert info.total_memory_mb == 16 * 1024
+    assert info.usage_percentage == 12.5      # engines busy 取 max
+    assert info.freq_mhz == 2400.0
+    assert info.power_watts == 3.5
+    assert info.temperature_celsius is None   # N100 平台无温度传感器
 
 
-def test_enumerate_intel_igpus_unknown_pci_id_fallback(monkeypatch, tmp_path):
+def test_intel_adapter_gpu_top_failure_degraded(monkeypatch, tmp_path):
     from llm_manager.devices import adapters as ad
 
-    drm = _make_fake_sysfs(tmp_path, pci_id="8086:46f0")
     monkeypatch.setattr(ad.os, "name", "posix")
-    monkeypatch.setattr(ad, "_DRM_CLASS", drm)
+    monkeypatch.setattr(ad, "_DRM_CLASS", _make_i915_sysfs(tmp_path))
+    monkeypatch.setattr(ad, "_run_intel_gpu_top", lambda: None)  # 工具缺失/失败
     out = ad.IntelLinuxAdapter().enumerate()
-    assert len(out) == 1
-    assert out[0].device_name == "Intel UHD Graphics (8086:46f0)"
+    assert len(out) == 1  # 识别与指标解耦:设备照常出现
+    assert out[0].usage_percentage == 0.0
+    assert out[0].freq_mhz is None and out[0].power_watts is None
 
 
-def test_enumerate_intel_igpus_skips_non_intel_and_no_busy(monkeypatch, tmp_path):
+def test_intel_adapter_no_i915_returns_empty(monkeypatch, tmp_path):
     from llm_manager.devices import adapters as ad
 
-    drm = _make_fake_sysfs(tmp_path, busy=None)  # 有 vendor 但无 gpu_busy_percent → 跳过
     monkeypatch.setattr(ad.os, "name", "posix")
+    drm = tmp_path / "sys" / "class" / "drm"
+    card1 = drm / "card1" / "device"
+    card1.mkdir(parents=True)
+    card1.joinpath("uevent").write_text("DRIVER=amdgpu\n")
     monkeypatch.setattr(ad, "_DRM_CLASS", drm)
     assert ad.IntelLinuxAdapter().enumerate() == []
 
-    drm2 = _make_fake_sysfs(tmp_path / "b", vendor="0x10de")
-    monkeypatch.setattr(ad, "_DRM_CLASS", drm2)
-    assert ad.IntelLinuxAdapter().enumerate() == []
 
-
-def test_enumerate_intel_igpus_windows_and_missing_sysfs(monkeypatch, tmp_path):
+def test_intel_adapter_windows_and_missing_sysfs(monkeypatch, tmp_path):
     from llm_manager.devices import adapters as ad
 
-    drm = _make_fake_sysfs(tmp_path, busy="42")
-    monkeypatch.setattr(ad, "_DRM_CLASS", drm)
+    monkeypatch.setattr(ad, "_DRM_CLASS", _make_i915_sysfs(tmp_path))
     monkeypatch.setattr(ad.os, "name", "nt")
-    assert ad.IntelLinuxAdapter().enumerate() == []  # Windows 不走 sysfs
+    assert ad.IntelLinuxAdapter().enumerate() == []
 
     monkeypatch.setattr(ad.os, "name", "posix")
     monkeypatch.setattr(ad, "_DRM_CLASS", tmp_path / "nonexistent")
-    assert ad.IntelLinuxAdapter().enumerate() == []  # 无 /sys/class/drm → []
+    assert ad.IntelLinuxAdapter().enumerate() == []
 
 
-def test_enumerate_intel_igpus_psutil_failure_degraded(monkeypatch, tmp_path):
-    from llm_manager.devices import adapters as ad
+def test_parse_intel_gpu_top_skips_init_frame_and_takes_last(monkeypatch):
+    from llm_manager.devices.adapters import _parse_intel_gpu_top
 
-    drm = _make_fake_sysfs(tmp_path, busy="7")
-    monkeypatch.setattr(ad.os, "name", "posix")
-    monkeypatch.setattr(ad, "_DRM_CLASS", drm)
+    sample = ('[\n{"period": {"duration": 0.035, "unit": "ms"}, "engines": {"Render/3D": {"busy": 99.0}}}\n,'
+              '{"period": {"duration": 1000.0, "unit": "ms"}, "frequency": {"actual": 1500.0},'
+              ' "engines": {"Render/3D": {"busy": 10.0}, "Blitter": {"busy": 3.0}}, "power": {"GPU": 1.2}}\n]')
+    m = _parse_intel_gpu_top(sample)
+    assert m == {"busy_pct": 10.0, "freq_mhz": 1500.0, "power_watts": 1.2}  # 初始化帧跳过、取最后帧
 
-    def boom():
-        raise OSError("psutil broke")
 
-    monkeypatch.setattr(ad.psutil, "virtual_memory", boom)
-    out = ad.IntelLinuxAdapter().enumerate()
-    assert len(out) == 1  # 降级零值,不抛
-    assert out[0].total_memory_mb == 0
-    assert out[0].usage_percentage == 7.0
+def test_parse_intel_gpu_top_unparseable_returns_none():
+    from llm_manager.devices.adapters import _parse_intel_gpu_top
+    assert _parse_intel_gpu_top("") is None
+    assert _parse_intel_gpu_top("garbage\nnot json") is None
 
 
 def test_device_info_new_fields_default_none():
