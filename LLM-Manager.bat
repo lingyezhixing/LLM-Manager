@@ -15,11 +15,6 @@ title LLM-Manager
 set PYTHONIOENCODING=utf-8
 set PYTHONUTF8=1
 
-:: 激活conda环境并运行（日志管理由Python程序自动处理）
+:: 激活conda环境并运行。重启由程序内置的 parent 监督器处理(python -m llm_manager 即自重启)。
 call conda activate LLM-Manager
-:run_loop
 python -m llm_manager
-if %ERRORLEVEL% EQU 81 (
-    echo LLM-Manager 请求重启^(exit 81^),重新启动...
-    goto run_loop
-)
