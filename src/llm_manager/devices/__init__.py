@@ -113,9 +113,12 @@ class DeviceMonitor:
             return (_DEVICE_KIND_RANK.get(kinds[idx], 9), idx)
 
         matched, unmatched = match_devices(self._get_referenced(), candidates)
-        cache: dict[str, DeviceInfo] = dict(sorted(matched.items(), key=order_key))
-        for c in sorted(unmatched, key=lambda c: order_key((c.device_name, c))):
-            cache[c.device_name] = c  # 未引用:以实测名入快照供展示(对调度无害)
+        # 合并统一排序:若分两段(先 matched 后 unmatched),未引用设备(如 CPU)会整体排到
+        # 被引用设备之后,跨段顺序错乱——故合成一个序列整体按 rank 排
+        cache: dict[str, DeviceInfo] = dict(
+            sorted(list(matched.items()) + [(c.device_name, c) for c in unmatched],
+                   key=order_key)
+        )
         self._cache = cache  # 原子 rebind
 
     def online_devices(self) -> set[str]:

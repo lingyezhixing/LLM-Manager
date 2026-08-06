@@ -651,6 +651,28 @@ def test_device_monitor_sorts_unmatched_too():
     ]
 
 
+def test_device_monitor_sorts_mixed_matched_and_unmatched():
+    """部分引用(服务器场景:只引用核显,CPU 未引用)→ CPU 仍首位(跨段统一排序,防段间错乱)。"""
+    from llm_manager.devices import DeviceMonitor, DeviceInfo
+
+    nvidia = [DeviceInfo("NVIDIA GeForce RTX 4060", "GPU", "VRAM", 8188, 6266, 1692, 35.0, 51.0)]
+    intel = [DeviceInfo("Intel UHD Graphics (Alder Lake-N)", "GPU (iGPU)", "Shared RAM", 15729, 5866, 9863, 0.0, None)]
+    cpu = [DeviceInfo("CPU", "CPU", "RAM", 16384, 8192, 8192, 33.0, None)]
+
+    mon = DeviceMonitor(
+        [_ranked_adapter("NvidiaAdapter", nvidia), _ranked_adapter("IntelAdapter", intel),
+         _ranked_adapter("CpuAdapter", cpu)],
+        lambda: {"alder lake-n"},
+    )
+    mon.refresh()
+    names = [d.device_name for d in mon.snapshot().values()]
+    assert names == [
+        "CPU",
+        "NVIDIA GeForce RTX 4060",
+        "Intel UHD Graphics (Alder Lake-N)",
+    ]
+
+
 class _FakeAdapter:
     def __init__(self, devices):
         self._devices = devices
