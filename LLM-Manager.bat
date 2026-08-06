@@ -1,9 +1,9 @@
 @echo off
-:: 提权:非管理员 → PowerShell 以管理员身份重新拉起自身(UAC 一次)。
-:: 开机自启(任务计划程序)已注册为最高权限则直接跳过此段。
+:: Elevate to admin if not already elevated (UAC once). Task-scheduler autostart
+:: registered with highest privileges skips this block.
 net session >nul 2>&1
 if %errorlevel% neq 0 (
-    powershell -NoProfile -Command "Start-Process -FilePath '%~f0' -ArgumentList '%*' -Verb RunAs"
+    powershell -NoProfile -Command "Start-Process -FilePath '%~f0' -Verb RunAs"
     exit /b
 )
 
@@ -19,10 +19,11 @@ exit /b
 chcp 65001 >nul
 title LLM-Manager
 
-:: 设置环境变量以确保 Python 使用 UTF-8 编码
+:: Force UTF-8 for Python output
 set PYTHONIOENCODING=utf-8
 set PYTHONUTF8=1
 
-:: 激活conda环境并运行。重启由程序内置的 parent 监督器处理(python -m llm_manager 即自重启)。
+:: Activate conda env and run. Restart-on-config-change is handled by the built-in
+:: parent supervisor (python -m llm_manager self-restarts internally).
 call conda activate LLM-Manager
 python -m llm_manager
