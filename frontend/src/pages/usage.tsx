@@ -23,7 +23,7 @@ export default function UsagePage() {
       <section className="mb-6">
         <UsageChartCard params={params} preset={range.preset} refetch={refetch} />
       </section>
-      <section className="mb-6">
+      <section>
         <UsageByModelTable params={params} refetch={refetch} />
       </section>
     </>

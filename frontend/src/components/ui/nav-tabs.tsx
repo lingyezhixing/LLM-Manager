@@ -1,10 +1,12 @@
 import type { ReactNode } from "react";
 
 /** 页面级分区导航(日志双 Tab / 系统五 zone 共用同一语言,防样式漂移):
- * 胶囊容器 + accent/12 激活。children 内含 NavTab 与可选右对齐控件(如日志页模型下拉 ml-auto)。 */
+ * 胶囊容器 + accent/12 激活。children 内含 NavTab 与可选右对齐控件(如日志页模型下拉 ml-auto)。
+ * sticky 吸顶:长内容滚动时保持可见(top 让开壳层 PillBar 的吸顶区 72px;bg-pill + blur
+ * 与 PillBar 同款玻璃,内容滚过时压暗模糊,不糊眼)。 */
 export function NavTabs({ children }: { children: ReactNode }) {
   return (
-    <div className="flex flex-wrap items-center gap-1 rounded-lg border border-border bg-card p-1 text-sm shadow-card">
+    <div className="sticky top-[72px] z-20 flex flex-wrap items-center gap-1 rounded-lg border border-border-subtle bg-pill p-1 text-sm shadow-card backdrop-blur-lg">
       {children}
     </div>
   );

@@ -116,10 +116,12 @@ export function ModelDefPanel() {
     );
   }
 
+  // 左栏 sticky 独立滚动:页面保持滚动(NavTabs 吸顶玻璃效果继续生效),
+  // 左栏吸顶位置 = PillBar 72 + NavTabs ~38 + mt-6 24 = 134px;max-h 让底部留 16px。
   return (
     <div className="grid gap-6 lg:grid-cols-[minmax(0,280px)_minmax(0,1fr)]">
-      {/* 左栏:模型列表(按 port 升序)+ 底部操作(新增 / 删除)*/}
-      <div className="flex flex-col gap-1">
+      {/* 左栏:模型列表(按 port 升序)+ 底部操作(新增 / 删除),吸顶后独立滚动 */}
+      <div className="flex flex-col gap-1 lg:sticky lg:top-[134px] lg:max-h-[calc(100dvh-150px)] lg:overflow-y-auto">
         {list.isLoading && (
           <span className="px-3 py-2 text-sm text-muted-foreground">加载中…</span>
         )}
@@ -157,7 +159,7 @@ export function ModelDefPanel() {
         </div>
       </div>
 
-      {/* 右栏:重启提示 + 详情表单(删除按钮在表单名称行内) */}
+      {/* 右栏:重启提示 + 详情表单(删除按钮在表单名称行内),随页面滚动 */}
       <div>
         {hint && (
           <div className="mb-4 flex flex-wrap items-center gap-3 rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-sm">
