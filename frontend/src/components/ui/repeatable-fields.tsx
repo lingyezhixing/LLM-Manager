@@ -13,11 +13,9 @@ const removeBtn = "shrink-0 h-9 px-2 text-xs text-muted-foreground hover:text-de
 export function StringListEditor({
   values,
   onChange,
-  placeholder,
 }: {
   values: string[];
   onChange: (next: string[]) => void;
-  placeholder?: string;
 }) {
   const update = (i: number, v: string) =>
     onChange(values.map((x, idx) => (idx === i ? v : x)));
@@ -31,7 +29,6 @@ export function StringListEditor({
         <div key={i} className="flex items-center gap-2">
           <TextInput
             value={v}
-            placeholder={placeholder}
             onChange={(e) => update(i, e.target.value)}
             onKeyDown={(e: KeyboardEvent<HTMLInputElement>) => {
               if (e.key === "Enter") {
@@ -51,17 +48,13 @@ export function StringListEditor({
 export function KeyValueEditor({
   entries,
   onChange,
-  valuePlaceholder,
   numeric,
-  keyPlaceholder = "键",
   keyOptions,
   valueSuffix,
 }: {
   entries: Record<string, string | number>;
   onChange: (next: Record<string, string | number>) => void;
-  valuePlaceholder?: string;
   numeric?: boolean;
-  keyPlaceholder?: string;
   // 键输入框的可选下拉建议(ComboboxInput:聚焦展开全部,可点选也可手输)。
   keyOptions?: string[];
   // 值输入框后的单位标注(如显存的 MB)。
@@ -92,13 +85,12 @@ export function KeyValueEditor({
           {keyOptions ? (
             <ComboboxInput value={k} options={keyOptions} onChange={(key) => setKey(i, key)} />
           ) : (
-            <TextInput value={k} placeholder={keyPlaceholder} onChange={(e) => setKey(i, e.target.value)} />
+            <TextInput value={k} onChange={(e) => setKey(i, e.target.value)} />
           )}
           {numeric ? (
             <div className="flex min-w-0 flex-1 items-center gap-1">
               <NumberInput
                 value={Number(v)}
-                placeholder={valuePlaceholder}
                 onChange={(e) => setValue(i, e.target.value === "" ? 0 : Number(e.target.value))}
               />
               {valueSuffix && <span className="shrink-0 text-xs text-muted-foreground">{valueSuffix}</span>}
@@ -107,7 +99,6 @@ export function KeyValueEditor({
             <div className="flex min-w-0 flex-1 items-center gap-1">
               <TextInput
                 value={String(v)}
-                placeholder={valuePlaceholder}
                 onChange={(e) => setValue(i, e.target.value)}
               />
             </div>

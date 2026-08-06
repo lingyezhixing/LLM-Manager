@@ -21,7 +21,7 @@ export function CommandEditor({
 }: {
   value: CommandDef;
   onChange: (next: CommandDef) => void;
-  // 变量替换({{port}}/{{alias}} → 实际值,仅用于「将执行」预览;编辑框保持字面占位符)
+  // 变量替换({{port}}/{{alias}} → 实际值,仅用于「命令预览」;编辑框保持字面占位符)
   vars?: Record<string, string>;
 }) {
   const [line, setLine] = useState(() => joinCommandLine(value.exe, value.args));

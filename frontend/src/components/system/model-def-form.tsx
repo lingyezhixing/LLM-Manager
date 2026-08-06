@@ -152,7 +152,7 @@ export function ModelDefForm({ model, onSaved, onDirtyChange, onDelete }: ModelD
   };
 
   const onSave = async () => {
-    if (saving) return;   // 防重复提交(ConfigSaveBar 已 disable 按钮,此为函数级双保险)
+    if (saving) return;   // 防重复提交(保存按钮已 disable,此为函数级双保险)
     if (isCreate) {
       const payload = cleanPayload(form);
       setForm(payload);
