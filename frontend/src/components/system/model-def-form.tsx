@@ -180,7 +180,18 @@ export function ModelDefForm({ model, onSaved, onDirtyChange, onDelete }: ModelD
   };
 
   return (
-    <div className="pb-6">
+    <div className="relative pb-6">
+      {/* 右上角提示浮层:保存失败 / 保存条件未满足(不与右下浮动按钮争空间) */}
+      {(errorMsg || !canSave) && (
+        <div className="absolute right-0 top-0 z-20 w-64 rounded-lg border border-border bg-card px-3 py-2 text-xs shadow-lg">
+          {errorMsg && <p className="text-destructive">{errorMsg}</p>}
+          {!canSave && (
+            <p className={errorMsg ? "mt-1 text-warning" : "text-warning"}>
+              需:名称、≥1 别名、≥1 方案(每方案:标识与命令行非空)、端口 1–65535
+            </p>
+          )}
+        </div>
+      )}
       <div className="mb-1 text-sm font-medium text-foreground">基本</div>
       {/* 名称行 4:2:2:1:1(名称/模式/端口/自启动/删除);创建态无删除,末格留白保比例。 */}
       <div className="grid grid-cols-1 gap-x-6 sm:grid-cols-10">
@@ -252,21 +263,15 @@ export function ModelDefForm({ model, onSaved, onDirtyChange, onDelete }: ModelD
       <div className="mb-1 mt-4 text-sm font-medium text-foreground">计费</div>
       <PricingEditor value={form.pricing} onChange={(pricing) => set("pricing", pricing)} />
 
-      {/* 右下角浮动保存/重置(仅 dirty/创建态显示):纵向堆叠,滚动时始终可见。 */}
+      {/* 右下角浮动保存/重置(仅 dirty/创建态显示):高频操作,滚动时始终可见。 */}
       {(dirty || isCreate) && (
         <div className="sticky bottom-4 z-10 mt-3 flex flex-col items-end gap-2">
-          {errorMsg && <span className="text-xs text-destructive">{errorMsg}</span>}
           <Button type="button" variant="outline" onClick={() => setForm(clone(baseline))}>
             重置
           </Button>
           <Button type="button" onClick={onSave} disabled={saving || !canSave}>
             {saving ? "保存中…" : "保存"}
           </Button>
-          {!canSave && (
-            <p className="max-w-[260px] text-right text-xs text-warning">
-              需:名称、≥1 别名、≥1 方案(每方案:标识与命令行非空)、端口 1–65535
-            </p>
-          )}
         </div>
       )}
     </div>
