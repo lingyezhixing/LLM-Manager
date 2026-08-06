@@ -1,10 +1,11 @@
 """Device detection: backends enumerate all present hardware (NVIDIA via nvidia-smi,
-AMD GPU via LHM, CPU via psutil) → DeviceMonitor fuzzy-matches config device names to
-detected hardware (token-subset) and atomically rebinds a config-keyed cache
-(+ unmatched devices keyed by raw name for display)."""
+Intel iGPU via i915 sysfs, AMD GPU via LHM, CPU via psutil) → DeviceMonitor
+fuzzy-matches config device names to detected hardware (token-subset) and atomically
+rebinds a config-keyed cache (+ unmatched devices keyed by raw name for display)."""
 from __future__ import annotations
 
 import atexit
+import os
 import psutil
 import re
 import shutil
@@ -118,6 +119,80 @@ def enumerate_nvidia() -> list[DeviceInfo]:
         DeviceInfo(row.name, "GPU", "VRAM", row.total_mb, row.free_mb, row.used_mb, row.util_pct, row.temp_c)
         for row in _parse_smi(_run_smi())
     ]
+
+
+# ==================== Intel iGPU(i915 sysfs)====================
+# Linux 容器/主机直接读 i915 内核接口,零额外依赖/权限(compose 已映射 /dev/dri):
+#   gpu_busy_percent   GPU 利用率百分比(i915 稳定接口)
+#   hwmon temp1_input  封装温度(单位 10⁻³ °C,标准 hwmon 协议)
+# Intel iGPU 无独立显存 → 共享系统 RAM(与 CPU 枚举器同一来源)。
+
+_DRM_CLASS = Path("/sys/class/drm")  # 模块级常量,测试 monkeypatch 重定向
+
+# 已知 Alder Lake-N(N100 等)系列;未知 Intel iGPU → 带 PCI ID 的兜底名
+_INTEL_IGPU_NAMES = {
+    "8086:46d0": "Intel UHD Graphics (Alder Lake-N)",
+    "8086:46d1": "Intel UHD Graphics (Alder Lake-N)",
+}
+
+
+def _intel_gpu_name(dev: Path) -> str:
+    """uevent 的 PCI_ID(如 8086:46d1)→ 已知映射名,未知 → 'Intel UHD Graphics (8086:xxxx)'。"""
+    try:
+        for line in dev.joinpath("uevent").read_text(encoding="ascii", errors="ignore").splitlines():
+            if line.startswith("PCI_ID="):
+                pci_id = line.split("=", 1)[1].strip().lower()
+                return _INTEL_IGPU_NAMES.get(pci_id, f"Intel UHD Graphics ({pci_id})")
+    except OSError:
+        pass
+    return "Intel UHD Graphics"
+
+
+def _intel_gpu_temp(dev: Path) -> float | None:
+    """i915 hwmon 封装温度(temp1_input,单位 10⁻³ °C)→ 摄氏度;无 hwmon/读失败 → None。"""
+    try:
+        for hwmon in dev.glob("hwmon/hwmon*"):
+            raw = hwmon.joinpath("temp1_input").read_text(encoding="ascii").strip()
+            return float(raw) / 1000.0
+    except (OSError, ValueError):
+        pass
+    return None
+
+
+def enumerate_intel_igpus() -> list[DeviceInfo]:
+    """主机/容器 Intel iGPU:扫 /sys/class/drm/cardN(i915 管理的 0x8086 且暴露
+    gpu_busy_percent)→ DeviceInfo(device_type='GPU (iGPU)', 内存=系统 RAM 快照)。
+    非 Linux / 无 Intel / 无 busy 接口 → []。永不抛(内部全兜底,降级跳过)。"""
+    if os.name == "nt" or not _DRM_CLASS.is_dir():
+        return []
+    try:
+        mem = psutil.virtual_memory()
+        total = int(mem.total // (1024 * 1024))
+        avail = int(mem.available // (1024 * 1024))
+        used = int(mem.used // (1024 * 1024))
+    except Exception:  # noqa: BLE001 — psutil 失败 → 零值降级,不抛
+        total = avail = used = 0
+    out: list[DeviceInfo] = []
+    try:
+        cards = sorted(p for p in _DRM_CLASS.iterdir() if p.name.startswith("card") and "-" not in p.name)
+    except OSError:
+        return []
+    for card in cards:
+        dev = card / "device"
+        try:
+            vendor = dev.joinpath("vendor").read_text(encoding="ascii").strip().lower()
+        except OSError:
+            continue
+        if vendor != "0x8086" or not dev.joinpath("gpu_busy_percent").is_file():
+            continue
+        try:
+            busy = float(dev.joinpath("gpu_busy_percent").read_text(encoding="ascii").strip())
+        except (OSError, ValueError):
+            busy = 0.0
+        out.append(DeviceInfo(
+            _intel_gpu_name(dev), "GPU (iGPU)", "Shared RAM",
+            total, avail, used, busy, _intel_gpu_temp(dev)))
+    return out
 
 
 def enumerate_cpu() -> list[DeviceInfo]:
@@ -297,4 +372,4 @@ class DeviceMonitor:
         return dict(self._cache)
 
 
-ENUMERATORS: list[Callable[[], list[DeviceInfo]]] = [enumerate_nvidia, enumerate_lhm_gpus, enumerate_cpu]
+ENUMERATORS: list[Callable[[], list[DeviceInfo]]] = [enumerate_nvidia, enumerate_intel_igpus, enumerate_lhm_gpus, enumerate_cpu]

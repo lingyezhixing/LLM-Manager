@@ -334,3 +334,104 @@ def test_new_gpu_model_matches_via_config_only(monkeypatch):
     assert matched["rtx 5090"].device_name == "NVIDIA GeForce RTX 5090"
     assert matched["rtx 5090"].total_memory_mb == 32768
     assert unmatched == []
+
+
+# ==================== Intel iGPU(i915 sysfs)====================
+
+
+def _make_fake_sysfs(tmp_path, *, vendor="0x8086", busy="42", pci_id="8086:46d1", temp_mc=None):
+    """构造假 /sys/class/drm 树:card0(Intel)+ card1(非 Intel)+ card0-DP-1(connector)。"""
+    drm = tmp_path / "sys" / "class" / "drm"
+    card0 = drm / "card0" / "device"
+    card0.mkdir(parents=True)
+    card0.joinpath("vendor").write_text(vendor)
+    card0.joinpath("uevent").write_text(f"PCI_ID={pci_id}\nDRIVER=i915\n")
+    if busy is not None:
+        card0.joinpath("gpu_busy_percent").write_text(busy)
+    if temp_mc is not None:
+        hwmon = card0 / "hwmon" / "hwmon0"
+        hwmon.mkdir(parents=True)
+        hwmon.joinpath("temp1_input").write_text(str(temp_mc))
+    # 非 Intel 卡 + connector 节点:都不应被枚举
+    card1 = drm / "card1" / "device"
+    card1.mkdir(parents=True)
+    card1.joinpath("vendor").write_text("0x10de")  # NVIDIA
+    drm.joinpath("card0-DP-1").mkdir(parents=True)
+    return drm
+
+
+def test_enumerate_intel_igpus_basic(monkeypatch, tmp_path):
+    import llm_manager.devices as dev
+
+    drm = _make_fake_sysfs(tmp_path, busy="42", temp_mc=48000)
+    monkeypatch.setattr(dev.os, "name", "posix")
+    monkeypatch.setattr(dev, "_DRM_CLASS", drm)
+
+    class _Mem:
+        total = 16 * 1024**3
+        available = 8 * 1024**3
+        used = 8 * 1024**3
+
+    monkeypatch.setattr(dev.psutil, "virtual_memory", lambda: _Mem())
+    out = dev.enumerate_intel_igpus()
+    assert len(out) == 1  # 只命中 card0;card1(NVIDIA)与 connector 跳过
+    info = out[0]
+    assert info.device_name == "Intel UHD Graphics (Alder Lake-N)"  # 46d1 映射
+    assert info.device_type == "GPU (iGPU)" and info.memory_type == "Shared RAM"
+    assert info.usage_percentage == 42.0
+    assert info.temperature_celsius == 48.0  # temp1_input 48000 m°C → 48°C
+    assert info.total_memory_mb == 16 * 1024
+
+
+def test_enumerate_intel_igpus_unknown_pci_id_fallback(monkeypatch, tmp_path):
+    import llm_manager.devices as dev
+
+    drm = _make_fake_sysfs(tmp_path, pci_id="8086:46f0")
+    monkeypatch.setattr(dev.os, "name", "posix")
+    monkeypatch.setattr(dev, "_DRM_CLASS", drm)
+    out = dev.enumerate_intel_igpus()
+    assert len(out) == 1
+    assert out[0].device_name == "Intel UHD Graphics (8086:46f0)"
+
+
+def test_enumerate_intel_igpus_skips_non_intel_and_no_busy(monkeypatch, tmp_path):
+    import llm_manager.devices as dev
+
+    drm = _make_fake_sysfs(tmp_path, busy=None)  # 有 vendor 但无 gpu_busy_percent → 跳过
+    monkeypatch.setattr(dev.os, "name", "posix")
+    monkeypatch.setattr(dev, "_DRM_CLASS", drm)
+    assert dev.enumerate_intel_igpus() == []
+
+    drm2 = _make_fake_sysfs(tmp_path / "b", vendor="0x10de")
+    monkeypatch.setattr(dev, "_DRM_CLASS", drm2)
+    assert dev.enumerate_intel_igpus() == []
+
+
+def test_enumerate_intel_igpus_windows_and_missing_sysfs(monkeypatch, tmp_path):
+    import llm_manager.devices as dev
+
+    drm = _make_fake_sysfs(tmp_path, busy="42")
+    monkeypatch.setattr(dev, "_DRM_CLASS", drm)
+    monkeypatch.setattr(dev.os, "name", "nt")
+    assert dev.enumerate_intel_igpus() == []  # Windows 不走 sysfs
+
+    monkeypatch.setattr(dev.os, "name", "posix")
+    monkeypatch.setattr(dev, "_DRM_CLASS", tmp_path / "nonexistent")
+    assert dev.enumerate_intel_igpus() == []  # 无 /sys/class/drm → []
+
+
+def test_enumerate_intel_igpus_psutil_failure_degraded(monkeypatch, tmp_path):
+    import llm_manager.devices as dev
+
+    drm = _make_fake_sysfs(tmp_path, busy="7")
+    monkeypatch.setattr(dev.os, "name", "posix")
+    monkeypatch.setattr(dev, "_DRM_CLASS", drm)
+
+    def boom():
+        raise OSError("psutil broke")
+
+    monkeypatch.setattr(dev.psutil, "virtual_memory", boom)
+    out = dev.enumerate_intel_igpus()
+    assert len(out) == 1  # 降级零值,不抛
+    assert out[0].total_memory_mb == 0
+    assert out[0].usage_percentage == 7.0
