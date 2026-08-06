@@ -582,3 +582,87 @@ def test_device_info_response_accepts_new_fields():
     })
     assert resp.freq_mhz == 2400.0 and resp.power_watts == 3.5
 
+
+# ==================== AMD(amdgpu sysfs)====================
+
+
+def _make_amdgpu_sysfs(tmp_path, busy="55", vram_total=8 * 1024**3, vram_used=3 * 1024**3, temp_mc=55000):
+    """假 /sys/class/drm 树:card0 = amdgpu(带 vram/busy/hwmon)。"""
+    drm = tmp_path / "sys" / "class" / "drm"
+    card0 = drm / "card0" / "device"
+    card0.mkdir(parents=True)
+    card0.joinpath("uevent").write_text("DRIVER=amdgpu\nPCI_ID=1002:15fe\n")
+    card0.joinpath("gpu_busy_percent").write_text(busy)
+    card0.joinpath("mem_info_vram_total").write_text(str(vram_total))
+    card0.joinpath("mem_info_vram_used").write_text(str(vram_used))
+    hwmon = card0 / "hwmon" / "hwmon0"
+    hwmon.mkdir(parents=True)
+    hwmon.joinpath("temp1_input").write_text(str(temp_mc))
+    return drm
+
+
+def test_amd_adapter_basic(monkeypatch, tmp_path):
+    from llm_manager.devices import adapters as ad
+
+    monkeypatch.setattr(ad.os, "name", "posix")
+    monkeypatch.setattr(ad, "_DRM_CLASS", _make_amdgpu_sysfs(tmp_path))
+    out = ad.AmdLinuxAdapter().enumerate()
+    assert len(out) == 1
+    info = out[0]
+    assert info.device_name == "AMD Radeon 780M Graphics"   # 1002:15fe 映射
+    assert info.device_type == "GPU (APU)" and info.memory_type == "VRAM"
+    assert info.usage_percentage == 55.0
+    assert info.total_memory_mb == 8 * 1024 and info.used_memory_mb == 3 * 1024
+    assert info.temperature_celsius == 55.0                 # 55000 m°C → 55°C
+
+
+def test_amd_adapter_missing_fields_degraded(monkeypatch, tmp_path):
+    from llm_manager.devices import adapters as ad
+
+    monkeypatch.setattr(ad.os, "name", "posix")
+    drm = tmp_path / "sys" / "class" / "drm"
+    card0 = drm / "card0" / "device"
+    card0.mkdir(parents=True)
+    card0.joinpath("uevent").write_text("DRIVER=amdgpu\nPCI_ID=1002:1640\n")
+    monkeypatch.setattr(ad, "_DRM_CLASS", drm)  # 无 busy/vram/hwmon
+    out = ad.AmdLinuxAdapter().enumerate()
+    assert len(out) == 1  # 识别与指标解耦
+    assert out[0].usage_percentage == 0.0 and out[0].total_memory_mb == 0
+    assert out[0].temperature_celsius is None
+    assert out[0].device_name == "AMD Radeon (1002:1640)"  # 未知 ID 兜底
+
+
+def test_amd_adapter_skips_non_amdgpu(monkeypatch, tmp_path):
+    # 混合树(card0=i915 + card1=amdgpu + connector)→ 仅 amdgpu 卡上报,识别过滤真实驱动
+    from llm_manager.devices import adapters as ad
+
+    monkeypatch.setattr(ad.os, "name", "posix")
+    monkeypatch.setattr(ad, "_DRM_CLASS", _make_i915_sysfs(tmp_path))
+    out = ad.AmdLinuxAdapter().enumerate()
+    assert len(out) == 1
+    assert out[0].device_name == "AMD Radeon 780M Graphics"
+
+
+def test_amd_adapter_available_clamped_non_negative(monkeypatch, tmp_path):
+    # used 瞬时读穿 total → available 钳到 0,不出现负数
+    from llm_manager.devices import adapters as ad
+
+    monkeypatch.setattr(ad.os, "name", "posix")
+    monkeypatch.setattr(ad, "_DRM_CLASS", _make_amdgpu_sysfs(
+        tmp_path, vram_total=8 * 1024**3, vram_used=10 * 1024**3))
+    out = ad.AmdLinuxAdapter().enumerate()
+    assert out[0].total_memory_mb == 8 * 1024 and out[0].used_memory_mb == 10 * 1024
+    assert out[0].available_memory_mb == 0
+
+
+def test_amd_adapter_windows_and_missing_sysfs(monkeypatch, tmp_path):
+    from llm_manager.devices import adapters as ad
+
+    monkeypatch.setattr(ad, "_DRM_CLASS", _make_amdgpu_sysfs(tmp_path))
+    monkeypatch.setattr(ad.os, "name", "nt")
+    assert ad.AmdLinuxAdapter().enumerate() == []
+
+    monkeypatch.setattr(ad.os, "name", "posix")
+    monkeypatch.setattr(ad, "_DRM_CLASS", tmp_path / "nonexistent")
+    assert ad.AmdLinuxAdapter().enumerate() == []
+
