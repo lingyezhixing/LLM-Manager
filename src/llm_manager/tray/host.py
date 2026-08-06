@@ -113,17 +113,9 @@ class SystemTray:
         buf.seek(0)
         return Image.open(buf)
 
-    def _status_line(self, item=None) -> str:
-        """打开菜单时求值的状态行(文本 callable,pystray 显示前调用)。
-        只读 state 原子操作,菜单线程调用安全。"""
-        from llm_manager import state
-        return f"模型运行中: {len(state.routing_names())}/{len(self._get_cfg().models)}"
-
     def _build_icon(self):
         cfg = self._get_cfg()
         items = [
-            pystray.MenuItem(self._status_line, lambda icon, item: None, enabled=False),
-            pystray.Menu.SEPARATOR,
             pystray.MenuItem("打开 WebUI", self.open_webui, default=True),
         ]
         if cfg.wol:
