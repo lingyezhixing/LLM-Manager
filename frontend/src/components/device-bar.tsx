@@ -31,9 +31,10 @@ function DeviceCard({
       <div className="flex items-center justify-between text-sm font-medium">
         <span className="truncate">{d.device_name}</span>
         <span className="text-xs text-muted-foreground">
-          {isCpu ? "CPU" : "GPU"}
           {d.freq_mhz != null ? <> · <span className="font-mono">{Math.round(d.freq_mhz)} MHz</span></> : ""}
           {d.temperature_celsius != null ? <> · <span className="font-mono">{Math.round(d.temperature_celsius)}°C</span></> : ""}
+          {d.freq_mhz != null || d.temperature_celsius != null ? " · " : ""}
+          {isCpu ? "CPU" : "GPU"}
         </span>
       </div>
       <div className="mt-2 flex items-center justify-between text-xs text-muted-foreground">
