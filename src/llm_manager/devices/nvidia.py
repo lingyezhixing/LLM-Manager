@@ -15,6 +15,7 @@ class _GpuRow(NamedTuple):
     free_mb: int
     util_pct: float
     temp_c: float | None
+    freq_mhz: float | None
 
 
 def _parse_smi(stdout: str) -> list[_GpuRow]:
@@ -33,7 +34,11 @@ def _parse_smi(stdout: str) -> list[_GpuRow]:
             free = int(parts[3])
             util = float(parts[4])
             temp = float(parts[5]) if parts[5] else None
-            rows.append(_GpuRow(name, total, used, free, util, temp))
+            try:
+                freq = float(parts[6]) if len(parts) > 6 and parts[6] else None
+            except ValueError:  # clocks.gr 输出 "N/A" 等 → 频率 None,不丢行
+                freq = None
+            rows.append(_GpuRow(name, total, used, free, util, temp, freq))
         except (ValueError, IndexError):
             continue
     return rows
@@ -45,7 +50,7 @@ def _run_smi() -> str:
         return ""
     try:
         r = subprocess.run(
-            [smi, "--query-gpu=name,memory.total,memory.used,memory.free,utilization.gpu,temperature.gpu",
+            [smi, "--query-gpu=name,memory.total,memory.used,memory.free,utilization.gpu,temperature.gpu,clocks.gr",
              "--format=csv,noheader,nounits"],
             capture_output=True, text=True, timeout=5, check=False,
         )
@@ -58,10 +63,10 @@ class NvidiaAdapter:
     """nvidia-smi → DeviceInfo(device_name=产品原始名)。无 nvidia-smi / 无 NVIDIA → []。
     字段映射(复用 _GpuRow):total_memory_mb=memory.total;used_memory_mb=memory.used;
     available_memory_mb=memory.free;usage_percentage=utilization.gpu;
-    temperature_celsius=temperature.gpu。"""
+    temperature_celsius=temperature.gpu;freq_mhz=clocks.gr(当前图形时钟,N/A → None)。"""
 
     def enumerate(self) -> list[DeviceInfo]:
         return [
-            DeviceInfo(row.name, "GPU", "VRAM", row.total_mb, row.free_mb, row.used_mb, row.util_pct, row.temp_c)
+            DeviceInfo(row.name, "GPU", "VRAM", row.total_mb, row.free_mb, row.used_mb, row.util_pct, row.temp_c, row.freq_mhz)
             for row in _parse_smi(_run_smi())
         ]

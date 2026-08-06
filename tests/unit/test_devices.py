@@ -3,18 +3,28 @@ from llm_manager.devices.nvidia import _parse_smi
 
 
 def test_parse_smi_extracts_fields():
-    out = "NVIDIA GeForce RTX 4060, 8192, 1024, 7168, 5, 45\n"
+    out = "NVIDIA GeForce RTX 4060, 8192, 1024, 7168, 5, 45, 2475\n"
     rows = _parse_smi(out)
     assert len(rows) == 1
     r = rows[0]
     assert r.name == "NVIDIA GeForce RTX 4060"
     assert r.total_mb == 8192
     assert r.temp_c == 45.0
+    assert r.freq_mhz == 2475.0
 
 
 def test_parse_smi_skips_bad_lines():
     out = "good, 8192, 1024, 7168, 5, 45\nbroken line\n\n"
     assert len(_parse_smi(out)) == 1
+
+
+def test_parse_smi_freq_na_keeps_row():
+    """clocks.gr 输出 N/A(部分驱动/虚拟化)→ 频率 None,不丢整行。"""
+    out = "NVIDIA GeForce RTX 4060, 8192, 1024, 7168, 5, 45, N/A\n"
+    rows = _parse_smi(out)
+    assert len(rows) == 1
+    assert rows[0].freq_mhz is None
+    assert rows[0].temp_c == 45.0
 
 
 def test_aggregate_sensors_dedicated_and_shared():
@@ -24,6 +34,8 @@ def test_aggregate_sensors_dedicated_and_shared():
         ("SmallData", "Dedicated Total VRAM", 4000.0),
         ("SmallData", "Shared Used", 500.0),
         ("SmallData", "Shared Total", 2000.0),
+        ("Clock", "GPU Core", 800.0),
+        ("Clock", "GPU Memory", 2400.0),
         ("Temperature", "GPU Temp", 60.0),
     ]
     info = _aggregate_sensors("780M", sensors)
@@ -33,6 +45,7 @@ def test_aggregate_sensors_dedicated_and_shared():
     assert info.used_memory_mb == 1500
     assert info.available_memory_mb == 4500
     assert info.temperature_celsius == 60.0
+    assert info.freq_mhz == 800.0  # 取 Clock/Core(GPU Core),忽略 GPU Memory
 
 
 def test_is_lhm_available_no_pythonnet(monkeypatch):
@@ -220,6 +233,7 @@ def test_enumerate_cpu_basic(monkeypatch):
     monkeypatch.setattr(ad.psutil, "virtual_memory", lambda: _Mem())
     monkeypatch.setattr(ad.psutil, "cpu_percent", lambda interval=None: 33.0)
     monkeypatch.setattr(ad, "_cpu_temp", lambda: None)
+    monkeypatch.setattr(ad, "_cpu_freq", lambda: 3700.0)
     out = ad.CpuAdapter().enumerate()
     assert len(out) == 1
     info = out[0]
@@ -229,6 +243,7 @@ def test_enumerate_cpu_basic(monkeypatch):
     assert info.available_memory_mb == 8 * 1024
     assert info.usage_percentage == 33.0
     assert info.temperature_celsius is None
+    assert info.freq_mhz == 3700.0
 
 
 def test_enumerate_cpu_psutil_failure_degraded(monkeypatch):
@@ -380,6 +395,71 @@ def test_cpu_temp_linux_branch_no_temp(monkeypatch):
         "acpitz": [types.SimpleNamespace(label="", current=27.8)],
     }, raising=False)
     assert ad._cpu_temp() is None
+
+
+def test_lhm_cpu_freq_reads_max_valid(monkeypatch):
+    """Windows:Clock/Core 取有效值最大者(升压多核),nan 跳过。"""
+    from llm_manager.devices import cpu as ad
+
+    monkeypatch.setattr(ad, "_lhm_computer", lambda: _fake_cpu_hw(
+        ("Clock", "Core #1", 4990.0),
+        ("Clock", "Core #2", 5000.0),
+        ("Clock", "Core #3", float("nan")),
+        ("Clock", "GPU Memory", 2400.0),  # 非 Cpu 硬件的传感器不会出现,防御性验证
+    ))
+    assert ad._lhm_cpu_freq() == 5000.0
+
+
+def test_lhm_cpu_freq_all_invalid_returns_none(monkeypatch):
+    """非管理员 Ryzen:Clock 全 nan → None(哨兵跳过,无需佐证)。"""
+    from llm_manager.devices import cpu as ad
+
+    monkeypatch.setattr(ad, "_lhm_computer", lambda: _fake_cpu_hw(
+        ("Clock", "Core #1", float("nan")),
+        ("Clock", "Core #2", 0.0),
+    ))
+    assert ad._lhm_cpu_freq() is None
+
+
+def test_cpu_freq_psutil_reads_current(monkeypatch):
+    """Linux:psutil.cpu_freq().current(容器实测 3184MHz)。"""
+    import types
+    from llm_manager.devices import cpu as ad
+
+    monkeypatch.setattr(ad.psutil, "cpu_freq",
+                        lambda: types.SimpleNamespace(current=3184.4, min=700.0, max=3400.0))
+    assert ad._cpu_freq_psutil() == 3184.4
+
+
+def test_cpu_freq_psutil_unavailable_returns_none(monkeypatch):
+    """psutil 读失败 / current 无效 → None(不抛)。"""
+    from llm_manager.devices import cpu as ad
+
+    def boom():
+        raise OSError("no cpufreq")
+
+    monkeypatch.setattr(ad.psutil, "cpu_freq", boom)
+    assert ad._cpu_freq_psutil() is None
+    monkeypatch.setattr(ad.psutil, "cpu_freq", lambda: None)
+    assert ad._cpu_freq_psutil() is None
+
+
+def test_cpu_freq_platform_branch(monkeypatch):
+    """频率平台分支与温度同构:nt → LHM(posix 分支不触碰 LHM)。"""
+    from llm_manager.devices import cpu as ad
+
+    def boom():
+        raise AssertionError("LHM 不应被调用")
+
+    monkeypatch.setattr(ad.os, "name", "nt")
+    monkeypatch.setattr(ad, "_lhm_cpu_freq", lambda: 4990.0)
+    monkeypatch.setattr(ad, "_cpu_freq_psutil", boom)
+    assert ad._cpu_freq() == 4990.0
+
+    monkeypatch.setattr(ad.os, "name", "posix")
+    monkeypatch.setattr(ad, "_cpu_freq_psutil", lambda: 3184.0)
+    monkeypatch.setattr(ad, "_lhm_cpu_freq", boom)
+    assert ad._cpu_freq() == 3184.0
 
 
 def test_cpu_temp_hwmon_prefers_package_label(monkeypatch):

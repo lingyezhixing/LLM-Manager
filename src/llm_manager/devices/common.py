@@ -117,14 +117,18 @@ def _lhm_computer():
 def _aggregate_sensors(device_name: str, sensors: Iterator[tuple[str, str, float]]) -> "DeviceInfo":
     """Pure: fold LHM sensor tuples into DeviceInfo. Port semantics from legacy amd_780m.py.
     跨设备共享(Intel/AMD 的 LHM Gpu 折叠同一实现);各自遍历骨架在各设备文件。
-    温度取同硬件所有温度传感器最大值(多传感器语义稳定,单传感器时即其本身)。"""
+    温度取同硬件所有温度传感器最大值;频率取 Clock/Core 传感器(LHM 的 "GPU Core",
+    对齐 nvidia-smi clocks.gr / intel_gpu_top frequency.actual 的核心频率语义)。"""
     from . import DeviceInfo  # noqa: F401 — 避免循环导入,延迟导入
     core_load = 0.0
     temp_c = None
+    freq_mhz = 0.0
     ded_used = ded_total = shared_used = shared_total = 0.0
     for stype, sname, val in sensors:
         if stype == "Load" and ("Core" in sname or "3D" in sname or "D3D" in sname):
             core_load = max(core_load, val)
+        elif stype == "Clock" and "Core" in sname:
+            freq_mhz = max(freq_mhz, val)
         elif stype == "SmallData":
             if "Dedicated" in sname and "Used" in sname:
                 ded_used = val
@@ -144,4 +148,5 @@ def _aggregate_sensors(device_name: str, sensors: Iterator[tuple[str, str, float
         device_name, "GPU (APU)", "Shared+Ded",
         int(total), int(total - used), int(used), float(core_load),
         int(round(temp_c)) if temp_c is not None else None,
+        float(freq_mhz) if freq_mhz > 0 else None,
     )
