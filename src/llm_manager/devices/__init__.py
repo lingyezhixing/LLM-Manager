@@ -9,7 +9,7 @@ import re
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Protocol
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,6 +74,13 @@ def match_devices(
     return matched, unmatched
 
 
+class DeviceAdapter(Protocol):
+    """一个平台×厂商数据源 → 统一 DeviceInfo。实现契约:enumerate() 永不抛(内部兜底)。"""
+
+    def enumerate(self) -> list[DeviceInfo]:
+        ...
+
+
 class DeviceMonitor:
     """On-demand 枚举 + 模糊匹配。refresh() 跑全部适配器 → candidates →
     match_devices(get_referenced()) → 原子 rebind self._cache(config 名键控 + 未引用实测名键控)。
@@ -110,13 +117,6 @@ class DeviceMonitor:
 
     def snapshot(self) -> dict[str, DeviceInfo]:
         return dict(self._cache)
-
-
-class DeviceAdapter:
-    """一个平台×厂商数据源 → 统一 DeviceInfo。enumerate() 永不抛(内部兜底)。"""
-
-    def enumerate(self) -> list[DeviceInfo]:
-        raise NotImplementedError
 
 
 def build_adapters() -> list[DeviceAdapter]:

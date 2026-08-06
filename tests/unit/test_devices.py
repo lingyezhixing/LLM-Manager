@@ -358,6 +358,26 @@ def test_build_adapters_minimal(monkeypatch):
     assert [type(a).__name__ for a in ads] == ["CpuAdapter"]
 
 
+def test_build_adapters_posix_without_sysfs(monkeypatch):
+    # posix + nvidia-smi 在 PATH + /sys/class/drm 不存在 → Linux 双 GPU 适配器不注册
+    from llm_manager.devices import build_adapters
+    monkeypatch.setattr("llm_manager.devices.os.name", "posix")
+    monkeypatch.setattr("llm_manager.devices.shutil.which", lambda _: "/usr/bin/nvidia-smi")
+    monkeypatch.setattr("llm_manager.devices.Path.is_dir", lambda self: False)
+    ads = build_adapters()
+    assert {type(a).__name__ for a in ads} == {"CpuAdapter", "NvidiaAdapter"}
+
+
+def test_build_adapters_windows_with_nvidia(monkeypatch):
+    # nt + nvidia-smi 在 PATH + LHM 不可用 → Cpu + Nvidia(Windows 无 sysfs 分支)
+    from llm_manager.devices import build_adapters
+    monkeypatch.setattr("llm_manager.devices.os.name", "nt")
+    monkeypatch.setattr("llm_manager.devices.shutil.which", lambda _: "C:\\nvidia-smi.exe")
+    monkeypatch.setattr("llm_manager.devices.is_lhm_available", lambda: False)
+    ads = build_adapters()
+    assert {type(a).__name__ for a in ads} == {"CpuAdapter", "NvidiaAdapter"}
+
+
 def test_new_gpu_model_matches_via_config_only(monkeypatch):
     """加设备零改代码:config 写 'rtx 5090',mock nvidia-smi 返回 5090 行 → 匹配成功,无需改 devices.py。"""
     import llm_manager.devices as dev

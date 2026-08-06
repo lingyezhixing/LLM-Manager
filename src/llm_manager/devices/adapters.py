@@ -240,7 +240,7 @@ _LHM_DLL = Path(__file__).resolve().parents[1] / "assets" / "dll" / "LibreHardwa
 
 
 def is_lhm_available() -> bool:
-    """pythonnet 可 import + LHM DLL 存在。app.py 装配位一次性判断
+    """pythonnet 可 import + LHM DLL 存在。devices.build_adapters() 装配位一次性判断
     (DLL 路径复用 _LHM_DLL 单一来源)。"""
     try:
         import clr  # type: ignore[import-not-found]  # noqa: F401
