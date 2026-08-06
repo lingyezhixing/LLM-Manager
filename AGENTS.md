@@ -99,7 +99,7 @@ tray     ── 系统托盘(自重启触发 / WOL / Claude 预设应用)
 ```bash
 python -m pytest tests -q          # 全量(含 smoke);~23s
 ruff format --check .             # 格式(2026-08-06 已全仓库格式化;改完须保持 format 干净)
-ruff check .                     # lint(单路径;0.12.7 多路径参数偶发丢诊断——竞态,勿用 `ruff check src tests`)
+ruff check .                     # lint(规则集显式固定 E4/E7/E9/F,见 pyproject;单路径防多路径丢诊断竞态)
 pyright src/llm_manager            # 类型检查(0 errors 基线)
 ```
 前端(`frontend/`):

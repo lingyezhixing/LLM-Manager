@@ -6,19 +6,20 @@ build-backend = "setuptools.build_meta"
 name = "llm-manager"
 version = "3.0.0a1"
 requires-python = ">=3.11"
+# 依赖全部 == 精确锁定(2026-08-06 升级至最新版后固定;升级需显式改版本 + 全量验证)。
 dependencies = [
-  "fastapi>=0.104",
-  "uvicorn[standard]>=0.24",
-  "httpx>=0.25",
-  "psutil>=5.9",
-  "PyYAML",
-  "pydantic>=2",
+  "fastapi==0.141.1",
+  "uvicorn[standard]==0.52.1",
+  "httpx==0.28.1",
+  "psutil==7.2.2",
+  "PyYAML==6.0.3",
+  "pydantic==2.13.4",
 ]
 
 [project.optional-dependencies]
-monitoring = ["pythonnet>=3"]
-tray = ["pystray", "Pillow"]
-dev = ["pytest>=8", "pytest-asyncio>=0.23", "ruff==0.12.7", "pyright", "httpx>=0.25"]
+monitoring = ["pythonnet==3.1.0"]
+tray = ["pystray==0.19.5", "Pillow==12.3.0"]
+dev = ["pytest==9.1.1", "pytest-asyncio==1.4.0", "ruff==0.16.1", "pyright==1.1.411", "httpx==0.28.1"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -30,8 +31,10 @@ testpaths = ["tests"]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+# 规则集显式固定(E4/E7/E9/F = 0.12.7 默认集):ruff 0.16 默认集扩大(I/UP/BLE/RUF…),
+# 若跟随默认,升级版本会引入新规则导致结果漂移。显式 select 后版本升级不改变行为。
 # 仓库内 .py 仅分布于 src/ 与 tests/,默认扫描(include 默认 *.py)即全覆盖。
-# 注意:0.12.7 多路径参数偶发丢诊断——验收用单路径 `ruff check .`,勿用 `ruff check src tests`。
+lint.select = ["E4", "E7", "E9", "F"]
 
 [tool.pyright]
 include = ["src/llm_manager"]
