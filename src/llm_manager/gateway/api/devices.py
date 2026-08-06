@@ -7,6 +7,7 @@ so it can be unit-tested directly without the HTTP stack.
 """
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 from dataclasses import asdict
 
@@ -55,6 +56,19 @@ async def _device_stream(feed: DeviceFeed) -> AsyncIterator[str]:
 
 
 def register_devices_routes(router: APIRouter) -> None:
+    @router.get("/devices")
+    async def list_devices(request: Request) -> DevicesResponse:
+        """一次性快照(设备名/温度/显存),**不启动** DeviceFeed 刷新门控——零额外
+        采样开销。复用缓存快照(app 启动/auto_start/模型启停时已刷新);仅当快照
+        为空(理论:启动后从未有人看过设备栏)才刷一次 monitor 兜底。"""
+        feed: DeviceFeed = request.app.state.device_feed
+        snap = feed.current_snapshot()
+        if not snap:
+            monitor = request.app.state.monitor
+            await asyncio.to_thread(monitor.refresh)
+            snap = monitor.snapshot()
+        return DevicesResponse(data=[_to_schema(d) for d in snap.values()])
+
     @router.get("/devices/stream")
     async def stream_devices(request: Request) -> StreamingResponse:
         feed: DeviceFeed = request.app.state.device_feed

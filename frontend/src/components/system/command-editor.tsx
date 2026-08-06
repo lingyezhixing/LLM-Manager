@@ -8,6 +8,12 @@ import type { CommandDef } from "@/lib/api";
 // 命令编辑:顺序=环境变量 → conda 环境 → 命令行 → 预览 → 高级(折叠 exe/args/cwd)。
 // 主输入=「命令行」(粘贴整条命令 → 程序拆 argv 直跑,无 shell);env 提到前面更直觉;
 // args 列表作命令行解析歧义(带空格路径等)的手改回退。
+
+// 内置常用环境变量(下拉建议,可手输任意键):GPU 可见性设置最常用。
+const COMMON_ENV_VARS = [
+  "CUDA_VISIBLE_DEVICES",   // NVIDIA:限定可见 GPU(如 0 或 0,1)
+  "HIP_VISIBLE_DEVICES",    // AMD ROCm:限定可见 GPU
+];
 export function CommandEditor({
   value,
   onChange,
@@ -51,31 +57,27 @@ export function CommandEditor({
 
   return (
     <div className="rounded-md border border-border p-3">
-      <Field label="环境变量" hint="键 = 值;程序会与系统环境合并后传入">
+      <Field label="环境变量" htmlFor="cmd-env">
         <KeyValueEditor
           entries={value.env}
           onChange={(env) => set("env", env as Record<string, string>)}
-          keyPlaceholder="CUDA_VISIBLE_DEVICES"
-          valuePlaceholder="0"
+          keyOptions={COMMON_ENV_VARS}
         />
       </Field>
       <Field
         label="conda 环境"
-        hint="留空=直跑;填了程序自动用 conda run -n <env> 包装(Windows 再加 cmd /c)"
         htmlFor="cmd-conda"
       >
         <TextInput
           id="cmd-conda"
           value={toStr(value.conda_env)}
           onChange={(e) => set("conda_env", fromStr(e.target.value))}
-          placeholder="lmdeploy"
         />
       </Field>
-      <Field label="命令行" hint="粘贴整条命令(可多行,换行当空格);含空格的路径用引号括起。支持 {{port}} / {{alias}} 占位符(启动时替换为顶部的端口/第一别名,「将执行」预览可见)。程序拆成 argv 直跑(无 shell 特性:| > && $ 等不生效)">
+      <Field label="命令行">
         <TextArea
           value={line}
           onChange={(e) => onLine(e.target.value)}
-          placeholder="lmdeploy serve /models/glm --model-name glm-4 --port 8000"
           rows={4}
         />
       </Field>
@@ -88,7 +90,7 @@ export function CommandEditor({
 
       {preview && (
         <div className="mb-3 rounded-md bg-muted px-3 py-2">
-          <div className="mb-0.5 text-xs text-muted-foreground">将执行</div>
+          <div className="mb-0.5 text-xs text-muted-foreground">命令预览</div>
           <code className="block break-all font-mono text-xs text-foreground">{preview}</code>
         </div>
       )}
@@ -101,11 +103,10 @@ export function CommandEditor({
           <Field label="exe(可执行文件)" htmlFor="cmd-exe">
             <TextInput id="cmd-exe" value={value.exe} onChange={(e) => set("exe", e.target.value)} />
           </Field>
-          <Field label="args(参数,有序)" hint="每行一个;命令行解析歧义(如带空格路径)时在此手改">
+          <Field label="args(参数,有序)">
             <StringListEditor
               values={value.args}
               onChange={(args) => set("args", args)}
-              placeholder="--port 8000"
             />
           </Field>
           <Field label="cwd(工作目录,可空)" htmlFor="cmd-cwd">

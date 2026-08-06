@@ -18,7 +18,7 @@ from typing import Callable, Literal
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from llm_manager.config import AppConfig, Command, ModelConfig, Pricing, PricingTier, Scheme, _norm_device
+from llm_manager.config import AppConfig, Command, ModelConfig, Pricing, PricingTier, Scheme
 from llm_manager.data import logs as _logs
 from llm_manager.data.config_store import (
     ConfigValidationFailed,
@@ -117,18 +117,18 @@ class ModelDefInput(BaseModel):
 
 
 def _to_model_config(body: ModelDefInput) -> ModelConfig:
-    """Pydantic 输入 → frozen ModelConfig。设备名 _norm_device(小写+strip)归一化,
-    与 YAML 导入一致(否则对不上 DeviceMonitor)。重复 config_source → ValueError(→ 422)。"""
+    """Pydantic 输入 → frozen ModelConfig。设备名存储原样(所见即所存),匹配时由
+    DeviceMonitor._tokens 归一化比对(与 YAML 导入一致)。重复 config_source → ValueError(→ 422)。"""
     schemes: dict[str, Scheme] = {}
     for s in body.schemes:
         if s.config_source in schemes:
             raise ValueError(f"duplicate scheme config_source '{s.config_source}'")
         schemes[s.config_source] = Scheme(
             config_source=s.config_source,
-            required_devices=frozenset(_norm_device(d) for d in s.required_devices),
+            required_devices=frozenset(s.required_devices),
             command=Command(exe=s.command.exe, args=tuple(s.command.args),
                             env=dict(s.command.env), cwd=s.command.cwd, conda_env=s.command.conda_env),
-            memory_mb={_norm_device(k): v for k, v in s.memory_mb.items()},
+            memory_mb=dict(s.memory_mb),
         )
     pricing = Pricing(
         pricing_type=body.pricing.pricing_type,
@@ -349,6 +349,17 @@ def register_config_routes(api: APIRouter) -> None:
             db.conn.commit()
         cfg = get_config_store(request).reload()
         return _config_write_result(request, cfg)
+
+    @api.post("/config/wol/send")
+    def send_wol_now(request: Request, body: WolUpdate) -> dict:
+        """立即发送魔术包(WebUI「发送魔术包」;按请求体地址,与托盘 send_wol 同款)。
+        广播/MAC 非法(如 build_magic_packet 校验失败)→ 422。"""
+        from llm_manager.tray import wol as wol_impl
+        try:
+            wol_impl.send_wol(body.mac_address, body.broadcast_address)
+        except Exception as e:
+            raise HTTPException(422, f"发送失败: {e}") from e
+        return {"ok": True}
 
     @api.put("/config/claude")
     def put_claude(request: Request, body: ClaudeConfigsUpdate) -> dict:

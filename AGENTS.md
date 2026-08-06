@@ -19,7 +19,7 @@ lmdeploy / vLLM …),对外暴露 OpenAI / Anthropic / Responses 兼容 API,记�
 ## 2. 架构分层(依赖单向无环)
 
 ```
-config   ── 纯数据 + validate(YAML/DB → frozen dataclasses;设备名 _norm_device 归一一次)
+config   ── 纯数据 + validate(YAML/DB → frozen dataclasses;设备名存储原样,匹配时归一化)
   ↓
 state    ── 内存状态机(ModelStatus)+ 单派发 inflight Future + activity(无锁,单线程)
   ↓

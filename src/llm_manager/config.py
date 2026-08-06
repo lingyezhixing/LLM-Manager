@@ -115,10 +115,6 @@ class AppConfig:
     claude_configs: dict[str, dict[str, str]]
 
 
-def _norm_device(name: str) -> str:
-    return name.strip().lower()
-
-
 def load(path: Path) -> AppConfig:
     raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     p = raw.get("program", {})
@@ -139,11 +135,11 @@ def load(path: Path) -> AppConfig:
             c = val["command"]
             schemes[key] = Scheme(
                 config_source=key,
-                required_devices=frozenset(_norm_device(d) for d in val.get("required_devices", [])),
+                required_devices=frozenset(val.get("required_devices", [])),
                 command=Command(
                     exe=c["exe"], args=tuple(c.get("args", [])), env=dict(c.get("env", {})),
                     cwd=c.get("cwd"), conda_env=c.get("conda_env")),
-                memory_mb={_norm_device(k): int(v) for k, v in val.get("memory_mb", {}).items()},
+                memory_mb={k: int(v) for k, v in val.get("memory_mb", {}).items()},
             )
         models[name] = ModelConfig(
             primary_name=name,
@@ -222,7 +218,7 @@ def select_adaptive(model: ModelConfig, online: set[str]) -> Scheme | None:
 
 def referenced_devices(cfg: AppConfig) -> set[str]:
     """收集 config 引用过的全部设备名 = ∪ scheme.required_devices ∪ ∪ scheme.memory_mb.keys()。
-    config load 时已 _norm_device 归一化(小写+strip);此处幂等再收集。供 DeviceMonitor 匹配。"""
+    设备名存储原样(所见即所存),匹配时由 DeviceMonitor._tokens 归一化比对。供 DeviceMonitor 匹配。"""
     names: set[str] = set()
     for m in cfg.models.values():
         for scheme in m.schemes.values():

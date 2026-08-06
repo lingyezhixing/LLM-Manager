@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { ConfigSaveBar } from "@/components/config-save-bar";
 import { Button } from "@/components/ui/button";
 import { Field, NumberInput, Select, Switch, TextInput } from "@/components/ui/form";
 import { numFromStr as num } from "@/lib/format";
@@ -92,9 +91,11 @@ interface ModelDefFormProps {
   onSaved: (result: ModelWriteResult, savedName: string) => void;
   // dirty 变化回调(面板用于切换守卫)。
   onDirtyChange?: (dirty: boolean) => void;
+  // 删除当前模型(名称行末格按钮;panel 层负责 confirm + 删除)。
+  onDelete?: () => void;
 }
 
-export function ModelDefForm({ model, onSaved, onDirtyChange }: ModelDefFormProps) {
+export function ModelDefForm({ model, onSaved, onDirtyChange, onDelete }: ModelDefFormProps) {
   const isCreate = model === null;
   const [form, setForm] = useState<ModelDef>(() => (model ? clone(model) : emptyModel()));
   const [baseline, setBaseline] = useState<ModelDef>(() => (model ? clone(model) : emptyModel()));
@@ -179,12 +180,13 @@ export function ModelDefForm({ model, onSaved, onDirtyChange }: ModelDefFormProp
   };
 
   return (
-    <div>
+    <div className="pb-6">
       <div className="mb-1 text-sm font-medium text-foreground">基本</div>
-      <div className="grid grid-cols-1 gap-x-6 sm:grid-cols-2">
+      {/* 名称行 4:2:2:1:1(名称/模式/端口/自启动/删除);创建态无删除,末格留白保比例。 */}
+      <div className="grid grid-cols-1 gap-x-6 sm:grid-cols-10">
         <Field
+          className="sm:col-span-4"
           label="名称"
-          hint={isCreate ? "唯一标识" : "可改名(保存时会询问是否迁移历史数据)"}
           htmlFor="mdf-name"
         >
           <TextInput
@@ -193,31 +195,38 @@ export function ModelDefForm({ model, onSaved, onDirtyChange }: ModelDefFormProp
             onChange={(e) => set("name", e.target.value)}
           />
         </Field>
-        <Field label="模式" hint="选择健康探测方式" htmlFor="mdf-mode">
+        <Field className="sm:col-span-2" label="模式" htmlFor="mdf-mode">
           <Select id="mdf-mode" value={form.mode} onChange={(e) => set("mode", e.target.value)}>
             {MODES.map((m) => (
               <option key={m} value={m}>{m}</option>
             ))}
           </Select>
         </Field>
-        <Field label="端口" hint="模型服务监听端口" htmlFor="mdf-port" error={!portValid && form.port !== 0 ? "端口须在 1–65535" : null}>
+        <Field className="sm:col-span-2" label="端口" htmlFor="mdf-port" error={!portValid && form.port !== 0 ? "端口须在 1–65535" : null}>
           <NumberInput id="mdf-port" value={form.port} onChange={(e) => set("port", num(e.target.value))} />
         </Field>
-        <Field label="自启动" hint="程序启动时自动拉起该模型" htmlFor="mdf-auto">
-          <div className="flex items-center gap-2">
+        <Field className="sm:col-span-1" label="自启动" htmlFor="mdf-auto">
+          <div className="flex h-9 items-center gap-2">
             <Switch id="mdf-auto" checked={form.auto_start} onChange={(v) => set("auto_start", v)} />
             <span className="text-xs text-muted-foreground">{form.auto_start ? "开" : "关"}</span>
           </div>
         </Field>
+        {onDelete && !isCreate ? (
+          <div className="mb-4 flex items-end sm:col-span-1">
+            <Button type="button" size="sm" variant="destructive" onClick={onDelete} className="h-9 w-full">
+              删除模型
+            </Button>
+          </div>
+        ) : (
+          <div className="hidden sm:col-span-1 sm:block" />
+        )}
         <Field
-          className="sm:col-span-2"
+          className="sm:col-span-10"
           label="对外别名"
-          hint="客户端请求用的名字;第一个 = 下游服务名(lmdeploy --model-name / llama.cpp -a)"
         >
           <StringListEditor
             values={form.aliases}
             onChange={(aliases) => set("aliases", aliases)}
-            placeholder="glm-4.6"
           />
         </Field>
       </div>
@@ -226,9 +235,6 @@ export function ModelDefForm({ model, onSaved, onDirtyChange }: ModelDefFormProp
         <span className="text-sm font-medium text-foreground">启动方案</span>
         <Button type="button" size="sm" variant="ghost" onClick={addScheme}>+ 添加方案</Button>
       </div>
-      <p className="mb-3 text-xs text-muted-foreground">
-        每个方案 = 一套启动配置;运行时按在线设备自动选匹配的方案(多 GPU 或备用配置时才需多套,一般一套即可)。
-      </p>
       <div className="flex flex-col gap-3">
         {/* 命令变量:{{port}}/{{alias}} → 顶部端口/第一别名,实时预览替换(与后端 substitute_vars 一致) */}
         {form.schemes.map((s, i) => (
@@ -246,17 +252,18 @@ export function ModelDefForm({ model, onSaved, onDirtyChange }: ModelDefFormProp
       <div className="mb-1 mt-4 text-sm font-medium text-foreground">计费</div>
       <PricingEditor value={form.pricing} onChange={(pricing) => set("pricing", pricing)} />
 
+      {/* 右下角浮动保存/重置(仅 dirty/创建态显示):纵向堆叠,滚动时始终可见。 */}
       {(dirty || isCreate) && (
-        <div className="mt-3">
-          <ConfigSaveBar
-            saving={saving}
-            error={errorMsg}
-            onSave={onSave}
-            onReset={() => setForm(clone(baseline))}
-            saveDisabled={!canSave}
-          />
+        <div className="sticky bottom-4 z-10 mt-3 flex flex-col items-end gap-2">
+          {errorMsg && <span className="text-xs text-destructive">{errorMsg}</span>}
+          <Button type="button" variant="outline" onClick={() => setForm(clone(baseline))}>
+            重置
+          </Button>
+          <Button type="button" onClick={onSave} disabled={saving || !canSave}>
+            {saving ? "保存中…" : "保存"}
+          </Button>
           {!canSave && (
-            <p className="mt-2 text-xs text-warning">
+            <p className="max-w-[260px] text-right text-xs text-warning">
               需:名称、≥1 别名、≥1 方案(每方案:标识与命令行非空)、端口 1–65535
             </p>
           )}

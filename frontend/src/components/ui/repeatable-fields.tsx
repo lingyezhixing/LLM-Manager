@@ -1,5 +1,6 @@
 import type { KeyboardEvent } from "react";
 import { Button } from "@/components/ui/button";
+import { ComboboxInput } from "@/components/ui/combobox";
 import { NumberInput, TextInput } from "@/components/ui/form";
 
 // 可复用行编辑器原子(模型定义 CRUD 用;后续其它键值/列表字段可复用)。
@@ -53,12 +54,18 @@ export function KeyValueEditor({
   valuePlaceholder,
   numeric,
   keyPlaceholder = "键",
+  keyOptions,
+  valueSuffix,
 }: {
   entries: Record<string, string | number>;
   onChange: (next: Record<string, string | number>) => void;
   valuePlaceholder?: string;
   numeric?: boolean;
   keyPlaceholder?: string;
+  // 键输入框的可选下拉建议(ComboboxInput:聚焦展开全部,可点选也可手输)。
+  keyOptions?: string[];
+  // 值输入框后的单位标注(如显存的 MB)。
+  valueSuffix?: string;
 }) {
   const pairs = Object.entries(entries);
 
@@ -82,19 +89,28 @@ export function KeyValueEditor({
     <div className="flex flex-col gap-2">
       {pairs.map(([k, v], i) => (
         <div key={i} className="flex items-center gap-2">
-          <TextInput value={k} placeholder={keyPlaceholder} onChange={(e) => setKey(i, e.target.value)} />
-          {numeric ? (
-            <NumberInput
-              value={Number(v)}
-              placeholder={valuePlaceholder}
-              onChange={(e) => setValue(i, e.target.value === "" ? 0 : Number(e.target.value))}
-            />
+          {keyOptions ? (
+            <ComboboxInput value={k} options={keyOptions} onChange={(key) => setKey(i, key)} />
           ) : (
-            <TextInput
-              value={String(v)}
-              placeholder={valuePlaceholder}
-              onChange={(e) => setValue(i, e.target.value)}
-            />
+            <TextInput value={k} placeholder={keyPlaceholder} onChange={(e) => setKey(i, e.target.value)} />
+          )}
+          {numeric ? (
+            <div className="flex min-w-0 flex-1 items-center gap-1">
+              <NumberInput
+                value={Number(v)}
+                placeholder={valuePlaceholder}
+                onChange={(e) => setValue(i, e.target.value === "" ? 0 : Number(e.target.value))}
+              />
+              {valueSuffix && <span className="shrink-0 text-xs text-muted-foreground">{valueSuffix}</span>}
+            </div>
+          ) : (
+            <div className="flex min-w-0 flex-1 items-center gap-1">
+              <TextInput
+                value={String(v)}
+                placeholder={valuePlaceholder}
+                onChange={(e) => setValue(i, e.target.value)}
+              />
+            </div>
           )}
           <button type="button" className={removeBtn} onClick={() => remove(i)}>✕</button>
         </div>

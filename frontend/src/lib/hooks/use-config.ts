@@ -9,6 +9,7 @@ import {
   fetchRestartStatus,
   fetchSystemInfo,
   restartApp,
+  sendWol,
   updateClaudeConfigs,
   updateLogRetention,
   updateProgram,
@@ -59,6 +60,13 @@ export function useDeleteWol() {
   return useMutation({
     mutationFn: () => deleteWol(),
     onSuccess: () => invalidateConfig(qc),
+  });
+}
+
+// 发送魔术包(无副作用于配置,不需失效)。
+export function useSendWol() {
+  return useMutation({
+    mutationFn: (body: WolConfig) => sendWol(body),
   });
 }
 

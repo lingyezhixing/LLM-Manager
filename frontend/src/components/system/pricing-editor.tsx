@@ -48,36 +48,37 @@ export function PricingEditor({ value, onChange }: { value: Pricing; onChange: (
 
   return (
     <div className="flex flex-col gap-3">
-      <Field label="计费方式" htmlFor="pr-type">
-        <Select
-          id="pr-type"
-          value={value.pricing_type}
-          onChange={(e) => onChange({ ...value, pricing_type: e.target.value as Pricing["pricing_type"] })}
-        >
-          <option value="tier">按量(分级,元/百万 token)</option>
-          <option value="hourly">按时(元/小时)</option>
-        </Select>
-      </Field>
-
-      {value.pricing_type === "hourly" && (
-        <Field label="单价(元/小时)" htmlFor="pr-hourly">
-          <NumberInput
-            id="pr-hourly"
-            value={value.hourly_price}
-            onChange={(e) => onChange({ ...value, hourly_price: e.target.value === "" ? 0 : Number(e.target.value) })}
-          />
+      {/* 计费方式 3 列 + 支持缓存/单价 1 列(按时计费时该格换为单价输入) */}
+      <div className="grid grid-cols-1 gap-x-6 sm:grid-cols-4">
+        <Field className="sm:col-span-3" label="计费方式" htmlFor="pr-type">
+          <Select
+            id="pr-type"
+            value={value.pricing_type}
+            onChange={(e) => onChange({ ...value, pricing_type: e.target.value as Pricing["pricing_type"] })}
+          >
+            <option value="tier">按量(分级,元/百万 token)</option>
+            <option value="hourly">按时(元/小时)</option>
+          </Select>
         </Field>
-      )}
+        {value.pricing_type === "hourly" ? (
+          <Field label="单价(元/小时)" htmlFor="pr-hourly">
+            <NumberInput
+              id="pr-hourly"
+              value={value.hourly_price}
+              onChange={(e) => onChange({ ...value, hourly_price: e.target.value === "" ? 0 : Number(e.target.value) })}
+            />
+          </Field>
+        ) : (
+          <Field label="支持缓存" htmlFor="pr-cache">
+            <div className="flex h-9 items-center">
+              <Switch id="pr-cache" checked={value.support_cache} onChange={(v) => onChange({ ...value, support_cache: v })} />
+            </div>
+          </Field>
+        )}
+      </div>
 
       {value.pricing_type === "tier" && (
         <>
-          <p className="text-xs text-muted-foreground">
-            每个阶梯 = 一个 token 量区间 + 单价;请求命中首个匹配阶梯。留空阶梯 = 免费。min=0 闭区间,否则开区间;max 留空 = 无上限。
-          </p>
-          <div className="flex items-center gap-2">
-            <Switch id="pr-cache" checked={value.support_cache} onChange={(v) => onChange({ ...value, support_cache: v })} />
-            <label htmlFor="pr-cache" className="text-xs text-muted-foreground">支持缓存(prompt_n 同算输入费 + 写缓存费)</label>
-          </div>
           {value.tiers.map((t, i) => (
             <div key={i} className="flex flex-wrap items-end gap-x-3 gap-y-2 rounded-md border border-border px-3 py-2">
               <span className="self-center text-xs font-medium text-muted-foreground">阶梯 {t.tier_index}</span>

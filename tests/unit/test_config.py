@@ -11,7 +11,7 @@ def _write_cfg(tmp_path: Path, body: str) -> Path:
     return p
 
 
-def test_load_parses_models_and_normalizes_device_names(tmp_path):
+def test_load_parses_models_and_preserves_device_names(tmp_path):
     cfg_path = _write_cfg(tmp_path, """
 program: {host: 0.0.0.0, port: 8080, alive_time: 60, log_level: INFO}
 Local-Models:
@@ -31,8 +31,8 @@ Local-Models:
     assert "Qwen3-4B" in m.aliases
     scheme = m.schemes["RTX4060"]
     assert isinstance(scheme, Scheme)
-    assert scheme.required_devices == frozenset({"rtx 4060"})
-    assert scheme.memory_mb == {"rtx 4060": 5120}
+    assert scheme.required_devices == frozenset({"RTX 4060"})   # 存储原样,匹配时归一化
+    assert scheme.memory_mb == {"RTX 4060": 5120}
     assert scheme.command.exe == "q.bat"
 
 

@@ -97,6 +97,7 @@ export function ModelDefPanel() {
           key={formKey}
           model={detail.data}
           onSaved={onSaved}
+          onDelete={onDelete}
           onDirtyChange={(d) => {
             dirtyRef.current = d;
           }}
@@ -148,18 +149,6 @@ export function ModelDefPanel() {
           <Button type="button" size="sm" variant="ghost" onClick={startCreate} className="w-full justify-start">
             + 新增
           </Button>
-          {typeof effSelected === "string" && (
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              onClick={onDelete}
-              className="w-full justify-start text-destructive"
-              disabled={del.isPending}
-            >
-              删除模型
-            </Button>
-          )}
           {del.error && (
             <div className="px-3 text-xs text-destructive">
               删除失败:{(del.error as Error).message}
@@ -168,7 +157,7 @@ export function ModelDefPanel() {
         </div>
       </div>
 
-      {/* 右栏:重启提示 + 详情表单 */}
+      {/* 右栏:重启提示 + 详情表单(删除按钮在表单名称行内) */}
       <div>
         {hint && (
           <div className="mb-4 flex flex-wrap items-center gap-3 rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-sm">

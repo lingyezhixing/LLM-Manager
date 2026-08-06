@@ -60,6 +60,17 @@ export async function deleteWol(): Promise<ConfigWriteResult> {
   return (await res.json()) as ConfigWriteResult;
 }
 
+// 立即发送魔术包(POST /api/config/wol/send;按传入地址直接发,无需先保存)。
+export async function sendWol(body: WolConfig): Promise<{ ok: boolean }> {
+  const res = await fetch("/api/config/wol/send", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw await parseApiError(res);
+  return (await res.json()) as { ok: boolean };
+}
+
 // Claude 预设:整组全量替换(PUT /api/config/claude)。
 export async function updateClaudeConfigs(configs: Record<string, Record<string, string>>): Promise<ConfigWriteResult> {
   const res = await fetch("/api/config/claude", {

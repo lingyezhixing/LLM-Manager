@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { ChevronDown, ChevronRight } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { ErrorState } from "@/components/ui/error-state";
@@ -67,6 +68,11 @@ function ClaudePresetCard({
 
   // 默认:生效中的卡展开,其余收起;新建卡必展开。
   const [expanded, setExpanded] = useState(isNew || isCurrent);
+  // isCurrent 异步到达(useClaudeCurrent 首载未回)→ 补展开(挂载初值固化后不会重算)。
+  // 用户手动收起后依赖不变,不会强制展开。
+  useEffect(() => {
+    if (!isNew && isCurrent) setExpanded(true);
+  }, [isNew, isCurrent]);
   const [nameInput, setNameInput] = useState("");
   const [json, setJson] = useState(isNew ? "{}" : JSON.stringify(preset, null, 2));
   const [baselineJson, setBaselineJson] = useState(json);
@@ -121,17 +127,15 @@ function ClaudePresetCard({
 
   return (
     <div className="rounded-lg border border-border p-3">
-      {/* 头部:折叠后也常驻(应用/删除/生效标记都在) */}
-      <div className="flex items-center gap-2">
+      {/* 头部:折叠后也常驻(应用/删除/生效标记都在)。整条可点切换展开(新建卡除外,内部按钮 stopPropagation)。 */}
+      <div
+        className={`flex select-none items-center gap-2 ${isNew ? "" : "cursor-pointer"}`}
+        onClick={() => { if (!isNew) setExpanded(!expanded); }}
+      >
         {!isNew && (
-          <button
-            type="button"
-            className="w-4 text-xs text-muted-foreground hover:text-foreground"
-            aria-label={expanded ? "收起" : "展开"}
-            onClick={() => setExpanded(!expanded)}
-          >
-            {expanded ? "▾" : "▸"}
-          </button>
+          <span className="text-muted-foreground" aria-hidden>
+            {expanded ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
+          </span>
         )}
         {isNew ? (
           <TextInput
@@ -148,7 +152,7 @@ function ClaudePresetCard({
           : <span className="text-xs text-muted-foreground">○ 未生效</span>}
         {!expanded && dirty && <span className="text-xs text-warning">未保存</span>}
         <div className="flex-1" />
-        <Button type="button" size="sm" variant="ghost" onClick={onApply} disabled={!applyEnabled || apply.isPending}>
+        <Button type="button" size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); onApply(); }} disabled={!applyEnabled || apply.isPending}>
           {apply.isPending ? "应用中…" : "应用"}
         </Button>
         <Button
@@ -156,7 +160,7 @@ function ClaudePresetCard({
           size="sm"
           variant="ghost"
           className="text-destructive"
-          onClick={onDelete}
+          onClick={(e) => { e.stopPropagation(); onDelete(); }}
           disabled={(!isNew && !deleteEnabled) || update.isPending}
         >
           {update.isPending ? "删除中…" : isNew ? "取消" : "删除"}

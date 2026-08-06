@@ -109,6 +109,26 @@ def test_delete_wol_clears_config(tmp_path):
         assert c.get("/api/config").json()["wol"] is None
 
 
+def test_send_wol_now_posts_magic_packet(tmp_path, monkeypatch):
+    from llm_manager.tray import wol as wol_module
+    sent: list[tuple[str, str]] = []
+    monkeypatch.setattr(wol_module, "send_wol",
+                        lambda mac, broadcast, port=9: sent.append((mac, broadcast)))
+    with TestClient(_app(tmp_path)) as c:
+        r = c.post("/api/config/wol/send", json={
+            "broadcast_address": "10.0.0.255", "mac_address": "aa:bb:cc:dd:ee:ff"})
+        assert r.status_code == 200
+        assert r.json() == {"ok": True}
+    assert sent == [("aa:bb:cc:dd:ee:ff", "10.0.0.255")]
+
+
+def test_send_wol_now_rejects_bad_mac(tmp_path):
+    with TestClient(_app(tmp_path)) as c:
+        r = c.post("/api/config/wol/send", json={
+            "broadcast_address": "10.0.0.255", "mac_address": "not-a-mac"})
+    assert r.status_code == 422
+
+
 def test_put_claude_replaces_configs(tmp_path):
     with TestClient(_app(tmp_path)) as c:
         r = c.put("/api/config/claude", json={"configs": {"GLM": {"ANTHROPIC_BASE_URL": "http://x"}}})
@@ -163,7 +183,7 @@ def test_put_program_claude_settings_path_is_restart_classified(tmp_path):
     assert j["needs_restart"] is True
 
 
-def test_to_model_config_normalizes_device_names():
+def test_to_model_config_preserves_device_names():
     from llm_manager.gateway.api.config_api import CommandInput, ModelDefInput, SchemeInput, _to_model_config
     body = ModelDefInput(name="M", mode="Chat", port=8000, aliases=["M"],
                          schemes=[SchemeInput(config_source="RTX4060",
@@ -174,8 +194,8 @@ def test_to_model_config_normalizes_device_names():
     assert mc.primary_name == "M"
     assert mc.aliases == ("M",)
     scheme = mc.schemes["RTX4060"]
-    assert scheme.required_devices == frozenset({"rtx 4060"})     # 归一化(小写+strip)
-    assert scheme.memory_mb == {"rtx 4060": 5120}
+    assert scheme.required_devices == frozenset({"RTX 4060"})   # 存储原样(所见即所存)
+    assert scheme.memory_mb == {"RTX 4060": 5120}
     assert scheme.command.exe == "run" and scheme.command.args == ()
 
 
@@ -322,15 +342,15 @@ def test_get_model_def_unknown_404(tmp_path):
     assert r.status_code == 404
 
 
-def test_post_model_def_normalizes_devices(tmp_path):
+def test_post_model_def_preserves_devices(tmp_path):
     with TestClient(_app(tmp_path)) as c:
         body = _def_body("M")
         body["schemes"][0]["required_devices"] = ["RTX 4060"]
         body["schemes"][0]["memory_mb"] = {"RTX 4060": 5120}
         c.post("/api/config/models", json=body)
         one = c.get("/api/config/models/M").json()
-    assert one["schemes"][0]["required_devices"] == ["rtx 4060"]   # 归一化
-    assert list(one["schemes"][0]["memory_mb"].keys()) == ["rtx 4060"]
+    assert one["schemes"][0]["required_devices"] == ["RTX 4060"]   # 存储原样
+    assert list(one["schemes"][0]["memory_mb"].keys()) == ["RTX 4060"]
 
 
 def test_put_model_def_replaces(tmp_path):

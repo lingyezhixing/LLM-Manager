@@ -47,9 +47,10 @@ function SectionTitle({ children }: { children: ReactNode }) {
   );
 }
 
-// 双列栅格容器:窄屏单列、≥sm 双列。Field 自带 mb-4 作行间距,故只设列间距。
+// 三列栅格容器:窄屏单列、≥sm 三列(监听三项/日志三项各排一行)。
+// Field 自带 mb-4 作行间距,故只设列间距。
 function FieldGrid({ children }: { children: ReactNode }) {
-  return <div className="grid grid-cols-1 gap-x-6 sm:grid-cols-2">{children}</div>;
+  return <div className="grid grid-cols-1 gap-x-6 sm:grid-cols-3">{children}</div>;
 }
 
 export function GeneralPanel() {
@@ -125,36 +126,36 @@ export function GeneralPanel() {
           <InfoTile label="运行时长" value={formatDuration(now / 1000 - info.started_at)} valueClass="break-all text-foreground" />
         </div>
       )}
-      <p className="mb-1 text-xs text-muted-foreground">
-        host / port / 日志级别改完需重启程序(顶部会提示);alive_time 与日志保留即时生效。
-      </p>
 
       <SectionTitle>监听与运行</SectionTitle>
       <FieldGrid>
-        <Field label="监听地址 (host)" htmlFor="cfg-host">
+        <Field label="监听地址" htmlFor="cfg-host">
           <TextInput id="cfg-host" value={form.program.host} onChange={(e) => set({ ...form.program, host: e.target.value })} />
         </Field>
-        <Field label="监听端口 (port)" htmlFor="cfg-port"
+        <Field label="监听端口" htmlFor="cfg-port"
           error={!portValid && form.program.port !== 0 ? "端口须在 1–65535" : null}>
           <NumberInput id="cfg-port" value={form.program.port} onChange={(e) => set({ ...form.program, port: num(e.target.value) })} />
         </Field>
-        <Field label="空闲检测 (alive_time)" hint="分钟 · 🟢 改完即时生效" htmlFor="cfg-alive"
+        <Field label="空闲检测 (分钟)" htmlFor="cfg-alive"
           error={!aliveValid ? "须 ≥ 0" : null}>
           <NumberInput id="cfg-alive" value={form.program.alive_time} onChange={(e) => set({ ...form.program, alive_time: num(e.target.value) })} />
         </Field>
       </FieldGrid>
 
       <SectionTitle>日志</SectionTitle>
-      <FieldGrid>
-        <Field label="日志级别 (log_level)" htmlFor="cfg-level">
-          <Select id="cfg-level" value={form.program.log_level} onChange={(e) => set({ ...form.program, log_level: e.target.value })}>
-            {LOG_LEVELS.map((lv) => (
-              <option key={lv} value={lv}>{lv}</option>
-            ))}
-          </Select>
-        </Field>
-      </FieldGrid>
-      <LogRetentionEditor value={form.logs} onChange={setLogs} />
+      <LogRetentionEditor
+        value={form.logs}
+        onChange={setLogs}
+        head={
+          <Field label="日志级别" htmlFor="cfg-level">
+            <Select id="cfg-level" value={form.program.log_level} onChange={(e) => set({ ...form.program, log_level: e.target.value })}>
+              {LOG_LEVELS.map((lv) => (
+                <option key={lv} value={lv}>{lv}</option>
+              ))}
+            </Select>
+          </Field>
+        }
+      />
 
       {dirty && (
         <ConfigSaveBar
