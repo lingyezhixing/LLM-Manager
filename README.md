@@ -1,4 +1,4 @@
-# LLM-Manager v3.0.0a1
+# LLM-Manager v3.0.0a2
 
 **LLM-Manager** 是一个统一管理本地大型语言模型（LLM）的代理网关 + WebUI：按需启动 / 空闲回收本地模型进程（llama.cpp / lmdeploy / vLLM …），对外暴露 OpenAI / Anthropic / Responses 兼容 API，记录用量与计费，并提供系统配置、模型管理、用量统计、日志查看的完整前端。**完全离线运行**（无任何云端依赖）。
 
@@ -113,7 +113,8 @@ docker compose up -d             # 日常：改代码/配置后重启即可，�
 全部配置存储在 SQLite 数据库（默认 `data/llm_manager.db`）中，通过 WebUI「系统配置」页或 `/api/config/*` 修改，无需编辑配置文件：
 
 - **程序配置**：监听地址 / 端口、日志级别、空闲回收间隔（分钟）、Claude settings 路径、WOL、Claude 预设、日志保留规则。
-- **模型定义**：名称、别名、模式、端口、自动启动、设备方案（scheme: required_devices / memory_mb / **结构化启动命令** exe + args + env + conda_env）、计费（阶梯 / 按时）。
+- **模型定义**：名称、别名、模式、端口、自动启动、设备方案（scheme: required_devices / memory_mb / **结构化启动命令** exe + args + env + conda_env）、计费（阶梯 / 按时）。支持**改名 + 历史数据迁移**（可选删旧日志）、启动命令 `{{port}}` / `{{alias}}` 变量替换（改端口 / 别名自动传导）。
+- **设备管理**：设备名存储原样（匹配时归一化）；模型配置页按需发起**网络唤醒**（发送魔术包）唤醒远程设备。
 - **环境变量**（可选，启动时覆写并持久化）：`LLM_MANAGER_HOST` / `LLM_MANAGER_PORT` / `LLM_MANAGER_ALIVE_TIME` / `LLM_MANAGER_LOG_LEVEL` / `LLM_MANAGER_DB_PATH`。
 
 首次启动（空库）时，若项目根目录存在 `config.yaml`（旧版 YAML 配置，结构参考下方），会作为一次性引导导入；否则使用默认配置。导入后配置以 DB 为准，`config.yaml` 不再被读取。
@@ -154,7 +155,8 @@ Local-Models:
 后端（项目根，conda env `LLM-Manager`）：
 ```bash
 python -m pytest tests -q     # 全量测试（含 smoke）
-ruff check .                  # lint
+ruff format --check .         # 格式
+ruff check .                  # lint（全量规则集，依赖已 == 固定）
 pyright src/llm_manager       # 类型检查
 ```
 
