@@ -24,7 +24,7 @@ Local-Models:
 
 
 def test_lifespan_starts_and_stops_background(tmp_path, monkeypatch):
-    # enumerate_lhm_gpus 内部职责;mock devices.is_lhm_available=False → 等效隔离 LHM 慢调用,聚焦 lifespan+background。
+    # enumerate_lhm_gpus 内部职责;mock devices.adapters.is_lhm_available=False → 等效隔离 LHM 慢调用,聚焦 lifespan+background。
     monkeypatch.setattr("llm_manager.devices.adapters.is_lhm_available", lambda: False)
     # 探针秒失败(跳过真实 60s 重试循环):仍证明 auto_start 后台真起 + 失败容错(不抛)+ 不阻塞 /health。
     # 测试的真实契约是「后台任务起 + 失败路径走通 + /health 不阻塞」,「重试 60s」只是 startup_timeout 的副作用。

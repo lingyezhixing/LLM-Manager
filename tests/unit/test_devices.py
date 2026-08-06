@@ -192,7 +192,7 @@ def test_lhm_computer_unavailable_returns_none(monkeypatch):
 
 
 def test_lhm_computer_init_failure_returns_none(monkeypatch):
-    # 初始化抛异常(AddReference 失败等)→ None,不穿透(防 enumerate_cpu 的 try 外调用)
+    # 初始化抛异常(AddReference 失败等)→ None,不穿透(防 CpuAdapter.enumerate 的 try 外调用)
     import sys
     import types
     from llm_manager.devices import adapters as ad
