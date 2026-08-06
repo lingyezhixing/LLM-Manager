@@ -22,7 +22,7 @@ from llm_manager import config
 from llm_manager.data import logs as _logs
 from llm_manager.data.log_handler import SystemLogHandler, setup_logging
 from llm_manager.data.persistence import open_db
-from llm_manager.devices import ENUMERATORS, DeviceMonitor
+from llm_manager.devices import DeviceMonitor, build_adapters
 from llm_manager.gateway.api.config_api import RESTART_EXIT_CODE
 from llm_manager.gateway.api.models import build_models_response
 from llm_manager.gateway.routes import register_routes
@@ -58,7 +58,7 @@ def create_app(db_path: Path | None = None, *, legacy_yaml: Path | None = None) 
                 resolved_db, len(cfg.models), cfg.program.host, cfg.program.port, cfg.program.alive_time)
     # referenced 动态化:配置运行时可变(WebUI 在线加模型),按活配置重算设备引用,
     # 否则新模型引用的设备名不进 online → 启动报 no adaptive scheme(需重启才生效)
-    monitor = DeviceMonitor(ENUMERATORS, lambda: config.referenced_devices(store.snapshot()))
+    monitor = DeviceMonitor(build_adapters(), lambda: config.referenced_devices(store.snapshot()))
     supervisor = Supervisor()
     lifecycle = Lifecycle(get_cfg=store.snapshot, supervisor=supervisor, devices=monitor,
                           probes=probe_registry, db=db)

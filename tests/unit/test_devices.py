@@ -267,7 +267,7 @@ def test_device_monitor_matches_config_names_and_keeps_unmatched():
     def enum_cpu():
         return [DeviceInfo("CPU", "CPU", "RAM", 16384, 8192, 8192, 33.0, None)]
 
-    mon = DeviceMonitor([enum_gpus, enum_cpu], lambda: {"rtx 4060", "v100"})
+    mon = DeviceMonitor([_FakeAdapter(enum_gpus()), _FakeAdapter(enum_cpu())], lambda: {"rtx 4060", "v100"})
     mon.refresh()
     online = mon.online_devices()
     assert "rtx 4060" in online and "v100" in online  # config 名(已匹配)
@@ -288,7 +288,7 @@ def test_device_monitor_dynamic_referenced_new_config_names_apply_without_restar
         ]
 
     referenced = {"rtx 4060"}
-    mon = DeviceMonitor([enum_gpus], lambda: referenced)
+    mon = DeviceMonitor([_FakeAdapter(enum_gpus())], lambda: referenced)
     mon.refresh()
     assert "rtx 4060" in mon.online_devices()
     assert "NVIDIA GeForce RTX 4060" not in mon.online_devices()  # 已匹配,不再以实测名出现
@@ -304,24 +304,58 @@ def test_device_monitor_dynamic_referenced_new_config_names_apply_without_restar
 
 def test_device_monitor_unmatched_referenced_is_offline():
     from llm_manager.devices import DeviceMonitor
-    mon = DeviceMonitor([lambda: []], lambda: {"rtx 5090"})  # 什么都没枚举到
+    mon = DeviceMonitor([_FakeAdapter([])], lambda: {"rtx 5090"})  # 什么都没枚举到
     mon.refresh()
     assert "rtx 5090" not in mon.online_devices()
 
 
 def test_device_monitor_enumerator_exception_isolated():
-    # 单个枚举器抛异常不影响其他
+    # 单个适配器抛异常不影响其他
     from llm_manager.devices import DeviceMonitor, DeviceInfo
 
-    def boom():
-        raise RuntimeError("backend broke")
+    class _BoomAdapter:
+        def enumerate(self):
+            raise RuntimeError("backend broke")
 
-    def ok():
-        return [DeviceInfo("CPU", "CPU", "RAM", 0, 0, 0, 0.0, None)]
-
-    mon = DeviceMonitor([boom, ok], lambda: {"cpu"})
+    ok = DeviceInfo("CPU", "CPU", "RAM", 0, 0, 0, 0.0, None)
+    mon = DeviceMonitor([_BoomAdapter(), _FakeAdapter([ok])], lambda: {"cpu"})
     mon.refresh()
     assert "cpu" in mon.online_devices()
+
+
+class _FakeAdapter:
+    def __init__(self, devices):
+        self._devices = devices
+
+    def enumerate(self):
+        return self._devices
+
+
+def test_build_adapters_linux_full(monkeypatch):
+    from llm_manager.devices import build_adapters
+    monkeypatch.setattr("llm_manager.devices.os.name", "posix")
+    monkeypatch.setattr("llm_manager.devices.shutil.which", lambda _: "/usr/bin/nvidia-smi")
+    monkeypatch.setattr("llm_manager.devices.Path.is_dir", lambda self: True)
+    ads = build_adapters()
+    assert {type(a).__name__ for a in ads} == {"CpuAdapter", "NvidiaAdapter", "IntelLinuxAdapter", "AmdLinuxAdapter"}
+
+
+def test_build_adapters_windows(monkeypatch):
+    from llm_manager.devices import build_adapters
+    monkeypatch.setattr("llm_manager.devices.os.name", "nt")
+    monkeypatch.setattr("llm_manager.devices.shutil.which", lambda _: None)
+    monkeypatch.setattr("llm_manager.devices.is_lhm_available", lambda: True)
+    ads = build_adapters()
+    assert {type(a).__name__ for a in ads} == {"CpuAdapter", "LhmAdapter"}
+
+
+def test_build_adapters_minimal(monkeypatch):
+    from llm_manager.devices import build_adapters
+    monkeypatch.setattr("llm_manager.devices.os.name", "nt")
+    monkeypatch.setattr("llm_manager.devices.shutil.which", lambda _: None)
+    monkeypatch.setattr("llm_manager.devices.is_lhm_available", lambda: False)
+    ads = build_adapters()
+    assert [type(a).__name__ for a in ads] == ["CpuAdapter"]
 
 
 def test_new_gpu_model_matches_via_config_only(monkeypatch):

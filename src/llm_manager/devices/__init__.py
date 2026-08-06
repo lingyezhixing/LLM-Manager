@@ -4,11 +4,11 @@ fuzzy-matches config device names to detected hardware (token-subset) and atomic
 rebinds a config-keyed cache (+ unmatched devices keyed by raw name for display)."""
 from __future__ import annotations
 
-import os  # noqa: F401 — Task 3 build_adapters 装配时使用(平台判断)
+import os
 import re
-import shutil  # noqa: F401 — Task 3 build_adapters 装配时使用(nvidia-smi 探测)
+import shutil
 from dataclasses import dataclass
-from pathlib import Path  # noqa: F401 — Task 3 build_adapters 装配时使用(sysfs 检查)
+from pathlib import Path
 from typing import Callable
 
 
@@ -28,8 +28,7 @@ class DeviceInfo:
 
 # DeviceInfo 必须先于 adapters 导入定义:adapters.py 顶层 `from . import DeviceInfo`,
 # 若包仍处部分初始化(DeviceInfo 未绑定)则 ImportError(拆包循环导入陷阱)。
-from . import adapters as _adapters  # noqa: E402
-from .adapters import (  # noqa: E402,F401 — 显式 re-export(AmdLinuxAdapter 供 Task 3 装配)
+from .adapters import (  # noqa: E402 — 显式 re-export(供 build_adapters 装配)
     NvidiaAdapter,
     CpuAdapter,
     IntelLinuxAdapter,
@@ -37,24 +36,6 @@ from .adapters import (  # noqa: E402,F401 — 显式 re-export(AmdLinuxAdapter 
     LhmAdapter,
     is_lhm_available,
 )
-
-
-# 兼容转发:app.py 的 ENUMERATORS 仍消费这 4 个函数(测试已直连适配器类),
-# Task 3 换 build_adapters() 后连同 ENUMERATORS 一并删除。
-def enumerate_nvidia() -> list["DeviceInfo"]:
-    return _adapters.NvidiaAdapter().enumerate()
-
-
-def enumerate_cpu() -> list["DeviceInfo"]:
-    return _adapters.CpuAdapter().enumerate()
-
-
-def enumerate_lhm_gpus() -> list["DeviceInfo"]:
-    return _adapters.LhmAdapter().enumerate()
-
-
-def enumerate_intel_igpus() -> list["DeviceInfo"]:
-    return _adapters.IntelLinuxAdapter().enumerate()
 
 
 def _tokens(name: str) -> set[str]:
@@ -94,7 +75,7 @@ def match_devices(
 
 
 class DeviceMonitor:
-    """On-demand 枚举 + 模糊匹配。refresh() 跑全部枚举器 → candidates →
+    """On-demand 枚举 + 模糊匹配。refresh() 跑全部适配器 → candidates →
     match_devices(get_referenced()) → 原子 rebind self._cache(config 名键控 + 未引用实测名键控)。
 
     referenced **动态获取**(每次 refresh 按活配置重算):配置运行时可变(WebUI 在线加
@@ -102,18 +83,18 @@ class DeviceMonitor:
     scheme,必须重启才生效。get_referenced 返回「归一化 config 名」集合。"""
     def __init__(
         self,
-        enumerators: list[Callable[[], list[DeviceInfo]]],
+        adapters: list["DeviceAdapter"],
         get_referenced: Callable[[], set[str]],
     ) -> None:
-        self._enumerators = enumerators
+        self._adapters = adapters
         self._get_referenced = get_referenced
         self._cache: dict[str, DeviceInfo] = {}
 
     def refresh(self) -> None:
         candidates: list[DeviceInfo] = []
-        for enum in self._enumerators:
+        for ad in self._adapters:
             try:
-                result = enum()
+                result = ad.enumerate()
                 if result:
                     candidates.extend(result)
             except Exception:  # noqa: BLE001 — 单个后端失败不影响其他
@@ -131,5 +112,21 @@ class DeviceMonitor:
         return dict(self._cache)
 
 
-# 公共 API 兼容(纯移动):app.py 仍消费 ENUMERATORS 常量,Task 3 换 build_adapters() 后删除。
-ENUMERATORS: list[Callable[[], list[DeviceInfo]]] = [enumerate_nvidia, enumerate_intel_igpus, enumerate_lhm_gpus, enumerate_cpu]
+class DeviceAdapter:
+    """一个平台×厂商数据源 → 统一 DeviceInfo。enumerate() 永不抛(内部兜底)。"""
+
+    def enumerate(self) -> list[DeviceInfo]:
+        raise NotImplementedError
+
+
+def build_adapters() -> list[DeviceAdapter]:
+    """平台自动装配:可用即注册,缺工具(无 nvidia-smi / 非 Linux / 无 LHM)自动跳过。"""
+    adapters: list[DeviceAdapter] = [CpuAdapter()]
+    if shutil.which("nvidia-smi"):
+        adapters.append(NvidiaAdapter())
+    if os.name == "posix" and Path("/sys/class/drm").is_dir():
+        adapters.append(IntelLinuxAdapter())
+        adapters.append(AmdLinuxAdapter())
+    if os.name == "nt" and is_lhm_available():
+        adapters.append(LhmAdapter())
+    return adapters
