@@ -1,14 +1,13 @@
 import {
   type ReactNode,
-  createContext,
   useCallback,
-  useContext,
   useEffect,
   useRef,
   useState,
 } from "react";
 import { createPortal } from "react-dom";
 import { Button } from "@/components/ui/button";
+import { ConfirmContext, type ConfirmFn, type ConfirmOptions } from "@/lib/confirm";
 
 // ---------- 底层 Dialog:portal + Esc + 点遮罩关 + focus trap + 焦点还原 + aria ----------
 function Dialog({
@@ -83,24 +82,6 @@ function Dialog({
 }
 
 // ---------- 命令式 confirm ----------
-interface ConfirmOptions {
-  title: string;
-  description?: string;
-  confirmText?: string;
-  cancelText?: string;
-  danger?: boolean;
-}
-type ConfirmFn = (opts: ConfirmOptions) => Promise<boolean>;
-
-const ConfirmContext = createContext<ConfirmFn | null>(null);
-
-/** 必须在 <ConfirmProvider> 内调用。返回 true=确认,false=取消/Esc/点外。 */
-export function useConfirm(): ConfirmFn {
-  const fn = useContext(ConfirmContext);
-  if (!fn) throw new Error("useConfirm 必须在 <ConfirmProvider> 内使用");
-  return fn;
-}
-
 interface Pending {
   opts: ConfirmOptions;
   resolve: (ok: boolean) => void;

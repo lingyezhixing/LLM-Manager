@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { ConfigSaveBar } from "@/components/config-save-bar";
-import { useConfirm } from "@/components/ui/dialog";
+import { useConfirm } from "@/lib/hooks/use-confirm";
 import { ErrorState } from "@/components/ui/error-state";
 import { Field, TextInput } from "@/components/ui/form";
-import { useToast } from "@/components/ui/toast";
+import { useToast } from "@/lib/hooks/use-toast";
 import type { WolConfig } from "@/lib/api";
 import { useConfig, useDeleteWol, useSendWol, useUpdateWol } from "@/lib/hooks/use-config";
 

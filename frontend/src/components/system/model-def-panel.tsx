@@ -1,8 +1,8 @@
 import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { useConfirm } from "@/components/ui/dialog";
+import { useConfirm } from "@/lib/hooks/use-confirm";
 import { ErrorState } from "@/components/ui/error-state";
-import { useToast } from "@/components/ui/toast";
+import { useToast } from "@/lib/hooks/use-toast";
 import { ModelDefForm } from "@/components/system/model-def-form";
 import { useDeleteModelDef, useModelDef, useModelDefs, useRestartModel } from "@/lib/hooks/use-model-defs";
 import type { ModelWriteResult } from "@/lib/api";

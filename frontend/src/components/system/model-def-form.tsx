@@ -5,7 +5,7 @@ import { numFromStr as num } from "@/lib/format";
 import { StringListEditor } from "@/components/ui/repeatable-fields";
 import { PricingEditor } from "@/components/system/pricing-editor";
 import { SchemeEditor } from "@/components/system/scheme-editor";
-import { useConfirm } from "@/components/ui/dialog";
+import { useConfirm } from "@/lib/hooks/use-confirm";
 import { type ModelDef, type ModelWriteResult, type SchemeDef } from "@/lib/api";
 import { useCreateModelDef, useUpdateModelDef } from "@/lib/hooks/use-model-defs";
 

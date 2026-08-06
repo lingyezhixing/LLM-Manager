@@ -71,7 +71,7 @@ export function applyVars(text: string, vars?: Record<string, string>): string {
   return out;
 }
 
-/** 预览最终将执行的命令(含 conda 包装;不含系统 env 合并、Windows 的 cmd /c 前缀)。
+/** 命令预览:最终执行的命令文本(含 conda 包装;不含系统 env 合并、Windows 的 cmd /c 前缀)。
  * vars({{port}}/{{alias}})替换后显示,与后端实际执行一致。 */
 export function previewCommand(c: {
   exe: string;

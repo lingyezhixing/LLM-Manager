@@ -4,7 +4,7 @@ import { ErrorState } from "@/components/ui/error-state";
 import { Field, NumberInput, Select, TextInput } from "@/components/ui/form";
 import { numFromStr as num } from "@/lib/format";
 import { InfoTile } from "@/components/ui/info-tile";
-import { useToast } from "@/components/ui/toast";
+import { useToast } from "@/lib/hooks/use-toast";
 import { LogRetentionEditor } from "@/components/system/log-retention-editor";
 import { type LogRetention, type ProgramConfig } from "@/lib/api";
 import { useConfig, useUpdateLogRetention, useUpdateProgram } from "@/lib/hooks/use-config";

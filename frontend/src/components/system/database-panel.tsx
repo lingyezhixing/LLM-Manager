@@ -1,8 +1,8 @@
 import { Button } from "@/components/ui/button";
-import { useConfirm } from "@/components/ui/dialog";
+import { useConfirm } from "@/lib/hooks/use-confirm";
 import { ErrorState } from "@/components/ui/error-state";
 import { InfoTile } from "@/components/ui/info-tile";
-import { useToast } from "@/components/ui/toast";
+import { useToast } from "@/lib/hooks/use-toast";
 import { useDeleteModelData, useOrphanedModels, useStorageStats } from "@/lib/hooks/use-data";
 
 // 数据库管理页(迁移 legacy DataManagement):存储统计 + 孤立模型清理 + 模型数据详情。

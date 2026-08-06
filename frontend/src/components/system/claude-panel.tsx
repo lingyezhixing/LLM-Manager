@@ -4,8 +4,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { ErrorState } from "@/components/ui/error-state";
 import { Field, TextArea, TextInput } from "@/components/ui/form";
-import { useConfirm } from "@/components/ui/dialog";
-import { useToast } from "@/components/ui/toast";
+import { useConfirm } from "@/lib/hooks/use-confirm";
+import { useToast } from "@/lib/hooks/use-toast";
 import { type ConfigResponse } from "@/lib/api";
 import {
   useApplyClaudePreset,
