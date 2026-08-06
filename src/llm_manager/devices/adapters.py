@@ -373,7 +373,7 @@ def _aggregate_sensors(device_name: str, sensors: Iterator[tuple[str, str, float
 
 
 class LhmAdapter:
-    """LHM 的 GpuAmd 硬件 → 经 _aggregate_sensors → DeviceInfo。_lhm_computer 不可用 → []。
+    """LHM 的 GpuAmd/GpuIntel 硬件 → 经 _aggregate_sensors → DeviceInfo。_lhm_computer 不可用 → []。
     NVIDIA 不走此(由 NvidiaAdapter 负责),避免重复计数。"""
 
     def enumerate(self) -> list[DeviceInfo]:
@@ -382,7 +382,7 @@ class LhmAdapter:
             return []
         out: list[DeviceInfo] = []
         for hw in c.Hardware:
-            if str(hw.HardwareType) != "GpuAmd":
+            if str(hw.HardwareType) not in ("GpuAmd", "GpuIntel"):
                 continue
             try:
                 hw.Update()

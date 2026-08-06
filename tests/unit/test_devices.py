@@ -255,6 +255,31 @@ def test_enumerate_lhm_gpus_unavailable_returns_empty(monkeypatch):
     assert ad.LhmAdapter().enumerate() == []
 
 
+def test_lhm_adapter_covers_amd_and_intel(monkeypatch):
+    # LHM 库支持 GpuIntel,现状只取 GpuAmd → Windows Intel 核显漏监控。扩展过滤集。
+    import types
+    import llm_manager.devices.adapters as ad
+
+    class _FakeHardware:
+        def __init__(self, htype, name):
+            self.HardwareType = htype
+            self.Name = name
+            self.Sensors = []
+
+        def Update(self):
+            pass
+
+    fake_computer = types.SimpleNamespace(Hardware=[
+        _FakeHardware("GpuAmd", "AMD Radeon 780M"),
+        _FakeHardware("GpuIntel", "Intel UHD Graphics"),
+        _FakeHardware("GpuNvidia", "NVIDIA GeForce RTX 4060"),
+        _FakeHardware("Cpu", "CPU"),
+    ])
+    monkeypatch.setattr(ad, "_lhm_computer", lambda: fake_computer)
+    out = ad.LhmAdapter().enumerate()
+    assert [d.device_name for d in out] == ["AMD Radeon 780M", "Intel UHD Graphics"]  # NVIDIA/CPU 排除
+
+
 def test_device_monitor_matches_config_names_and_keeps_unmatched():
     from llm_manager.devices import DeviceMonitor, DeviceInfo
 
