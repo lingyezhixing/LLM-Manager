@@ -7,7 +7,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import signal
+import subprocess
 import sys
+import threading
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -149,8 +152,67 @@ def create_dev_app() -> FastAPI:
 
 
 def exit_code_for(restart_requested: bool) -> int:
-    """main() 退出码:restart_requested → 哨兵码(监督器在其上重启),否则 0(正常退出)。"""
+    """worker 退出码:restart_requested → 哨兵码(parent 监督器在其上拉新 worker),否则 0(正常退出)。"""
     return RESTART_EXIT_CODE if restart_requested else 0
+
+
+# ==================== parent 监督器 ====================
+# 配置变更重启 = 程序内置的 parent+worker(类 NapCat):parent 常驻、不碰 DB,只 spawn
+# worker / 转发信号 / 按退出码拉新。worker 每次都是全新进程 → OS 回收一切,构造性干净
+# (无进程内重启的隐藏状态泄漏)。退出码协议:81=请求重启,0=正常,其他=崩溃(不自愈)。
+
+_WORKER_FLAG = "--worker"
+_SHUTDOWN_GRACE = 10.0   # worker 优雅关闭超时(秒);超时强杀,防卡死拽死 parent
+
+
+def _should_respawn(rc: int | None) -> bool:
+    """parent 决策:worker 退出码 → 是否拉新 worker。81=重启→True;其余(0 正常/崩溃)→False。"""
+    return rc == RESTART_EXIT_CODE
+
+
+def _worker_command() -> list[str]:
+    """worker 子进程命令:同解释器跑 `python -m llm_manager --worker`。"""
+    return [sys.executable, "-m", "llm_manager", _WORKER_FLAG]
+
+
+def _spawn_kwargs() -> dict:
+    """worker 进程隔离参数(同 supervisor._popen_kwargs):Win 独立进程组 / POSIX 新会话,
+    使 parent 能显式转发信号(否则 Ctrl-C 直接打到 worker、绕过 parent 编排)。stdio 继承,
+    worker 的 setup_logging 自带控制台+文件 handler,日志直通 parent 控制台。"""
+    kwargs: dict = {"stdout": None, "stderr": None, "stdin": None}
+    if os.name == "nt":
+        kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+    else:
+        kwargs["start_new_session"] = True
+    return kwargs
+
+
+def _forwardable_signals() -> list:
+    """parent 要转发给 worker 的信号。Windows 仅 SIGINT(Ctrl-C;无 SIGTERM);POSIX 两者。"""
+    if os.name == "nt":
+        return [signal.SIGINT]
+    return [signal.SIGINT, signal.SIGTERM]
+
+
+def _send_shutdown(proc) -> None:
+    """向 worker 进程组发优雅关闭信号。Win:CTRL_BREAK_EVENT(需 worker 在独立进程组);
+    POSIX:killpg(SIGTERM)。进程已不在 → 静默。"""
+    try:
+        if os.name == "nt":
+            proc.send_signal(signal.CTRL_BREAK_EVENT)
+        else:
+            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+    except (ProcessLookupError, OSError):
+        pass
+
+
+def _force_kill(proc) -> None:
+    """超时兜底:worker 仍运行 → 强杀;已退出 → no-op。"""
+    if proc.poll() is None:
+        try:
+            proc.kill()
+        except Exception:
+            pass
 
 
 def main() -> None:

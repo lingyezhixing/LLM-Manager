@@ -1,3 +1,4 @@
+import sys
 import time
 
 import pytest
@@ -123,3 +124,128 @@ def test_exit_code_for_returns_sentinel_only_when_requested():
     from llm_manager.app import RESTART_EXIT_CODE, exit_code_for
     assert exit_code_for(False) == 0
     assert exit_code_for(True) == RESTART_EXIT_CODE == 81
+
+
+# ---------- parent 监督器辅助(Task 1) ----------
+
+def test_should_respawn_only_on_restart_sentinel():
+    from llm_manager.app import _should_respawn, RESTART_EXIT_CODE
+    assert _should_respawn(RESTART_EXIT_CODE) is True
+    assert _should_respawn(0) is False
+    assert _should_respawn(1) is False
+    assert _should_respawn(None) is False
+    assert _should_respawn(-9) is False
+
+
+def test_worker_command_contains_executable_and_flag():
+    from llm_manager.app import _worker_command, _WORKER_FLAG
+    cmd = _worker_command()
+    assert cmd[0] == sys.executable
+    assert "-m" in cmd and "llm_manager" in cmd
+    assert _WORKER_FLAG in cmd
+
+
+def test_spawn_kwargs_windows_uses_process_group(monkeypatch):
+    import subprocess
+    import llm_manager.app as appmod
+    monkeypatch.setattr(appmod.os, "name", "nt")
+    kw = appmod._spawn_kwargs()
+    assert kw["creationflags"] == subprocess.CREATE_NEW_PROCESS_GROUP
+
+
+def test_spawn_kwargs_posix_uses_new_session(monkeypatch):
+    import llm_manager.app as appmod
+    monkeypatch.setattr(appmod.os, "name", "posix")
+    kw = appmod._spawn_kwargs()
+    assert kw["start_new_session"] is True
+    assert "creationflags" not in kw
+
+
+# ---------- 信号转发辅助(Task 2) ----------
+
+def test_forwardable_signals_per_os(monkeypatch):
+    import signal as _sig
+    import llm_manager.app as appmod
+    monkeypatch.setattr(appmod.os, "name", "nt")
+    assert appmod._forwardable_signals() == [_sig.SIGINT]
+    monkeypatch.setattr(appmod.os, "name", "posix")
+    sigs = appmod._forwardable_signals()
+    assert _sig.SIGINT in sigs and _sig.SIGTERM in sigs
+
+
+def test_send_shutdown_windows_sends_ctrl_break(monkeypatch):
+    import signal as _sig
+    import llm_manager.app as appmod
+    monkeypatch.setattr(appmod.os, "name", "nt")
+    sent = {}
+
+    class FakeProc:
+        pid = 123
+
+        def send_signal(self, s):
+            sent["sig"] = s
+
+    appmod._send_shutdown(FakeProc())
+    assert sent["sig"] == _sig.CTRL_BREAK_EVENT
+
+
+def test_send_shutdown_posix_killpg(monkeypatch):
+    import signal as _sig
+    import llm_manager.app as appmod
+    monkeypatch.setattr(appmod.os, "name", "posix")
+    killed = {}
+    # getpgid/killpg 在 Windows 不存在,raising=False 允许注入以测 POSIX 分支
+    monkeypatch.setattr(appmod.os, "getpgid", lambda pid: 999, raising=False)
+    monkeypatch.setattr(appmod.os, "killpg", lambda pgid, sig: killed.__setitem__("args", (pgid, sig)), raising=False)
+
+    class FakeProc:
+        pid = 123
+
+    appmod._send_shutdown(FakeProc())
+    assert killed["args"] == (999, _sig.SIGTERM)
+
+
+def test_send_shutdown_missing_process_is_silent(monkeypatch):
+    import llm_manager.app as appmod
+    monkeypatch.setattr(appmod.os, "name", "posix")
+
+    def _raise_ple(pid):
+        raise ProcessLookupError()
+
+    # getpgid 抛 ProcessLookupError → 应被 _send_shutdown 吞掉。
+    # killpg 仅作占位使其属性可解析(实际不会被调用:getpgid 先抛)。
+    monkeypatch.setattr(appmod.os, "getpgid", _raise_ple, raising=False)
+    monkeypatch.setattr(appmod.os, "killpg", lambda *a: None, raising=False)
+
+    class FakeProc:
+        pid = 123
+
+    appmod._send_shutdown(FakeProc())   # 不抛
+
+
+def test_force_kill_when_still_running():
+    import llm_manager.app as appmod
+    killed = {}
+
+    class FakeProc:
+        def poll(self):
+            return None   # 仍运行
+
+        def kill(self):
+            killed["killed"] = True
+
+    appmod._force_kill(FakeProc())
+    assert killed.get("killed") is True
+
+
+def test_force_kill_noop_when_exited():
+    import llm_manager.app as appmod
+
+    class FakeProc:
+        def poll(self):
+            return 0      # 已退出
+
+        def kill(self):
+            raise AssertionError("不应 kill 已退出的进程")
+
+    appmod._force_kill(FakeProc())
