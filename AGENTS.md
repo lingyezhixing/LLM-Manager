@@ -48,9 +48,10 @@ tray     ── 系统托盘(自重启触发 / WOL / Claude 预设应用)
    覆盖新 owner——`owner != _inflight[name]` 时 no-op。
 4. **协作式中断**。stop 不强杀:置 `stop_event`,pipeline 在 await 点自行检查并收口
    (kill_tree + `_log_end` + `_runtime_end`)。`force=True` 仅用于 STOPPED 转移(用户 stop)。
-5. **退出码 81 = 请求重启**。`POST /api/config/restart` 置 `restart_requested`;
-   `main()` 末尾据此 `sys.exit(81)`,**监督器在 81 上重启**(见 §5)。dev(`--reload`)
-   无 server 分支则 `os._exit(81)`,由 `Dev-Backend.bat` 的 `if %ERRORLEVEL% EQU 81 goto restart` 兜底。
+5. **退出码 81 = 请求重启**(内部信号)。`POST /api/config/restart` 置 `restart_requested`;
+   worker(`_run_worker`,=`--worker` 入口)据此 `sys.exit(81)`,**内置 parent 监督器
+   (`_run_parent`)接住 81 拉起全新 worker**(见 §5)。dev(`--reload`)不经 main、绕过
+   parent;无 server 分支则 `os._exit(81)`(dev 进程一次性,可接受)。
 6. **运行中 = 内存 live 集,非 `end_time IS NULL`**。崩溃随进程消失,故残留会话/段天然
    落为 ended。心跳每 30s 把运行中项的 `end_time` 推到 now(只管时间,不管状态)。
    → **绝不能用 `end_time is not None` 判运行中**(曾致日志页运行中消失 bug,194962b)。
@@ -78,12 +79,19 @@ tray     ── 系统托盘(自重启触发 / WOL / Claude 预设应用)
   不做显存检查)——「设备仅用于方案匹配、真运行在别处」是合法用法,`{}` 与 `{dev:0}`
   调度语义等价;前端保存时会把 required 设备的缺省显存显式写 0(所见即所存)。
 
-## 5. 退出码 / 自重启契约
+## 5. 自重启(parent + worker,类 NapCat)
 
-- 生产:`LLM-Manager.bat` 监督器循环,`main()` 以 81 退出 → 重启。
-- dev:`Dev-Backend.bat` `:restart` + 81 循环;`os._exit(81)` 跳过 lifespan 收尾
-  (dev 进程一次性,可接受)。
-- `POST /api/config/restart`(WebUI 顶部重启横幅)走 `restart_requested → exit 81`。
+- **架构**:`python -m llm_manager` = parent 监督器(常驻、不碰 DB、不持 app 状态);
+  spawn `python -m llm_manager --worker`(=worker,跑 create_app + server.run)。
+  worker 退出码 81 → parent 拉全新 worker(每次全新进程,OS 回收一切,构造性干净);
+  0 → parent 退;其他(崩溃)→ parent 亦退,**不自愈**(可见失败)。
+  严格顺序:parent 等 worker rc 到手才 spawn 下一个 → 无双 worker 并存、无端口竞争。
+- **信号转发**:parent 收 Ctrl-C/SIGTERM → 转发 worker 进程组(Win `CTRL_BREAK_EVENT` /
+  POSIX `killpg SIGTERM`)使其优雅关闭;`_SHUTDOWN_GRACE`(10s)超时强杀兜底。
+- dev(`uvicorn --factory --reload`):不经 main、绕过 parent,uvicorn 自管 reload;
+  `restart_app` 无 server 分支 `os._exit(81)`(dev 一次性)。
+- `POST /api/config/restart`(WebUI 顶部重启横幅)走 `restart_requested → worker exit 81 → parent 拉新`。
+- `LLM-Manager.bat` 仅作 Windows 静默后台启动(VBS),不参与重启。
 
 ## 6. 命令(验收用)
 

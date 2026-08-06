@@ -63,7 +63,7 @@ tray     ── 系统托盘（WOL / Claude 预设 / 快速启停）
 
 - **单进程模型**：一个 Python 进程跑一个 app（FastAPI + uvicorn），模块级单例内存状态，SQLite 单连接 + `write_lock` 串行化。
 - **配置单一源**：全部配置存 SQLite（`data/llm_manager.db`），运行时只读 frozen 快照；环境变量仅在启动期覆写并持久化。
-- **自重启契约**：退出码 81 = 请求重启；`LLM-Manager.bat` 监督器循环重启。
+- **自重启**：程序内置 parent 监督器（`python -m llm_manager`）spawn 并管理 worker；配置变更重启时 worker 以退出码 81 退出，parent 拉起全新 worker（每次全新进程，构造性干净）。`LLM-Manager.bat` 仅作 Windows 静默后台启动，不参与重启。
 
 ---
 
