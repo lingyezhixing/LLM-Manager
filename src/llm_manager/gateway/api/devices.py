@@ -28,6 +28,8 @@ class DeviceInfoResponse(BaseModel):
     used_memory_mb: int
     usage_percentage: float
     temperature_celsius: float | None
+    freq_mhz: float | None = None       # 与 DeviceInfo 同步:asdict 展开要求字段存在
+    power_watts: float | None = None
 
 
 class DevicesResponse(BaseModel):

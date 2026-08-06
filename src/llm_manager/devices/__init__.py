@@ -22,6 +22,8 @@ class DeviceInfo:
     used_memory_mb: int
     usage_percentage: float
     temperature_celsius: float | None
+    freq_mhz: float | None = None       # 新增:当前频率(Intel intel_gpu_top 等)
+    power_watts: float | None = None    # 新增:功耗(Intel intel_gpu_top 等)
 
 
 # DeviceInfo 必须先于 adapters 导入定义:adapters.py 顶层 `from . import DeviceInfo`,

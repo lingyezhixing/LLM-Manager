@@ -436,3 +436,22 @@ def test_enumerate_intel_igpus_psutil_failure_degraded(monkeypatch, tmp_path):
     assert len(out) == 1  # 降级零值,不抛
     assert out[0].total_memory_mb == 0
     assert out[0].usage_percentage == 7.0
+
+
+def test_device_info_new_fields_default_none():
+    from llm_manager.devices import DeviceInfo
+    d = DeviceInfo("X", "GPU", "VRAM", 1, 1, 0, 5.0, None)
+    assert d.freq_mhz is None and d.power_watts is None  # 默认值 → 现有构造点零改动
+
+
+def test_device_info_response_accepts_new_fields():
+    # _to_schema 用 asdict(d) 展开:Pydantic 模型必须同步带两字段,否则 TypeError
+    from llm_manager.gateway.api.devices import DeviceInfoResponse
+    resp = DeviceInfoResponse(**{
+        "device_name": "Intel UHD Graphics (Alder Lake-N)", "device_type": "GPU (iGPU)",
+        "memory_type": "Shared RAM", "total_memory_mb": 16384, "available_memory_mb": 8192,
+        "used_memory_mb": 8192, "usage_percentage": 42.0, "temperature_celsius": None,
+        "freq_mhz": 2400.0, "power_watts": 3.5,
+    })
+    assert resp.freq_mhz == 2400.0 and resp.power_watts == 3.5
+
