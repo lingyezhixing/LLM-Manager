@@ -1,4 +1,5 @@
-from llm_manager.devices.adapters import _parse_smi, _aggregate_sensors
+from llm_manager.devices.lhm import _aggregate_sensors
+from llm_manager.devices.nvidia import _parse_smi
 
 
 def test_parse_smi_extracts_fields():
@@ -51,7 +52,7 @@ def test_is_lhm_available_no_pythonnet(monkeypatch):
 def test_is_lhm_available_dll_present(monkeypatch, tmp_path):
     import sys
     import types
-    from llm_manager.devices import adapters as ad
+    from llm_manager.devices import lhm as ad
 
     monkeypatch.setitem(sys.modules, "clr", types.ModuleType("clr"))  # 假装 pythonnet 已装
     fake_dll = tmp_path / "LibreHardwareMonitorLib.dll"
@@ -63,7 +64,7 @@ def test_is_lhm_available_dll_present(monkeypatch, tmp_path):
 def test_is_lhm_available_dll_missing(monkeypatch, tmp_path):
     import sys
     import types
-    from llm_manager.devices import adapters as ad
+    from llm_manager.devices import lhm as ad
 
     monkeypatch.setitem(sys.modules, "clr", types.ModuleType("clr"))
     monkeypatch.setattr(ad, "_LHM_DLL", tmp_path / "nonexistent.dll")
@@ -73,7 +74,7 @@ def test_is_lhm_available_dll_missing(monkeypatch, tmp_path):
 def test_run_smi_uses_noheader_nounits_format(monkeypatch):
     # 真机验证发现:nvidia-smi 默认输出带 [MiB]/[%] 单位,_parse_smi 的 int() 解析失败 →
     # 必须用 --format=csv,noheader,nounits 让输出纯数字(_parse_smi 纯函数不变)。
-    from llm_manager.devices import adapters as ad
+    from llm_manager.devices import nvidia as ad
     captured = {}
 
     class _R:
@@ -167,7 +168,7 @@ def test_match_devices_requires_full_subset_not_partial():
 
 
 def test_enumerate_nvidia_returns_all_rows_with_raw_names(monkeypatch):
-    from llm_manager.devices import adapters as ad
+    from llm_manager.devices import nvidia as ad
     smi = ("NVIDIA GeForce RTX 4060 Laptop GPU, 8188, 1692, 6266, 35, 51\n"
            "Tesla V100-SXM2-32GB, 32768, 0, 32365, 0, 40\n")
     monkeypatch.setattr(ad, "_run_smi", lambda: smi)
@@ -180,13 +181,13 @@ def test_enumerate_nvidia_returns_all_rows_with_raw_names(monkeypatch):
 
 
 def test_enumerate_nvidia_empty_when_no_smi(monkeypatch):
-    from llm_manager.devices import adapters as ad
+    from llm_manager.devices import nvidia as ad
     monkeypatch.setattr(ad, "_run_smi", lambda: "")
     assert ad.NvidiaAdapter().enumerate() == []
 
 
 def test_lhm_computer_unavailable_returns_none(monkeypatch):
-    from llm_manager.devices import adapters as ad
+    from llm_manager.devices import lhm as ad
     monkeypatch.setattr(ad, "is_lhm_available", lambda: False)
     assert ad._lhm_computer() is None
 
@@ -195,7 +196,7 @@ def test_lhm_computer_init_failure_returns_none(monkeypatch):
     # 初始化抛异常(AddReference 失败等)→ None,不穿透(防 CpuAdapter.enumerate 的 try 外调用)
     import sys
     import types
-    from llm_manager.devices import adapters as ad
+    from llm_manager.devices import lhm as ad
 
     def boom(*a, **k):
         raise RuntimeError("AddReference failed")
@@ -209,7 +210,7 @@ def test_lhm_computer_init_failure_returns_none(monkeypatch):
 
 
 def test_enumerate_cpu_basic(monkeypatch):
-    from llm_manager.devices import adapters as ad
+    from llm_manager.devices import cpu as ad
 
     class _Mem:
         total = 16 * 1024**3
@@ -231,7 +232,7 @@ def test_enumerate_cpu_basic(monkeypatch):
 
 
 def test_enumerate_cpu_psutil_failure_degraded(monkeypatch):
-    from llm_manager.devices import adapters as ad
+    from llm_manager.devices import cpu as ad
 
     def boom():
         raise OSError("psutil broke")
@@ -244,13 +245,13 @@ def test_enumerate_cpu_psutil_failure_degraded(monkeypatch):
 
 
 def test_lhm_cpu_temp_unavailable_returns_none(monkeypatch):
-    from llm_manager.devices import adapters as ad
+    from llm_manager.devices import lhm as ad
     monkeypatch.setattr(ad, "_lhm_computer", lambda: None)
     assert ad._lhm_cpu_temp() is None
 
 
 def test_enumerate_lhm_gpus_unavailable_returns_empty(monkeypatch):
-    from llm_manager.devices import adapters as ad
+    from llm_manager.devices import lhm as ad
     monkeypatch.setattr(ad, "_lhm_computer", lambda: None)
     assert ad.LhmAdapter().enumerate() == []
 
@@ -258,7 +259,7 @@ def test_enumerate_lhm_gpus_unavailable_returns_empty(monkeypatch):
 def test_lhm_adapter_covers_amd_and_intel(monkeypatch):
     # LHM 库支持 GpuIntel,现状只取 GpuAmd → Windows Intel 核显漏监控。扩展过滤集。
     import types
-    import llm_manager.devices.adapters as ad
+    import llm_manager.devices.lhm as ad
 
     class _FakeHardware:
         def __init__(self, htype, name):
@@ -406,7 +407,7 @@ def test_build_adapters_windows_with_nvidia(monkeypatch):
 def test_new_gpu_model_matches_via_config_only(monkeypatch):
     """加设备零改代码:config 写 'rtx 5090',mock nvidia-smi 返回 5090 行 → 匹配成功,无需改 devices.py。"""
     import llm_manager.devices as dev
-    from llm_manager.devices import adapters as ad
+    from llm_manager.devices import nvidia as ad
     smi = "NVIDIA GeForce RTX 5090, 32768, 1000, 31768, 5, 45\n"
     monkeypatch.setattr(ad, "_run_smi", lambda: smi)
     matched, unmatched = dev.match_devices({"rtx 5090"}, ad.NvidiaAdapter().enumerate())
@@ -433,17 +434,20 @@ def _make_i915_sysfs(tmp_path, pci_id="8086:46d1"):
 
 
 def test_intel_adapter_metrics_from_gpu_top(monkeypatch, tmp_path):
-    from llm_manager.devices import adapters as ad
+    from llm_manager.devices import common as cm
+    from llm_manager.devices import intel as ad
 
+    fake_drm = _make_i915_sysfs(tmp_path)
     monkeypatch.setattr(ad.os, "name", "posix")
-    monkeypatch.setattr(ad, "_DRM_CLASS", _make_i915_sysfs(tmp_path))
+    monkeypatch.setattr(ad, "_DRM_CLASS", fake_drm)
+    monkeypatch.setattr(cm, "_DRM_CLASS", fake_drm)
     # 两帧:初始化帧(period 0.035ms,应跳过)+ 采样帧(1000ms)
     sample = ('[\n{"period": {"duration": 0.035, "unit": "ms"}, "engines": {"Render/3D": {"busy": 0.0}}}\n,'
               '{"period": {"duration": 1000.34, "unit": "ms"}, "frequency": {"actual": 2400.0, "requested": 2400.0},'
               ' "engines": {"Render/3D": {"busy": 12.5}, "Video": {"busy": 5.0}},'
               ' "power": {"GPU": 3.5, "Package": 2.4}}\n]')
     monkeypatch.setattr(ad, "_run_intel_gpu_top", lambda: sample)
-    monkeypatch.setattr(ad.psutil, "virtual_memory", lambda: type("M", (), {"total": 16 * 1024**3, "available": 8 * 1024**3, "used": 8 * 1024**3})())
+    monkeypatch.setattr(cm.psutil, "virtual_memory", lambda: type("M", (), {"total": 16 * 1024**3, "available": 8 * 1024**3, "used": 8 * 1024**3})())
     out = ad.IntelLinuxAdapter().enumerate()
     assert len(out) == 1  # card0 命中;card1(amdgpu)与 connector 跳过
     info = out[0]
@@ -456,10 +460,13 @@ def test_intel_adapter_metrics_from_gpu_top(monkeypatch, tmp_path):
 
 
 def test_intel_adapter_gpu_top_failure_degraded(monkeypatch, tmp_path):
-    from llm_manager.devices import adapters as ad
+    from llm_manager.devices import common as cm
+    from llm_manager.devices import intel as ad
 
+    fake_drm = _make_i915_sysfs(tmp_path)
     monkeypatch.setattr(ad.os, "name", "posix")
-    monkeypatch.setattr(ad, "_DRM_CLASS", _make_i915_sysfs(tmp_path))
+    monkeypatch.setattr(ad, "_DRM_CLASS", fake_drm)
+    monkeypatch.setattr(cm, "_DRM_CLASS", fake_drm)
     monkeypatch.setattr(ad, "_run_intel_gpu_top", lambda: None)  # 工具缺失/失败
     out = ad.IntelLinuxAdapter().enumerate()
     assert len(out) == 1  # 识别与指标解耦:设备照常出现
@@ -468,7 +475,8 @@ def test_intel_adapter_gpu_top_failure_degraded(monkeypatch, tmp_path):
 
 
 def test_intel_adapter_no_i915_returns_empty(monkeypatch, tmp_path):
-    from llm_manager.devices import adapters as ad
+    from llm_manager.devices import common as cm
+    from llm_manager.devices import intel as ad
 
     monkeypatch.setattr(ad.os, "name", "posix")
     drm = tmp_path / "sys" / "class" / "drm"
@@ -476,11 +484,12 @@ def test_intel_adapter_no_i915_returns_empty(monkeypatch, tmp_path):
     card1.mkdir(parents=True)
     card1.joinpath("uevent").write_text("DRIVER=amdgpu\n")
     monkeypatch.setattr(ad, "_DRM_CLASS", drm)
+    monkeypatch.setattr(cm, "_DRM_CLASS", drm)
     assert ad.IntelLinuxAdapter().enumerate() == []
 
 
 def test_intel_adapter_windows_and_missing_sysfs(monkeypatch, tmp_path):
-    from llm_manager.devices import adapters as ad
+    from llm_manager.devices import intel as ad
 
     monkeypatch.setattr(ad, "_DRM_CLASS", _make_i915_sysfs(tmp_path))
     monkeypatch.setattr(ad.os, "name", "nt")
@@ -493,7 +502,7 @@ def test_intel_adapter_windows_and_missing_sysfs(monkeypatch, tmp_path):
 
 def test_run_intel_gpu_top_timeout_124_still_returns_stdout(monkeypatch):
     # GNU coreutils timeout 杀子进程必然返回 124 → 124 属预期,截断 stdout 照收(解析器容忍)
-    from llm_manager.devices import adapters as ad
+    from llm_manager.devices import intel as ad
 
     class _R:
         returncode = 124
@@ -506,7 +515,7 @@ def test_run_intel_gpu_top_timeout_124_still_returns_stdout(monkeypatch):
 
 def test_run_intel_gpu_top_real_failure_returns_none(monkeypatch):
     # 真失败(工具自身报错)≠ timeout:returncode=1 → None,指标降级
-    from llm_manager.devices import adapters as ad
+    from llm_manager.devices import intel as ad
 
     class _R:
         returncode = 1
@@ -518,7 +527,7 @@ def test_run_intel_gpu_top_real_failure_returns_none(monkeypatch):
 
 
 def test_parse_intel_gpu_top_skips_init_frame_and_takes_last(monkeypatch):
-    from llm_manager.devices.adapters import _parse_intel_gpu_top
+    from llm_manager.devices.intel import _parse_intel_gpu_top
 
     sample = ('[\n{"period": {"duration": 0.035, "unit": "ms"}, "engines": {"Render/3D": {"busy": 99.0}}}\n,'
               '{"period": {"duration": 1000.0, "unit": "ms"}, "frequency": {"actual": 1500.0},'
@@ -532,7 +541,7 @@ def test_parse_intel_gpu_top_skips_init_frame_and_takes_last(monkeypatch):
 
 def test_parse_intel_gpu_top_pretty_multiline_real_format(monkeypatch):
     # 真机实测:intel_gpu_top -J 输出为 pretty 多行格式(每帧跨 ~20 行,字段逐行)
-    from llm_manager.devices.adapters import _parse_intel_gpu_top
+    from llm_manager.devices.intel import _parse_intel_gpu_top
 
     sample = ('[\n'
               '{\n'
@@ -585,7 +594,7 @@ def test_parse_intel_gpu_top_pretty_multiline_real_format(monkeypatch):
 
 
 def test_parse_intel_gpu_top_unparseable_returns_none():
-    from llm_manager.devices.adapters import _parse_intel_gpu_top
+    from llm_manager.devices.intel import _parse_intel_gpu_top
     assert _parse_intel_gpu_top("") is None
     assert _parse_intel_gpu_top("garbage\nnot json") is None
 
@@ -627,10 +636,13 @@ def _make_amdgpu_sysfs(tmp_path, busy="55", vram_total=8 * 1024**3, vram_used=3 
 
 
 def test_amd_adapter_basic(monkeypatch, tmp_path):
-    from llm_manager.devices import adapters as ad
+    from llm_manager.devices import amd as ad
+    from llm_manager.devices import common as cm
 
+    fake_drm = _make_amdgpu_sysfs(tmp_path)
     monkeypatch.setattr(ad.os, "name", "posix")
-    monkeypatch.setattr(ad, "_DRM_CLASS", _make_amdgpu_sysfs(tmp_path))
+    monkeypatch.setattr(ad, "_DRM_CLASS", fake_drm)
+    monkeypatch.setattr(cm, "_DRM_CLASS", fake_drm)
     out = ad.AmdLinuxAdapter().enumerate()
     assert len(out) == 1
     info = out[0]
@@ -642,7 +654,8 @@ def test_amd_adapter_basic(monkeypatch, tmp_path):
 
 
 def test_amd_adapter_missing_fields_degraded(monkeypatch, tmp_path):
-    from llm_manager.devices import adapters as ad
+    from llm_manager.devices import amd as ad
+    from llm_manager.devices import common as cm
 
     monkeypatch.setattr(ad.os, "name", "posix")
     drm = tmp_path / "sys" / "class" / "drm"
@@ -650,6 +663,7 @@ def test_amd_adapter_missing_fields_degraded(monkeypatch, tmp_path):
     card0.mkdir(parents=True)
     card0.joinpath("uevent").write_text("DRIVER=amdgpu\nPCI_ID=1002:1640\n")
     monkeypatch.setattr(ad, "_DRM_CLASS", drm)  # 无 busy/vram/hwmon
+    monkeypatch.setattr(cm, "_DRM_CLASS", drm)
     out = ad.AmdLinuxAdapter().enumerate()
     assert len(out) == 1  # 识别与指标解耦
     assert out[0].usage_percentage == 0.0 and out[0].total_memory_mb == 0
@@ -659,10 +673,13 @@ def test_amd_adapter_missing_fields_degraded(monkeypatch, tmp_path):
 
 def test_amd_adapter_skips_non_amdgpu(monkeypatch, tmp_path):
     # 混合树(card0=i915 + card1=amdgpu + connector)→ 仅 amdgpu 卡上报,识别过滤真实驱动
-    from llm_manager.devices import adapters as ad
+    from llm_manager.devices import amd as ad
+    from llm_manager.devices import common as cm
 
+    fake_drm = _make_i915_sysfs(tmp_path)
     monkeypatch.setattr(ad.os, "name", "posix")
-    monkeypatch.setattr(ad, "_DRM_CLASS", _make_i915_sysfs(tmp_path))
+    monkeypatch.setattr(ad, "_DRM_CLASS", fake_drm)
+    monkeypatch.setattr(cm, "_DRM_CLASS", fake_drm)
     out = ad.AmdLinuxAdapter().enumerate()
     assert len(out) == 1
     assert out[0].device_name == "AMD Radeon 780M Graphics"
@@ -670,18 +687,20 @@ def test_amd_adapter_skips_non_amdgpu(monkeypatch, tmp_path):
 
 def test_amd_adapter_available_clamped_non_negative(monkeypatch, tmp_path):
     # used 瞬时读穿 total → available 钳到 0,不出现负数
-    from llm_manager.devices import adapters as ad
+    from llm_manager.devices import amd as ad
+    from llm_manager.devices import common as cm
 
     monkeypatch.setattr(ad.os, "name", "posix")
-    monkeypatch.setattr(ad, "_DRM_CLASS", _make_amdgpu_sysfs(
-        tmp_path, vram_total=8 * 1024**3, vram_used=10 * 1024**3))
+    fake_drm = _make_amdgpu_sysfs(tmp_path, vram_total=8 * 1024**3, vram_used=10 * 1024**3)
+    monkeypatch.setattr(ad, "_DRM_CLASS", fake_drm)
+    monkeypatch.setattr(cm, "_DRM_CLASS", fake_drm)
     out = ad.AmdLinuxAdapter().enumerate()
     assert out[0].total_memory_mb == 8 * 1024 and out[0].used_memory_mb == 10 * 1024
     assert out[0].available_memory_mb == 0
 
 
 def test_amd_adapter_windows_and_missing_sysfs(monkeypatch, tmp_path):
-    from llm_manager.devices import adapters as ad
+    from llm_manager.devices import amd as ad
 
     monkeypatch.setattr(ad, "_DRM_CLASS", _make_amdgpu_sysfs(tmp_path))
     monkeypatch.setattr(ad.os, "name", "nt")

@@ -26,16 +26,13 @@ class DeviceInfo:
     power_watts: float | None = None    # 新增:功耗(Intel intel_gpu_top 等)
 
 
-# DeviceInfo 必须先于 adapters 导入定义:adapters.py 顶层 `from . import DeviceInfo`,
+# DeviceInfo 必须先于各适配器模块导入定义:模块顶层 `from . import DeviceInfo`,
 # 若包仍处部分初始化(DeviceInfo 未绑定)则 ImportError(拆包循环导入陷阱)。
-from .adapters import (  # noqa: E402 — 显式 re-export(供 build_adapters 装配)
-    NvidiaAdapter,
-    CpuAdapter,
-    IntelLinuxAdapter,
-    AmdLinuxAdapter,
-    LhmAdapter,
-    is_lhm_available,
-)
+from .nvidia import NvidiaAdapter  # noqa: E402 — 显式 re-export(供 build_adapters 装配)
+from .intel import IntelLinuxAdapter  # noqa: E402
+from .amd import AmdLinuxAdapter  # noqa: E402
+from .lhm import LhmAdapter, is_lhm_available  # noqa: E402
+from .cpu import CpuAdapter  # noqa: E402
 
 
 def _tokens(name: str) -> set[str]:
