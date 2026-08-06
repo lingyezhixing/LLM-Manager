@@ -400,7 +400,7 @@ def register_config_routes(api: APIRouter) -> None:
     async def restart_app(request: Request) -> dict:
         """请求优雅重启:置 app.state.restart_requested;有 uvicorn server → 后台延迟翻
         should_exit(让 202 先冲刷),worker 优雅跑完 lifespan 收尾后以 81 退出。
-        无 server(dev --reload)→ 0.5s 后 os._exit(81)(dev 进程一次性,可接受)。
+        无 server(dev --reload)→ 0.5s 后 os._exit(81)(dev 无监督器,需手动重启)。
         生产路径:内置 parent 监督器接住 81 拉起全新 worker(不依赖外部 bat/sh)。"""
         request.app.state.restart_requested = True
         server = getattr(request.app.state, "uvicorn_server", None)
