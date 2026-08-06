@@ -1,4 +1,9 @@
 @echo off
+:: Fix working dir to script dir: resolved_db is a relative path ("data/llm_manager.db").
+:: Task-scheduler/runas launches default to System32, which created an empty db at
+:: C:\Windows\System32\data\llm_manager.db (all-initial WebUI). cd guarantees the db
+:: always lands in the deploy dir.
+cd /d "%~dp0"
 :: Elevate to admin if not already elevated (UAC once). Task-scheduler autostart
 :: registered with highest privileges skips this block.
 net session >nul 2>&1
