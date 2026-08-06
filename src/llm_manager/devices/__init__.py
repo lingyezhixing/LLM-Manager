@@ -1,7 +1,9 @@
 """Device detection: backends enumerate all present hardware (NVIDIA via nvidia-smi,
-Intel GPU via i915+intel_gpu_top/LHM, AMD GPU via amdgpu/LHM, CPU via psutil) → DeviceMonitor
-fuzzy-matches config device names to detected hardware (token-subset) and atomically
-rebinds a config-keyed cache (+ unmatched devices keyed by raw name for display)."""
+Intel GPU via i915+intel_gpu_top/LHM, AMD GPU via amdgpu/LHM, CPU via psutil/LHM) →
+DeviceMonitor fuzzy-matches config device names to detected hardware (token-subset)
+and atomically rebinds a config-keyed cache (+ unmatched devices keyed by raw name
+for display). 每个适配器文件内按平台分割路径,每次仅激活一条;频率/温度字段为
+可空增量(读不到 → None/0),全链路不新增进程、不新增调用。"""
 from __future__ import annotations
 
 import re
@@ -19,8 +21,8 @@ class DeviceInfo:
     used_memory_mb: int
     usage_percentage: float
     temperature_celsius: float | None
-    freq_mhz: float | None = None       # 新增:当前频率(Intel intel_gpu_top 等)
-    power_watts: float | None = None    # 新增:功耗(Intel intel_gpu_top 等)
+    freq_mhz: float | None = None       # 当前核心频率(核心语义,非显存):clocks.gr / LHM Clock/Core / intel_gpu_top
+    power_watts: float | None = None    # 功耗(intel_gpu_top 专用,其余设备读不到)
 
 
 # DeviceInfo 必须先于各适配器模块导入定义:模块顶层 `from . import DeviceInfo`,

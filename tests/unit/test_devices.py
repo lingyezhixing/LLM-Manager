@@ -2,6 +2,9 @@ from llm_manager.devices.common import _aggregate_sensors
 from llm_manager.devices.nvidia import _parse_smi
 
 
+# ==================== nvidia-smi 解析(_parse_smi)====================
+
+
 def test_parse_smi_extracts_fields():
     out = "NVIDIA GeForce RTX 4060, 8192, 1024, 7168, 5, 45, 2475\n"
     rows = _parse_smi(out)
@@ -27,6 +30,9 @@ def test_parse_smi_freq_na_keeps_row():
     assert rows[0].temp_c == 45.0
 
 
+# ==================== LHM 共享折叠(_aggregate_sensors)====================
+
+
 def test_aggregate_sensors_dedicated_and_shared():
     sensors = [
         ("Load", "D3D", 42.0),
@@ -46,6 +52,9 @@ def test_aggregate_sensors_dedicated_and_shared():
     assert info.available_memory_mb == 4500
     assert info.temperature_celsius == 60.0
     assert info.freq_mhz == 800.0  # 取 Clock/Core(GPU Core),忽略 GPU Memory
+
+
+# ==================== LHM 可用性(is_lhm_available)====================
 
 
 def test_is_lhm_available_no_pythonnet(monkeypatch):
@@ -84,6 +93,9 @@ def test_is_lhm_available_dll_missing(monkeypatch, tmp_path):
     assert cm.is_lhm_available() is False
 
 
+# ==================== nvidia-smi 调用(_run_smi)====================
+
+
 def test_run_smi_uses_noheader_nounits_format(monkeypatch):
     # 真机验证发现:nvidia-smi 默认输出带 [MiB]/[%] 单位,_parse_smi 的 int() 解析失败 →
     # 必须用 --format=csv,noheader,nounits 让输出纯数字(_parse_smi 纯函数不变)。
@@ -111,6 +123,9 @@ def test_parse_smi_handles_multi_gpu_csv_noheader_nounits():
     assert len(rows) == 2
     assert "4060" in rows[0].name.lower() and rows[0].total_mb == 8188
     assert "v100" in rows[1].name.lower() and rows[1].total_mb == 32768
+
+
+# ==================== token 匹配(_tokens / match_devices)====================
 
 
 def test_tokens_splits_alnum():
@@ -180,6 +195,9 @@ def test_match_devices_requires_full_subset_not_partial():
     assert [c.device_name for c in unmatched] == ["NVIDIA GeForce RTX 3090"]
 
 
+# ==================== NvidiaAdapter====================
+
+
 def test_enumerate_nvidia_returns_all_rows_with_raw_names(monkeypatch):
     from llm_manager.devices import nvidia as ad
     smi = ("NVIDIA GeForce RTX 4060 Laptop GPU, 8188, 1692, 6266, 35, 51\n"
@@ -197,6 +215,9 @@ def test_enumerate_nvidia_empty_when_no_smi(monkeypatch):
     from llm_manager.devices import nvidia as ad
     monkeypatch.setattr(ad, "_run_smi", lambda: "")
     assert ad.NvidiaAdapter().enumerate() == []
+
+
+# ==================== LHM 单例(_lhm_computer)====================
 
 
 def test_lhm_computer_unavailable_returns_none(monkeypatch):
@@ -220,6 +241,9 @@ def test_lhm_computer_init_failure_returns_none(monkeypatch):
     monkeypatch.setitem(sys.modules, "clr", fake_clr)
     monkeypatch.setattr(cm, "_LHM_COMPUTER", None)
     assert cm._lhm_computer() is None
+
+
+# ==================== CPU 适配器(CpuAdapter / 温度 / 频率 / 平台分支)====================
 
 
 def test_enumerate_cpu_basic(monkeypatch):
@@ -501,6 +525,9 @@ def test_cpu_temp_hwmon_unavailable_returns_none(monkeypatch):
     assert ad._cpu_temp_hwmon() is None
 
 
+# ==================== DeviceMonitor / build_adapters====================
+
+
 def test_device_monitor_matches_config_names_and_keeps_unmatched():
     from llm_manager.devices import DeviceMonitor, DeviceInfo
 
@@ -583,6 +610,9 @@ def test_build_adapters_always_returns_four_adapters():
     ads = build_adapters()
     assert len(ads) == 4
     assert {type(a).__name__ for a in ads} == {"CpuAdapter", "NvidiaAdapter", "IntelAdapter", "AmdAdapter"}
+
+
+# ==================== 集成(新模型引用实时匹配)====================
 
 
 def test_new_gpu_model_matches_via_config_only(monkeypatch):
@@ -833,6 +863,9 @@ def test_parse_intel_gpu_top_unparseable_returns_none():
     from llm_manager.devices.intel import _parse_intel_gpu_top
     assert _parse_intel_gpu_top("") is None
     assert _parse_intel_gpu_top("garbage\nnot json") is None
+
+
+# ==================== DeviceInfo 字段====================
 
 
 def test_device_info_new_fields_default_none():

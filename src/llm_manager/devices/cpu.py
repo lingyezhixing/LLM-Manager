@@ -1,4 +1,5 @@
-"""主机 CPU 适配器:psutil RAM/占用 + 温度(LHM Tctl 仅 Windows;hwmon 仅 Linux)。"""
+"""主机 CPU 适配器:psutil RAM/占用 + 温度/频率(LHM 仅 Windows;hwmon/psutil 仅 Linux)。
+平台分支在适配器内部(与 intel/amd 同构),每次仅激活一条路径。"""
 from __future__ import annotations
 
 import os
@@ -55,6 +56,28 @@ def _lhm_cpu_temp() -> float | None:
     return None
 
 
+def _cpu_temp_hwmon() -> float | None:
+    """Linux hwmon CPU 温度(psutil.sensors_temperatures,容器内 /sys 只读可见)。
+    只认 CPU 芯片 coretemp/k10temp/cpu_thermal;优先 label 为 Package id 0 / Tctl / Tdie 的
+    条目,无则取首个 current>0;不拿 acpitz/it8613(主板/环境温度)兜底。Windows 无此函数 → None。"""
+    sensors = getattr(psutil, "sensors_temperatures", None)
+    if sensors is None:
+        return None
+    try:
+        chips = sensors()
+    except Exception:  # noqa: BLE001 — 平台不支持/权限问题 → None
+        return None
+    for chip in ("coretemp", "k10temp", "cpu_thermal"):
+        for st in chips.get(chip, []):
+            if st.current > 0 and st.label in ("Package id 0", "Tctl", "Tdie"):
+                return float(st.current)
+    for chip in ("coretemp", "k10temp", "cpu_thermal"):
+        for st in chips.get(chip, []):
+            if st.current > 0:
+                return float(st.current)
+    return None
+
+
 def _cpu_temp() -> float | None:
     """CPU 温度:平台内部分支(与 intel/amd 适配器同构)——Windows → LHM Tctl/Tdie
     (佐证逻辑见 _lhm_cpu_temp);Linux → hwmon(coretemp/k10temp)。"""
@@ -100,28 +123,6 @@ def _cpu_freq() -> float | None:
     if os.name == "nt":
         return _lhm_cpu_freq()
     return _cpu_freq_psutil()
-
-
-def _cpu_temp_hwmon() -> float | None:
-    """Linux hwmon CPU 温度(psutil.sensors_temperatures,容器内 /sys 只读可见)。
-    只认 CPU 芯片 coretemp/k10temp/cpu_thermal;优先 label 为 Package id 0 / Tctl / Tdie 的
-    条目,无则取首个 current>0;不拿 acpitz/it8613(主板/环境温度)兜底。Windows 无此函数 → None。"""
-    sensors = getattr(psutil, "sensors_temperatures", None)
-    if sensors is None:
-        return None
-    try:
-        chips = sensors()
-    except Exception:  # noqa: BLE001 — 平台不支持/权限问题 → None
-        return None
-    for chip in ("coretemp", "k10temp", "cpu_thermal"):
-        for st in chips.get(chip, []):
-            if st.current > 0 and st.label in ("Package id 0", "Tctl", "Tdie"):
-                return float(st.current)
-    for chip in ("coretemp", "k10temp", "cpu_thermal"):
-        for st in chips.get(chip, []):
-            if st.current > 0:
-                return float(st.current)
-    return None
 
 
 class CpuAdapter:
