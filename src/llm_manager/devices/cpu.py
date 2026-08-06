@@ -4,8 +4,7 @@ from __future__ import annotations
 import psutil
 
 from . import DeviceInfo
-from .common import _system_mem
-from .lhm import _lhm_cpu_temp
+from .common import _system_mem, _lhm_cpu_temp
 
 
 class CpuAdapter:

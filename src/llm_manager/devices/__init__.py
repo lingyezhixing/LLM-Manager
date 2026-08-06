@@ -1,14 +1,11 @@
 """Device detection: backends enumerate all present hardware (NVIDIA via nvidia-smi,
-Intel iGPU via i915 + intel_gpu_top, AMD GPU via LHM, CPU via psutil) → DeviceMonitor
+Intel GPU via i915+intel_gpu_top/LHM, AMD GPU via amdgpu/LHM, CPU via psutil) → DeviceMonitor
 fuzzy-matches config device names to detected hardware (token-subset) and atomically
 rebinds a config-keyed cache (+ unmatched devices keyed by raw name for display)."""
 from __future__ import annotations
 
-import os
 import re
-import shutil
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Callable, Protocol
 
 
@@ -29,9 +26,8 @@ class DeviceInfo:
 # DeviceInfo 必须先于各适配器模块导入定义:模块顶层 `from . import DeviceInfo`,
 # 若包仍处部分初始化(DeviceInfo 未绑定)则 ImportError(拆包循环导入陷阱)。
 from .nvidia import NvidiaAdapter  # noqa: E402 — 显式 re-export(供 build_adapters 装配)
-from .intel import IntelLinuxAdapter  # noqa: E402
-from .amd import AmdLinuxAdapter  # noqa: E402
-from .lhm import LhmAdapter, is_lhm_available  # noqa: E402
+from .intel import IntelAdapter  # noqa: E402
+from .amd import AmdAdapter  # noqa: E402
 from .cpu import CpuAdapter  # noqa: E402
 
 
@@ -117,13 +113,5 @@ class DeviceMonitor:
 
 
 def build_adapters() -> list[DeviceAdapter]:
-    """平台自动装配:可用即注册,缺工具(无 nvidia-smi / 非 Linux / 无 LHM)自动跳过。"""
-    adapters: list[DeviceAdapter] = [CpuAdapter()]
-    if shutil.which("nvidia-smi"):
-        adapters.append(NvidiaAdapter())
-    if os.name == "posix" and Path("/sys/class/drm").is_dir():
-        adapters.append(IntelLinuxAdapter())
-        adapters.append(AmdLinuxAdapter())
-    if os.name == "nt" and is_lhm_available():
-        adapters.append(LhmAdapter())
-    return adapters
+    """恒注册 4 个设备适配器;平台/工具检测内移到各适配器 enumerate()(不适用时返回 [])。"""
+    return [NvidiaAdapter(), IntelAdapter(), AmdAdapter(), CpuAdapter()]

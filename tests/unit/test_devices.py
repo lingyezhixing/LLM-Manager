@@ -1,4 +1,4 @@
-from llm_manager.devices.lhm import _aggregate_sensors
+from llm_manager.devices.common import _aggregate_sensors
 from llm_manager.devices.nvidia import _parse_smi
 
 
@@ -45,30 +45,30 @@ def test_is_lhm_available_no_pythonnet(monkeypatch):
         return real_import(name, *args, **kwargs)
 
     monkeypatch.setattr(builtins, "__import__", fake_import)
-    from llm_manager.devices import is_lhm_available
-    assert is_lhm_available() is False
+    from llm_manager.devices import common as cm
+    assert cm.is_lhm_available() is False
 
 
 def test_is_lhm_available_dll_present(monkeypatch, tmp_path):
     import sys
     import types
-    from llm_manager.devices import lhm as ad
+    from llm_manager.devices import common as cm
 
     monkeypatch.setitem(sys.modules, "clr", types.ModuleType("clr"))  # 假装 pythonnet 已装
     fake_dll = tmp_path / "LibreHardwareMonitorLib.dll"
     fake_dll.write_text("fake")
-    monkeypatch.setattr(ad, "_LHM_DLL", fake_dll)
-    assert ad.is_lhm_available() is True
+    monkeypatch.setattr(cm, "_LHM_DLL", fake_dll)
+    assert cm.is_lhm_available() is True
 
 
 def test_is_lhm_available_dll_missing(monkeypatch, tmp_path):
     import sys
     import types
-    from llm_manager.devices import lhm as ad
+    from llm_manager.devices import common as cm
 
     monkeypatch.setitem(sys.modules, "clr", types.ModuleType("clr"))
-    monkeypatch.setattr(ad, "_LHM_DLL", tmp_path / "nonexistent.dll")
-    assert ad.is_lhm_available() is False
+    monkeypatch.setattr(cm, "_LHM_DLL", tmp_path / "nonexistent.dll")
+    assert cm.is_lhm_available() is False
 
 
 def test_run_smi_uses_noheader_nounits_format(monkeypatch):
@@ -187,26 +187,26 @@ def test_enumerate_nvidia_empty_when_no_smi(monkeypatch):
 
 
 def test_lhm_computer_unavailable_returns_none(monkeypatch):
-    from llm_manager.devices import lhm as ad
-    monkeypatch.setattr(ad, "is_lhm_available", lambda: False)
-    assert ad._lhm_computer() is None
+    from llm_manager.devices import common as cm
+    monkeypatch.setattr(cm, "is_lhm_available", lambda: False)
+    assert cm._lhm_computer() is None
 
 
 def test_lhm_computer_init_failure_returns_none(monkeypatch):
     # 初始化抛异常(AddReference 失败等)→ None,不穿透(防 CpuAdapter.enumerate 的 try 外调用)
     import sys
     import types
-    from llm_manager.devices import lhm as ad
+    from llm_manager.devices import common as cm
 
     def boom(*a, **k):
         raise RuntimeError("AddReference failed")
 
     fake_clr = types.ModuleType("clr")
     fake_clr.AddReference = boom
-    monkeypatch.setattr(ad, "is_lhm_available", lambda: True)
+    monkeypatch.setattr(cm, "is_lhm_available", lambda: True)
     monkeypatch.setitem(sys.modules, "clr", fake_clr)
-    monkeypatch.setattr(ad, "_LHM_COMPUTER", None)
-    assert ad._lhm_computer() is None
+    monkeypatch.setattr(cm, "_LHM_COMPUTER", None)
+    assert cm._lhm_computer() is None
 
 
 def test_enumerate_cpu_basic(monkeypatch):
@@ -245,40 +245,9 @@ def test_enumerate_cpu_psutil_failure_degraded(monkeypatch):
 
 
 def test_lhm_cpu_temp_unavailable_returns_none(monkeypatch):
-    from llm_manager.devices import lhm as ad
-    monkeypatch.setattr(ad, "_lhm_computer", lambda: None)
-    assert ad._lhm_cpu_temp() is None
-
-
-def test_enumerate_lhm_gpus_unavailable_returns_empty(monkeypatch):
-    from llm_manager.devices import lhm as ad
-    monkeypatch.setattr(ad, "_lhm_computer", lambda: None)
-    assert ad.LhmAdapter().enumerate() == []
-
-
-def test_lhm_adapter_covers_amd_and_intel(monkeypatch):
-    # LHM 库支持 GpuIntel,现状只取 GpuAmd → Windows Intel 核显漏监控。扩展过滤集。
-    import types
-    import llm_manager.devices.lhm as ad
-
-    class _FakeHardware:
-        def __init__(self, htype, name):
-            self.HardwareType = htype
-            self.Name = name
-            self.Sensors = []
-
-        def Update(self):
-            pass
-
-    fake_computer = types.SimpleNamespace(Hardware=[
-        _FakeHardware("GpuAmd", "AMD Radeon 780M"),
-        _FakeHardware("GpuIntel", "Intel UHD Graphics"),
-        _FakeHardware("GpuNvidia", "NVIDIA GeForce RTX 4060"),
-        _FakeHardware("Cpu", "CPU"),
-    ])
-    monkeypatch.setattr(ad, "_lhm_computer", lambda: fake_computer)
-    out = ad.LhmAdapter().enumerate()
-    assert [d.device_name for d in out] == ["AMD Radeon 780M", "Intel UHD Graphics"]  # NVIDIA/CPU 排除
+    from llm_manager.devices import common as cm
+    monkeypatch.setattr(cm, "_lhm_computer", lambda: None)
+    assert cm._lhm_cpu_temp() is None
 
 
 def test_device_monitor_matches_config_names_and_keeps_unmatched():
@@ -357,51 +326,12 @@ class _FakeAdapter:
         return self._devices
 
 
-def test_build_adapters_linux_full(monkeypatch):
+def test_build_adapters_always_returns_four_adapters():
+    """恒注册 4 个设备适配器;平台/工具检测内移到各适配器 enumerate()。"""
     from llm_manager.devices import build_adapters
-    monkeypatch.setattr("llm_manager.devices.os.name", "posix")
-    monkeypatch.setattr("llm_manager.devices.shutil.which", lambda _: "/usr/bin/nvidia-smi")
-    monkeypatch.setattr("llm_manager.devices.Path.is_dir", lambda self: True)
     ads = build_adapters()
-    assert {type(a).__name__ for a in ads} == {"CpuAdapter", "NvidiaAdapter", "IntelLinuxAdapter", "AmdLinuxAdapter"}
-
-
-def test_build_adapters_windows(monkeypatch):
-    from llm_manager.devices import build_adapters
-    monkeypatch.setattr("llm_manager.devices.os.name", "nt")
-    monkeypatch.setattr("llm_manager.devices.shutil.which", lambda _: None)
-    monkeypatch.setattr("llm_manager.devices.is_lhm_available", lambda: True)
-    ads = build_adapters()
-    assert {type(a).__name__ for a in ads} == {"CpuAdapter", "LhmAdapter"}
-
-
-def test_build_adapters_minimal(monkeypatch):
-    from llm_manager.devices import build_adapters
-    monkeypatch.setattr("llm_manager.devices.os.name", "nt")
-    monkeypatch.setattr("llm_manager.devices.shutil.which", lambda _: None)
-    monkeypatch.setattr("llm_manager.devices.is_lhm_available", lambda: False)
-    ads = build_adapters()
-    assert [type(a).__name__ for a in ads] == ["CpuAdapter"]
-
-
-def test_build_adapters_posix_without_sysfs(monkeypatch):
-    # posix + nvidia-smi 在 PATH + /sys/class/drm 不存在 → Linux 双 GPU 适配器不注册
-    from llm_manager.devices import build_adapters
-    monkeypatch.setattr("llm_manager.devices.os.name", "posix")
-    monkeypatch.setattr("llm_manager.devices.shutil.which", lambda _: "/usr/bin/nvidia-smi")
-    monkeypatch.setattr("llm_manager.devices.Path.is_dir", lambda self: False)
-    ads = build_adapters()
-    assert {type(a).__name__ for a in ads} == {"CpuAdapter", "NvidiaAdapter"}
-
-
-def test_build_adapters_windows_with_nvidia(monkeypatch):
-    # nt + nvidia-smi 在 PATH + LHM 不可用 → Cpu + Nvidia(Windows 无 sysfs 分支)
-    from llm_manager.devices import build_adapters
-    monkeypatch.setattr("llm_manager.devices.os.name", "nt")
-    monkeypatch.setattr("llm_manager.devices.shutil.which", lambda _: "C:\\nvidia-smi.exe")
-    monkeypatch.setattr("llm_manager.devices.is_lhm_available", lambda: False)
-    ads = build_adapters()
-    assert {type(a).__name__ for a in ads} == {"CpuAdapter", "NvidiaAdapter"}
+    assert len(ads) == 4
+    assert {type(a).__name__ for a in ads} == {"CpuAdapter", "NvidiaAdapter", "IntelAdapter", "AmdAdapter"}
 
 
 def test_new_gpu_model_matches_via_config_only(monkeypatch):
@@ -448,7 +378,7 @@ def test_intel_adapter_metrics_from_gpu_top(monkeypatch, tmp_path):
               ' "power": {"GPU": 3.5, "Package": 2.4}}\n]')
     monkeypatch.setattr(ad, "_run_intel_gpu_top", lambda: sample)
     monkeypatch.setattr(cm.psutil, "virtual_memory", lambda: type("M", (), {"total": 16 * 1024**3, "available": 8 * 1024**3, "used": 8 * 1024**3})())
-    out = ad.IntelLinuxAdapter().enumerate()
+    out = ad.IntelAdapter().enumerate()
     assert len(out) == 1  # card0 命中;card1(amdgpu)与 connector 跳过
     info = out[0]
     assert info.device_name == "Intel UHD Graphics (Alder Lake-N)"
@@ -468,7 +398,7 @@ def test_intel_adapter_gpu_top_failure_degraded(monkeypatch, tmp_path):
     monkeypatch.setattr(ad, "_DRM_CLASS", fake_drm)
     monkeypatch.setattr(cm, "_DRM_CLASS", fake_drm)
     monkeypatch.setattr(ad, "_run_intel_gpu_top", lambda: None)  # 工具缺失/失败
-    out = ad.IntelLinuxAdapter().enumerate()
+    out = ad.IntelAdapter().enumerate()
     assert len(out) == 1  # 识别与指标解耦:设备照常出现
     assert out[0].usage_percentage == 0.0
     assert out[0].freq_mhz is None and out[0].power_watts is None
@@ -485,19 +415,73 @@ def test_intel_adapter_no_i915_returns_empty(monkeypatch, tmp_path):
     card1.joinpath("uevent").write_text("DRIVER=amdgpu\n")
     monkeypatch.setattr(ad, "_DRM_CLASS", drm)
     monkeypatch.setattr(cm, "_DRM_CLASS", drm)
-    assert ad.IntelLinuxAdapter().enumerate() == []
+    assert ad.IntelAdapter().enumerate() == []
 
 
-def test_intel_adapter_windows_and_missing_sysfs(monkeypatch, tmp_path):
+def test_intel_adapter_windows_branch_via_lhm(monkeypatch, tmp_path):
+    """Intel Windows 分支:通过 LHM GpuIntel 硬件 → 经 _aggregate_sensors → DeviceInfo。"""
+    import types
+    from llm_manager.devices import intel as ad
+    from llm_manager.devices import common as cm
+
+    class _FakeSensor:
+        def __init__(self, stype, sname, val):
+            self.SensorType = stype
+            self.Name = sname
+            self.Value = val
+
+    class _FakeHardware:
+        def __init__(self, htype, name, sensors):
+            self.HardwareType = htype
+            self.Name = name
+            self.Sensors = sensors
+
+        def Update(self):
+            pass
+
+    fake_computer = types.SimpleNamespace(Hardware=[
+        _FakeHardware("GpuIntel", "Intel UHD Graphics", [
+            _FakeSensor("Load", "D3D", 42.0),
+            _FakeSensor("SmallData", "Dedicated Used VRAM", 1000.0),
+            _FakeSensor("SmallData", "Dedicated Total VRAM", 4000.0),
+            _FakeSensor("SmallData", "Shared Used", 500.0),
+            _FakeSensor("SmallData", "Shared Total", 2000.0),
+            _FakeSensor("Temperature", "GPU Temp", 60.0),
+        ]),
+        _FakeHardware("GpuAmd", "AMD Radeon 780M", []),
+        _FakeHardware("GpuNvidia", "NVIDIA GeForce RTX 4060", []),
+    ])
+    # 需要同时 patch 两个地方:cm._lhm_computer 和 ad._lhm_computer
+    monkeypatch.setattr(cm, "_lhm_computer", lambda: fake_computer)
+    monkeypatch.setattr(ad, "_lhm_computer", lambda: fake_computer)
+    monkeypatch.setattr(ad.os, "name", "nt")
+    out = ad.IntelAdapter().enumerate()
+    assert len(out) == 1
+    assert out[0].device_name == "Intel UHD Graphics"
+    assert out[0].device_type == "GPU (APU)"  # _aggregate_sensors 统一语义
+
+
+def test_intel_adapter_windows_lhm_unavailable_returns_empty(monkeypatch):
+    """Intel Windows 分支:LHM 不可用 → []。"""
+    from llm_manager.devices import intel as ad
+    from llm_manager.devices import common as cm
+
+    # 直接 patch common.is_lhm_available 返回 False,让 _lhm_computer 返回 None
+    monkeypatch.setattr(cm, "is_lhm_available", lambda: False)
+    # 确保已初始化的单例被重置
+    monkeypatch.setattr(cm, "_LHM_COMPUTER", None)
+    monkeypatch.setattr(ad.os, "name", "nt")
+    assert ad.IntelAdapter().enumerate() == []
+
+
+def test_intel_adapter_linux_missing_sysfs_returns_empty(monkeypatch):
+    """Intel Linux 分支:无 sysfs → []。"""
     from llm_manager.devices import intel as ad
 
-    monkeypatch.setattr(ad, "_DRM_CLASS", _make_i915_sysfs(tmp_path))
-    monkeypatch.setattr(ad.os, "name", "nt")
-    assert ad.IntelLinuxAdapter().enumerate() == []
-
     monkeypatch.setattr(ad.os, "name", "posix")
-    monkeypatch.setattr(ad, "_DRM_CLASS", tmp_path / "nonexistent")
-    assert ad.IntelLinuxAdapter().enumerate() == []
+    from llm_manager.devices import common as cm
+    monkeypatch.setattr(cm, "_DRM_CLASS", None)  # Path is_dir() 会失败
+    assert ad.IntelAdapter().enumerate() == []
 
 
 def test_run_intel_gpu_top_timeout_124_still_returns_stdout(monkeypatch):
@@ -643,7 +627,7 @@ def test_amd_adapter_basic(monkeypatch, tmp_path):
     monkeypatch.setattr(ad.os, "name", "posix")
     monkeypatch.setattr(ad, "_DRM_CLASS", fake_drm)
     monkeypatch.setattr(cm, "_DRM_CLASS", fake_drm)
-    out = ad.AmdLinuxAdapter().enumerate()
+    out = ad.AmdAdapter().enumerate()
     assert len(out) == 1
     info = out[0]
     assert info.device_name == "AMD Radeon 780M Graphics"   # 1002:15fe 映射
@@ -664,7 +648,7 @@ def test_amd_adapter_missing_fields_degraded(monkeypatch, tmp_path):
     card0.joinpath("uevent").write_text("DRIVER=amdgpu\nPCI_ID=1002:1640\n")
     monkeypatch.setattr(ad, "_DRM_CLASS", drm)  # 无 busy/vram/hwmon
     monkeypatch.setattr(cm, "_DRM_CLASS", drm)
-    out = ad.AmdLinuxAdapter().enumerate()
+    out = ad.AmdAdapter().enumerate()
     assert len(out) == 1  # 识别与指标解耦
     assert out[0].usage_percentage == 0.0 and out[0].total_memory_mb == 0
     assert out[0].temperature_celsius is None
@@ -680,7 +664,7 @@ def test_amd_adapter_skips_non_amdgpu(monkeypatch, tmp_path):
     monkeypatch.setattr(ad.os, "name", "posix")
     monkeypatch.setattr(ad, "_DRM_CLASS", fake_drm)
     monkeypatch.setattr(cm, "_DRM_CLASS", fake_drm)
-    out = ad.AmdLinuxAdapter().enumerate()
+    out = ad.AmdAdapter().enumerate()
     assert len(out) == 1
     assert out[0].device_name == "AMD Radeon 780M Graphics"
 
@@ -694,19 +678,73 @@ def test_amd_adapter_available_clamped_non_negative(monkeypatch, tmp_path):
     fake_drm = _make_amdgpu_sysfs(tmp_path, vram_total=8 * 1024**3, vram_used=10 * 1024**3)
     monkeypatch.setattr(ad, "_DRM_CLASS", fake_drm)
     monkeypatch.setattr(cm, "_DRM_CLASS", fake_drm)
-    out = ad.AmdLinuxAdapter().enumerate()
+    out = ad.AmdAdapter().enumerate()
     assert out[0].total_memory_mb == 8 * 1024 and out[0].used_memory_mb == 10 * 1024
     assert out[0].available_memory_mb == 0
 
 
-def test_amd_adapter_windows_and_missing_sysfs(monkeypatch, tmp_path):
+def test_amd_adapter_windows_branch_via_lhm(monkeypatch, tmp_path):
+    """AMD Windows 分支:通过 LHM GpuAmd 硬件 → 经 _aggregate_sensors → DeviceInfo。"""
+    import types
+    from llm_manager.devices import amd as ad
+    from llm_manager.devices import common as cm
+
+    class _FakeSensor:
+        def __init__(self, stype, sname, val):
+            self.SensorType = stype
+            self.Name = sname
+            self.Value = val
+
+    class _FakeHardware:
+        def __init__(self, htype, name, sensors):
+            self.HardwareType = htype
+            self.Name = name
+            self.Sensors = sensors
+
+        def Update(self):
+            pass
+
+    fake_computer = types.SimpleNamespace(Hardware=[
+        _FakeHardware("GpuAmd", "AMD Radeon 780M Graphics", [
+            _FakeSensor("Load", "D3D", 55.0),
+            _FakeSensor("SmallData", "Dedicated Used VRAM", 3000.0),
+            _FakeSensor("SmallData", "Dedicated Total VRAM", 8000.0),
+            _FakeSensor("SmallData", "Shared Used", 500.0),
+            _FakeSensor("SmallData", "Shared Total", 2000.0),
+            _FakeSensor("Temperature", "GPU Temp", 55.0),
+        ]),
+        _FakeHardware("GpuIntel", "Intel UHD Graphics", []),
+        _FakeHardware("GpuNvidia", "NVIDIA GeForce RTX 4060", []),
+    ])
+    # 需要同时 patch 两个地方:cm._lhm_computer 和 ad._lhm_computer
+    monkeypatch.setattr(cm, "_lhm_computer", lambda: fake_computer)
+    monkeypatch.setattr(ad, "_lhm_computer", lambda: fake_computer)
+    monkeypatch.setattr(ad.os, "name", "nt")
+    out = ad.AmdAdapter().enumerate()
+    assert len(out) == 1
+    assert out[0].device_name == "AMD Radeon 780M Graphics"
+    assert out[0].device_type == "GPU (APU)"  # _aggregate_sensors 统一语义
+
+
+def test_amd_adapter_windows_lhm_unavailable_returns_empty(monkeypatch):
+    """AMD Windows 分支:LHM 不可用 → []。"""
+    from llm_manager.devices import amd as ad
+    from llm_manager.devices import common as cm
+
+    # 直接 patch common.is_lhm_available 返回 False,让 _lhm_computer 返回 None
+    monkeypatch.setattr(cm, "is_lhm_available", lambda: False)
+    # 确保已初始化的单例被重置
+    monkeypatch.setattr(cm, "_LHM_COMPUTER", None)
+    monkeypatch.setattr(ad.os, "name", "nt")
+    assert ad.AmdAdapter().enumerate() == []
+
+
+def test_amd_adapter_linux_missing_sysfs_returns_empty(monkeypatch):
+    """AMD Linux 分支:无 sysfs → []。"""
     from llm_manager.devices import amd as ad
 
-    monkeypatch.setattr(ad, "_DRM_CLASS", _make_amdgpu_sysfs(tmp_path))
-    monkeypatch.setattr(ad.os, "name", "nt")
-    assert ad.AmdLinuxAdapter().enumerate() == []
-
     monkeypatch.setattr(ad.os, "name", "posix")
-    monkeypatch.setattr(ad, "_DRM_CLASS", tmp_path / "nonexistent")
-    assert ad.AmdLinuxAdapter().enumerate() == []
+    from llm_manager.devices import common as cm
+    monkeypatch.setattr(cm, "_DRM_CLASS", None)  # Path is_dir() 会失败
+    assert ad.AmdAdapter().enumerate() == []
 

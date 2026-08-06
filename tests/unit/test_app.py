@@ -24,8 +24,8 @@ Local-Models:
 
 
 def test_lifespan_starts_and_stops_background(tmp_path, monkeypatch):
-    # enumerate_lhm_gpus 内部职责;mock devices.lhm.is_lhm_available=False → 等效隔离 LHM 慢调用,聚焦 lifespan+background。
-    monkeypatch.setattr("llm_manager.devices.lhm.is_lhm_available", lambda: False)
+    # enumerate_lhm_gpus 内部职责;mock devices.common.is_lhm_available=False → 等效隔离 LHM 慢调用,聚焦 lifespan+background。
+    monkeypatch.setattr("llm_manager.devices.common.is_lhm_available", lambda: False)
     # 探针秒失败(跳过真实 60s 重试循环):仍证明 auto_start 后台真起 + 失败容错(不抛)+ 不阻塞 /health。
     # 测试的真实契约是「后台任务起 + 失败路径走通 + /health 不阻塞」,「重试 60s」只是 startup_timeout 的副作用。
     from llm_manager.probes import probe_registry, ProbeResult
@@ -72,7 +72,7 @@ def test_create_app_closes_db_on_bootstrap_error(tmp_path):
 
 def test_crud_then_catalog_reflects_without_restart(tmp_path, monkeypatch):
     """核心契约:POST /api/config/models 后,不重启即见 /v1/models + /api/config/models(读穿)。"""
-    monkeypatch.setattr("llm_manager.devices.lhm.is_lhm_available", lambda: False)  # 隔离 LHM 慢枚举
+    monkeypatch.setattr("llm_manager.devices.common.is_lhm_available", lambda: False)  # 隔离 LHM 慢枚举
     cfg_path = tmp_path / "config.yaml"
     cfg_path.write_text(
         "program: {host: 0.0.0.0, port: 8080, alive_time: 60, log_level: INFO}\n"
@@ -102,7 +102,7 @@ def test_crud_then_catalog_reflects_without_restart(tmp_path, monkeypatch):
 def test_log_level_from_config_applied(tmp_path, monkeypatch):
     """cfg.program.log_level 真正传入 setup_logging(此前硬编码 INFO 从未生效)。
     只捕获调用参数,不触发真实 logging 副作用(conftest _isolate_logging 隔离)。"""
-    monkeypatch.setattr("llm_manager.devices.lhm.is_lhm_available", lambda: False)
+    monkeypatch.setattr("llm_manager.devices.common.is_lhm_available", lambda: False)
     levels: list[str] = []
     monkeypatch.setattr("llm_manager.app.setup_logging",
                         lambda level="INFO", **kw: levels.append(level))

@@ -1,21 +1,33 @@
-"""AMD Linux GPU 适配器:amdgpu sysfs 识别与指标。"""
+"""AMD GPU 适配器:Linux(amdgpu sysfs)/Windows(LHM)统一接口。"""
 from __future__ import annotations
 
 import os
 from pathlib import Path
 
 from . import DeviceInfo
-from .common import _DRM_CLASS, _drm_cards, _hwmon_temp1, _read_float, _read_int_mb
+from .common import (
+    _DRM_CLASS, _drm_cards, _hwmon_temp1, _read_float, _read_int_mb,
+    _lhm_computer, _aggregate_sensors,  # Windows LHM 运行时
+)
 
 # ==================== AMD(amdgpu sysfs,待 780M 实测校准)====================
 
 
-class AmdLinuxAdapter:
-    """Linux amdgpu GPU:gpu_busy_percent 利用率 + mem_info_vram_* 显存 + hwmon 温度。
-    字段读不到自动降级 None/0。"""
+class AmdAdapter:
+    """AMD GPU 适配器:Linux(amdgpu sysfs)/Windows(LHM)统一接口。
+    Linux:gpu_busy_percent 利用率 + mem_info_vram_* 显存 + hwmon 温度。字段读不到自动降级 None/0。
+    Windows:LHM GpuAmd 硬件 → 经 _aggregate_sensors → DeviceInfo。"""
 
     def enumerate(self) -> list[DeviceInfo]:
-        if os.name == "nt" or not _DRM_CLASS.is_dir():
+        """内部 dispatch 平台:nt→LHM / posix→amdgpu sysfs。"""
+        if os.name == "nt":
+            return self._enumerate_windows()
+        return self._enumerate_linux()
+
+    def _enumerate_linux(self) -> list[DeviceInfo]:
+        """Linux amdgpu GPU:gpu_busy_percent 利用率 + mem_info_vram_* 显存 + hwmon 温度。
+        字段读不到自动降级 None/0。"""
+        if not _DRM_CLASS.is_dir():
             return []
         out: list[DeviceInfo] = []
         for card in _drm_cards():
@@ -27,6 +39,27 @@ class AmdLinuxAdapter:
             out.append(DeviceInfo(
                 _amd_gpu_name(dev), "GPU (APU)", "VRAM",
                 total, max(total - used, 0), used, busy, _hwmon_temp1(dev)))
+        return out
+
+    def _enumerate_windows(self) -> list[DeviceInfo]:
+        """Windows AMD GPU:LHM GpuAmd 硬件 → 经 _aggregate_sensors → DeviceInfo。
+        _lhm_computer 不可用 → []。"""
+        c = _lhm_computer()
+        if c is None:
+            return []
+        out: list[DeviceInfo] = []
+        for hw in c.Hardware:
+            if str(hw.HardwareType) != "GpuAmd":
+                continue
+            try:
+                hw.Update()
+                sensors = (
+                    (str(s.SensorType), str(s.Name), s.Value if s.Value is not None else 0.0)
+                    for s in hw.Sensors
+                )
+                out.append(_aggregate_sensors(str(hw.Name), sensors))
+            except Exception:  # noqa: BLE001 — 单个 LHM GPU 传感器读取失败 → 跳过该 GPU,继续其余
+                pass
         return out
 
 

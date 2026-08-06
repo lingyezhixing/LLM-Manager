@@ -1,4 +1,4 @@
-"""Intel Linux iGPU 适配器:i915 uevent 识别 + intel_gpu_top 指标。"""
+"""Intel GPU 适配器:Linux(i915 + intel_gpu_top)/Windows(LHM)统一接口。"""
 from __future__ import annotations
 
 import os
@@ -7,7 +7,10 @@ import subprocess
 from pathlib import Path
 
 from . import DeviceInfo
-from .common import _DRM_CLASS, _drm_cards, _system_mem
+from .common import (
+    _DRM_CLASS, _drm_cards, _system_mem,
+    _lhm_computer, _aggregate_sensors,  # Windows LHM 运行时
+)
 
 # ==================== Intel iGPU(i915 + intel_gpu_top)====================
 _INTEL_IGPU_NAMES = {
@@ -87,13 +90,23 @@ def _parse_intel_gpu_top(stdout: str | None) -> dict | None:
     }
 
 
-class IntelLinuxAdapter:
-    """Linux Intel iGPU:uevent DRIVER=i915 识别;利用率/频率/功耗来自 intel_gpu_top
-    (sysfs 实测无 busy 接口)。识别与指标解耦:工具缺失 → 设备照常出现,指标 None/0。
-    温度:None(N100 平台无 hwmon 传感器,诚实标注)。内存:共享系统 RAM。"""
+class IntelAdapter:
+    """Intel GPU 适配器:Linux(i915 + intel_gpu_top)/Windows(LHM)统一接口。
+    Linux:uevent DRIVER=i915 识别;利用率/频率/功耗来自 intel_gpu_top(sysfs 实测无 busy 接口)。
+    Windows:LHM GpuIntel 硬件 → 经 _aggregate_sensors → DeviceInfo。
+    识别与指标解耦:工具缺失/LHM不可用 → 设备照常出现/返回空,指标 None/0。"""
 
     def enumerate(self) -> list[DeviceInfo]:
-        if os.name == "nt" or not _DRM_CLASS.is_dir():
+        """内部 dispatch 平台:nt→LHM / posix→i915+intel_gpu_top。"""
+        if os.name == "nt":
+            return self._enumerate_windows()
+        return self._enumerate_linux()
+
+    def _enumerate_linux(self) -> list[DeviceInfo]:
+        """Linux Intel iGPU:uevent DRIVER=i915 识别;利用率/频率/功耗来自 intel_gpu_top
+        (sysfs 实测无 busy 接口)。识别与指标解耦:工具缺失 → 设备照常出现,指标 None/0。
+        温度:None(N100 平台无 hwmon 传感器,诚实标注)。内存:共享系统 RAM。"""
+        if not _DRM_CLASS.is_dir():
             return []
         total, avail, used = _system_mem()
         cards = [c for c in _drm_cards() if _is_i915(c / "device")]
@@ -105,3 +118,24 @@ class IntelLinuxAdapter:
             total, avail, used, metrics.get("busy_pct", 0.0),
             None, metrics.get("freq_mhz"), metrics.get("power_watts"),
         ) for c in cards]  # 多 i915 卡:按卡命名;指标共享同一次 intel_gpu_top 采样
+
+    def _enumerate_windows(self) -> list[DeviceInfo]:
+        """Windows Intel GPU:LHM GpuIntel 硬件 → 经 _aggregate_sensors → DeviceInfo。
+        _lhm_computer 不可用 → []。"""
+        c = _lhm_computer()
+        if c is None:
+            return []
+        out: list[DeviceInfo] = []
+        for hw in c.Hardware:
+            if str(hw.HardwareType) != "GpuIntel":
+                continue
+            try:
+                hw.Update()
+                sensors = (
+                    (str(s.SensorType), str(s.Name), s.Value if s.Value is not None else 0.0)
+                    for s in hw.Sensors
+                )
+                out.append(_aggregate_sensors(str(hw.Name), sensors))
+            except Exception:  # noqa: BLE001 — 单个 LHM GPU 传感器读取失败 → 跳过该 GPU,继续其余
+                pass
+        return out
