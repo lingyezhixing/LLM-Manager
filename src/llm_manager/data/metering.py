@@ -2,6 +2,9 @@
 total exception safety (a raise in stream-finally truncates the client stream).
 Ported from legacy core/token_parsers.py (behavior preserved verbatim)。
 
+未知路径默认回退 parse_generic(保守按字段分类,非顺序盲试;仅无歧义信号
+返回非零,宁可漏计也不误记)。显式注册表仍为主路,新增已知端点应显式注册。
+
 另含共享用量指标 helper(hit_rate),供 session/usage 引用。"""
 
 from __future__ import annotations
@@ -165,17 +168,68 @@ def parse_responses(body: bytes) -> TokenUsage:
     return TokenUsage(input_tokens, output_tokens, cached, max(0, input_tokens - cached))
 
 
-def _parse_noop(body: bytes) -> TokenUsage:
-    return TokenUsage(0, 0, 0, 0)
+@_safe
+def _parse_generic_usage(body: bytes) -> TokenUsage:
+    """裸 usage(input_tokens/output_tokens,无缓存字段)的保守口径:总输入/输出
+    明确可取,cache 拆分未知 → cache=0、prompt=input。SSE 取首个带用量的块。"""
+    s = _body_str(body)
+    inp = out = 0
+    if _is_sse(s):
+        for payload in iter_blocks(s):
+            d = _try_json(payload)
+            if not isinstance(d, dict):
+                continue
+            u = d.get("usage")
+            if isinstance(u, dict) and ("input_tokens" in u or "output_tokens" in u):
+                inp = _to_int(u.get("input_tokens"))
+                out = _to_int(u.get("output_tokens"))
+                if inp or out:
+                    break
+    else:
+        obj = _try_json(s)
+        if isinstance(obj, dict):
+            u = obj.get("usage")
+            if isinstance(u, dict):
+                inp = _to_int(u.get("input_tokens"))
+                out = _to_int(u.get("output_tokens"))
+    if not (inp or out):
+        return TokenUsage(0, 0, 0, 0)
+    return TokenUsage(inp, out, 0, inp)
+
+
+@_safe
+def parse_generic(body: bytes) -> TokenUsage:
+    """保守通用回退:未知路径时按「存在哪些字段」分类(非顺序盲试),避免
+    anthropic 与 responses 同字段不同 cache 语义的错配。仅无歧义信号返回非零,
+    否则归零——宁可漏计也不误记(用量/计费是 DB 事实)。显式注册表仍为主路。"""
+    s = _body_str(body)
+    if "timings" in s:
+        return parse_openai(body)  # llama.cpp native(infill 等);parse_openai 内含 timings 分支
+    if "input_tokens_details" in s:
+        return parse_responses(body)  # OpenAI Responses 缓存口径
+    if "cache_read_input_tokens" in s or "cache_creation_input_tokens" in s:
+        return parse_anthropic(body)  # Anthropic 缓存口径
+    if (
+        "usage" in s
+        and "input_tokens" in s
+        and not ("prompt_tokens" in s or "completion_tokens" in s)
+    ):
+        return _parse_generic_usage(body)  # 裸 input/output,无缓存字段
+    return parse_openai(body)  # openai 形态(prompt_tokens/completion_tokens)
 
 
 # path → (parser, include_usage) 单源;parser_registry 派生保持既有 API 不变。
+# 未注册路径 → parse_tokens 回退 parse_generic(见模块 docstring)。
 _PARSER_META: dict[str, dict] = {
     "v1/chat/completions": {"parser": parse_openai, "include_usage": True},
     "v1/completions": {"parser": parse_openai, "include_usage": True},
     "v1/embeddings": {"parser": parse_openai, "include_usage": False},
     "v1/rerank": {"parser": parse_openai, "include_usage": False},
     "rerank": {"parser": parse_openai, "include_usage": False},
+    "infill": {  # llama.cpp native:timings 头尾带 cache_n/prompt_n/predicted_n
+        "parser": parse_openai,
+        "include_usage": False,
+    },
     "v1/messages": {"parser": parse_anthropic, "include_usage": False},
     "v1/responses": {"parser": parse_responses, "include_usage": False},
 }
@@ -187,7 +241,7 @@ parser_registry: dict[str, Callable[[bytes], TokenUsage]] = {
 
 def parse_tokens(path: str, body: bytes) -> TokenUsage:
     key = path.lstrip("/").split("?")[0]
-    return parser_registry.get(key, _parse_noop)(body)
+    return parser_registry.get(key, parse_generic)(body)
 
 
 def needs_include_usage(path: str) -> bool:
