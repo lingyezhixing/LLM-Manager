@@ -31,17 +31,7 @@ from llm_manager.data.config_store import (
 )
 from llm_manager.gateway.api.common import get_config_store, get_db
 from llm_manager.tray import claude
-
-try:
-    from importlib.metadata import PackageNotFoundError
-    from importlib.metadata import version as _pkg_version
-
-    try:
-        _VERSION = _pkg_version("llm-manager")
-    except PackageNotFoundError:
-        _VERSION = "unknown"
-except Exception:  # noqa: BLE001
-    _VERSION = "unknown"
+from llm_manager.version import get_version
 
 logger = logging.getLogger(__name__)
 
@@ -321,7 +311,7 @@ def register_config_routes(api: APIRouter) -> None:
         started_at = getattr(request.app.state, "started_at", None) or time.time()
         db_path = Path(str(getattr(request.app.state, "resolved_db", "data/llm_manager.db")))
         return {
-            "version": _VERSION,
+            "version": get_version(),
             "started_at": started_at,
             "uptime_s": max(0.0, time.time() - started_at),
             "db_size_bytes": db_path.stat().st_size if db_path.exists() else None,
