@@ -12,7 +12,12 @@ from pathlib import Path
 
 import pytest
 
-from llm_manager.runtime.update import UpdateError, apply_update, check_update
+from llm_manager.runtime.update import (
+    UpdateError,
+    _https_rewrite_args,
+    apply_update,
+    check_update,
+)
 
 
 def _git(cwd: Path, *args: str) -> str:
@@ -190,6 +195,30 @@ def test_git_missing_unsupported(monkeypatch, tmp_path) -> None:
     assert not st.ok
     assert st.supported is False
     assert "git" in (st.error or "")
+
+
+def test_https_rewrite_for_ssh_origin_when_no_ssh(monkeypatch, repo: Path) -> None:
+    """容器缺 ssh + origin 为 scp 式 SSH URL → fetch 生成 HTTPS 重写(仅本次,不碰配置)。"""
+    monkeypatch.setattr(
+        "llm_manager.runtime.update.shutil.which",
+        lambda name: "/usr/bin/git" if name == "git" else None,
+    )
+    _git(repo, "remote", "set-url", "origin", "git@github.com:someone/repo.git")
+    assert _https_rewrite_args(repo) == ["-c", "url.https://github.com/.insteadOf=git@github.com:"]
+
+
+def test_https_rewrite_noop_with_ssh_present(repo: Path) -> None:
+    """本机有 ssh → 不重写(origin 为本地路径亦不重写)。"""
+    assert _https_rewrite_args(repo) == []
+
+
+def test_https_rewrite_noop_for_https_origin(monkeypatch, repo: Path) -> None:
+    monkeypatch.setattr(
+        "llm_manager.runtime.update.shutil.which",
+        lambda name: "/usr/bin/git" if name == "git" else None,
+    )
+    _git(repo, "remote", "set-url", "origin", "https://github.com/someone/repo.git")
+    assert _https_rewrite_args(repo) == []
 
 
 def test_no_tags_commit_target_only(tmp_path: Path) -> None:

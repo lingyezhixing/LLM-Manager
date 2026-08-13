@@ -126,6 +126,33 @@ def _behind(root: Path, range_: str) -> int:
     return int(r.stdout.strip() or 0)
 
 
+def _https_rewrite_args(root: Path) -> list[str]:
+    """容器缺 ssh 且 origin 为 SSH URL → 返回 ``-c url.<https>.insteadOf=<ssh前缀>``
+    重写参数(仅 fetch 用)。HTTPS 免认证拉取公开仓库;宿主推送仍走 SSH,不碰 origin 配置。
+    重写仅把"本就不可能成功的 SSH fetch"转成 HTTPS,无安全回归;私库无凭据照样失败。"""
+    if shutil.which("ssh") is not None:
+        return []
+    url = _strip(_git_or_error(root, ["remote", "get-url", "origin"]).stdout)
+    if url.startswith("git@"):  # git@host:owner/repo.git
+        host, _, path = url[len("git@") :].partition(":")
+        if host and path and ":" not in path:
+            return ["-c", f"url.https://{host}/.insteadOf=git@{host}:"]
+    if url.startswith("ssh://"):  # ssh://git@host[:port]/path
+        after_user = url[len("ssh://") :].split("@")[-1]
+        host = after_user.split(":", 1)[0]
+        prefix = url.rsplit("/", 1)[0] + "/"
+        if host:
+            return ["-c", f"url.https://{host}/.insteadOf={prefix}"]
+    return []
+
+
+def _fetch(root: Path) -> subprocess.CompletedProcess:
+    """git fetch origin(缺 ssh 时自动 HTTPS 重写)。"""
+    return _git_or_error(
+        root, [*_https_rewrite_args(root), "fetch", "origin"], timeout=_FETCH_TIMEOUT
+    )
+
+
 def _merge_failure_hint(root: Path, proc: subprocess.CompletedProcess) -> str:
     """merge 失败归因:冲突(本地改动被覆盖)→ 提示清理;非 ff(分叉)→ 提示手动处理;否则通用。"""
     dirty = bool(_git_or_error(root, ["status", "--porcelain"], timeout=5.0).stdout.strip())
@@ -165,7 +192,7 @@ def check_update(root: Path | None = None) -> UpdateStatus:
         )
 
     try:
-        r = _git_or_error(root, ["fetch", "origin"], timeout=_FETCH_TIMEOUT)
+        r = _fetch(root)
         if r.returncode != 0:
             return UpdateStatus(
                 ok=False,
@@ -231,7 +258,7 @@ def apply_update(root: Path | None = None, *, target: str = "commit") -> str:
     root = root or _PROJECT_ROOT
     if target not in _TARGETS:
         raise UpdateError("未知更新目标(仅支持 commit / tag)")
-    r = _git_or_error(root, ["fetch", "origin"], timeout=_FETCH_TIMEOUT)
+    r = _fetch(root)
     if r.returncode != 0:
         raise UpdateError(f"拉取远端失败:{_strip(r.stderr) or _strip(r.stdout) or '未知错误'}")
 

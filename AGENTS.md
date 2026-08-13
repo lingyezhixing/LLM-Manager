@@ -113,6 +113,10 @@ tray     ── 系统托盘(自重启触发 / WOL / Claude 预设应用)
   (仅剩启动时间/运行时长)。
 - **严格语义**:本地未提交改动不预拒——交给 git 原语,仅与更新内容冲突时拒绝(绝不
   stash/覆盖);本地历史分叉同样拒绝。均 409。
+- **Docker/容器**:镜像缺 `openssh-client` 时,origin 若为 SSH URL → fetch 仅本次自动
+  HTTPS 重写(`-c url.<https>.insteadOf=<ssh前缀>`,免认证拉公开仓库,不碰宿主推送配置)。
+  root 容器下宿主仓库须为 root 属主,否则 git "dubious ownership" 拒绝 → 功能隐藏
+  (这层拒绝是有意为之:root 写非 root 属主 bind-mount 会改宿主文件属主)。
 - **网络纪律**:唯一联网点——程序启动时自动检测一次(worker 启动后台 fetch 一次),
   此后无任何自动联网,仅用户显式按钮触发(系统页「更新」区)。
 - 测试:`tests/unit/runtime/test_update.py`(本地 bare origin,无网络)、
