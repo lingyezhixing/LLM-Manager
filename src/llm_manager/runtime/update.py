@@ -28,17 +28,7 @@ _FETCH_TIMEOUT = 30.0  # 网络拉取超时(秒)
 _NO_TAG = "未打标签"
 
 # 非交互:远端要凭据/提示时静默失败,绝不挂起等待用户输入。
-# 另解 git 的 "dubious ownership":Docker 下项目根常为宿主 bind mount(属主 ≠ 容器
-# 用户),git 默认拒绝"可疑属主"仓库导致 supported=false。仅对本项目根放行
-# (safe.directory 精确路径,不弱化全局安全);本地开发属主一致,该条无害。
-_GIT_ENV = {
-    **os.environ,
-    "GIT_TERMINAL_PROMPT": "0",
-    "GIT_ASKPASS": "echo",
-    "GIT_CONFIG_COUNT": "1",
-    "GIT_CONFIG_KEY_0": "safe.directory",
-    "GIT_CONFIG_VALUE_0": str(_PROJECT_ROOT),
-}
+_GIT_ENV = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_ASKPASS": "echo"}
 
 _TARGETS = ("commit", "tag")
 
