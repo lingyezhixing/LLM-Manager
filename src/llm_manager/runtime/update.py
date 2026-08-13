@@ -8,7 +8,9 @@
 才会被拒(绝不 stash / 覆盖);历史分叉同样拒绝。**不做回退**:数据库结构只向前迁移,
 旧代码无法解读新 schema,故不支持回到旧版本,也不支持任选历史提交。
 
-网络仅由用户显式触发(检查/应用按钮),后台永不自动。``check_update`` /
+网络语义:worker 启动时自动检测一次(app.py `_startup_update_check`,结果缓存到
+`app.state.update_status`),此后无任何自动检测——前端 GET /status 只读缓存,
+POST /check(手动检查)/ POST /apply(应用)由用户显式触发。``check_update`` /
 ``apply_update`` 接受可注入的 ``root``(缺省 = 仓库根),测试用临时 git 仓库即
 本地 bare origin,无网络依赖。
 """
@@ -48,7 +50,6 @@ class UpdateStatus:
     dirty: bool = False  # 工作树有未提交改动(仅提示,不预拒)
     conflicted: bool = False  # 本地与远端历史分叉(两个目标均不可用)
     tag: str | None = None  # 最新标签名;远端无标签 → None
-    tag_sha: str | None = None
     tag_available: bool = False  # 可 ff-only 更新到该标签
     tag_behind: int = 0  # HEAD..tag 提交数(落后数,仅展示)
     commit_sha: str | None = None  # origin/main 最新提交短 SHA
@@ -105,6 +106,13 @@ def _describe_tag(root: Path, ref: str = "HEAD") -> str | None:
 def _full(root: Path, ref: str) -> str:
     """ref 完整 SHA;不存在 → ""。"""
     r = _git_or_error(root, ["rev-parse", ref], timeout=5.0)
+    return _strip(r.stdout) if r.returncode == 0 else ""
+
+
+def _tag_commit(root: Path, tag: str) -> str:
+    """标签指向的 commit SHA(``^{}`` 剥皮:带注释标签 → commit,轻量标签原样)。
+    不能用 ``rev-parse <tag>`` 裸取——带注释标签返回 tag 对象 SHA,与 commit 不可比。"""
+    r = _git_or_error(root, ["rev-parse", f"{tag}^{{}}"], timeout=5.0)
     return _strip(r.stdout) if r.returncode == 0 else ""
 
 
@@ -182,8 +190,7 @@ def check_update(root: Path | None = None) -> UpdateStatus:
         commit_available = not diverged and head != remote and _is_ancestor(root, head, remote)
         commit_behind = _behind(root, "HEAD..origin/main") if head != remote else 0
         tag = _describe_tag(root, "origin/main")
-        tag_full = _full(root, tag) if tag else ""
-        tag_sha = _short(tag_full) if tag_full else None
+        tag_full = _tag_commit(root, tag) if tag else ""
         tag_available = (
             bool(tag_full)
             and not diverged
@@ -198,7 +205,6 @@ def check_update(root: Path | None = None) -> UpdateStatus:
             dirty=dirty,
             conflicted=diverged,
             tag=tag,
-            tag_sha=tag_sha,
             tag_available=tag_available,
             tag_behind=tag_behind,
             commit_sha=commit_sha,
@@ -237,7 +243,12 @@ def apply_update(root: Path | None = None, *, target: str = "commit") -> str:
     else:
         ref = "origin/main"
 
+    before = _full(root, "HEAD")
     merge = _git_or_error(root, ["merge", "--ff-only", ref], timeout=_FETCH_TIMEOUT)
     if merge.returncode != 0:
         raise UpdateError(_merge_failure_hint(root, merge))
-    return _short(_full(root, "HEAD"))
+    # 合并成功但 HEAD 未变(目标已是当前提交的 no-op)→ 拒绝,避免无谓重启
+    after = _full(root, "HEAD")
+    if after == before:
+        raise UpdateError("目标已是当前版本,无需更新")
+    return _short(after)

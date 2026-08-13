@@ -33,7 +33,7 @@ export function SystemOverview() {
   const { data: info } = useSystemInfo();
   const now = useNowTick(1000);
   const [mode, setMode] = useState<UpdateTarget>("tag");
-  const { data: st, isFetching } = useUpdateStatus();
+  const { data: st, isFetching, isError } = useUpdateStatus();
   const check = useUpdateCheck();
   const app = useUpdateApp();
   const confirm = useConfirm();
@@ -60,18 +60,23 @@ export function SystemOverview() {
   const canUpdate = !!st && !st.conflicted && isAvailable(st, mode);
   const behind = st ? behindOf(st, mode) : 0;
   const latest = st ? latestVal(st, mode) : "—";
-  const updateTitle = canUpdate
+  // 加载中(缓存未就绪)不显示误导性禁用原因
+  const updateTitle = st === undefined
     ? undefined
-    : st?.conflicted
-      ? "本地与远端历史分叉,无法更新"
-      : mode === "tag" && st && !st.tag
-        ? "远端无标签版本,可切换检测模式为「提交」"
-        : "当前目标已是最新,无更新";
+    : canUpdate
+      ? undefined
+      : st.conflicted
+        ? "本地与远端历史分叉,无法更新"
+        : mode === "tag" && !st.tag
+          ? "远端无标签版本,可切换检测模式为「提交」"
+          : "当前目标已是最新,无更新";
 
   let note: string | null = null;
   let noteClass = "text-muted-foreground";
   if (st?.checking || (isFetching && !st)) {
     note = "正在检查更新…(程序启动时自动检测)";
+  } else if (check.isPending) {
+    note = "正在检查更新…";
   } else if (st) {
     if (!st.ok) {
       note = `检查失败:${st.error ?? "未知错误"}`;
@@ -90,8 +95,11 @@ export function SystemOverview() {
       note = "已是最新版本";
       noteClass = "text-success";
     }
+  } else if (isError) {
+    note = "获取更新信息失败,点击「检查更新」重试";
+    noteClass = "text-destructive";
   } else {
-    note = "启动时已自动检测一次,之后仅手动点「检查更新」";
+    note = "点击「检查更新」手动检测最新版本";
   }
 
   const checking = check.isPending || app.pending || st?.checking;
@@ -136,7 +144,7 @@ export function SystemOverview() {
         </div>
       )}
 
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
+      <div className={`grid grid-cols-2 gap-2 ${unsupported ? "" : "sm:grid-cols-3 lg:grid-cols-5"}`}>
         {!unsupported && (
           <>
             <InfoTile label="当前版本" value={st?.current_version ?? "—"} valueClass="text-foreground" />

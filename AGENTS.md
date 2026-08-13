@@ -9,8 +9,8 @@
 本地多 LLM 模型的代理网关 + WebUI:按需启动/空闲回收本地模型进程(llama.cpp /
 lmdeploy / vLLM …),对外暴露 OpenAI / Anthropic / Responses 兼容 API,记录用量与计费,
 提供系统配置、模型管理、用量统计、日志查看的前端。**完全离线**(无云端依赖)。
-**唯一联网点 = 自更新**(系统页「更新」区,git fetch/merge 本项目仓库,用户显式
-点击检查/应用按钮才触发,后台永不自动;见 §5.1)。
+**唯一联网点 = 自更新**(系统页「更新」区,git fetch/merge 本项目仓库:程序启动时
+自动检测一次,此后仅用户显式点击检查/应用按钮才联网;见 §5.1)。
 
 - 后端:Python 3 + FastAPI + uvicorn + SQLite(单连接 + `write_lock`)。`src/llm_manager/`
 - 前端:React 19 + Vite + TS + Tailwind v4 + TanStack Query。`frontend/`
@@ -112,7 +112,8 @@ tray     ── 系统托盘(自重启触发 / WOL / Claude 预设应用)
   (仅剩启动时间/运行时长)。
 - **严格语义**:本地未提交改动不预拒——交给 git 原语,仅与更新内容冲突时拒绝(绝不
   stash/覆盖);本地历史分叉同样拒绝。均 409。
-- **网络纪律**:唯一联网点,仅用户显式按钮触发(系统页「更新」区),后台永不自动。
+- **网络纪律**:唯一联网点——程序启动时自动检测一次(worker 启动后台 fetch 一次),
+  此后无任何自动联网,仅用户显式按钮触发(系统页「更新」区)。
 - 测试:`tests/unit/runtime/test_update.py`(本地 bare origin,无网络)、
   `tests/unit/gateway/test_api_update.py`(API 契约)。
 - 注意:更新后依赖若变,editable 安装不会自动重装(pip 层自理)。

@@ -43,8 +43,12 @@ def register_update_routes(api: APIRouter) -> None:
     @api.post("/update/check", status_code=200)
     async def update_check(request: Request) -> dict:
         """手动检查更新(仅「检查更新」按钮触发):跑一次全新 check_update(fetch,
-        网络),结果写回缓存并返回。async def → to_thread 外包阻塞的 git 调用。"""
+        网络),结果写回缓存并返回。gen 递增使迟到的启动检测结果不覆盖本次手动结果。
+        async def → to_thread 外包阻塞的 git 调用。"""
         st = await asyncio.to_thread(check_update)
+        request.app.state.update_check_generation = (
+            getattr(request.app.state, "update_check_generation", 0) + 1
+        )
         request.app.state.update_status = st
         return asdict(st)
 

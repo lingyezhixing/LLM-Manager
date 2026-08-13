@@ -75,7 +75,7 @@ def test_uptodate(repo: Path) -> None:
     assert st.ok and not st.error
     assert not st.dirty and not st.conflicted
     assert st.current_version == "v1.0.0"
-    assert st.tag == "v1.0.0" and st.tag_sha == st.current_sha
+    assert st.tag == "v1.0.0"
     assert st.commit_sha == st.current_sha
     assert not st.tag_available and not st.commit_available
     assert st.tag_behind == 0 and st.commit_behind == 0
@@ -85,7 +85,7 @@ def test_targets_available_and_apply(repo: Path) -> None:
     tag_sha, head_sha = _advance_origin(repo)
     st = check_update(repo)
     assert st.ok and not st.conflicted
-    assert st.tag == "v1.1.0" and st.tag_sha == tag_sha
+    assert st.tag == "v1.1.0"
     assert st.commit_sha == head_sha
     assert st.tag_available and st.commit_available
     assert st.tag_behind == 1 and st.commit_behind == 2  # c2(标签)+ c3(未标签)
@@ -154,6 +154,34 @@ def test_not_a_git_repo(tmp_path: Path) -> None:
     assert not st.ok
     assert st.supported is False
     assert st.error and "git" in st.error
+
+
+def test_annotated_tag_not_false_positive(repo: Path) -> None:
+    """HEAD 恰在最新带注释标签的提交上时,不得误报可更新(H1:裸 rev-parse 返回 tag
+    对象 SHA → 误判 tag_full != head → 点击后无谓重启)。"""
+    _git(repo, "tag", "-a", "v1.0.1", "-m", "annotated release")  # 带注释标签
+    _git(repo, "push", "origin", "main", "--tags")
+    st = check_update(repo)
+    assert st.tag == "v1.0.1"
+    assert st.tag_available is False
+    assert st.tag_behind == 0
+
+
+def test_apply_noop_when_up_to_date_refuses(repo: Path) -> None:
+    """已是最新时 apply 不得静默 no-op 并触发重启(M3)。"""
+    with pytest.raises(UpdateError, match="无需更新"):
+        apply_update(repo, target="commit")
+    with pytest.raises(UpdateError, match="无需更新"):
+        apply_update(repo, target="tag")
+
+
+def test_check_offline_fetch_failure(repo: Path) -> None:
+    """远端不可达 → ok=False 但 supported=True(功能仍在,可手动重试)。"""
+    _git(repo, "remote", "set-url", "origin", "https://127.0.0.1:1/unreachable.git")
+    st = check_update(repo)
+    assert st.ok is False
+    assert st.supported is True
+    assert st.error and "拉取远端失败" in st.error
 
 
 def test_git_missing_unsupported(monkeypatch, tmp_path) -> None:

@@ -32,7 +32,6 @@ def _status() -> UpdateStatus:
         current_version="v3.0.0a2",
         current_sha="abc1234",
         tag="v3.0.0a2",
-        tag_sha="abc1234",
         tag_available=True,
         tag_behind=1,
         commit_sha="def5678",
@@ -103,3 +102,29 @@ def test_update_apply_rejects_bad_target(tmp_path):
     with TestClient(_app(tmp_path)) as c:
         r = c.post("/api/update/apply", json={"target": "release"})
     assert r.status_code == 422  # Pydantic Literal 校验
+
+
+def test_startup_check_generation_guard(monkeypatch, tmp_path) -> None:
+    """手动 check 把 gen 递增后,迟到的启动检测结果不得覆盖手动结果(M2);gen 仍为
+    0(无人手动 check)时启动结果正常落缓存。"""
+    import asyncio
+    import types
+
+    from llm_manager.app import _startup_update_check
+
+    startup = UpdateStatus(ok=True, current_version="startup")
+    manual = UpdateStatus(ok=True, current_version="manual")
+    monkeypatch.setattr("llm_manager.app.check_update", lambda: startup)
+
+    def _fake_app(status, gen):
+        return types.SimpleNamespace(
+            state=types.SimpleNamespace(update_status=status, update_check_generation=gen)
+        )
+
+    superseded = _fake_app(manual, 1)
+    asyncio.run(_startup_update_check(superseded))
+    assert superseded.state.update_status == manual  # 启动结果被 gen 守卫拒绝
+
+    fresh = _fake_app(None, 0)
+    asyncio.run(_startup_update_check(fresh))
+    assert fresh.state.update_status == startup  # 无手动介入 → 正常写入

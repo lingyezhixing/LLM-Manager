@@ -37,12 +37,17 @@ logger = logging.getLogger(__name__)
 async def _startup_update_check(app: FastAPI) -> None:
     """程序启动时后台检测一次自更新(git fetch,网络):结果缓存到
     app.state.update_status,前端只读缓存。仅此一次,此后无任何自动检测——
-    手动检查走 POST /api/update/check。to_thread 外包阻塞的 git 调用。"""
+    手动检查走 POST /api/update/check。to_thread 外包阻塞的 git 调用。
+    generation 守卫:若期间用户已手动 check(gen 递增),启动的慢结果不得覆盖
+    更新的手动结果(否则启动 fetch 超时窗口内手动结果会被回退成启动态)。"""
     try:
-        app.state.update_status = await asyncio.to_thread(check_update)
+        result = await asyncio.to_thread(check_update)
+        if app.state.update_check_generation == 0:
+            app.state.update_status = result
     except Exception:
         logger.exception("startup update check failed")
-        app.state.update_status = UpdateStatus(ok=False, error="启动更新检查失败")
+        if app.state.update_check_generation == 0:
+            app.state.update_status = UpdateStatus(ok=False, error="启动更新检查失败")
 
 
 def create_app(db_path: Path | None = None, *, legacy_yaml: Path | None = None) -> FastAPI:
@@ -157,7 +162,7 @@ def create_app(db_path: Path | None = None, *, legacy_yaml: Path | None = None) 
                     idle_task.cancel()
                 if not auto_task.done():
                     auto_task.cancel()
-                await asyncio.gather(idle_task, auto_task, return_exceptions=True)
+                await asyncio.gather(update_task, idle_task, auto_task, return_exceptions=True)
             # === 系统日志收尾:停 flush_loop → 兜底清空剩余 pending → 摘 handler → 收口会话 ===
             try:
                 log_stop.set()
@@ -182,6 +187,7 @@ def create_app(db_path: Path | None = None, *, legacy_yaml: Path | None = None) 
     }
     app.state.started_at = time.time()
     app.state.update_status = None  # 自更新启动检测结果缓存(后台任务填充;None=检测中)
+    app.state.update_check_generation = 0  # 手动 check 递增;启动任务只在仍为 0 时写缓存
     return app
 
 
