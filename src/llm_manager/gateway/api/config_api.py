@@ -29,13 +29,17 @@ from llm_manager.data.config_store import (
     mutate_appconfig,
     set_settings,
 )
-from llm_manager.gateway.api.common import get_config_store, get_db
+from llm_manager.gateway.api.common import (
+    boot_program,
+    config_write_result,
+    get_config_store,
+    get_db,
+    restart_fields,
+)
 from llm_manager.tools import claude
 from llm_manager.version import get_version
 
 logger = logging.getLogger(__name__)
-
-_RESTART_FIELDS = ("host", "port", "claude_settings_path", "log_level")
 
 # 退出码 81 契约:生产监督器与 Dev-Backend.bat 均在其上重启
 RESTART_EXIT_CODE = 81
@@ -273,27 +277,6 @@ def _delete_model(cfg: AppConfig, name: str) -> AppConfig:
     return replace(cfg, models={k: v for k, v in cfg.models.items() if k != name})
 
 
-def _boot(request: Request) -> dict:
-    return request.app.state.boot_program
-
-
-def _restart_fields(snapshot, boot: dict) -> list[str]:
-    return [f for f in _RESTART_FIELDS if str(getattr(snapshot.program, f)) != str(boot.get(f))]
-
-
-def _serving() -> list[str]:
-    """当前正在服务(ROUTING 且 pending>0)的模型——restart 会中断它们。"""
-    from llm_manager import state
-
-    return [n for n in state.routing_names() if state.pending_count(n) > 0]
-
-
-def _config_write_result(request: Request, cfg: AppConfig) -> dict:
-    """写回/查询的共享响应:needs_restart/restart_fields/serving(原 5 处内联)。"""
-    rf = _restart_fields(cfg, _boot(request))
-    return {"needs_restart": bool(rf), "restart_fields": rf, "serving": _serving()}
-
-
 def _routing_served(primary: str, cfg: AppConfig) -> list[str]:
     """操作触及的模型若当前 ROUTING,返回其 served name(aliases[0]);用于 PUT 的 restart 提示。
     DELETE 的 ROUTING 拦截在端点处(404/409 之前)。"""
@@ -320,7 +303,7 @@ def register_config_routes(api: APIRouter) -> None:
     @api.get("/config")
     def get_config(request: Request) -> dict:
         cfg = get_config_store(request).snapshot()
-        boot = _boot(request)
+        boot = boot_program(request)
         p = cfg.program
         return {
             "program": {
@@ -337,7 +320,7 @@ def register_config_routes(api: APIRouter) -> None:
             ),
             "claude": cfg.claude_configs,
             "logs": {"days": p.log_retention_days, "count": p.log_retention_count},
-            "restart_fields": _restart_fields(cfg, boot),
+            "restart_fields": restart_fields(cfg, boot),
         }
 
     @api.put("/config/program")
@@ -354,7 +337,7 @@ def register_config_routes(api: APIRouter) -> None:
         if updates:
             set_settings(get_db(request), updates)
         cfg = get_config_store(request).reload()
-        return _config_write_result(request, cfg)
+        return config_write_result(request, cfg)
 
     @api.put("/config/wol")
     def put_wol(request: Request, body: WolUpdate) -> dict:
@@ -368,7 +351,7 @@ def register_config_routes(api: APIRouter) -> None:
             },
         )
         cfg = get_config_store(request).reload()
-        return _config_write_result(request, cfg)
+        return config_write_result(request, cfg)
 
     @api.delete("/config/wol")
     def delete_wol(request: Request) -> dict:
@@ -379,7 +362,7 @@ def register_config_routes(api: APIRouter) -> None:
             db.conn.execute("DELETE FROM system_settings WHERE key IN ('wol_broadcast', 'wol_mac')")
             db.conn.commit()
         cfg = get_config_store(request).reload()
-        return _config_write_result(request, cfg)
+        return config_write_result(request, cfg)
 
     @api.post("/config/wol/send")
     def send_wol_now(request: Request, body: WolUpdate) -> dict:
@@ -399,7 +382,7 @@ def register_config_routes(api: APIRouter) -> None:
             get_db(request), {"claude_configs": json.dumps(body.configs, ensure_ascii=False)}
         )
         cfg = get_config_store(request).reload()
-        return _config_write_result(request, cfg)
+        return config_write_result(request, cfg)
 
     @api.post("/config/claude/apply")
     def apply_claude_preset(request: Request, body: ClaudeApplyRequest) -> dict:
@@ -435,11 +418,11 @@ def register_config_routes(api: APIRouter) -> None:
         if updates:
             set_settings(get_db(request), updates)
         get_config_store(request).reload()  # 日志规则已并入 AppConfig 快照;reload 保持新鲜
-        return _config_write_result(request, get_config_store(request).snapshot())
+        return config_write_result(request, get_config_store(request).snapshot())
 
     @api.get("/config/restart-status")
     def restart_status(request: Request) -> dict:
-        return _config_write_result(request, get_config_store(request).snapshot())
+        return config_write_result(request, get_config_store(request).snapshot())
 
     @api.post("/config/restart", status_code=202)
     async def restart_app(request: Request) -> dict:
