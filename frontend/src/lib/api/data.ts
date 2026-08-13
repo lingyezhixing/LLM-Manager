@@ -1,5 +1,5 @@
 // 数据管理 — storage stats / orphaned / delete (gateway/api/data_api.py)。
-import { parseApiError } from "./shared";
+import { apiJson } from "./shared";
 
 export interface ModelDataStats {
   request_count: number;
@@ -19,19 +19,15 @@ export interface OrphanedModelsResponse {
 }
 
 export async function fetchStorageStats(): Promise<StorageStats> {
-  const res = await fetch("/api/data/storage-stats");
-  if (!res.ok) throw await parseApiError(res);
-  return (await res.json()) as StorageStats;
+  return apiJson<StorageStats>("/api/data/storage-stats");
 }
 
 export async function fetchOrphanedModels(): Promise<OrphanedModelsResponse> {
-  const res = await fetch("/api/data/models/orphaned");
-  if (!res.ok) throw await parseApiError(res);
-  return (await res.json()) as OrphanedModelsResponse;
+  return apiJson<OrphanedModelsResponse>("/api/data/models/orphaned");
 }
 
 export async function deleteModelData(name: string): Promise<{ deleted: string }> {
-  const res = await fetch(`/api/data/models/${encodeURIComponent(name)}`, { method: "DELETE" });
-  if (!res.ok) throw await parseApiError(res);
-  return (await res.json()) as { deleted: string };
+  return apiJson<{ deleted: string }>(`/api/data/models/${encodeURIComponent(name)}`, {
+    method: "DELETE",
+  });
 }

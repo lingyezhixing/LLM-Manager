@@ -21,9 +21,10 @@ function activityText(m: ModelInfo, nowMs: number): string {
  * ticks idle locally — no polling. Card w/ icon header + 3 KPI tiles + running rows.
  */
 export function ModelSummary() {
-  const data = useEventStream<ModelsResponse>("/api/models/stream");
+  const { data, error } = useEventStream<ModelsResponse>("/api/models/stream");
   const now = useNowTick(1000);
 
+  if (error) return <p className="text-sm text-muted-foreground">模型数据加载失败(后端未连接,将自动重试)</p>;
   if (!data) return <p className="text-sm text-muted-foreground">加载中…</p>;
 
   const models: ModelInfo[] = data.data ?? [];

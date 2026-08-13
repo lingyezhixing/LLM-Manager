@@ -1,6 +1,6 @@
 // 系统配置 — config 写回 + system info. Types hand-defined to match
 // gateway/api/config_api.py (ProgramUpdate / GET /api/config / GET /api/system/info)。
-import { apiJson, parseApiError } from "./shared";
+import { apiJson } from "./shared";
 
 export interface SystemInfo {
   version: string;
@@ -44,13 +44,11 @@ export interface WolConfig {
 
 // 日志保留规则写回(PUT /api/config/logs;日志规则已并入 AppConfig 快照,恒不触发重启)。
 export async function updateLogRetention(body: LogRetention): Promise<ConfigWriteResult> {
-  const res = await fetch("/api/config/logs", {
+  return apiJson<ConfigWriteResult>("/api/config/logs", {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
-  if (!res.ok) throw await parseApiError(res);
-  return (await res.json()) as ConfigWriteResult;
 }
 
 export type ProgramUpdate = Partial<ProgramConfig>;
@@ -69,16 +67,13 @@ export async function fetchRestartStatus(): Promise<ConfigWriteResult> {
 
 // 自重启:后端优雅关闭 + sys.exit(81)→ 监督器重启。202;失败抛 parseApiError。
 export async function restartApp(): Promise<void> {
-  const res = await fetch("/api/config/restart", { method: "POST" });
-  if (!res.ok) throw await parseApiError(res);
+  await apiJson<void>("/api/config/restart", { method: "POST" });
 }
 
 export async function updateProgram(body: ProgramUpdate): Promise<ConfigWriteResult> {
-  const res = await fetch("/api/config/program", {
+  return apiJson<ConfigWriteResult>("/api/config/program", {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
-  if (!res.ok) throw await parseApiError(res);
-  return (await res.json()) as ConfigWriteResult;
 }

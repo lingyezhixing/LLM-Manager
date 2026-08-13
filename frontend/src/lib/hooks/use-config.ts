@@ -100,5 +100,5 @@ export function useRestartApp() {
     },
     onError: (e: unknown) => setError(errMsg(e)),
   });
-  return { triggerRestart: () => mutate.mutate(), restarting, error };
+  return { triggerRestart: () => mutate.mutate(), restarting, pending: mutate.isPending, error };
 }

@@ -8,6 +8,9 @@ import { isPendingKey, PENDING_KEY_PREFIX } from "@/lib/pending-keys";
 // StringListEditor:有序字符串列表(args / required_devices / aliases)。
 // KeyValueEditor:键=值(env str→str / memory_mb str→int)。
 // 受控:父级持数组/对象,onChange 回传新值。全部不可变更新(无原地改)。
+// 行 key 用 index:行完全受控(value 全由 props 驱动,无内部 state),index key 下删除
+// 中间行显示仍正确(React 复用节点但 value 随 props 更新),仅焦点可能错位——低风险已知
+// 折衷;引入稳定行 id 会污染父级数据模型(需后端类型同步),收益不足,维持现状。
 
 const removeBtn = "shrink-0 h-9 px-2 text-xs text-muted-foreground hover:text-destructive";
 

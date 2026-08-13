@@ -10,7 +10,7 @@ import { useRestartApp, useRestartStatus } from "@/lib/hooks/use-config";
 export default function SystemPage() {
   const [zone, setZone] = useState<SystemZone>("general");
   const { data: rs } = useRestartStatus();
-  const { triggerRestart, restarting, error: restartError } = useRestartApp();
+  const { triggerRestart, restarting, pending, error: restartError } = useRestartApp();
   const fieldsKey = rs?.restart_fields.join(",") ?? "";
   const [dismissedKey, setDismissedKey] = useState<string | null>(null);
   const showBanner = !!rs?.needs_restart && dismissedKey !== fieldsKey;
@@ -23,7 +23,7 @@ export default function SystemPage() {
           serving={rs.serving}
           onDismiss={() => setDismissedKey(fieldsKey)}
           onRestart={triggerRestart}
-          restarting={restarting}
+          restarting={restarting || pending}
         />
       )}
       {restartError && (

@@ -1,6 +1,6 @@
 // 模型/设备类型 + 模型控制 + 模型定义 CRUD。Types hand-defined to match
 // gateway/api/{models,devices}.py + config_api.py (ModelDefInput / GET /api/config/models[/{name}])。
-import { parseApiError } from "./shared";
+import { apiJson, parseApiError } from "./shared";
 
 export interface ModelInfo {
   alias: string;
@@ -108,24 +108,19 @@ export interface ModelWriteResult {
 }
 
 export async function fetchModelDefs(): Promise<ModelDefSummary[]> {
-  const res = await fetch("/api/config/models");
-  if (!res.ok) throw await parseApiError(res);
-  return (await res.json()) as ModelDefSummary[];
+  return apiJson<ModelDefSummary[]>("/api/config/models");
 }
 
 export async function fetchModelDef(name: string): Promise<ModelDef> {
-  const res = await fetch(`/api/config/models/${encodeURIComponent(name)}`);
-  if (!res.ok) throw await parseApiError(res);
-  return (await res.json()) as ModelDef;
+  return apiJson<ModelDef>(`/api/config/models/${encodeURIComponent(name)}`);
 }
 
 export async function createModelDef(body: ModelDef): Promise<void> {
-  const res = await fetch("/api/config/models", {
+  await apiJson<void>("/api/config/models", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
-  if (!res.ok) throw await parseApiError(res);
 }
 
 // migrate_data:仅改名(body.name≠路径 name)时生效——true=把历史用量/成本/日志迁到新名。
@@ -134,7 +129,7 @@ export async function updateModelDef(
   body: ModelDef,
   migrate_data = false,
 ): Promise<ModelWriteResult> {
-  const res = await fetch(
+  return apiJson<ModelWriteResult>(
     `/api/config/models/${encodeURIComponent(name)}?migrate_data=${migrate_data}`,
     {
       method: "PUT",
@@ -142,11 +137,8 @@ export async function updateModelDef(
       body: JSON.stringify(body),
     },
   );
-  if (!res.ok) throw await parseApiError(res);
-  return (await res.json()) as ModelWriteResult;
 }
 
 export async function deleteModelDef(name: string): Promise<void> {
-  const res = await fetch(`/api/config/models/${encodeURIComponent(name)}`, { method: "DELETE" });
-  if (!res.ok) throw await parseApiError(res);
+  await apiJson<void>(`/api/config/models/${encodeURIComponent(name)}`, { method: "DELETE" });
 }

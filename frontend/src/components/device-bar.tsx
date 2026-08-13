@@ -77,7 +77,7 @@ function DeviceCard({
 }
 
 export function DeviceBar() {
-  const data = useEventStream<DevicesResponse>("/api/devices/stream");
+  const { data, error } = useEventStream<DevicesResponse>("/api/devices/stream");
   const [unit, setUnit] = useState<MemUnit>("MB");   // 默认 MB,点击读数切 GB
 
   const toggle = () => setUnit((u) => (u === "GB" ? "MB" : "GB"));
@@ -89,7 +89,9 @@ export function DeviceBar() {
         <Cpu className="size-4 text-primary-accent" />
         设备
       </h3>
-      {!data ? (
+      {error ? (
+        <p className="text-sm text-muted-foreground">设备数据加载失败(后端未连接,将自动重试)</p>
+      ) : !data ? (
         <p className="text-sm text-muted-foreground">设备加载中…</p>
       ) : devices.length === 0 ? (
         <p className="text-sm text-muted-foreground">未检测到设备</p>

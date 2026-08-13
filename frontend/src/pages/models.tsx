@@ -11,7 +11,7 @@ import type { ModelsResponse } from "@/lib/api";
  * 定位最新会话并订阅 SSE 实时尾)。状态走 /api/models/stream SSE;启停走 POST /start|/stop。
  */
 export default function ModelsPage() {
-  const data = useEventStream<ModelsResponse>("/api/models/stream");
+  const { data, error } = useEventStream<ModelsResponse>("/api/models/stream");
   const now = useNowTick(1000);
   const [sel, setSel] = useState<string | null>(null);
   const models = [...(data?.data ?? [])].sort((a, b) => a.port - b.port);   // 统一按 port 升序
@@ -22,11 +22,13 @@ export default function ModelsPage() {
       {/* 高度 = 视口 - 壳层 chrome(胶囊 40 + sticky top-4 16 + main pt-8 32 + pb 16 = 104px) */}
       <div className="grid h-[calc(100dvh-104px)] gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,4fr)]">
         <div className="flex flex-col gap-2 overflow-auto">
-          {data === null
-            ? <p className="text-sm text-muted-foreground">加载中…</p>
-            : models.length === 0
-              ? <p className="text-sm text-muted-foreground">暂无模型 — 到「系统配置 → 模型定义」添加</p>
-              : models.map((m) => (
+          {error
+            ? <p className="text-sm text-muted-foreground">模型数据加载失败(后端未连接,将自动重试)</p>
+            : data === null
+              ? <p className="text-sm text-muted-foreground">加载中…</p>
+              : models.length === 0
+                ? <p className="text-sm text-muted-foreground">暂无模型 — 到「系统配置 → 模型定义」添加</p>
+                : models.map((m) => (
               <ModelCard key={m.alias} m={m} nowMs={now}
                 selected={selected?.alias === m.alias} onSelect={() => setSel(m.alias)} />
             ))}
