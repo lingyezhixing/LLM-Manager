@@ -60,6 +60,14 @@ export function SystemOverview() {
   const canUpdate = !!st && !st.conflicted && isAvailable(st, mode);
   const behind = st ? behindOf(st, mode) : 0;
   const latest = st ? latestVal(st, mode) : "—";
+  // 当前版本 = 版本标签(提交短号),如 v3.0.0a2(f7dbf33)
+  const currentVersion = st && (st.current_version || st.current_sha)
+    ? st.current_version
+      ? st.current_sha
+        ? `${st.current_version}(${st.current_sha})`
+        : st.current_version
+      : st.current_sha
+    : "—";
   // 加载中(缓存未就绪)不显示误导性禁用原因
   const updateTitle = st === undefined
     ? undefined
@@ -144,11 +152,10 @@ export function SystemOverview() {
         </div>
       )}
 
-      <div className={`grid grid-cols-2 gap-2 ${unsupported ? "" : "sm:grid-cols-3 lg:grid-cols-5"}`}>
+      <div className={`grid grid-cols-2 gap-2 ${unsupported ? "" : "sm:grid-cols-2 lg:grid-cols-4"}`}>
         {!unsupported && (
           <>
-            <InfoTile label="当前版本" value={st?.current_version ?? "—"} valueClass="text-foreground" />
-            <InfoTile label="当前提交" value={st?.current_sha ?? "—"} valueClass="text-foreground" />
+            <InfoTile label="当前版本" value={currentVersion} valueClass="text-foreground" />
             <InfoTile
               label={mode === "tag" ? "最新版本" : "最新提交"}
               value={`${latest}${behind > 0 ? ` (落后 ${behind})` : ""}`}
