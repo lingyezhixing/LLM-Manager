@@ -107,7 +107,7 @@ class SystemTray:
         """多尺寸 ICO:Windows 托盘按系统 DPI 选最接近帧渲染(16/24/32px),
         单帧 256 会让系统硬缩 → 高 DPI 下模糊。sizes 生成的多帧文件经
         pystray 二次保存仍保留全部帧(Pillow 从 image.info['sizes'] 继承)。"""
-        icon = Path(__file__).resolve().parents[1] / "assets" / "icon.ico"
+        icon = Path(__file__).resolve().parents[0] / "assets" / "icon.ico"
         src = (
             Image.open(icon).convert("RGBA")
             if icon.exists()

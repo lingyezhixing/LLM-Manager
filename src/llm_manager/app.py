@@ -34,7 +34,7 @@ from llm_manager.runtime.heartbeat import heartbeat_loop
 from llm_manager.runtime.lifecycle import Lifecycle
 from llm_manager.runtime.log_retention import log_retention_loop, retention_from_store
 from llm_manager.supervisor import Supervisor
-from llm_manager.tray import host as tray_host
+from llm_manager import tray as tray_host
 
 logger = logging.getLogger(__name__)
 
