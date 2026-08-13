@@ -56,9 +56,16 @@ export function fmtRange(r: DateRange): string {
   return `${f} ~ ${t}`;
 }
 
-/** 图表 preset(自定义区间按 30d 粒度显示)— token 卡与用量页共用。 */
-export function chartPresetFor(preset: UsagePreset): string {
-  return preset === "custom" ? "30d" : preset;
+/** 图表 x 轴时间标签粒度(对应 TokenChart.fmtTs 的 preset 分支)— token 卡与用量页共用。
+ * 自定义区间按跨度选粒度:≤12h 含秒、日内 HH:MM、≤7d 带日时分、更长仅日期——
+ * 否则小时级区间会按 30d 格式只显示日期(所有标签同值无信息量)。 */
+export function chartPresetFor(preset: UsagePreset, custom: DateRange | null = null): string {
+  if (preset !== "custom" || !custom) return preset;
+  const spanMs = custom.to.getTime() - custom.from.getTime();
+  if (spanMs <= 12 * 3_600_000) return "10m";
+  if (spanMs < 24 * 3_600_000) return "today";
+  if (spanMs < 7 * 24 * 3_600_000) return "7d";
+  return "30d";
 }
 
 export function paramsForState(state: UsageRangeState): UsageSeriesParams {

@@ -21,7 +21,7 @@ export default function UsagePage() {
         <UsageKpiRow params={params} refetch={refetch} />
       </section>
       <section className="mb-6">
-        <UsageChartCard params={params} preset={range.preset} refetch={refetch} />
+        <UsageChartCard params={params} preset={range.preset} custom={range.custom} refetch={refetch} />
       </section>
       <section>
         <UsageByModelTable params={params} refetch={refetch} />

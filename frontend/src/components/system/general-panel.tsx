@@ -2,7 +2,7 @@ import { type ReactNode, useEffect, useRef, useState } from "react";
 import { ConfigSaveBar } from "@/components/config-save-bar";
 import { ErrorState } from "@/components/ui/error-state";
 import { Field, NumberInput, Select, TextInput } from "@/components/ui/form";
-import { errMsg, numFromStr as num } from "@/lib/format";
+import { errMsg, formatClock, numFromStr as num } from "@/lib/format";
 import { InfoTile } from "@/components/ui/info-tile";
 import { useToast } from "@/lib/hooks/use-toast";
 import { LogRetentionEditor } from "@/components/system/log-retention-editor";
@@ -12,15 +12,6 @@ import { useNowTick } from "@/lib/hooks/use-now-tick";
 import { useSystemInfo } from "@/lib/hooks/use-config";
 
 const LOG_LEVELS = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"];
-
-function formatDuration(sec: number): string {
-  const s = Math.max(0, Math.floor(sec));
-  const h = Math.floor(s / 3600);
-  const m = Math.floor((s % 3600) / 60);
-  const ss = s % 60;
-  const pad = (x: number) => String(x).padStart(2, "0");
-  return `${pad(h)}:${pad(m)}:${pad(ss)}`;
-}
 
 function sameProgram(a: ProgramConfig, b: ProgramConfig): boolean {
   return (Object.keys(a) as (keyof ProgramConfig)[]).every((k) => a[k] === b[k]);
@@ -126,7 +117,7 @@ export function GeneralPanel() {
         <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-3">
           <InfoTile label="版本" value={info.version} valueClass="break-all text-foreground" />
           <InfoTile label="启动时间" value={new Date(info.started_at * 1000).toLocaleString()} valueClass="break-all text-foreground" />
-          <InfoTile label="运行时长" value={formatDuration(now / 1000 - info.started_at)} valueClass="break-all text-foreground" />
+          <InfoTile label="运行时长" value={formatClock(now / 1000 - info.started_at)} valueClass="break-all text-foreground" />
         </div>
       )}
 

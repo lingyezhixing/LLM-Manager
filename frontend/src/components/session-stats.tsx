@@ -2,19 +2,8 @@ import { useQuery } from "@tanstack/react-query";
 import { ErrorState } from "@/components/ui/error-state";
 import { InfoTile } from "@/components/ui/info-tile";
 import { fetchSessionUsage } from "@/lib/api";
-import { errMsg, formatCost, formatTokens } from "@/lib/format";
+import { errMsg, formatCost, formatTokens, formatUptime } from "@/lib/format";
 import { useNowTick } from "@/lib/hooks/use-now-tick";
-
-/** Compact uptime: 45s / 12m / 3h 12m / 2d 5h. */
-function formatUptime(sec: number): string {
-  if (sec < 60) return `${sec}s`;
-  const m = Math.floor(sec / 60);
-  if (m < 60) return `${m}m`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h ${m % 60}m`;
-  const d = Math.floor(h / 24);
-  return `${d}d ${h % 24}h`;
-}
 
 /** Session stats (since gateway start). Totals refetch every 10s——token 是内存读、成本是
  *  DB 查询,3s 过频;uptime ticks locally. */

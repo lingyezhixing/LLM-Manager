@@ -8,14 +8,56 @@ export function formatTokens(n: number, decimals = 1): string {
   return `${n}`;
 }
 
-/** 秒数 → 精确空闲时长(小时起):45s / 2m 5s / 1h 2m 30s。 */
-export function formatIdle(sec: number): string {
+/** 时长三档精度(全部时长格式化收敛于此,组件内不再私写副本):
+ *  - "full"    精确含秒:45s / 2m 5s / 1h 2m 30s(空闲显示)
+ *  - "minutes" 小时级舍秒:45s / 3m 12s / 1h 5m(会话列表)
+ */
+type DurationPrecision = "full" | "minutes";
+
+function formatDuration(sec: number, precision: DurationPrecision): string {
+  if (precision === "full") {
+    const h = Math.floor(sec / 3600);
+    const m = Math.floor((sec % 3600) / 60);
+    const s = sec % 60;
+    if (h > 0) return `${h}h ${m}m ${s}s`;
+    if (m > 0) return `${m}m ${s}s`;
+    return `${s}s`;
+  }
+  if (sec < 60) return `${Math.round(sec)}s`;
+  if (sec < 3600) return `${Math.floor(sec / 60)}m ${Math.round(sec % 60)}s`;
   const h = Math.floor(sec / 3600);
-  const m = Math.floor((sec % 3600) / 60);
-  const s = sec % 60;
-  if (h > 0) return `${h}h ${m}m ${s}s`;
-  if (m > 0) return `${m}m ${s}s`;
-  return `${s}s`;
+  return `${h}h ${Math.round((sec % 3600) / 60)}m`;
+}
+
+/** 精确空闲时长(含秒)— 模型卡/概览空闲显示。 */
+export function formatIdle(sec: number): string {
+  return formatDuration(sec, "full");
+}
+
+/** 时长(小时级舍秒)— 日志会话列表。 */
+export function fmtDuration(sec: number): string {
+  return formatDuration(sec, "minutes");
+}
+
+/** 紧凑时长(天起,分钟粒度):45s / 12m / 3h 12m / 2d 5h — 概览本次启动 uptime。 */
+export function formatUptime(sec: number): string {
+  if (sec < 60) return `${sec}s`;
+  const m = Math.floor(sec / 60);
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ${m % 60}m`;
+  const d = Math.floor(h / 24);
+  return `${d}d ${h % 24}h`;
+}
+
+/** 时钟串 HH:MM:SS(零填充,负数钳 0)— 系统页运行时长。 */
+export function formatClock(sec: number): string {
+  const s = Math.max(0, Math.floor(sec));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const ss = s % 60;
+  const pad = (x: number) => String(x).padStart(2, "0");
+  return `${pad(h)}:${pad(m)}:${pad(ss)}`;
 }
 
 export function formatCount(n: number): string {
@@ -46,14 +88,6 @@ export function formatCost(yuan: number): string {
 /** 时间戳(epoch 秒)→ 本地时间字符串(24 小时制)— 日志查看页会话列表用。 */
 export function fmtTime(ts: number): string {
   return new Date(ts * 1000).toLocaleString("zh-CN", { hour12: false });
-}
-
-/** 秒数 → 人类可读时长(如 3m 12s、1h 5m)— 日志查看页会话列表用。 */
-export function fmtDuration(sec: number): string {
-  if (sec < 60) return `${Math.round(sec)}s`;
-  if (sec < 3600) return `${Math.floor(sec / 60)}m ${Math.round(sec % 60)}s`;
-  const h = Math.floor(sec / 3600);
-  return `${h}h ${Math.round((sec % 3600) / 60)}m`;
 }
 
 /** 数字输入框值解析:空串 → 0(NumberInput 受控值常见)。 */

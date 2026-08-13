@@ -36,7 +36,13 @@ export function ModelCard({ m, selected, nowMs, onSelect }: {
       : { label: "启动", cls: "go", fn: () => startModel(m.alias) };
 
   return (
-    <div onClick={onSelect}
+    <div role="button" tabIndex={0} onClick={onSelect}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onSelect();
+        }
+      }}
       className={`flex items-center gap-2 rounded-lg border p-2.5 cursor-pointer transition-colors ${
         selected ? "border-primary-accent bg-primary-accent/12" : "border-border-subtle hover:bg-card-hover"}`}>
       <div className="min-w-0 flex-1">

@@ -8,17 +8,19 @@ import { ErrorState } from "@/components/ui/error-state";
 import { TokenChart } from "@/components/token-chart";
 import { fetchUsageCostSeries, fetchUsageSeries, type UsageSeries, type UsageSeriesParams } from "@/lib/api";
 import { errMsg, formatCost } from "@/lib/format";
-import { chartPresetFor, type UsagePreset } from "@/lib/usage-range";
+import { chartPresetFor, type DateRange, type UsagePreset } from "@/lib/usage-range";
 
 type View = "total" | "models" | "cost";
 
 export function UsageChartCard({
   params,
   preset,
+  custom,
   refetch,
 }: {
   params: UsageSeriesParams;
   preset: UsagePreset;
+  custom: DateRange | null;
   refetch: number | false;
 }) {
   const [view, setView] = useState<View>("models");
@@ -33,7 +35,7 @@ export function UsageChartCard({
     refetchInterval: refetch,
     enabled: view === "cost",
   });
-  const chartPreset = chartPresetFor(preset);
+  const chartPreset = chartPresetFor(preset, custom);
   return (
     <div className="rounded-lg border border-border bg-card p-4 shadow-card">
       <div className="mb-3 flex items-center justify-between">
