@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Cpu } from "lucide-react";
+import { Card, Empty, Loading } from "@/components/ui/card";
 import { useEventStream } from "@/lib/hooks/use-event-stream";
 import type { DevicesResponse } from "@/lib/api";
 
@@ -84,7 +85,7 @@ export function DeviceBar() {
   const devices = data?.data ?? [];
 
   return (
-    <section className="rounded-lg border border-border bg-card p-4 shadow-card">
+    <Card>
       <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-foreground">
         <Cpu className="size-4 text-primary-accent" />
         设备
@@ -92,9 +93,9 @@ export function DeviceBar() {
       {error ? (
         <p className="text-sm text-muted-foreground">设备数据加载失败(后端未连接,将自动重试)</p>
       ) : !data ? (
-        <p className="text-sm text-muted-foreground">设备加载中…</p>
+        <Loading label="设备加载中…" />
       ) : devices.length === 0 ? (
-        <p className="text-sm text-muted-foreground">未检测到设备</p>
+        <Empty label="未检测到设备" />
       ) : (
         <div className="flex flex-wrap gap-3">
           {devices.map((d) => (
@@ -102,6 +103,6 @@ export function DeviceBar() {
           ))}
         </div>
       )}
-    </section>
+    </Card>
   );
 }

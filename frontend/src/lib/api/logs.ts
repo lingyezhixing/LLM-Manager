@@ -11,6 +11,10 @@ export interface LogLine {
 // 日志搜索 / 翻页(本次会话全量在后端,前端按需取一页)。
 export interface LogSearch { matches: number[]; total: number; }
 
+// 日志页大小/实时尾窗口(use-model-logs 的 WINDOW 与 fetchSessionLines 默认 limit 同源,
+// 导出单常量防两处漂移——若不同,历史翻页会静默截断)。
+export const LOG_PAGE_LIMIT = 1500;
+
 export interface LogSession {
   id: number;
   type: "system" | "model";
@@ -34,7 +38,7 @@ export async function fetchSessions(
 }
 
 export async function fetchSessionLines(
-  sessionId: number, before: number, limit = 1500, level?: string,
+  sessionId: number, before: number, limit = LOG_PAGE_LIMIT, level?: string,
 ): Promise<LogLine[]> {
   const qs = new URLSearchParams({ before: String(before), limit: String(limit) });
   if (level) qs.set("level", level);

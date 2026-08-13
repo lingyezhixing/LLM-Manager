@@ -59,72 +59,16 @@ class _SnapshotSource(Protocol):
     def snapshot(self) -> dict[str, DeviceInfo]: ...
 
 
-class DeviceFeed:
-    """Subscriber-gated periodic device-snapshot feed for ``GET /api/devices/stream``.
+class _GatedFeed(Generic[T]):
+    """Subscriber-gated periodic feed 骨架:首订阅起 task、末订阅取消,loop 只在有人
+    订阅时跑。子类实现 ``_snapshot``(同步快照)、``_produce``(每 tick 生成)与
+    ``_dispatch``(派发);``_on_unsubscribed`` 在末订阅退出时复位子类状态(如
+    ModelFeed 的 last-seen,保证 resubscribe 重新发布首帧)。"""
 
-    First subscriber starts the refresh loop; last unsubscribe stops it. The loop
-    refreshes the monitor OFF the event loop (``asyncio.to_thread`` — nvidia-smi / LHM
-    are blocking) and publishes each snapshot to all subscribers, so N viewers share a
-    single refresh per interval.
-    """
-
-    def __init__(self, monitor: _SnapshotSource, interval: float = 2.0) -> None:
-        self._monitor = monitor
-        self._bc: Broadcaster[dict[str, DeviceInfo]] = Broadcaster()
-        self._interval = interval
-        self._task: asyncio.Task[None] | None = None
-
-    def subscribe(self) -> asyncio.Queue[dict[str, DeviceInfo]]:
-        q = self._bc.subscribe()
-        if self._task is None:
-            self._task = asyncio.create_task(self._loop())
-        return q
-
-    def unsubscribe(self, q: asyncio.Queue[dict[str, DeviceInfo]]) -> None:
-        self._bc.unsubscribe(q)
-        if self._bc.subscriber_count == 0 and self._task is not None:
-            self._task.cancel()
-            self._task = None
-
-    @property
-    def subscriber_count(self) -> int:
-        return self._bc.subscriber_count
-
-    def current_snapshot(self) -> dict[str, DeviceInfo]:
-        """Current cached snapshot (no refresh); the loop keeps it warm while subscribed."""
-        return self._monitor.snapshot()
-
-    async def _loop(self) -> None:
-        try:
-            while self._bc.subscriber_count > 0:
-                snapshot = await asyncio.to_thread(self._refresh_and_snapshot)
-                self._bc.publish(snapshot)
-                await asyncio.sleep(self._interval)
-        except asyncio.CancelledError:
-            pass
-
-    def _refresh_and_snapshot(self) -> dict[str, DeviceInfo]:
-        self._monitor.refresh()
-        return self._monitor.snapshot()
-
-
-class ModelFeed(Generic[T]):
-    """Subscriber-gated **change-detect** feed for value snapshots (e.g. model state).
-
-    Polls ``snapshot()`` every ``interval`` and publishes ONLY when the value changes
-    (value-equality), coalescing bursts — so the model stream is event-driven rather than
-    a fixed cadence. The snapshot must exclude time-derived fields (idle/uptime) or it
-    would differ every tick; the frontend ticks those locally from timestamps in the
-    snapshot. First subscriber starts the loop; last unsubscribe stops it and resets the
-    last-seen value so a later resubscribe re-publishes.
-    """
-
-    def __init__(self, snapshot: Callable[[], T], interval: float = 0.5) -> None:
-        self._snapshot = snapshot
+    def __init__(self, interval: float) -> None:
         self._bc: Broadcaster[T] = Broadcaster()
         self._interval = interval
         self._task: asyncio.Task[None] | None = None
-        self._last: T | None = None
 
     def subscribe(self) -> asyncio.Queue[T]:
         q = self._bc.subscribe()
@@ -137,22 +81,91 @@ class ModelFeed(Generic[T]):
         if self._bc.subscriber_count == 0 and self._task is not None:
             self._task.cancel()
             self._task = None
-            self._last = None  # resubscribe should re-publish the initial snapshot
+            self._on_unsubscribed()
 
     @property
     def subscriber_count(self) -> int:
         return self._bc.subscriber_count
 
     def current_snapshot(self) -> T:
+        """当前缓存快照(不刷新);loop 在订阅期间保持其新鲜。"""
         return self._snapshot()
+
+    def _snapshot(self) -> T:
+        raise NotImplementedError
 
     async def _loop(self) -> None:
         try:
             while self._bc.subscriber_count > 0:
-                snap = self._snapshot()
-                if snap != self._last:
-                    self._last = snap
-                    self._bc.publish(snap)
+                snap = await self._produce()
+                self._dispatch(snap)
                 await asyncio.sleep(self._interval)
         except asyncio.CancelledError:
             pass
+
+    async def _produce(self) -> T:
+        raise NotImplementedError
+
+    def _dispatch(self, snap: T) -> None:
+        raise NotImplementedError
+
+    def _on_unsubscribed(self) -> None:
+        """末订阅退出复位(默认 no-op)。"""
+
+
+class DeviceFeed(_GatedFeed[dict[str, DeviceInfo]]):
+    """Subscriber-gated periodic device-snapshot feed for ``GET /api/devices/stream``.
+
+    First subscriber starts the refresh loop; last unsubscribe stops it. The loop
+    refreshes the monitor OFF the event loop (``asyncio.to_thread`` — nvidia-smi / LHM
+    are blocking) and publishes each snapshot to all subscribers, so N viewers share a
+    single refresh per interval.
+    """
+
+    def __init__(self, monitor: _SnapshotSource, interval: float = 2.0) -> None:
+        super().__init__(interval)
+        self._monitor = monitor
+
+    def _snapshot(self) -> dict[str, DeviceInfo]:
+        return self._monitor.snapshot()
+
+    async def _produce(self) -> dict[str, DeviceInfo]:
+        return await asyncio.to_thread(self._refresh_and_snapshot)
+
+    def _dispatch(self, snap: dict[str, DeviceInfo]) -> None:
+        self._bc.publish(snap)
+
+    def _refresh_and_snapshot(self) -> dict[str, DeviceInfo]:
+        self._monitor.refresh()
+        return self._monitor.snapshot()
+
+
+class ModelFeed(_GatedFeed[T]):
+    """Subscriber-gated **change-detect** feed for value snapshots (e.g. model state).
+
+    Polls ``snapshot()`` every ``interval`` and publishes ONLY when the value changes
+    (value-equality), coalescing bursts — so the model stream is event-driven rather than
+    a fixed cadence. The snapshot must exclude time-derived fields (idle/uptime) or it
+    would differ every tick; the frontend ticks those locally from timestamps in the
+    snapshot. First subscriber starts the loop; last unsubscribe stops it and resets the
+    last-seen value so a later resubscribe re-publishes.
+    """
+
+    def __init__(self, snapshot: Callable[[], T], interval: float = 0.5) -> None:
+        super().__init__(interval)
+        self._snapshot_fn = snapshot
+        self._last: T | None = None
+
+    def _snapshot(self) -> T:
+        return self._snapshot_fn()
+
+    async def _produce(self) -> T:
+        return self._snapshot_fn()
+
+    def _dispatch(self, snap: T) -> None:
+        if snap != self._last:
+            self._last = snap
+            self._bc.publish(snap)
+
+    def _on_unsubscribed(self) -> None:
+        self._last = None  # resubscribe should re-publish the initial snapshot

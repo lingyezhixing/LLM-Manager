@@ -4,8 +4,15 @@ import { DatabasePanel } from "@/components/system/database-panel";
 import { GeneralPanel } from "@/components/system/general-panel";
 import { ModelDefPanel } from "@/components/system/model-def-panel";
 import { RestartBanner } from "@/components/system/restart-banner";
-import { SystemNav, type SystemZone } from "@/components/system/system-nav";
+import { ZoneNav } from "@/components/ui/nav-tabs";
 import { useRestartApp, useRestartStatus } from "@/lib/hooks/use-config";
+
+type SystemZone = "general" | "models" | "database";
+const ZONES: readonly { key: SystemZone; label: string }[] = [
+  { key: "general", label: "系统配置" },
+  { key: "models", label: "模型配置" },
+  { key: "database", label: "数据库管理" },
+];
 
 export default function SystemPage() {
   const [zone, setZone] = useState<SystemZone>("general");
@@ -38,7 +45,7 @@ export default function SystemPage() {
         </div>
       )}
       <div>
-        <SystemNav active={zone} onSelect={setZone} />
+        <ZoneNav zones={ZONES} active={zone} onSelect={setZone} />
         <div className="mt-6">
           {zone === "general" && <GeneralPanel />}
           {zone === "models" && <ModelDefPanel />}

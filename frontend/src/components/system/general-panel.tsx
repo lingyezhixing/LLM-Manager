@@ -1,5 +1,6 @@
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { type ReactNode, useMemo } from "react";
 import { ConfigSaveBar } from "@/components/config-save-bar";
+import { Loading } from "@/components/ui/card";
 import { ErrorState } from "@/components/ui/error-state";
 import { Field, NumberInput, Select, TextInput } from "@/components/ui/form";
 import { errMsg, formatClock, numFromStr as num } from "@/lib/format";
@@ -10,6 +11,7 @@ import { type LogRetention, type ProgramConfig } from "@/lib/api";
 import { useConfig, useUpdateLogRetention, useUpdateProgram } from "@/lib/hooks/use-config";
 import { useNowTick } from "@/lib/hooks/use-now-tick";
 import { useSystemInfo } from "@/lib/hooks/use-config";
+import { useSyncedForm } from "@/lib/hooks/use-synced-form";
 
 const LOG_LEVELS = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"];
 
@@ -27,6 +29,9 @@ interface GeneralForm {
   logs: LogRetention;
 }
 const sameForm = (a: GeneralForm, b: GeneralForm) => sameProgram(a.program, b.program) && sameLogs(a.logs, b.logs);
+// useSyncedForm 的 null 感知比较(初始/未加载态 form=baseline=null)。
+const sameFormOrNull = (a: GeneralForm | null, b: GeneralForm | null) =>
+  a === b || (a !== null && b !== null && sameForm(a, b));
 
 // 段标题:轻量横线分隔(── 标题 ──────),与模型表单的分区一致。
 function SectionTitle({ children }: { children: ReactNode }) {
@@ -51,37 +56,27 @@ export function GeneralPanel() {
   const update = useUpdateProgram();
   const updateLogs = useUpdateLogRetention();
   const toast = useToast();
-  const [form, setForm] = useState<GeneralForm | null>(null);
-  // 上一次采纳进表单的服务端值;区分「未编辑(form 仍 == 该值)→ 跟随外部刷新」vs「编辑中 → 保留」。
-  const syncedRef = useRef<GeneralForm | null>(null);
-
-  // 初值就绪填表单;后续 data 外部刷新时,若用户未编辑则跟随(避免 stale-form),编辑中则保留。
-  // 用函数式更新读最新 form,避免把 form 列入依赖(编辑中不打断)。
-  useEffect(() => {
-    if (!data) return;
-    const incoming: GeneralForm = { program: data.program, logs: data.logs };
-    setForm((prev) => {
-      const base = syncedRef.current;
-      if (prev !== null && base !== null && !sameForm(prev, base)) return prev; // 编辑中,保留
-      syncedRef.current = incoming;
-      return incoming;
-    });
-  }, [data]);
+  const serverForm = useMemo<GeneralForm | null>(
+    () => (data ? { program: data.program, logs: data.logs } : null),
+    [data],
+  );
+  const { form, setForm, dirty, baseline, advance, commit } = useSyncedForm<GeneralForm | null>(
+    serverForm,
+    null,
+    sameFormOrNull,
+  );
 
   if (isError) {
     return <ErrorState message={errMsg(error)} onRetry={() => refetch()} />;
   }
   if (isLoading || !form) {
-    return <div className="text-sm text-muted-foreground">加载中…</div>;
+    return <Loading />;
   }
 
   // M7:form 非空 ⇒ data 已就绪(form 只在 data 就绪后填充);此处兜底防 data 中途变 undefined
   const initial: GeneralForm = data
     ? { program: data.program, logs: data.logs }
     : { program: form.program, logs: form.logs };
-  // dirty 以 syncedRef(最近采纳的服务端值)为基准,而非 live data——外部刷新被中途丢弃后,
-  // 若用户恰好还原到 syncedRef,保存条应熄灭而非出现「点了没反应」的幽灵态。
-  const dirty = syncedRef.current !== null && !sameForm(form, syncedRef.current);
   const portValid = form.program.port >= 1 && form.program.port <= 65535;
   const aliveValid = form.program.alive_time >= 0;
   const set = (p: ProgramConfig) => setForm({ ...form, program: p });
@@ -90,13 +85,13 @@ export function GeneralPanel() {
   const saveError = update.error ?? updateLogs.error;
 
   const onSave = () => {
-    const pDirty = !sameProgram(form.program, syncedRef.current!.program);
-    const lDirty = !sameLogs(form.logs, syncedRef.current!.logs);
+    const pDirty = !sameProgram(form.program, baseline!.program);
+    const lDirty = !sameLogs(form.logs, baseline!.logs);
     let toasted = false;
     if (pDirty) {
       update.mutate(form.program, {
         onSuccess: () => {
-          syncedRef.current = { ...syncedRef.current!, program: form.program };
+          advance((base) => ({ ...base!, program: form.program }));
           if (!toasted) { toasted = true; toast.success("系统配置已保存"); }
         },
       });
@@ -104,7 +99,7 @@ export function GeneralPanel() {
     if (lDirty) {
       updateLogs.mutate(form.logs, {
         onSuccess: () => {
-          syncedRef.current = { ...syncedRef.current!, logs: form.logs };
+          advance((base) => ({ ...base!, logs: form.logs }));
           if (!toasted) { toasted = true; toast.success("系统配置已保存"); }
         },
       });
@@ -156,10 +151,7 @@ export function GeneralPanel() {
           saving={saving}
           error={saveError ? errMsg(saveError) : null}
           onSave={onSave}
-          onReset={() => {
-            syncedRef.current = initial;
-            setForm(initial);
-          }}
+          onReset={() => commit(initial)}
           saveDisabled={!portValid || !aliveValid || form.logs.days < 1 || form.logs.count < 1}
         />
       )}

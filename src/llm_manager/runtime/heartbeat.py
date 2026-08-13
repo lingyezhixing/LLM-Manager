@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 
 from llm_manager.data import logs as _logs
 from llm_manager.data.usage import runtime_heartbeat_live
+from llm_manager.runtime.loops import tick_loop
 
 if TYPE_CHECKING:
     from llm_manager.data.persistence import Db
@@ -24,13 +25,12 @@ HEARTBEAT_INTERVAL = 30.0  # 秒:老项目同款节奏,崩溃最多丢最后 30s
 async def heartbeat_loop(
     db: Db, stop_event: asyncio.Event, interval: float = HEARTBEAT_INTERVAL
 ) -> None:
-    """常驻心跳任务:每 interval 把所有进行中会话/运行段的 end_time 推到 now。"""
-    while not stop_event.is_set():
-        try:
-            await asyncio.wait_for(stop_event.wait(), timeout=interval)
-        except TimeoutError:
-            now = time.time()
-            _logs.log_heartbeat_live(db, now)
-            runtime_heartbeat_live(db, now)
-        except asyncio.CancelledError:
-            break
+    """常驻心跳任务:每 interval 把所有进行中会话/运行段的 end_time 推到 now。
+    wait_first=True:启动先睡一轮再首次写(启动即写无意义,且让 DB 连接先行就绪)。"""
+
+    async def _tick() -> None:
+        now = time.time()
+        _logs.log_heartbeat_live(db, now)
+        runtime_heartbeat_live(db, now)
+
+    await tick_loop(stop_event, interval, _tick, wait_first=True)

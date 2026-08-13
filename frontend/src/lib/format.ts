@@ -64,12 +64,9 @@ export function formatCount(n: number): string {
   return n.toLocaleString("en-US");
 }
 
-export function formatHitRate(r: number): string {
-  return `${(r * 100).toFixed(1)}%`;
-}
-
-export function formatPercent(share: number): string {
-  return `${(share * 100).toFixed(0)}%`;
+/** 占比/命中率百分比(0~1 → N%);decimals 默认 0,命中率调用方传 1。 */
+export function formatPercent(share: number, decimals = 0): string {
+  return `${(share * 100).toFixed(decimals)}%`;
 }
 
 export function formatLatency(ms: number): string {

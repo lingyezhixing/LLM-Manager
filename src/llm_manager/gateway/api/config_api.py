@@ -13,13 +13,12 @@ import os
 import time
 from collections.abc import Callable
 from dataclasses import replace
-from pathlib import Path
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from llm_manager.config import AppConfig, Command, ModelConfig, Pricing, PricingTier, Scheme
+from llm_manager.config import AppConfig, ModelConfig, Pricing, Scheme
 from llm_manager.data import logs as _logs
 from llm_manager.data.config_store import (
     ConfigValidationFailed,
@@ -31,6 +30,7 @@ from llm_manager.data.config_store import (
 from llm_manager.gateway.api.common import (
     boot_program,
     config_write_result,
+    db_size_bytes,
     get_config_store,
     get_db,
     restart_fields,
@@ -109,37 +109,7 @@ def _to_model_config(body: ModelDefInput) -> ModelConfig:
     for s in body.schemes:
         if s.config_source in schemes:
             raise ValueError(f"duplicate scheme config_source '{s.config_source}'")
-        schemes[s.config_source] = Scheme(
-            config_source=s.config_source,
-            required_devices=frozenset(s.required_devices),
-            command=Command(
-                exe=s.command.exe,
-                args=tuple(s.command.args),
-                env=dict(s.command.env),
-                cwd=s.command.cwd,
-                conda_env=s.command.conda_env,
-            ),
-            memory_mb=dict(s.memory_mb),
-        )
-    pricing = Pricing(
-        pricing_type=body.pricing.pricing_type,
-        hourly_price=body.pricing.hourly_price,
-        support_cache=body.pricing.support_cache,
-        tiers=tuple(
-            PricingTier(
-                tier_index=t.tier_index,
-                min_input=t.min_input,
-                max_input=t.max_input,
-                min_output=t.min_output,
-                max_output=t.max_output,
-                input_price=t.input_price,
-                output_price=t.output_price,
-                cache_write_price=t.cache_write_price,
-                cache_read_price=t.cache_read_price,
-            )
-            for t in body.pricing.tiers
-        ),
-    )
+        schemes[s.config_source] = Scheme.from_dict(s.model_dump())
     return ModelConfig(
         primary_name=body.name,
         aliases=tuple(body.aliases),
@@ -147,30 +117,8 @@ def _to_model_config(body: ModelDefInput) -> ModelConfig:
         port=body.port,
         auto_start=body.auto_start,
         schemes=schemes,
-        pricing=pricing,
+        pricing=Pricing.from_dict(body.pricing.model_dump()),
     )
-
-
-def _pricing_dict(p):
-    return {
-        "pricing_type": p.pricing_type,
-        "hourly_price": p.hourly_price,
-        "support_cache": p.support_cache,
-        "tiers": [
-            {
-                "tier_index": t.tier_index,
-                "min_input": t.min_input,
-                "max_input": t.max_input,
-                "min_output": t.min_output,
-                "max_output": t.max_output,
-                "input_price": t.input_price,
-                "output_price": t.output_price,
-                "cache_write_price": t.cache_write_price,
-                "cache_read_price": t.cache_read_price,
-            }
-            for t in p.tiers
-        ],
-    }
 
 
 def _create_model(cfg: AppConfig, body: ModelDefInput) -> AppConfig:
@@ -271,12 +219,11 @@ def register_config_routes(api: APIRouter) -> None:
     @api.get("/system/info")
     def system_info(request: Request) -> dict:
         started_at = getattr(request.app.state, "started_at", None) or time.time()
-        db_path = Path(str(getattr(request.app.state, "resolved_db", "data/llm_manager.db")))
         return {
             "version": get_version(),
             "started_at": started_at,
             "uptime_s": max(0.0, time.time() - started_at),
-            "db_size_bytes": db_path.stat().st_size if db_path.exists() else None,
+            "db_size_bytes": db_size_bytes(request),
         }
 
     @api.get("/config")
@@ -415,7 +362,7 @@ def register_config_routes(api: APIRouter) -> None:
                 }
                 for s in m.schemes.values()
             ],
-            "pricing": _pricing_dict(m.pricing),
+            "pricing": m.pricing.to_dict(),
         }
 
     @api.put("/config/models/{name}")

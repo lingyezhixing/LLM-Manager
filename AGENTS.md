@@ -143,8 +143,10 @@ npx tsc -b           # 仅类型检查
 - **S3 CI / pre-commit**:`ruff format --check && ruff check && pyright && pytest -q` +
   前端 `oxlint && tsc -b`。已 2026-08-06 一次性 `ruff format`(74/85 重排)并纳入
   后端验收命令;CI/pre-commit 自动化仍未建(本地手动执行)。
-- **S5 `useSyncedForm<T>` 抽象**:general/wol/claude/model-def-form 四处手写「服务端快照→本地表单」
-  同步(已滋生 F1)。抽象 hook 把「baseline 只能在 onSuccess 推进」固化。重构面较大,**留作演进**。
+- **S5 `useSyncedForm<T>` 抽象(已落地,2026-08-13)**:general/wol/claude-path/model-def-form
+  四处手写「服务端快照→本地表单」同步已收敛为 `frontend/src/lib/hooks/use-synced-form.ts`
+  (external-follow 仅在未编辑时;baseline 仅 onSuccess 推进;alwaysDirty 支持创建态)。
+  单例语义/契约不变,后续新增表单一律用它。
 - **🔵1 create_task 任务集**:6 处 fire-and-forget 任务内部均已捕异常,实际未检索异常风险低;
   跨模块引用集 helper 性价比不足。
 - 其它:双账本(内存计数 + DB 落库)、`_migrate` 历史链退役窗口、前端 `useLogViewer` 改 useReducer

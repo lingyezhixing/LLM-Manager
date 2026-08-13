@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 
 import { LineChart } from "lucide-react";
 
+import { Card, Empty, Loading } from "@/components/ui/card";
 import { ErrorState } from "@/components/ui/error-state";
 import { TokenChart } from "@/components/token-chart";
 import { fetchUsageCostSeries, fetchUsageSeries, type UsageSeries, type UsageSeriesParams } from "@/lib/api";
@@ -37,7 +38,7 @@ export function UsageChartCard({
   });
   const chartPreset = chartPresetFor(preset, custom);
   return (
-    <div className="rounded-lg border border-border bg-card p-4 shadow-card">
+    <Card>
       <div className="mb-3 flex items-center justify-between">
         <span className="flex items-center gap-2 text-sm font-semibold">
           <LineChart className="size-4 text-primary-accent" />
@@ -64,9 +65,11 @@ export function UsageChartCard({
             <ErrorState message={errMsg(costSeriesQ.error)} onRetry={() => costSeriesQ.refetch()} />
           </div>
         ) : costSeriesQ.isLoading || !costSeriesQ.data ? (
-          <div className="flex h-[192px] items-center justify-center text-sm text-muted-foreground">加载中…</div>
+          <div className="flex h-[192px] items-center justify-center">
+            <Loading />
+          </div>
         ) : costSeriesQ.data.buckets.length === 0 ? (
-          <div className="flex h-[192px] items-center justify-center rounded-lg border border-dashed border-border text-sm text-muted-foreground">该时间范围内暂无成本</div>
+          <Empty label="该时间范围内暂无成本" className="h-[192px]" />
         ) : (
           <TokenChart data={costSeriesQ.data} preset={chartPreset} formatY={formatCost} />
         )
@@ -75,15 +78,15 @@ export function UsageChartCard({
           <ErrorState message={errMsg(error)} onRetry={() => refetchSeries()} />
         </div>
       ) : isLoading || !data ? (
-        <div className="flex h-[192px] items-center justify-center text-sm text-muted-foreground">加载中…</div>
-      ) : data.buckets.length === 0 ? (
-        <div className="flex h-[192px] items-center justify-center rounded-lg border border-dashed border-border text-sm text-muted-foreground">
-          该时间范围内暂无请求
+        <div className="flex h-[192px] items-center justify-center">
+          <Loading />
         </div>
+      ) : data.buckets.length === 0 ? (
+        <Empty label="该时间范围内暂无请求" className="h-[192px]" />
       ) : (
         <TokenChart data={view === "total" ? totalOnly(data) : data} preset={chartPreset} />
       )}
-    </div>
+    </Card>
   );
 }
 

@@ -38,3 +38,24 @@ export function NavTab({
     </button>
   );
 }
+
+/** 通用分区导航(系统页 / 工具箱页共用,防样式漂移):zone key → label 映射渲染 NavTab。 */
+export function ZoneNav<K extends string>({
+  zones,
+  active,
+  onSelect,
+}: {
+  zones: readonly { key: K; label: string }[];
+  active: K;
+  onSelect: (zone: K) => void;
+}) {
+  return (
+    <NavTabs>
+      {zones.map((z) => (
+        <NavTab key={z.key} active={z.key === active} onClick={() => onSelect(z.key)}>
+          {z.label}
+        </NavTab>
+      ))}
+    </NavTabs>
+  );
+}

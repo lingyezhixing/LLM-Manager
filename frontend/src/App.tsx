@@ -1,4 +1,4 @@
-import { Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes } from "react-router-dom";
 import AppLayout from "@/components/app-shell";
 import { ConfirmProvider } from "@/components/ui/dialog";
 import { ToastProvider } from "@/components/ui/toast";
@@ -22,7 +22,7 @@ export default function App() {
             <Route path="tools" element={<ToolsPage />} />
             <Route path="logs" element={<LogsPage />} />
             <Route path="system" element={<SystemPage />} />
-            <Route path="*" element={<OverviewPage />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         </Routes>
       </ConfirmProvider>

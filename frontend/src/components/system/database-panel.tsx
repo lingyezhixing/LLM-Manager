@@ -1,10 +1,12 @@
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
+import { Loading } from "@/components/ui/card";
 import { useConfirm } from "@/lib/hooks/use-confirm";
 import { ErrorState } from "@/components/ui/error-state";
 import { InfoTile } from "@/components/ui/info-tile";
 import { errMsg } from "@/lib/format";
 import { useToast } from "@/lib/hooks/use-toast";
-import { useDeleteModelData, useOrphanedModels, useStorageStats } from "@/lib/hooks/use-data";
+import { deleteModelData, fetchOrphanedModels, fetchStorageStats } from "@/lib/api";
 
 // 数据库管理页(迁移 legacy DataManagement):存储统计 + 孤立模型清理 + 模型数据详情。
 // 每载入获取一次(refetchOnMount: "always"),不轮询。删除 = 级联清数据 + 自动 VACUUM(后端)。
@@ -16,9 +18,25 @@ function formatBytes(n: number | null): string {
 }
 
 export function DatabasePanel() {
-  const stats = useStorageStats();
-  const orphaned = useOrphanedModels();
-  const del = useDeleteModelData();
+  const stats = useQuery({
+    queryKey: ["data", "storage-stats"],
+    queryFn: fetchStorageStats,
+    refetchOnMount: "always",
+  });
+  const orphaned = useQuery({
+    queryKey: ["data", "orphaned"],
+    queryFn: fetchOrphanedModels,
+    refetchOnMount: "always",
+  });
+  const qc = useQueryClient();
+  // 删除孤立模型数据:成功 → 失效两查询(表格与孤立区同步刷新)。
+  const del = useMutation({
+    mutationFn: (name: string) => deleteModelData(name),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["data", "storage-stats"] });
+      qc.invalidateQueries({ queryKey: ["data", "orphaned"] });
+    },
+  });
   const confirm = useConfirm();
   const toast = useToast();
 
@@ -49,7 +67,7 @@ export function DatabasePanel() {
     );
   }
   if (stats.isLoading || orphaned.isLoading || !s) {
-    return <div className="text-sm text-muted-foreground">加载中…</div>;
+    return <Loading />;
   }
 
   const entries = Object.entries(s.models_data).sort((a, b) => b[1].request_count - a[1].request_count);

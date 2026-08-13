@@ -12,7 +12,6 @@ from llm_manager.state import (
     finish_start,
     get_status,
     inc_pending,
-    is_failed,
     is_runnable,
     pending_count,
     record_failure,
@@ -53,7 +52,7 @@ def test_happy_path_transitions():
 def test_failure_transition_sets_reason():
     set_status("M", ModelStatus.STARTING)
     set_status("M", ModelStatus.FAILED, reason="boom")
-    assert is_failed("M")
+    assert get_status("M") == ModelStatus.FAILED
 
 
 def test_failed_to_start_retry_is_legal():
@@ -98,7 +97,7 @@ def test_force_stop_from_any_state():
 def test_record_failure_helper():
     set_status("M", ModelStatus.STARTING)
     record_failure("M", "segfault")
-    assert is_failed("M")
+    assert get_status("M") == ModelStatus.FAILED
 
 
 def test_pending_inc_dec_clamped():

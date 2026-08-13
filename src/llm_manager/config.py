@@ -37,6 +37,25 @@ class Command:
     cwd: str | None = None
     conda_env: str | None = None
 
+    @classmethod
+    def from_dict(cls, d: dict) -> Command:
+        return cls(
+            exe=d.get("exe", ""),
+            args=tuple(d.get("args", [])),
+            env=dict(d.get("env", {})),
+            cwd=d.get("cwd"),
+            conda_env=d.get("conda_env"),
+        )
+
+    def to_dict(self) -> dict:
+        return {
+            "exe": self.exe,
+            "args": list(self.args),
+            "env": self.env,
+            "cwd": self.cwd,
+            "conda_env": self.conda_env,
+        }
+
 
 @dataclass(frozen=True, slots=True)
 class Scheme:
@@ -44,6 +63,23 @@ class Scheme:
     required_devices: frozenset[str]
     command: Command
     memory_mb: dict[str, int]
+
+    @classmethod
+    def from_dict(cls, d: dict) -> Scheme:
+        return cls(
+            config_source=d["config_source"],
+            required_devices=frozenset(d.get("required_devices", [])),
+            command=Command.from_dict(d.get("command", {})),
+            memory_mb={k: int(v) for k, v in d.get("memory_mb", {}).items()},
+        )
+
+    def to_dict(self) -> dict:
+        return {
+            "config_source": self.config_source,
+            "required_devices": sorted(self.required_devices),
+            "command": self.command.to_dict(),
+            "memory_mb": dict(self.memory_mb),
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,6 +94,33 @@ class PricingTier:
     cache_write_price: float = 0.0
     cache_read_price: float = 0.0
 
+    @classmethod
+    def from_dict(cls, d: dict) -> PricingTier:
+        return cls(
+            tier_index=d["tier_index"],
+            min_input=d.get("min_input", 0),
+            max_input=d.get("max_input"),
+            min_output=d.get("min_output", 0),
+            max_output=d.get("max_output"),
+            input_price=d.get("input_price", 0.0),
+            output_price=d.get("output_price", 0.0),
+            cache_write_price=d.get("cache_write_price", 0.0),
+            cache_read_price=d.get("cache_read_price", 0.0),
+        )
+
+    def to_dict(self) -> dict:
+        return {
+            "tier_index": self.tier_index,
+            "min_input": self.min_input,
+            "max_input": self.max_input,
+            "min_output": self.min_output,
+            "max_output": self.max_output,
+            "input_price": self.input_price,
+            "output_price": self.output_price,
+            "cache_write_price": self.cache_write_price,
+            "cache_read_price": self.cache_read_price,
+        }
+
 
 @dataclass(frozen=True, slots=True)
 class Pricing:
@@ -65,6 +128,23 @@ class Pricing:
     hourly_price: float = 0.0
     support_cache: bool = False  # 模型级:是否支持 prompt 缓存(缓存计费开关)
     tiers: tuple[PricingTier, ...] = ()
+
+    @classmethod
+    def from_dict(cls, d: dict) -> Pricing:
+        return cls(
+            pricing_type=d.get("pricing_type", "tier"),
+            hourly_price=d.get("hourly_price", 0.0),
+            support_cache=bool(d.get("support_cache", False)),
+            tiers=tuple(PricingTier.from_dict(t) for t in d.get("tiers", [])),
+        )
+
+    def to_dict(self) -> dict:
+        return {
+            "pricing_type": self.pricing_type,
+            "hourly_price": self.hourly_price,
+            "support_cache": self.support_cache,
+            "tiers": [t.to_dict() for t in self.tiers],
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -136,19 +216,7 @@ def load(path: Path) -> AppConfig:
         for key, val in m.items():
             if key in reserved or not isinstance(val, dict):
                 continue
-            c = val["command"]
-            schemes[key] = Scheme(
-                config_source=key,
-                required_devices=frozenset(val.get("required_devices", [])),
-                command=Command(
-                    exe=c["exe"],
-                    args=tuple(c.get("args", [])),
-                    env=dict(c.get("env", {})),
-                    cwd=c.get("cwd"),
-                    conda_env=c.get("conda_env"),
-                ),
-                memory_mb={k: int(v) for k, v in val.get("memory_mb", {}).items()},
-            )
+            schemes[key] = Scheme.from_dict({**val, "config_source": key})
         models[name] = ModelConfig(
             primary_name=name,
             aliases=tuple(m.get("aliases", [])),  # tuple 保 yaml 顺序,aliases[0]=served

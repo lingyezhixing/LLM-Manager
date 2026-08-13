@@ -15,7 +15,7 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from llm_manager.data.config_store import set_settings
+from llm_manager.data.config_store import delete_settings, set_settings
 from llm_manager.gateway.api.common import config_write_result, get_config_store, get_db
 from llm_manager.tools import claude, wol
 
@@ -53,10 +53,7 @@ def register_tools_routes(api: APIRouter) -> None:
     def delete_wol(request: Request) -> dict:
         """清除 WOL 配置(删双键 → snapshot.wol=None,托盘动作提示未配置)。
         与 put_wol 对称:WOL 是双键一对,清除整对删,不留孤儿键。"""
-        db = get_db(request)
-        with db.write_lock:
-            db.conn.execute("DELETE FROM system_settings WHERE key IN ('wol_broadcast', 'wol_mac')")
-            db.conn.commit()
+        delete_settings(get_db(request), ["wol_broadcast", "wol_mac"])
         cfg = get_config_store(request).reload()
         return config_write_result(request, cfg)
 

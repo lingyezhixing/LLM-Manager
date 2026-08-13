@@ -54,6 +54,27 @@ def _drm_cards() -> list[Path]:
         return []
 
 
+def _uevent_text(dev: Path) -> str:
+    """dev/uevent 全文;读失败 → ""。Intel/AMD 共用。"""
+    try:
+        return dev.joinpath("uevent").read_text(encoding="ascii", errors="ignore")
+    except OSError:
+        return ""
+
+
+def _uevent_driver(dev: Path, driver: str) -> bool:
+    """uevent 含 DRIVER=<driver> → True(i915/amdgpu 识别,比 vendor 更准)。"""
+    return f"DRIVER={driver}" in _uevent_text(dev)
+
+
+def _uevent_pci_id(dev: Path) -> str | None:
+    """uevent 的 PCI_ID(如 8086:46d1)→ 小写 pci_id;无 → None。"""
+    for line in _uevent_text(dev).splitlines():
+        if line.startswith("PCI_ID="):
+            return line.split("=", 1)[1].strip().lower()
+    return None
+
+
 def _read_float(path: Path) -> float:
     try:
         return float(path.read_text(encoding="ascii").strip())
@@ -170,3 +191,25 @@ def _aggregate_sensors(device_name: str, sensors: Iterator[tuple[str, str, float
         round(temp_c) if temp_c is not None else None,
         float(freq_mhz) if freq_mhz > 0 else None,
     )
+
+
+def _enumerate_lhm(hw_type: str) -> list[DeviceInfo]:
+    """Windows LHM 指定硬件类型的枚举(GpuIntel/GpuAmd)。_lhm_computer 不可用 → []。
+    Intel/AMD 适配器共用的 Windows 分支骨架(唯一差异是 HardwareType 串)。"""
+    c = _lhm_computer()
+    if c is None:
+        return []
+    out: list[DeviceInfo] = []
+    for hw in c.Hardware:
+        if str(hw.HardwareType) != hw_type:
+            continue
+        try:
+            hw.Update()
+            sensors = (
+                (str(s.SensorType), str(s.Name), s.Value if s.Value is not None else 0.0)
+                for s in hw.Sensors
+            )
+            out.append(_aggregate_sensors(str(hw.Name), sensors))
+        except Exception:  # noqa: BLE001, S110 — 单个 LHM GPU 传感器读取失败 → 跳过该 GPU,继续其余
+            pass
+    return out

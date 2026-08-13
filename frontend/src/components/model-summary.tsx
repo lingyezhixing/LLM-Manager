@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import { Activity } from "lucide-react";
+import { Card, Loading } from "@/components/ui/card";
 import { InfoTile } from "@/components/ui/info-tile";
 import { formatIdle } from "@/lib/format";
 import { useEventStream } from "@/lib/hooks/use-event-stream";
@@ -25,7 +26,7 @@ export function ModelSummary() {
   const now = useNowTick(1000);
 
   if (error) return <p className="text-sm text-muted-foreground">模型数据加载失败(后端未连接,将自动重试)</p>;
-  if (!data) return <p className="text-sm text-muted-foreground">加载中…</p>;
+  if (!data) return <Loading />;
 
   const models: ModelInfo[] = data.data ?? [];
   const running = models.filter((m) => m.status === "routing")
@@ -34,7 +35,7 @@ export function ModelSummary() {
   const failed = models.filter((m) => m.status === "failed");
 
   return (
-    <section className="rounded-lg border border-border bg-card p-4 shadow-card">
+    <Card>
       <div className="mb-3 flex items-center justify-between">
         <h3 className="flex items-center gap-2 text-sm font-semibold text-foreground">
           <Activity className="size-4 text-primary-accent" />
@@ -70,6 +71,6 @@ export function ModelSummary() {
           })}
         </div>
       )}
-    </section>
+    </Card>
   );
 }

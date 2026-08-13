@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ErrorState } from "@/components/ui/error-state";
 import { InfoTile } from "@/components/ui/info-tile";
 import { fetchUsageCost, fetchUsageSummary, type UsageSeriesParams } from "@/lib/api";
-import { errMsg, formatCost, formatCount, formatHitRate, formatTokens } from "@/lib/format";
+import { errMsg, formatCost, formatCount, formatPercent, formatTokens } from "@/lib/format";
 
 export function UsageKpiRow({
   params,
@@ -40,7 +40,7 @@ export function UsageKpiRow({
       <InfoTile label="输出" value={formatTokens(data.output_tokens)} />
       <InfoTile label="缓存命中" value={formatTokens(data.cache_hit)} valueClass="text-success" />
       <InfoTile label="未命中" value={formatTokens(data.cache_miss)} valueClass="text-destructive" />
-      <InfoTile label="命中率" value={formatHitRate(data.hit_rate)} valueClass="text-primary-accent" />
+      <InfoTile label="命中率" value={formatPercent(data.hit_rate, 1)} valueClass="text-primary-accent" />
       <InfoTile label="请求数" value={formatCount(data.request_count)} />
       <InfoTile
         label="成本"

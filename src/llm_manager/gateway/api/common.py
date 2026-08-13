@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi import Request
 from pydantic import BaseModel
 
@@ -18,6 +20,12 @@ def get_db(request: Request) -> Db:
 def get_config_store(request: Request) -> ConfigStore:
     """config_store(读穿快照源)。"""
     return request.app.state.config_store
+
+
+def db_size_bytes(request: Request) -> int | None:
+    """DB 文件大小(不存在 → None)。system_info 与 storage-stats 共用。"""
+    path = Path(str(getattr(request.app.state, "resolved_db", "data/llm_manager.db")))
+    return path.stat().st_size if path.exists() else None
 
 
 def sse_frame(payload: BaseModel) -> str:

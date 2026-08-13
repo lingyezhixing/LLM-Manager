@@ -8,12 +8,13 @@ from pathlib import Path
 from . import DeviceInfo
 from .common import (
     _DRM_CLASS,
-    _aggregate_sensors,  # Windows LHM 运行时
     _drm_cards,
+    _enumerate_lhm,  # Windows LHM 运行时
     _hwmon_temp1,
-    _lhm_computer,
     _read_float,
     _read_int_mb,
+    _uevent_driver,
+    _uevent_pci_id,
 )
 
 # ==================== AMD(amdgpu sysfs + LHM)====================
@@ -21,11 +22,7 @@ from .common import (
 
 def _is_amdgpu(dev: Path) -> bool:
     """uevent 含 DRIVER=amdgpu → AMD GPU(与 Intel 的 _is_i915 同构,不依赖 vendor 猜测)。"""
-    try:
-        uevent = dev.joinpath("uevent").read_text(encoding="ascii", errors="ignore")
-    except OSError:
-        return False
-    return "DRIVER=amdgpu" in uevent
+    return _uevent_driver(dev, "amdgpu")
 
 
 def _amd_vram(dev: Path) -> tuple[int, int]:
@@ -42,16 +39,10 @@ _AMD_GPU_NAMES = {
 
 def _amd_gpu_name(dev: Path) -> str:
     """uevent 的 PCI_ID(如 1002:15fe)→ 已知映射名,未知 → 'AMD Radeon (1002:xxxx)'。"""
-    try:
-        for line in (
-            dev.joinpath("uevent").read_text(encoding="ascii", errors="ignore").splitlines()
-        ):
-            if line.startswith("PCI_ID="):
-                pci_id = line.split("=", 1)[1].strip().lower()
-                return _AMD_GPU_NAMES.get(pci_id, f"AMD Radeon ({pci_id})")
-    except OSError:
-        pass
-    return "AMD Radeon"
+    pci_id = _uevent_pci_id(dev)
+    if pci_id is None:
+        return "AMD Radeon"
+    return _AMD_GPU_NAMES.get(pci_id, f"AMD Radeon ({pci_id})")
 
 
 class AmdAdapter:
@@ -92,22 +83,5 @@ class AmdAdapter:
         return out
 
     def _enumerate_windows(self) -> list[DeviceInfo]:
-        """Windows AMD GPU:LHM GpuAmd 硬件 → 经 _aggregate_sensors → DeviceInfo。
-        _lhm_computer 不可用 → []。"""
-        c = _lhm_computer()
-        if c is None:
-            return []
-        out: list[DeviceInfo] = []
-        for hw in c.Hardware:
-            if str(hw.HardwareType) != "GpuAmd":
-                continue
-            try:
-                hw.Update()
-                sensors = (
-                    (str(s.SensorType), str(s.Name), s.Value if s.Value is not None else 0.0)
-                    for s in hw.Sensors
-                )
-                out.append(_aggregate_sensors(str(hw.Name), sensors))
-            except Exception:  # noqa: BLE001, S110 — 单个 LHM GPU 传感器读取失败 → 跳过该 GPU,继续其余
-                pass
-        return out
+        """Windows AMD GPU:LHM GpuAmd 硬件 → 经 _aggregate_sensors → DeviceInfo。"""
+        return _enumerate_lhm("GpuAmd")

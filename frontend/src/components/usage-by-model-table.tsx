@@ -1,10 +1,11 @@
-import { useState, type ReactNode } from "react";
+import { useState } from "react";
 
 import { useQuery } from "@tanstack/react-query";
 
+import { Card, Empty, Loading } from "@/components/ui/card";
 import { ErrorState } from "@/components/ui/error-state";
 import { fetchUsageByModel, fetchUsageCost, type UsageSeriesParams } from "@/lib/api";
-import { errMsg, formatCost, formatCount, formatHitRate, formatLatency, formatPercent, formatTokens } from "@/lib/format";
+import { errMsg, formatCost, formatCount, formatLatency, formatPercent, formatTokens } from "@/lib/format";
 
 type SortKey = "input_tokens" | "output_tokens" | "cache_n" | "request_count" | "hit_rate" | "latency_ms" | "cost";
 
@@ -30,8 +31,8 @@ export function UsageByModelTable({
   const [desc, setDesc] = useState(true);
 
   if (isError) return <Card><ErrorState message={errMsg(error)} onRetry={() => refetchByModel()} /></Card>;
-  if (isLoading) return <Card>加载中…</Card>;
-  if (!data || data.length === 0) return <Card><Empty /></Card>;
+  if (isLoading) return <Card><Loading /></Card>;
+  if (!data || data.length === 0) return <Card><Empty label="该时间范围内暂无请求" /></Card>;
 
   const rows = [...data].sort((a, b) => {
     if (sortKey === "cost") {
@@ -84,7 +85,7 @@ export function UsageByModelTable({
                   <span className="w-9 text-right font-mono text-xs text-muted-foreground">{formatPercent(r.share)}</span>
                 </div>
               </td>
-              <td className="p-2 text-right font-mono tabular-nums">{formatHitRate(r.hit_rate)}</td>
+              <td className="p-2 text-right font-mono tabular-nums">{formatPercent(r.hit_rate, 1)}</td>
               <td className="p-2 text-right font-mono tabular-nums">{formatLatency(r.latency_ms)}</td>
               <td className="p-2 text-right font-mono tabular-nums">{costQ.data ? formatCost(costOf.get(r.model) ?? 0) : "—"}</td>
             </tr>
@@ -93,14 +94,6 @@ export function UsageByModelTable({
       </table>
     </Card>
   );
-}
-
-function Card({ children }: { children: ReactNode }) {
-  return <div className="rounded-lg border border-border bg-card p-4 shadow-card">{children}</div>;
-}
-
-function Empty() {
-  return <div className="flex h-24 items-center justify-center text-sm text-muted-foreground">该时间范围内暂无请求</div>;
 }
 
 function Th({ label }: { label: string }) {

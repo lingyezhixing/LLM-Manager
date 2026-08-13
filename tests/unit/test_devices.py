@@ -975,8 +975,10 @@ def test_intel_adapter_windows_branch_via_lhm(monkeypatch, tmp_path):
             _FakeHardware("GpuNvidia", "NVIDIA GeForce RTX 4060", []),
         ]
     )
-    # intel 模块 `from .common import _lhm_computer` 直接绑定 → 仅 patch ad 生效
-    monkeypatch.setattr(ad, "_lhm_computer", lambda: fake_computer)
+    # _enumerate_lhm 在 common 模块内引用 _lhm_computer → patch common
+    from llm_manager.devices import common as cm
+
+    monkeypatch.setattr(cm, "_lhm_computer", lambda: fake_computer)
     monkeypatch.setattr(ad.os, "name", "nt")
     out = ad.IntelAdapter().enumerate()
     assert len(out) == 1
@@ -1270,8 +1272,10 @@ def test_amd_adapter_windows_branch_via_lhm(monkeypatch, tmp_path):
             _FakeHardware("GpuNvidia", "NVIDIA GeForce RTX 4060", []),
         ]
     )
-    # amd 模块 `from .common import _lhm_computer` 直接绑定 → 仅 patch ad 生效
-    monkeypatch.setattr(ad, "_lhm_computer", lambda: fake_computer)
+    # _enumerate_lhm 在 common 模块内引用 _lhm_computer → patch common
+    from llm_manager.devices import common as cm
+
+    monkeypatch.setattr(cm, "_lhm_computer", lambda: fake_computer)
     monkeypatch.setattr(ad.os, "name", "nt")
     out = ad.AmdAdapter().enumerate()
     assert len(out) == 1

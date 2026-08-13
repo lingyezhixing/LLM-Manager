@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Loading } from "@/components/ui/card";
 import { useEventStream } from "@/lib/hooks/use-event-stream";
 import { useNowTick } from "@/lib/hooks/use-now-tick";
 import { ModelCard } from "@/components/model-card";
@@ -25,7 +26,7 @@ export default function ModelsPage() {
           {error
             ? <p className="text-sm text-muted-foreground">模型数据加载失败(后端未连接,将自动重试)</p>
             : data === null
-              ? <p className="text-sm text-muted-foreground">加载中…</p>
+              ? <Loading />
               : models.length === 0
                 ? <p className="text-sm text-muted-foreground">暂无模型 — 到「系统配置 → 模型定义」添加</p>
                 : models.map((m) => (

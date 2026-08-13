@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { LogLine, LogSearch } from "@/lib/api";
-import { fetchSessionLines, fetchSessions, searchSessionLogs } from "@/lib/api";
+import { fetchSessionLines, fetchSessions, LOG_PAGE_LIMIT, searchSessionLogs } from "@/lib/api";
 
-const WINDOW = 1500;          // 实时尾窗口 + 历史页大小(行数)
+const WINDOW = LOG_PAGE_LIMIT; // 实时尾窗口 + 历史页大小(与 fetchSessionLines 默认 limit 同源)
 const STICKY_THRESHOLD = 24;  // 贴底判定阈值(px)
 const TOP_THRESHOLD = 8;      // 触顶判定阈值(px)——触发向上加载历史
 const MAX_PREFIX = 5000;      // historyPrefix 上限(防卡顿;超过丢最旧)

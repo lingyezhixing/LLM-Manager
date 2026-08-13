@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Field, NumberInput, Select, Switch, TextInput } from "@/components/ui/form";
 import { numFromStr as num } from "@/lib/format";
@@ -9,8 +9,19 @@ import { SchemeEditor } from "@/components/system/scheme-editor";
 import { useConfirm } from "@/lib/hooks/use-confirm";
 import { type ModelDef, type ModelWriteResult, type SchemeDef } from "@/lib/api";
 import { useCreateModelDef, useUpdateModelDef } from "@/lib/hooks/use-model-defs";
+import { useSyncedForm } from "@/lib/hooks/use-synced-form";
 
 const MODES = ["Chat", "Embedding", "Reranker"];
+
+// 空方案(新增/追加方案共用):一个默认 config_source + 空 command。
+function emptyScheme(): SchemeDef {
+  return {
+    config_source: "default",
+    required_devices: [],
+    command: { exe: "", args: [], env: {}, cwd: null, conda_env: null },
+    memory_mb: {},
+  };
+}
 
 // 空模型草稿(新增用):一个空 scheme。
 function emptyModel(): ModelDef {
@@ -20,14 +31,7 @@ function emptyModel(): ModelDef {
     port: 0,
     auto_start: false,
     aliases: [],
-    schemes: [
-      {
-        config_source: "default",
-        required_devices: [],
-        command: { exe: "", args: [], env: {}, cwd: null, conda_env: null },
-        memory_mb: {},
-      },
-    ],
+    schemes: [emptyScheme()],
     pricing: { pricing_type: "tier", hourly_price: 0, support_cache: false, tiers: [] },
   };
 }
@@ -98,13 +102,18 @@ interface ModelDefFormProps {
 
 export function ModelDefForm({ model, onSaved, onDirtyChange, onDelete }: ModelDefFormProps) {
   const isCreate = model === null;
-  const [form, setForm] = useState<ModelDef>(() => (model ? clone(model) : emptyModel()));
-  const [baseline, setBaseline] = useState<ModelDef>(() => (model ? clone(model) : emptyModel()));
+  // useSyncedForm:key 变化(切模型/进出创建)由父级触发 remount → 重取初值;同模型内不重置。
+  // alwaysDirty=true(创建态:空表单也算 dirty,保存按钮常显)。
+  const { form, setForm, dirty, commit, reset } = useSyncedForm<ModelDef>(
+    null, // 不进外部刷新跟随:本表单由 key remount 管理生命周期
+    model ? clone(model) : emptyModel(),
+    deepEqual,
+    { alwaysDirty: isCreate },
+  );
 
-  // key 变化(切模型/进出创建)由父级触发 remount → useState 重取初值;同模型内不重置。
   useEffect(() => {
-    onDirtyChange?.(isCreate || !deepEqual(form, baseline));
-  }, [isCreate, form, baseline, onDirtyChange]);
+    onDirtyChange?.(dirty);
+  }, [dirty, onDirtyChange]);
 
   const confirm = useConfirm();
   const update = useUpdateModelDef(model?.name ?? "");
@@ -113,7 +122,6 @@ export function ModelDefForm({ model, onSaved, onDirtyChange, onDelete }: ModelD
   const saving = mutation.isPending;
   const errorMsg = mutation.error ? (mutation.error as Error).message : null;
 
-  const dirty = isCreate ? true : !deepEqual(form, baseline);
   const portValid = form.port >= 1 && form.port <= 65535;
   const canSave = clientValid(form) && portValid;
 
@@ -126,15 +134,7 @@ export function ModelDefForm({ model, onSaved, onDirtyChange, onDelete }: ModelD
   const addScheme = () =>
     setForm({
       ...form,
-      schemes: [
-        ...form.schemes,
-        {
-          config_source: "default",
-          required_devices: [],
-          command: { exe: "", args: [], env: {}, cwd: null, conda_env: null },
-          memory_mb: {},
-        },
-      ],
+      schemes: [...form.schemes, emptyScheme()],
     });
 
   const doUpdate = (migrate: boolean) => {
@@ -145,7 +145,7 @@ export function ModelDefForm({ model, onSaved, onDirtyChange, onDelete }: ModelD
       { body: payload, migrate },
       {
         onSuccess: (result) => {
-          setBaseline(clone(payload));
+          commit(clone(payload));
           onSaved(result, payload.name);   // 传新名:改名后 panel 切到新名
         },
       },
@@ -159,7 +159,7 @@ export function ModelDefForm({ model, onSaved, onDirtyChange, onDelete }: ModelD
       setForm(payload);
       create.mutate(payload, {
         onSuccess: () => {
-          setBaseline(clone(payload));
+          commit(clone(payload));
           onSaved({ affected_routing: [], hint: null }, payload.name);
         },
       });
@@ -267,7 +267,7 @@ export function ModelDefForm({ model, onSaved, onDirtyChange, onDelete }: ModelD
       {/* 右下角浮动保存/重置(仅 dirty/创建态显示):高频操作,滚动时始终可见。 */}
       {(dirty || isCreate) && (
         <div className="sticky bottom-4 z-10 mt-3 flex flex-col items-end gap-2">
-          <Button type="button" variant="outline" onClick={() => setForm(clone(baseline))}>
+          <Button type="button" variant="outline" onClick={() => reset()}>
             重置
           </Button>
           <Button type="button" onClick={onSave} disabled={saving || !canSave}>

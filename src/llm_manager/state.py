@@ -91,10 +91,6 @@ def is_runnable(name: str) -> bool:
     return get_status(name) == ModelStatus.ROUTING
 
 
-def is_failed(name: str) -> bool:
-    return get_status(name) == ModelStatus.FAILED
-
-
 def record_failure(name: str, reason: str) -> None:
     rec = _rec(name)
     rec.status = ModelStatus.FAILED

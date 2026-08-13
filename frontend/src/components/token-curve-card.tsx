@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { LineChart } from "lucide-react";
 
+import { Card, Empty, Loading } from "@/components/ui/card";
 import { ErrorState } from "@/components/ui/error-state";
 import { TokenChart } from "@/components/token-chart";
 import { UsageRangePicker } from "@/components/usage-range-picker";
@@ -22,7 +23,7 @@ export function TokenCurveCard() {
   });
 
   return (
-    <div className="rounded-lg border border-border bg-card p-4 shadow-card">
+    <Card>
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
         <span className="flex items-center gap-2 text-sm font-semibold">
           <LineChart className="size-4 text-primary-accent" />
@@ -35,10 +36,14 @@ export function TokenCurveCard() {
           <ErrorState message={errMsg(error)} onRetry={() => refetch()} />
         </div>
       ) : isLoading || !data ? (
-        <div className="flex h-[160px] items-center justify-center text-sm text-muted-foreground">加载中…</div>
+        <div className="flex h-[160px] items-center justify-center">
+          <Loading />
+        </div>
+      ) : data.buckets.length === 0 ? (
+        <Empty label="该时间范围内暂无请求" className="h-[160px]" />
       ) : (
         <TokenChart data={data} preset={chartPresetFor(range.preset, range.custom)} />
       )}
-    </div>
+    </Card>
   );
 }

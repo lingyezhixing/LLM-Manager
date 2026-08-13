@@ -14,7 +14,6 @@ from llm_manager.config import (
     PROGRAM_DEFAULTS,
     RETENTION_DEFAULTS,
     AppConfig,
-    Command,
     ModelConfig,
     Pricing,
     PricingTier,
@@ -48,6 +47,18 @@ def set_settings(db: Db, updates: dict[str, str]) -> None:
         try:
             for k, v in updates.items():
                 _upsert_locked(db, k, v)
+            db.conn.commit()
+        except Exception:
+            db.conn.rollback()
+            raise
+
+
+def delete_settings(db: Db, keys: list[str]) -> None:
+    """多键原子删(整组清除,不留孤儿键)。与 set_settings 同锁纪律。"""
+    with db.write_lock:
+        try:
+            for k in keys:
+                db.conn.execute("DELETE FROM system_settings WHERE key = ?", (k,))
             db.conn.commit()
         except Exception:
             db.conn.rollback()
@@ -126,16 +137,6 @@ def _write_appconfig_locked(db: Db, cfg: AppConfig) -> None:
                     (mid, alias, a_ord),
                 )
             for s_ord, (src, scheme) in enumerate(m.schemes.items()):
-                c = scheme.command
-                command_json = json.dumps(
-                    {
-                        "exe": c.exe,
-                        "args": list(c.args),
-                        "env": c.env,
-                        "cwd": c.cwd,
-                        "conda_env": c.conda_env,
-                    }
-                )
                 db.conn.execute(
                     "INSERT INTO model_schemes (model_id, config_source, required_devices, memory_mb, command, ord) "
                     "VALUES (?,?,?,?,?,?)",
@@ -144,7 +145,7 @@ def _write_appconfig_locked(db: Db, cfg: AppConfig) -> None:
                         src,
                         json.dumps(sorted(scheme.required_devices)),
                         json.dumps(scheme.memory_mb),
-                        command_json,
+                        json.dumps(scheme.command.to_dict()),
                         s_ord,
                     ),
                 )
@@ -220,31 +221,27 @@ def _read_appconfig_locked(db: Db) -> AppConfig:
             "FROM model_schemes WHERE model_id = ? ORDER BY ord",
             (mid,),
         ):
-            d = json.loads(srow["command"] or "{}")
-            command = Command(
-                exe=d.get("exe", ""),
-                args=tuple(d.get("args", [])),
-                env=dict(d.get("env", {})),
-                cwd=d.get("cwd"),
-                conda_env=d.get("conda_env"),
-            )
-            schemes[srow["config_source"]] = Scheme(
-                config_source=srow["config_source"],
-                required_devices=frozenset(json.loads(srow["required_devices"])),
-                command=command,
-                memory_mb=dict(json.loads(srow["memory_mb"])),
+            schemes[srow["config_source"]] = Scheme.from_dict(
+                {
+                    "config_source": srow["config_source"],
+                    "required_devices": json.loads(srow["required_devices"]),
+                    "command": json.loads(srow["command"] or "{}"),
+                    "memory_mb": json.loads(srow["memory_mb"]),
+                }
             )
         tiers = tuple(
-            PricingTier(
-                tier_index=tr["tier_index"],
-                min_input=tr["min_input"],
-                max_input=tr["max_input"],
-                min_output=tr["min_output"],
-                max_output=tr["max_output"],
-                input_price=tr["input_price"],
-                output_price=tr["output_price"],
-                cache_write_price=tr["cache_write_price"],
-                cache_read_price=tr["cache_read_price"],
+            PricingTier.from_dict(
+                {
+                    "tier_index": tr["tier_index"],
+                    "min_input": tr["min_input"],
+                    "max_input": tr["max_input"],
+                    "min_output": tr["min_output"],
+                    "max_output": tr["max_output"],
+                    "input_price": tr["input_price"],
+                    "output_price": tr["output_price"],
+                    "cache_write_price": tr["cache_write_price"],
+                    "cache_read_price": tr["cache_read_price"],
+                }
             )
             for tr in db.conn.execute(
                 "SELECT tier_index, min_input, max_input, min_output, max_output, "

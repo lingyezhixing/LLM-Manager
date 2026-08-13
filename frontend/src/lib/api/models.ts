@@ -64,7 +64,7 @@ export interface SchemeDef {
   command: CommandDef;
   memory_mb: Record<string, number>;
 }
-// 计费定价 — 对应 GET /api/config/models/{name} 的 _pricing_dict 输出(逐字段同形)。
+// 计费定价 — 对应 GET /api/config/models/{name} 的 Pricing.to_dict() 输出(逐字段同形)。
 export interface PricingTier {
   tier_index: number;
   min_input: number | null;

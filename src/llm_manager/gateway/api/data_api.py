@@ -6,23 +6,25 @@ models.original_name ∉ AppConfig.models.keys()(usage/runtime 记录的均为 p
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from fastapi import APIRouter, HTTPException, Request
 
 from llm_manager.data import logs as _logs
 from llm_manager.data import persistence as _p
-from llm_manager.gateway.api.common import get_config_store, get_db
+from llm_manager.gateway.api.common import (
+    db_size_bytes,
+    get_config_store,
+    get_db,
+)
 
 
 def register_data_routes(api: APIRouter) -> None:
     @api.get("/data/storage-stats")
     def storage_stats(request: Request) -> dict:
         db = get_db(request)
-        db_path = Path(str(getattr(request.app.state, "resolved_db", "data/llm_manager.db")))
-        size = db_path.stat().st_size if db_path.exists() else None
         cfg = get_config_store(request).snapshot()
-        s = _p.storage_stats(db, configured=set(cfg.models.keys()), size_bytes=size)
+        s = _p.storage_stats(
+            db, configured=set(cfg.models.keys()), size_bytes=db_size_bytes(request)
+        )
         log_sessions, log_lines = _logs.log_counts(db)
         return {
             "size_bytes": s.size_bytes,

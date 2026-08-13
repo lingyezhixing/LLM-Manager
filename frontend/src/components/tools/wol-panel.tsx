@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { ConfigSaveBar } from "@/components/config-save-bar";
+import { Loading } from "@/components/ui/card";
 import { useConfirm } from "@/lib/hooks/use-confirm";
 import { ErrorState } from "@/components/ui/error-state";
 import { Field, TextInput } from "@/components/ui/form";
@@ -9,6 +9,9 @@ import { useToast } from "@/lib/hooks/use-toast";
 import type { WolConfig } from "@/lib/api";
 import { useConfig } from "@/lib/hooks/use-config";
 import { useDeleteWol, useSendWol, useUpdateWol } from "@/lib/hooks/use-tools";
+import { useSyncedForm } from "@/lib/hooks/use-synced-form";
+
+const EMPTY_WOL: WolConfig = { broadcast_address: "", mac_address: "" };
 
 function shallowEqual(a: WolConfig, b: WolConfig): boolean {
   return a.broadcast_address === b.broadcast_address && a.mac_address === b.mac_address;
@@ -22,29 +25,21 @@ export function WolPanel() {
   const send = useSendWol();
   const confirm = useConfirm();
   const toast = useToast();
-  const serverWol: WolConfig = data?.wol ?? { broadcast_address: "", mac_address: "" };
-  const [form, setForm] = useState<WolConfig>(serverWol);
-  const syncedRef = useRef<WolConfig>(serverWol);
+  const serverWol: WolConfig = data?.wol ?? EMPTY_WOL;
+  const { form, setForm, dirty, commit, reset } = useSyncedForm<WolConfig>(
+    serverWol,
+    EMPTY_WOL,
+    shallowEqual,
+  );
   const hasConfig = serverWol.broadcast_address !== "" || serverWol.mac_address !== "";
-
-  // 外部刷新跟随:未编辑(与 synced 一致)才采纳,编辑中保留。
-  useEffect(() => {
-    const incoming: WolConfig = data?.wol ?? { broadcast_address: "", mac_address: "" };
-    setForm((prev) => {
-      if (!shallowEqual(prev, syncedRef.current)) return prev;   // 编辑中,保留
-      syncedRef.current = incoming;
-      return incoming;
-    });
-  }, [data?.wol]);
 
   if (isError) {
     return <ErrorState message={errMsg(error)} onRetry={() => refetch()} />;
   }
   if (isLoading) {
-    return <div className="text-sm text-muted-foreground">加载中…</div>;
+    return <Loading />;
   }
 
-  const dirty = !shallowEqual(form, syncedRef.current);
   const macOk = form.mac_address.trim() !== "";
   const bcastOk = form.broadcast_address.trim() !== "";   // B8:后端两字段均 min_length=1,前端同步门控
   const set = (k: keyof WolConfig, v: string) => setForm({ ...form, [k]: v });
@@ -60,9 +55,7 @@ export function WolPanel() {
     if (!ok) return;
     del.mutate(undefined, {
       onSuccess: () => {
-        const empty: WolConfig = { broadcast_address: "", mac_address: "" };
-        syncedRef.current = empty;
-        setForm(empty);
+        commit(EMPTY_WOL);
         toast.success("网络唤醒配置已还原");
       },
       onError: (e: unknown) => toast.error(errMsg(e)),
@@ -94,12 +87,12 @@ export function WolPanel() {
           onSave={() =>
             update.mutate(form, {
               onSuccess: () => {
-                syncedRef.current = form;
+                commit(form);
                 toast.success("网络唤醒配置已保存");
               },
             })
           }
-          onReset={() => setForm(syncedRef.current)}
+          onReset={() => reset()}
           saveDisabled={!macOk || !bcastOk}
         />
       )}

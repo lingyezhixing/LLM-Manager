@@ -64,7 +64,7 @@ export function joinCommandLine(exe: string, args: string[]): string {
 
 /** 启动命令变量替换:{{port}}/{{alias}} → 模型实际值(与后端 substitute_vars 同占位符;
  * 有占位符才换,无则原样)。双大括号避免与 JSON 参数(单大括号)混淆。 */
-export function applyVars(text: string, vars?: Record<string, string>): string {
+function applyVars(text: string, vars?: Record<string, string>): string {
   if (!vars) return text;
   let out = text;
   for (const [k, v] of Object.entries(vars)) out = out.replaceAll(k, v);

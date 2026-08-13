@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
+import { Loading } from "@/components/ui/card";
 import { ErrorState } from "@/components/ui/error-state";
 import { Field, TextArea, TextInput } from "@/components/ui/form";
 import { useConfirm } from "@/lib/hooks/use-confirm";
@@ -10,6 +11,7 @@ import { errMsg } from "@/lib/format";
 import { type ConfigResponse } from "@/lib/api";
 import { useConfig, useUpdateProgram } from "@/lib/hooks/use-config";
 import { useApplyClaudePreset, useClaudeCurrent, useUpdateClaudeConfigs } from "@/lib/hooks/use-tools";
+import { useSyncedForm } from "@/lib/hooks/use-synced-form";
 
 // 解析预设 JSON 文本:须为 str→str 对象。失败 → { ok:false, message }。
 function parseEnvJson(text: string): { ok: true; value: Record<string, string> } | { ok: false; message: string } {
@@ -190,6 +192,11 @@ export function ClaudePanel() {
   const { data: currentData } = useClaudeCurrent();
   const updateProgram = useUpdateProgram();
   const toast = useToast();
+  // ── Claude settings 路径行(自通用页移入)──
+  // useSyncedForm:外部刷新且未编辑(pathInput == baseline)时跟随,保存成功 commit 推进。
+  const serverPath = data?.program.claude_settings_path ?? "";
+  const { form: pathInput, setForm: setPathInput, dirty: pathDirty, commit: commitPath } =
+    useSyncedForm<string>(serverPath, "", (a, b) => a === b);
 
   const serverPresets = data?.claude ?? {};
   const names = [...Object.keys(serverPresets)].sort();
@@ -199,24 +206,12 @@ export function ClaudePanel() {
   // 新建卡:nonce>0 时渲染一张;保存成功(onCreated)或取消后清零,期间禁新增。
   const [newNonce, setNewNonce] = useState(0);
 
-  // ── Claude settings 路径行(自通用页移入)──
-  // 本地输入 + 最近保存值;外部刷新且未编辑(pathSaved === pathInput)时跟随。
-  const [pathInput, setPathInput] = useState("");
-  const [pathSaved, setPathSaved] = useState("");
-  useEffect(() => {
-    if (!data) return;
-    if (pathSaved === pathInput) {
-      setPathInput(data.program.claude_settings_path);
-      setPathSaved(data.program.claude_settings_path);
-    }
-  }, [data, pathInput, pathSaved]);
-  const pathDirty = pathInput !== pathSaved;
   const onSavePath = () => {
     updateProgram.mutate(
       { claude_settings_path: pathInput },
       {
         onSuccess: () => {
-          setPathSaved(pathInput);
+          commitPath(pathInput);
           toast.success("Claude settings 路径已保存");
         },
         onError: (e: unknown) => toast.error(errMsg(e)),
@@ -228,7 +223,7 @@ export function ClaudePanel() {
     return <ErrorState message={errMsg(error)} onRetry={() => refetch()} />;
   }
   if (isLoading) {
-    return <div className="text-sm text-muted-foreground">加载中…</div>;
+    return <Loading />;
   }
 
   return (

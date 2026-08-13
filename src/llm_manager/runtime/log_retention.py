@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 # 否则其 DB 行被删后 logs.flush 落库 FK 失败)。导入安全无环:logs 仅依赖
 # persistence / realtime(→devices),均不依赖 runtime.log_retention。
 from llm_manager.data import logs as _logs
+from llm_manager.runtime.loops import tick_loop
 
 if TYPE_CHECKING:
     from llm_manager.data.config_store import ConfigStore
@@ -31,26 +32,24 @@ def retention_from_store(store: ConfigStore) -> tuple[int, int]:
 async def log_retention_loop(
     db, get_settings, stop_event: asyncio.Event, *, period: float = 60.0, now: float | None = None
 ) -> None:
-    """每轮取 fresh 保留规则执行 log_cleanup。get_settings 注入(可测)。"""
-    while not stop_event.is_set():
-        try:
-            days, count = get_settings()
-            if days > 0 and count > 0:
-                removed_s, removed_l = await asyncio.to_thread(
-                    _logs.log_cleanup,
-                    db,
-                    days,
-                    count,
-                    now,
-                    live_session_ids=_logs.live_session_ids(),
-                )
-                if removed_s:
-                    logger.info(
-                        "log retention cleaned %d sessions / %d lines", removed_s, removed_l
-                    )
-        except Exception as e:  # noqa: BLE001
-            logger.error("log retention iteration error: %s", e)
-        try:
-            await asyncio.wait_for(stop_event.wait(), timeout=period)
-        except TimeoutError:
-            pass
+    """每轮取 fresh 保留规则执行 log_cleanup。get_settings 注入(可测)。
+    单轮异常记日志继续(与 idle_reclamation_loop 同款兜底)。"""
+
+    async def _tick() -> None:
+        days, count = get_settings()
+        if days > 0 and count > 0:
+            removed_s, removed_l = await asyncio.to_thread(
+                _logs.log_cleanup,
+                db,
+                days,
+                count,
+                now,
+                live_session_ids=_logs.live_session_ids(),
+            )
+            if removed_s:
+                logger.info("log retention cleaned %d sessions / %d lines", removed_s, removed_l)
+
+    def _on_error(e: Exception) -> None:
+        logger.error("log retention iteration error: %s", e)
+
+    await tick_loop(stop_event, period, _tick, on_error=_on_error)

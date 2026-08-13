@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { Loading } from "@/components/ui/card";
 import { useConfirm } from "@/lib/hooks/use-confirm";
 import { ErrorState } from "@/components/ui/error-state";
 import { errMsg } from "@/lib/format";
@@ -86,13 +87,13 @@ export function ModelDefPanel() {
   // 详情区:列表加载中 / 编辑态详情加载中 → 加载提示;创建态 → 空表单;否则表单。
   let formArea;
   if (list.isLoading) {
-    formArea = <div className="text-sm text-muted-foreground">加载中…</div>;
+    formArea = <Loading />;
   } else if (list.isError) {
     formArea = <ErrorState message={errMsg(list.error)} onRetry={() => list.refetch()} />;
   } else if (typeof effSelected === "string") {
     formArea =
       detail.isLoading || !detail.data ? (
-        <div className="text-sm text-muted-foreground">加载中…</div>
+        <Loading />
       ) : (
         <ModelDefForm
           key={formKey}
@@ -124,7 +125,7 @@ export function ModelDefPanel() {
       {/* 左栏:模型列表(按 port 升序)+ 底部操作(新增 / 删除),吸顶后独立滚动 */}
       <div className="flex flex-col gap-1 lg:sticky lg:top-[134px] lg:max-h-[calc(100dvh-150px)] lg:overflow-y-auto">
         {list.isLoading && (
-          <span className="px-3 py-2 text-sm text-muted-foreground">加载中…</span>
+          <Loading />
         )}
         <div className="flex flex-col gap-0.5" role="listbox" aria-label="模型列表">
           {items.map((m) => {

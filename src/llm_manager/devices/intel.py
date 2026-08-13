@@ -10,10 +10,11 @@ from pathlib import Path
 from . import DeviceInfo
 from .common import (
     _DRM_CLASS,
-    _aggregate_sensors,  # Windows LHM 运行时
     _drm_cards,
-    _lhm_computer,
+    _enumerate_lhm,  # Windows LHM 运行时
     _system_mem,
+    _uevent_driver,
+    _uevent_pci_id,
 )
 
 # ==================== Intel iGPU(i915 + intel_gpu_top)====================
@@ -25,25 +26,15 @@ _INTEL_IGPU_NAMES = {
 
 def _intel_gpu_name(dev: Path) -> str:
     """uevent 的 PCI_ID(如 8086:46d1)→ 已知映射名,未知 → 'Intel UHD Graphics (8086:xxxx)'。"""
-    try:
-        for line in (
-            dev.joinpath("uevent").read_text(encoding="ascii", errors="ignore").splitlines()
-        ):
-            if line.startswith("PCI_ID="):
-                pci_id = line.split("=", 1)[1].strip().lower()
-                return _INTEL_IGPU_NAMES.get(pci_id, f"Intel UHD Graphics ({pci_id})")
-    except OSError:
-        pass
-    return "Intel UHD Graphics"
+    pci_id = _uevent_pci_id(dev)
+    if pci_id is None:
+        return "Intel UHD Graphics"
+    return _INTEL_IGPU_NAMES.get(pci_id, f"Intel UHD Graphics ({pci_id})")
 
 
 def _is_i915(dev: Path) -> bool:
     """uevent 含 DRIVER=i915 → Intel GPU(比 vendor 更准,不依赖 gpu_busy_percent 文件)。"""
-    try:
-        uevent = dev.joinpath("uevent").read_text(encoding="ascii", errors="ignore")
-    except OSError:
-        return False
-    return "DRIVER=i915" in uevent
+    return _uevent_driver(dev, "i915")
 
 
 def _run_intel_gpu_top() -> str | None:
@@ -142,22 +133,5 @@ class IntelAdapter:
         ]  # 多 i915 卡:按卡命名;指标共享同一次 intel_gpu_top 采样
 
     def _enumerate_windows(self) -> list[DeviceInfo]:
-        """Windows Intel GPU:LHM GpuIntel 硬件 → 经 _aggregate_sensors → DeviceInfo。
-        _lhm_computer 不可用 → []。"""
-        c = _lhm_computer()
-        if c is None:
-            return []
-        out: list[DeviceInfo] = []
-        for hw in c.Hardware:
-            if str(hw.HardwareType) != "GpuIntel":
-                continue
-            try:
-                hw.Update()
-                sensors = (
-                    (str(s.SensorType), str(s.Name), s.Value if s.Value is not None else 0.0)
-                    for s in hw.Sensors
-                )
-                out.append(_aggregate_sensors(str(hw.Name), sensors))
-            except Exception:  # noqa: BLE001, S110 — 单个 LHM GPU 传感器读取失败 → 跳过该 GPU,继续其余
-                pass
-        return out
+        """Windows Intel GPU:LHM GpuIntel 硬件 → 经 _aggregate_sensors → DeviceInfo。"""
+        return _enumerate_lhm("GpuIntel")
