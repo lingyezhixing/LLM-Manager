@@ -61,6 +61,13 @@ export function SystemOverview() {
   const canUpdate = !!st && !st.conflicted && isAvailable(st, mode);
   const behind = st ? behindOf(st, mode) : 0;
   const latest = st ? latestVal(st, mode) : "—";
+  const updateTitle = canUpdate
+    ? undefined
+    : st?.conflicted
+      ? "本地与远端历史分叉,无法更新"
+      : mode === "tag" && st && !st.tag
+        ? "远端无标签版本,可切换检测模式为「提交」"
+        : "当前目标已是最新,无更新";
 
   let note: string | null = null;
   let noteClass = "text-muted-foreground";
@@ -122,7 +129,7 @@ export function SystemOverview() {
               size="sm"
               onClick={onUpdate}
               disabled={!canUpdate || app.pending}
-              title={canUpdate ? undefined : "当前目标无更新"}
+              title={updateTitle}
             >
               {app.pending ? "更新中…" : "更新"}
             </Button>
