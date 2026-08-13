@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
+import os
 from pathlib import Path
 
 from fastapi import Request
 from pydantic import BaseModel
 
+from llm_manager import RESTART_EXIT_CODE
 from llm_manager.config import AppConfig
 from llm_manager.data.config_store import ConfigStore
 from llm_manager.data.persistence import Db
@@ -59,3 +62,27 @@ def config_write_result(request: Request, cfg: AppConfig) -> dict:
     """写回/查询的共享响应:needs_restart/restart_fields/serving。"""
     rf = restart_fields(cfg, boot_program(request))
     return {"needs_restart": bool(rf), "restart_fields": rf, "serving": serving_models()}
+
+
+def trigger_restart(request: Request) -> None:
+    """置 restart_requested + 安排退出:有 uvicorn server → 后台延迟翻 should_exit
+    (让 202 先冲刷,worker 优雅跑完 lifespan 收尾后以 81 退出);无 server(dev
+    --reload)→ 0.5s 后 os._exit(81)(dev 无监督器,一次性)。
+    生产路径:内置 parent 监督器接住 81 拉起全新 worker。/api/config/restart 与
+    /api/update/apply 共用。"""
+    request.app.state.restart_requested = True
+    server = getattr(request.app.state, "uvicorn_server", None)
+    if server is not None:
+
+        async def _delayed_exit() -> None:
+            await asyncio.sleep(0.5)
+            server.should_exit = True
+
+        asyncio.create_task(_delayed_exit())
+    else:
+
+        async def _dev_exit() -> None:
+            await asyncio.sleep(0.5)
+            os._exit(RESTART_EXIT_CODE)
+
+        asyncio.create_task(_dev_exit())

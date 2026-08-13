@@ -1,10 +1,12 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import {
+  applyUpdate,
   fetchConfig,
   fetchHealth,
   fetchRestartStatus,
   fetchSystemInfo,
+  fetchUpdateStatus,
   restartApp,
   updateLogRetention,
   updateProgram,
@@ -80,19 +82,19 @@ async function awaitReconnect(timeoutMs: number): Promise<void> {
   throw new Error("timeout");
 }
 
-// 自重启:POST /api/config/restart(202)→ 触发后端关闭+退出 81→监督器重启。
-// 前端 poll /health 两阶段重连,恢复后整页 reload 反映新参数。
-export function useRestartApp() {
+// 自重启流程:触发后端关闭(202)→ poll /health 两阶段重连 → 恢复后整页 reload 反映新状态。
+// /api/config/restart(配置字段重启)与 /api/update/apply(自更新重启)共用同一流程。
+function useReconnectReload(action: () => Promise<unknown>) {
   const [restarting, setRestarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const mutate = useMutation({
-    mutationFn: restartApp,
+    mutationFn: action,
     onSuccess: async () => {
       setRestarting(true);
       setError(null);
       try {
         await awaitReconnect(60_000);
-        window.location.reload();   // 整页 reload 自然带回新配置,无需先 invalidate
+        window.location.reload();   // 整页 reload 自然带回新配置/新代码,无需先 invalidate
       } catch {
         setError("重启超时,请手动检查后刷新页面。");
         setRestarting(false);
@@ -100,5 +102,28 @@ export function useRestartApp() {
     },
     onError: (e: unknown) => setError(errMsg(e)),
   });
-  return { triggerRestart: () => mutate.mutate(), restarting, pending: mutate.isPending, error };
+  return { trigger: () => mutate.mutate(), restarting, pending: mutate.isPending, error };
+}
+
+export function useRestartApp() {
+  const r = useReconnectReload(restartApp);
+  return { triggerRestart: r.trigger, restarting: r.restarting, pending: r.pending, error: r.error };
+}
+
+// 自更新:先 POST /api/update/apply(后端 git pull + 触发重启),成功后走同一重连流程。
+export function useUpdateApp() {
+  const r = useReconnectReload(applyUpdate);
+  return { triggerUpdate: r.trigger, updating: r.restarting, pending: r.pending, error: r.error };
+}
+
+export function useUpdateStatus() {
+  // 只按需取:打开更新页/点「检查更新」才 fetch;不窗口聚焦重取、失败不自动重试
+  // (离线时保持安静,面板以 error 呈现)。
+  return useQuery({
+    queryKey: ["update", "status"],
+    queryFn: fetchUpdateStatus,
+    staleTime: 5 * 60_000,
+    refetchOnWindowFocus: false,
+    retry: false,
+  });
 }

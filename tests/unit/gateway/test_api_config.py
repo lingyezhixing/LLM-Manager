@@ -701,9 +701,7 @@ def test_restart_app_flips_should_exit_when_server_present(tmp_path):
 def test_restart_without_server_exits_81_after_flush(monkeypatch, tmp_path):
     """dev(--reload)模式无真实 uvicorn server:0.5s 冲刷延迟后 os._exit(81)(Dev-Backend.bat 81 循环重启)。"""
     calls: list[int] = []
-    monkeypatch.setattr(
-        "llm_manager.gateway.api.config_api.os._exit", lambda code: calls.append(code)
-    )
+    monkeypatch.setattr("llm_manager.gateway.api.common.os._exit", lambda code: calls.append(code))
     client = TestClient(_app(tmp_path))  # _app 不设 uvicorn_server(dev 模式等价)
     with client:
         r = client.post("/api/config/restart")

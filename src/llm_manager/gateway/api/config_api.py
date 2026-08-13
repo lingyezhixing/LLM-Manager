@@ -7,9 +7,7 @@ restart 检测:对比 snapshot.program 的 host/port/claude_settings_path/log_le
 
 from __future__ import annotations
 
-import asyncio
 import logging
-import os
 import time
 from collections.abc import Callable
 from dataclasses import replace
@@ -18,7 +16,6 @@ from typing import Literal
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from llm_manager import RESTART_EXIT_CODE
 from llm_manager.config import AppConfig, ModelConfig, Pricing, Scheme
 from llm_manager.data import logs as _logs
 from llm_manager.data.config_store import (
@@ -35,6 +32,7 @@ from llm_manager.gateway.api.common import (
     get_config_store,
     get_db,
     restart_fields,
+    trigger_restart,
 )
 from llm_manager.version import get_version
 
@@ -280,26 +278,8 @@ def register_config_routes(api: APIRouter) -> None:
 
     @api.post("/config/restart", status_code=202)
     async def restart_app(request: Request) -> dict:
-        """请求优雅重启:置 app.state.restart_requested;有 uvicorn server → 后台延迟翻
-        should_exit(让 202 先冲刷),worker 优雅跑完 lifespan 收尾后以 81 退出。
-        无 server(dev --reload)→ 0.5s 后 os._exit(81)(dev 无监督器,需手动重启)。
-        生产路径:内置 parent 监督器接住 81 拉起全新 worker(不依赖外部 bat/sh)。"""
-        request.app.state.restart_requested = True
-        server = getattr(request.app.state, "uvicorn_server", None)
-        if server is not None:
-
-            async def _delayed_exit() -> None:
-                await asyncio.sleep(0.5)
-                server.should_exit = True
-
-            asyncio.create_task(_delayed_exit())
-        else:
-
-            async def _dev_exit() -> None:
-                await asyncio.sleep(0.5)
-                os._exit(RESTART_EXIT_CODE)
-
-            asyncio.create_task(_dev_exit())
+        """请求优雅重启:置 restart_requested → worker 退出 81 → parent 拉起新 worker。"""
+        trigger_restart(request)
         return {}
 
     @api.get("/config/models")

@@ -4,14 +4,16 @@ import { DatabasePanel } from "@/components/system/database-panel";
 import { GeneralPanel } from "@/components/system/general-panel";
 import { ModelDefPanel } from "@/components/system/model-def-panel";
 import { RestartBanner } from "@/components/system/restart-banner";
+import { UpdatePanel } from "@/components/system/update-panel";
 import { ZoneNav } from "@/components/ui/nav-tabs";
 import { useRestartApp, useRestartStatus } from "@/lib/hooks/use-config";
 
-type SystemZone = "general" | "models" | "database";
+type SystemZone = "general" | "models" | "database" | "update";
 const ZONES: readonly { key: SystemZone; label: string }[] = [
   { key: "general", label: "系统配置" },
   { key: "models", label: "模型配置" },
   { key: "database", label: "数据库管理" },
+  { key: "update", label: "更新" },
 ];
 
 export default function SystemPage() {
@@ -50,6 +52,7 @@ export default function SystemPage() {
           {zone === "general" && <GeneralPanel />}
           {zone === "models" && <ModelDefPanel />}
           {zone === "database" && <DatabasePanel />}
+          {zone === "update" && <UpdatePanel />}
         </div>
       </div>
     </>

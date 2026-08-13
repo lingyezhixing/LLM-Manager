@@ -9,6 +9,8 @@
 本地多 LLM 模型的代理网关 + WebUI:按需启动/空闲回收本地模型进程(llama.cpp /
 lmdeploy / vLLM …),对外暴露 OpenAI / Anthropic / Responses 兼容 API,记录用量与计费,
 提供系统配置、模型管理、用量统计、日志查看的前端。**完全离线**(无云端依赖)。
+**唯一联网点 = 自更新**(系统页「更新」区,git fetch/merge 本项目仓库,用户显式
+点击检查/应用按钮才触发,后台永不自动;见 §5.1)。
 
 - 后端:Python 3 + FastAPI + uvicorn + SQLite(单连接 + `write_lock`)。`src/llm_manager/`
 - 前端:React 19 + Vite + TS + Tailwind v4 + TanStack Query。`frontend/`
@@ -25,7 +27,7 @@ state    ── 内存状态机(ModelStatus)+ 单派发 inflight Future + activi
   ↓
 supervisor ── 子进程管理(_procs/_exit_cbs/_readers 三表 + kill_tree + 单 _wait 协程)
   ↓
-runtime  ── lifecycle(编排)/scheduling(纯函数资源决策)/background(心跳 30s + 日志保留 + 空闲回收 + 自启)
+runtime  ── lifecycle(编排)/scheduling(纯函数资源决策)/background(心跳 30s + 日志保留 + 空闲回收 + 自启)/update(自更新:git 编排)
   ↓
 data     ── persistence(schema/迁移)+ logs(会话/行 SQL + 捕获/广播/flush)+ usage(计费 + 会话计数)+ config_store(DB 配置)
   ↓
@@ -92,6 +94,19 @@ tray     ── 系统托盘(自重启触发 / WOL / Claude 预设应用)
   `restart_app` 无 server 分支 `os._exit(81)`(dev 一次性)。
 - `POST /api/config/restart`(WebUI 顶部重启横幅)走 `restart_requested → worker exit 81 → parent 拉新`。
 - `LLM-Manager.bat` 仅作 Windows 静默后台启动(VBS),不参与重启。
+
+### 5.1 自更新(标签版本 + 严格 ff-only)
+
+- **版本 = git 标签**(当前 = `git describe --tags --abbrev=0 HEAD`,最新 =
+  `origin/main` 最近可达标签)——以标签为版本号,不以单个 commit。发版必须打标签。
+- **流程**:`GET /api/update/status`(fetch 对比,不动工作树;离线 → ok=False+error)/
+  `POST /api/update/apply`(fetch + `git merge --ff-only origin/main` → `trigger_restart` →
+  exit 81 → parent 拉新 worker。editable 安装下工作树即源码,新进程 import 即新代码)。
+- **严格语义**:工作树脏 / 本地历史分叉 → 409,绝不 stash/覆盖。仅 ff-only。
+- **网络纪律**:唯一联网点,仅用户显式按钮触发(系统页「更新」区),后台永不自动。
+- 测试:`tests/unit/runtime/test_update.py`(本地 bare origin,无网络)、
+  `tests/unit/gateway/test_api_update.py`(API 契约)。
+- 注意:更新后依赖若变,editable 安装不会自动重装(pip 层自理)。
 
 ## 6. 命令(验收用)
 
