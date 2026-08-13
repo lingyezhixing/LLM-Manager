@@ -3,7 +3,9 @@ total exception safety (a raise in stream-finally truncates the client stream).
 Ported from legacy core/token_parsers.py (behavior preserved verbatim)。
 
 未知路径默认回退 parse_generic(保守按字段分类,非顺序盲试;仅无歧义信号
-返回非零,宁可漏计也不误记)。显式注册表仍为主路,新增已知端点应显式注册。
+返回非零,宁可漏计也不误记)。三大 API 显式注册;此外 parse_generic 还识别
+Ollama(prompt_eval_count/eval_count)、Gemini(usageMetadata)、Cohere
+(meta.billed_units)等常见约定,任意转发路径的用量尽力计数。
 
 另含共享用量指标 helper(hit_rate),供 usage(计费/会话计数)引用。"""
 
@@ -198,6 +200,84 @@ def _parse_generic_usage(body: bytes) -> TokenUsage:
 
 
 @_safe
+def _parse_ollama(body: bytes) -> TokenUsage:
+    """Ollama /api/chat、/api/generate:prompt_eval_count(输入)+ eval_count(输出),
+    流式末块(done=true)带计数字段。无缓存拆分 → cache=0、prompt=input。"""
+    s = _body_str(body)
+    inp = out = 0
+    if _is_sse(s):
+        for payload in iter_blocks(s):
+            d = _try_json(payload)
+            if not isinstance(d, dict):
+                continue
+            inp = _to_int(d.get("prompt_eval_count"))
+            out = _to_int(d.get("eval_count"))
+            if inp or out:
+                break
+    else:
+        d = _try_json(s) or {}
+        inp = _to_int(d.get("prompt_eval_count"))
+        out = _to_int(d.get("eval_count"))
+    if not (inp or out):
+        return TokenUsage(0, 0, 0, 0)
+    return TokenUsage(inp, out, 0, inp)
+
+
+@_safe
+def _parse_gemini(body: bytes) -> TokenUsage:
+    """Gemini generateContent/streamGenerateContent:usageMetadata。
+    promptTokenCount(输入)+ candidatesTokenCount(输出)+ cachedContentTokenCount(缓存读)。
+    流式每块都带 usageMetadata,取最末块(累积口径)。"""
+    s = _body_str(body)
+    inp = out = cached = 0
+    if _is_sse(s):
+        for payload in iter_blocks(s):
+            d = _try_json(payload)
+            if not isinstance(d, dict):
+                continue
+            u = d.get("usageMetadata")
+            if isinstance(u, dict) and "promptTokenCount" in u:
+                inp = _to_int(u.get("promptTokenCount"))
+                out = _to_int(u.get("candidatesTokenCount"))
+                cached = _to_int(u.get("cachedContentTokenCount"))
+    else:
+        u = (_try_json(s) or {}).get("usageMetadata") or {}
+        inp = _to_int(u.get("promptTokenCount"))
+        out = _to_int(u.get("candidatesTokenCount"))
+        cached = _to_int(u.get("cachedContentTokenCount"))
+    if not (inp or out):
+        return TokenUsage(0, 0, 0, 0)
+    cached = min(cached, inp)
+    return TokenUsage(inp, out, cached, max(0, inp - cached))
+
+
+@_safe
+def _parse_billed_units(body: bytes) -> TokenUsage:
+    """Cohere:meta.billed_units.input_tokens/output_tokens,流式末块带 meta。
+    无缓存字段 → cache=0、prompt=input。"""
+    s = _body_str(body)
+    inp = out = 0
+    if _is_sse(s):
+        for payload in iter_blocks(s):
+            d = _try_json(payload)
+            if not isinstance(d, dict):
+                continue
+            u = ((d.get("meta") or {}).get("billed_units")) or {}
+            if "input_tokens" in u or "output_tokens" in u:
+                inp = _to_int(u.get("input_tokens"))
+                out = _to_int(u.get("output_tokens"))
+                if inp or out:
+                    break
+    else:
+        u = ((_try_json(s) or {}).get("meta") or {}).get("billed_units") or {}
+        inp = _to_int(u.get("input_tokens"))
+        out = _to_int(u.get("output_tokens"))
+    if not (inp or out):
+        return TokenUsage(0, 0, 0, 0)
+    return TokenUsage(inp, out, 0, inp)
+
+
+@_safe
 def parse_generic(body: bytes) -> TokenUsage:
     """保守通用回退:未知路径时按「存在哪些字段」分类(非顺序盲试),避免
     anthropic 与 responses 同字段不同 cache 语义的错配。仅无歧义信号返回非零,
@@ -207,13 +287,19 @@ def parse_generic(body: bytes) -> TokenUsage:
         return parse_responses(body)  # OpenAI Responses 缓存口径
     if "cache_read_input_tokens" in s or "cache_creation_input_tokens" in s:
         return parse_anthropic(body)  # Anthropic 缓存口径
+    if "prompt_eval_count" in s or "eval_count" in s:
+        return _parse_ollama(body)  # Ollama 原生口径
+    if "promptTokenCount" in s or "candidatesTokenCount" in s:
+        return _parse_gemini(body)  # Gemini usageMetadata 口径
+    if "billed_units" in s:
+        return _parse_billed_units(body)  # Cohere 计费单位口径
     if (
         "usage" in s
         and "input_tokens" in s
         and not ("prompt_tokens" in s or "completion_tokens" in s)
     ):
         return _parse_generic_usage(body)  # 裸 input/output,无缓存字段
-    return parse_openai(body)  # openai 形态(prompt_tokens/completion_tokens)
+    return parse_openai(body)  # openai 形态(prompt_tokens/completion_tokens)或 llama.cpp timings
 
 
 # path → (parser, include_usage) 单源;parser_registry 派生保持既有 API 不变。

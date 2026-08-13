@@ -113,11 +113,12 @@ class _StreamSample:
     避免长流式响应(推理模型几分钟输出)整条缓冲导致内存随流时长无界增长、N 个并发流
     = N 份无界缓冲。
 
-    metering 三解析器的用量字段仅出现在头部(Anthropic message_start 的 input 用量)
-    或尾部(OpenAI usage / Anthropic message_delta / Responses response.completed)——
-    中间内容增量不含用量,可安全丢弃。解析器对头尾拼接串容忍:拼接处的半行被
+    metering 各解析器的用量字段仅出现在头部(Anthropic message_start 的 input 用量)
+    或尾部(OpenAI usage / Anthropic message_delta / Responses response.completed /
+    Ollama done 末块 / Gemini 累积 usageMetadata / Cohere 末块 meta)——中间内容增量
+    不含用量,可安全丢弃。解析器对头尾拼接串容忍:拼接处的半行被
     _try_json 回退跳过,完整的 head/tail 事件照常解析(parse_anthropic 需头+尾,
-    parse_openai/responses 仅需尾)。"""
+    其余仅需尾)。"""
 
     def __init__(self, head_max: int = 16 * 1024, tail_max: int = 128 * 1024) -> None:
         self._head_max = head_max

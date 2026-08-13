@@ -221,6 +221,49 @@ def test_https_rewrite_noop_for_https_origin(monkeypatch, repo: Path) -> None:
     assert _https_rewrite_args(repo) == []
 
 
+def test_fetch_refreshes_force_moved_tag(tmp_path: Path) -> None:
+    """远端发布标签被强移(改史/squash 重打)后,普通 fetch 残留本地旧标签 → 版本识别
+    错位;`_fetch` 的 --tags --force 强制对齐远端标签。容器侧 HEAD 停在旧祖先提交,
+    标签是 fetch 自动跟随带进来的(与实际场景一致)。"""
+    orig = tmp_path / "orig"
+    _init_repo(orig)
+    _commit(orig, "c1")
+    _git(orig, "tag", "v1.0.0")
+    origin = tmp_path / "origin.git"
+    _git(orig, "init", "--bare", str(origin))
+    _git(orig, "remote", "add", "origin", str(origin))
+    _git(orig, "push", "origin", "main", "--tags")
+
+    # 容器 = 克隆(HEAD 停在 c1)
+    clone = tmp_path / "clone"
+    _git(tmp_path, "clone", str(origin), str(clone))
+
+    # 远端推进 c2 + v2.0.0;容器 fetch 自动跟随 v2.0.0(此后成为"旧标签"),HEAD 不动
+    _commit(orig, "c2")
+    _git(orig, "tag", "v2.0.0")
+    _git(orig, "push", "origin", "main", "--tags")
+    _git(clone, "fetch", "origin")
+
+    # 远端改史 + 标签强移:reset 掉 c2,重建等价提交 c2'(不同 SHA),v2.0.0 强移过去
+    _git(orig, "reset", "--soft", "HEAD~1")
+    _commit(orig, "c2'")
+    _git(orig, "tag", "-f", "v2.0.0")
+    _git(orig, "push", "origin", "main", "--force")
+    _git(orig, "push", "origin", "v2.0.0", "--force")
+
+    # 复现错位:普通 fetch 不更新已存在标签,describe(origin/main) 沿 c2' 祖先回退 v1.0.0
+    _git(clone, "fetch", "origin")
+    assert _git(clone, "describe", "--tags", "--abbrev=0", "origin/main") == "v1.0.0"
+
+    # 修复:check_update 内部 _fetch 带 --tags --force → 标签对齐远端,正确识别 v2.0.0
+    st = check_update(clone)
+    assert st.ok and not st.conflicted
+    assert st.tag == "v2.0.0"
+    assert st.tag_available is True
+    assert st.commit_available is True
+    assert st.commit_sha == _git(clone, "rev-parse", "--short", "origin/main")
+
+
 def test_no_tags_commit_target_only(tmp_path: Path) -> None:
     work = tmp_path / "notags"
     _init_repo(work)

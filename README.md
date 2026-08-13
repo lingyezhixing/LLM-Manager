@@ -1,4 +1,4 @@
-# LLM-Manager v3.0.0a2
+# LLM-Manager
 
 **LLM-Manager** 是一个统一管理本地大型语言模型（LLM）的代理网关 + WebUI：按需启动 / 空闲回收本地模型进程（llama.cpp / lmdeploy / vLLM …），对外暴露 OpenAI / Anthropic / Responses 兼容 API，记录用量与计费，并提供系统配置、模型管理、用量统计、日志查看的完整前端。**完全离线运行**（无任何云端依赖）。
 
@@ -34,7 +34,7 @@
 - **分析看板**：成本趋势 / Token 趋势 / 单模型统计 / 使用量汇总（WebUI 用量统计页，实时 SSE 刷新）。
 
 ### 5. 系统托盘
-- 🌐 一键打开 WebUI · 🔔 网络唤醒远程设备（如飞牛 NAS）· Claude API 预设一键切换（子菜单显示当前配置）· ▶ 重启自启模型 / ⏹ 卸载全部模型 · ❌ 优雅退出。
+- 一键打开 WebUI · 网络唤醒远程设备（如飞牛 NAS，未配置时隐藏）· Claude API 预设一键切换（子菜单显示当前配置）· 重启自启模型 / 卸载全部模型 · 优雅退出。
 - 无头环境（无桌面 / 无 pystray）自动降级为静默后台运行。
 
 ### 6. 数据与日志管理
@@ -47,6 +47,11 @@
 - 页面：**概览**（设备 / 模型 / 会话实时状态）· **模型管理**（启停 + 实时日志 + 定义 CRUD）· **用量统计** · **日志查看** · **系统配置**（程序 / 模型 / 计费 / WOL / Claude 预设 / 日志保留 / 数据管理）。
 - 配置修改即时生效或提示重启（需重启字段自动检测 + 一键自重启，退出码 81 契约）。
 
+### 8. 自更新（仅向前）
+- **版本即 git 标签**；更新目标两档：**稳定版**（最近发布标签）/ **最新提交**（origin/main 最新提交），严格 ff-only，不支持回退。
+- 系统页「更新」区一键检查并应用，更新后自动重启生效；程序启动时后台自动检测一次，**此后仅手动触发联网**（完全离线的唯一联网点）。
+- Docker 下 root 容器要求宿主仓库为 root 属主；镜像缺 openssh-client 时 SSH 远端自动回退 HTTPS 拉取（公开仓库免认证）。
+
 ---
 
 ## 架构
@@ -55,7 +60,7 @@
 config   ── 纯数据 + 校验（DB → frozen dataclasses）
 state    ── 内存状态机 + 单派发 inflight Future
 supervisor ── 子进程管理（kill_tree + 单 wait 协程）
-runtime  ── 生命周期编排 / 纯函数资源调度 / 心跳 / 日志保留
+runtime  ── 生命周期编排 / 纯函数资源调度 / 心跳 / 日志保留 / 自更新
 data     ── SQLite 持久化 + 日志 / 用量 / 配置存储
 gateway  ── 流式代理 + REST/SSE 端点 + 别名解析
 tray     ── 系统托盘（WOL / Claude 预设 / 快速启停）
@@ -63,7 +68,7 @@ tray     ── 系统托盘（WOL / Claude 预设 / 快速启停）
 
 - **单进程模型**：一个 Python 进程跑一个 app（FastAPI + uvicorn），模块级单例内存状态，SQLite 单连接 + `write_lock` 串行化。
 - **配置单一源**：全部配置存 SQLite（`data/llm_manager.db`），运行时只读 frozen 快照；环境变量仅在启动期覆写并持久化。
-- **自重启**：程序内置 parent 监督器（`python -m llm_manager`）spawn 并管理 worker；配置变更重启时 worker 以退出码 81 退出，parent 拉起全新 worker（每次全新进程，构造性干净）。`LLM-Manager.bat` 仅作 Windows 静默后台启动，不参与重启。
+- **自重启**：程序内置 parent 监督器（`python -m llm_manager`）spawn 并管理 worker；配置变更或自更新完成后 worker 以退出码 81 退出，parent 拉起全新 worker（每次全新进程，构造性干净）。`LLM-Manager.bat` 仅作 Windows 静默后台启动，不参与重启。
 
 ---
 
@@ -105,6 +110,7 @@ docker compose up -d             # 日常：改代码/配置后重启即可，�
 - `data/`、`logs/` 落在宿主机，天然持久化；配置全部走 WebUI（DB 化），无需进容器改文件
 - 容器内 `python -m llm_manager` 即 parent+worker 自重启；镜像预装 llama.cpp 编译/运行所需系统库（Vulkan/OpenBLAS/cmake 工具链），llama.cpp 编译脚本不归本仓库管理
 - Intel iGPU 监控需容器 `SYS_ADMIN` + `seccomp=unconfined`（compose example 已含，仅供 i915 PMU 监控）
+- **自更新**：root 容器下宿主仓库须为 root 属主（否则 git "dubious ownership" 拒绝，更新功能自动隐藏）；镜像缺 openssh-client 时 SSH 远端自动回退 HTTPS 拉取（公开仓库免认证，宿主推送仍走 SSH）
 
 ---
 

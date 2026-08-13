@@ -147,9 +147,15 @@ def _https_rewrite_args(root: Path) -> list[str]:
 
 
 def _fetch(root: Path) -> subprocess.CompletedProcess:
-    """git fetch origin(缺 ssh 时自动 HTTPS 重写)。"""
+    """git fetch origin --tags --force(缺 ssh 时自动 HTTPS 重写)。
+
+    --tags --force 保证远端标签与本地一致:普通 fetch 对已存在的本地标签永不更新,
+    发布标签被强移/改写历史(squash 重打)后,本地会残留指向孤立提交的旧标签 →
+    ``describe`` 沿新祖先走不到它 → 版本识别回退旧号(如强移后仍显示 v3.0.0a2)。"""
     return _git_or_error(
-        root, [*_https_rewrite_args(root), "fetch", "origin"], timeout=_FETCH_TIMEOUT
+        root,
+        [*_https_rewrite_args(root), "fetch", "origin", "--tags", "--force"],
+        timeout=_FETCH_TIMEOUT,
     )
 
 

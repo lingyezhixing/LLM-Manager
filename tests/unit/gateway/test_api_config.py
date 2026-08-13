@@ -36,9 +36,9 @@ def test_system_info_returns_version_uptime_db_size(tmp_path):
         r = c.get("/api/system/info")
     assert r.status_code == 200
     j = r.json()
-    # 锁住回归:version 必须从源码 pyproject 读到真实版本(3.0.0a2),不再滞后于
+    # 锁住回归:version 必须从源码 pyproject 读到真实版本(3.0.0),不再滞后于
     # 已安装元数据。升版本号时同步改此处。
-    assert j["version"] == "3.0.0a2"
+    assert j["version"] == "3.0.0"
     assert isinstance(j["started_at"], (int, float))
     assert "db_path" not in j and "log_dir" not in j  # 已移除:不再暴露路径
     assert isinstance(j["db_size_bytes"], int)  # 保留:实际库文件大小(fixture 挂了 resolved_db)

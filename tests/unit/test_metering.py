@@ -86,3 +86,45 @@ def test_generic_fallback_error_body_returns_zero():
     assert parse_tokens("v1/whatever", b'{"error":{"message":"bad request"}}') == TokenUsage(
         0, 0, 0, 0
     )
+
+
+def test_generic_fallback_ollama_non_stream():
+    # Ollama /api/generate:prompt_eval_count + eval_count,无缓存字段 → cache=0、prompt=input
+    body = b'{"model":"m","response":"hi","done":true,"prompt_eval_count":12,"eval_count":28,"total_duration":1000}'
+    assert parse_tokens("api/generate", body) == TokenUsage(12, 28, 0, 12)
+
+
+def test_generic_fallback_ollama_stream():
+    # 流式:中间块无计数,末块(done=true)带计数
+    body = (
+        b'data: {"model":"m","response":"hi","done":false}\n\n'
+        b'data: {"model":"m","response":" you","done":false}\n\n'
+        b'data: {"model":"m","response":"","done":true,"prompt_eval_count":12,"eval_count":28}\n\n'
+    )
+    assert parse_tokens("api/chat", body) == TokenUsage(12, 28, 0, 12)
+
+
+def test_generic_fallback_gemini_non_stream():
+    # Gemini usageMetadata:promptTokenCount/candidatesTokenCount/cachedContentTokenCount
+    body = (
+        b'{"candidates":[{"content":{"parts":[{"text":"hi"}]}}],'
+        b'"usageMetadata":{"promptTokenCount":100,"candidatesTokenCount":50,"cachedContentTokenCount":20}}'
+    )
+    assert parse_tokens("v1beta/models/m:generateContent", body) == TokenUsage(100, 50, 20, 80)
+
+
+def test_generic_fallback_gemini_stream():
+    # 流式:每块带 usageMetadata,取最末块(累积口径)
+    body = (
+        b'data: {"candidates":[],"usageMetadata":{"promptTokenCount":90,"candidatesTokenCount":10}}\n\n'
+        b'data: {"candidates":[],"usageMetadata":{"promptTokenCount":100,"candidatesTokenCount":50}}\n\n'
+    )
+    assert parse_tokens("v1beta/models/m:streamGenerateContent", body) == TokenUsage(
+        100, 50, 0, 100
+    )
+
+
+def test_generic_fallback_cohere_billed_units():
+    # Cohere:meta.billed_units.input_tokens/output_tokens
+    body = b'{"text":"hi","meta":{"billed_units":{"input_tokens":30,"output_tokens":15}}}'
+    assert parse_tokens("v1/generate", body) == TokenUsage(30, 15, 0, 30)
