@@ -10,8 +10,8 @@ import ToolsPage from "@/pages/tools";
 import UsagePage from "@/pages/usage";
 import { useUpdateStatus } from "@/lib/hooks/use-config";
 
-// 程序启动时自动检测一次更新(useUpdateStatus 挂载即取;staleTime:Infinity 保证
-// 此后无任何自动检测,仅系统页手动点「检查更新」)。不渲染 UI。
+// 启动时预读自更新状态缓存(后端已在程序启动时后台检测一次,存于 /api/update/status;
+// 此处只是 GET 读缓存预取,不触发任何检测)。不渲染 UI。
 function StartupUpdateCheck() {
   useUpdateStatus();
   return null;

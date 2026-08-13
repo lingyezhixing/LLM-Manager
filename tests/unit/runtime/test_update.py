@@ -152,7 +152,16 @@ def test_conflicted_rejects_both_targets(repo: Path) -> None:
 def test_not_a_git_repo(tmp_path: Path) -> None:
     st = check_update(tmp_path)
     assert not st.ok
+    assert st.supported is False
     assert st.error and "git" in st.error
+
+
+def test_git_missing_unsupported(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr("llm_manager.runtime.update.shutil.which", lambda _name: None)
+    st = check_update(tmp_path)
+    assert not st.ok
+    assert st.supported is False
+    assert "git" in (st.error or "")
 
 
 def test_no_tags_commit_target_only(tmp_path: Path) -> None:

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import {
   applyUpdate,
+  checkUpdate,
   fetchConfig,
   fetchHealth,
   fetchRestartStatus,
@@ -12,6 +13,7 @@ import {
   updateProgram,
   type LogRetention,
   type ProgramUpdate,
+  type UpdateStatus,
   type UpdateTarget,
 } from "@/lib/api";
 import { errMsg } from "@/lib/format";
@@ -118,15 +120,27 @@ export function useUpdateApp() {
 }
 
 export function useUpdateStatus() {
-  // 启动时自动检测一次(挂载于 App 根 StartupUpdateCheck);staleTime:Infinity →
-  // 数据永不失效,此后任何重挂载/聚焦/重连都不再自动联网,仅「检查更新」按钮
-  // 手动 refetch 才会再查。失败不自动重试。
+  // 只读后端启动检测缓存:GET /status 无网络,刷新/进页不触发检测;失败不自动重试。
+  // 启动检测未完成(checking=true)时短轮询等待结果——这是等「程序启动时那一次检测」,
+  // 不新增任何检测;完成后轮询自动停止。
   return useQuery({
     queryKey: ["update", "status"],
     queryFn: fetchUpdateStatus,
-    staleTime: Infinity,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
     retry: false,
+    refetchInterval: (query) => {
+      const d = query.state.data as UpdateStatus | undefined;
+      return d?.checking ? 1500 : false;
+    },
+  });
+}
+
+// 手动检查更新(POST /api/update/check,唯一触发后端重新检测的入口)。
+export function useUpdateCheck() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: checkUpdate,
+    onSuccess: (data) => qc.setQueryData(["update", "status"], data),
   });
 }

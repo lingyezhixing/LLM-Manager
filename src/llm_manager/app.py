@@ -28,9 +28,21 @@ from llm_manager.realtime import DeviceFeed, ModelFeed
 from llm_manager.runtime import background
 from llm_manager.runtime.lifecycle import Lifecycle
 from llm_manager.runtime.probes import probe_registry
+from llm_manager.runtime.update import UpdateStatus, check_update
 from llm_manager.supervisor import Supervisor
 
 logger = logging.getLogger(__name__)
+
+
+async def _startup_update_check(app: FastAPI) -> None:
+    """程序启动时后台检测一次自更新(git fetch,网络):结果缓存到
+    app.state.update_status,前端只读缓存。仅此一次,此后无任何自动检测——
+    手动检查走 POST /api/update/check。to_thread 外包阻塞的 git 调用。"""
+    try:
+        app.state.update_status = await asyncio.to_thread(check_update)
+    except Exception:
+        logger.exception("startup update check failed")
+        app.state.update_status = UpdateStatus(ok=False, error="启动更新检查失败")
 
 
 def create_app(db_path: Path | None = None, *, legacy_yaml: Path | None = None) -> FastAPI:
@@ -110,6 +122,8 @@ def create_app(db_path: Path | None = None, *, legacy_yaml: Path | None = None) 
         idle_task = asyncio.create_task(
             background.idle_reclamation_loop(lifecycle, store.snapshot, stop_event)
         )
+        # 启动自更新检测(后台一次;结果缓存 app.state.update_status,前端只读)
+        update_task = asyncio.create_task(_startup_update_check(app))
         # 系统托盘(守卫:pystray 可用 + 需 uvicorn server 句柄做优雅退出;claude_settings_path 可空,
         # 未配置时托盘照常启动,仅 Claude 预设子菜单隐藏——首次启动不该缺失托盘)
         tray = None
@@ -137,6 +151,8 @@ def create_app(db_path: Path | None = None, *, legacy_yaml: Path | None = None) 
             try:
                 await lifecycle.unload_all()
             finally:
+                if not update_task.done():
+                    update_task.cancel()
                 if not idle_task.done():
                     idle_task.cancel()
                 if not auto_task.done():
@@ -165,6 +181,7 @@ def create_app(db_path: Path | None = None, *, legacy_yaml: Path | None = None) 
         for f in ("host", "port", "claude_settings_path", "log_level")
     }
     app.state.started_at = time.time()
+    app.state.update_status = None  # 自更新启动检测结果缓存(后台任务填充;None=检测中)
     return app
 
 

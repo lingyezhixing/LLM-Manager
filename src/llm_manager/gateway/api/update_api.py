@@ -1,10 +1,12 @@
-"""Self-update API: GET /api/update/status + POST /api/update/apply。
+"""Self-update API: GET /api/update/status + POST /api/update/check + POST /api/update/apply。
 
-状态:fetch 后以 git 标签身份对比本地/远端(不动工作树),给出两个目标的可用性
-(tag=最新标签 / commit=最新提交);
-应用:fetch + ff-only 合并到所选目标(严格向前,冲突/分叉 → 409)→ 成功后走
-common.trigger_restart(与 /api/config/restart 同通道)→ worker 退出 81 →
-parent 监督器拉全新 worker 加载新代码(editable 安装,工作树即源码)。
+检测语义:程序(worker)启动时后台检测一次(check_update,见 app.py 的
+_startup_update_check),结果缓存到 app.state.update_status。此后**无任何自动检测**:
+* GET  /status → 读缓存快照(无网络;启动检测未完成 → checking=True 占位);
+* POST /check  → 手动触发一次全新检测(前端「检查更新」按钮),刷新缓存并返回;
+* POST /apply  → fetch + ff-only 合并到所选目标(冲突/分叉 → 409)→ 成功后走
+  common.trigger_restart(与 /api/config/restart 同通道)→ worker 退出 81 →
+  parent 监督器拉全新 worker 加载新代码(editable 安装,工作树即源码)。
 """
 
 from __future__ import annotations
@@ -17,7 +19,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from llm_manager.gateway.api.common import trigger_restart
-from llm_manager.runtime.update import UpdateError, apply_update, check_update
+from llm_manager.runtime.update import UpdateError, UpdateStatus, apply_update, check_update
 
 
 class UpdateTarget(BaseModel):
@@ -26,11 +28,25 @@ class UpdateTarget(BaseModel):
     target: Literal["commit", "tag"] = "commit"
 
 
+def _cached_status(request: Request) -> UpdateStatus:
+    """启动检测缓存;未就绪 → checking=True 占位(前端据此轮询等待,不新增检测)。"""
+    cached = getattr(request.app.state, "update_status", None)
+    return cached if cached is not None else UpdateStatus(checking=True)
+
+
 def register_update_routes(api: APIRouter) -> None:
     @api.get("/update/status")
-    def update_status() -> dict:
-        """检查更新(网络 fetch;超时/离线 → ok=False + error)。同步 def → 线程池,不阻塞事件循环。"""
-        return asdict(check_update())
+    def update_status(request: Request) -> dict:
+        """读启动检测缓存快照(无网络)。同步 def → 线程池,不阻塞事件循环。"""
+        return asdict(_cached_status(request))
+
+    @api.post("/update/check", status_code=200)
+    async def update_check(request: Request) -> dict:
+        """手动检查更新(仅「检查更新」按钮触发):跑一次全新 check_update(fetch,
+        网络),结果写回缓存并返回。async def → to_thread 外包阻塞的 git 调用。"""
+        st = await asyncio.to_thread(check_update)
+        request.app.state.update_status = st
+        return asdict(st)
 
     @api.post("/update/apply", status_code=202)
     async def update_apply(body: UpdateTarget, request: Request) -> dict:

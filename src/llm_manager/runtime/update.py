@@ -37,10 +37,12 @@ class UpdateError(Exception):
 
 @dataclass(frozen=True)
 class UpdateStatus:
-    """检查结果快照(API 层 asdict 直出)。ok=False 时仅 current_* 有意义。"""
+    """检查结果快照(API 层 asdict 直出)。ok=False 时仅 supported/error 可信。"""
 
-    ok: bool = False  # git 可用且远端可达(其余字段才可信)
-    error: str | None = None  # ok=False 时的人类可读原因
+    ok: bool = False  # 检查成功(git 可用 + 仓库 + 远端可达)
+    supported: bool = True  # 功能是否可用:git 已安装且工作目录是 git 仓库
+    checking: bool = False  # 启动检测尚未完成(前端据此轮询等待)
+    error: str | None = None  # 失败原因(检查失败 / 不支持时的文案)
     current_version: str = ""  # HEAD 最近可达标签;无标签 → "未打标签"
     current_sha: str = ""  # 本地 HEAD 短 SHA
     dirty: bool = False  # 工作树有未提交改动(仅提示,不预拒)
@@ -128,19 +130,30 @@ def _merge_failure_hint(root: Path, proc: subprocess.CompletedProcess) -> str:
 
 
 def check_update(root: Path | None = None) -> UpdateStatus:
-    """检查更新:git 可用性 + 工作树干净度 + fetch(更新 origin/main,不动工作树)+ 两目标可用性。"""
+    """检查更新:git 可用性 + 是否仓库(不支持 → supported=False)→ fetch(更新
+    origin/main,不动工作树)→ 两目标可用性。前端以 supported 决定是否展示更新功能。"""
     root = root or _PROJECT_ROOT
+    try:
+        if shutil.which("git") is None:
+            return UpdateStatus(ok=False, supported=False, error="系统未安装 git,无法自更新")
+        if not _is_git_repo(root):
+            return UpdateStatus(ok=False, supported=False, error="非 git 仓库,无法自更新")
+    except UpdateError as e:
+        return UpdateStatus(ok=False, supported=False, error=str(e))
+
     current_version = ""
     current_sha = ""
     try:
-        if not _is_git_repo(root):
-            return UpdateStatus(ok=False, error="非 git 仓库,无法自更新")
         current_version = _describe_tag(root) or _NO_TAG
         current_sha = _short(_full(root, "HEAD"))
         dirty = bool(_git_or_error(root, ["status", "--porcelain"], timeout=5.0).stdout.strip())
     except UpdateError as e:
         return UpdateStatus(
-            ok=False, error=str(e), current_version=current_version, current_sha=current_sha
+            ok=False,
+            supported=True,
+            error=str(e),
+            current_version=current_version,
+            current_sha=current_sha,
         )
 
     try:

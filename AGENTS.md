@@ -101,10 +101,15 @@ tray     ── 系统托盘(自重启触发 / WOL / Claude 预设应用)
 - **更新目标两个细粒度**:`tag`(origin/main 最近可达标签,稳定发布)/ `commit`
   (origin/main 最新提交,前沿)。**无回退 / 无版本选择 / 无提交树浏览**——数据库结构
   只向前迁移,旧代码无法解读新 schema,故不支持回到旧版本。
-- **流程**:`GET /api/update/status`(fetch 对比,不动工作树;离线 → ok=False+error)/
-  `POST /api/update/apply` body `{"target": "tag"|"commit"}`(fetch + `git merge
-  --ff-only <目标>` → `trigger_restart` → exit 81 → parent 拉新 worker。editable
-  安装下工作树即源码,新进程 import 即新代码)。
+- **检测语义**:程序(worker)启动时后台检测一次(fetch,不动工作树),结果缓存
+  `app.state.update_status`;此后无任何自动检测。`GET /api/update/status`(读缓存,
+  无网络;启动检测未完成 → checking=true,前端短轮询等待)/ `POST /api/update/check`
+  (手动重新检测,唯一重新联网入口,前端「检查更新」按钮)/ `POST /api/update/apply`
+  body `{"target": "tag"|"commit"}`(fetch + `git merge --ff-only <目标>` →
+  `trigger_restart` → exit 81 → parent 拉新 worker。editable 安装下工作树即源码,
+  新进程 import 即新代码)。
+- **支持性门控**:git 未安装 / 非 git 仓库 → `supported=false`,前端隐藏更新功能
+  (仅剩启动时间/运行时长)。
 - **严格语义**:本地未提交改动不预拒——交给 git 原语,仅与更新内容冲突时拒绝(绝不
   stash/覆盖);本地历史分叉同样拒绝。均 409。
 - **网络纪律**:唯一联网点,仅用户显式按钮触发(系统页「更新」区),后台永不自动。
