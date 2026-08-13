@@ -1,5 +1,3 @@
-from pathlib import Path
-
 from llm_manager.config import (
     AppConfig,
     Command,
@@ -7,46 +5,11 @@ from llm_manager.config import (
     ModelMode,
     ProgramConfig,
     Scheme,
-    load,
     resolve_alias,
     select_adaptive,
     substitute_vars,
     validate,
 )
-
-
-def _write_cfg(tmp_path: Path, body: str) -> Path:
-    p = tmp_path / "config.yaml"
-    p.write_text(body, encoding="utf-8")
-    return p
-
-
-def test_load_parses_models_and_preserves_device_names(tmp_path):
-    cfg_path = _write_cfg(
-        tmp_path,
-        """
-program: {host: 0.0.0.0, port: 8080, alive_time: 60, log_level: INFO}
-Local-Models:
-  Qwen3-4B:
-    aliases: ["Qwen3-4B"]
-    mode: Chat
-    port: 10001
-    RTX4060:
-      required_devices: ["RTX 4060"]
-      command: {exe: "q.bat"}
-      memory_mb: {"RTX 4060": 5120}
-""",
-    )
-    cfg = load(cfg_path)
-    m = cfg.models["Qwen3-4B"]
-    assert m.port == 10001
-    assert m.mode == "Chat"
-    assert "Qwen3-4B" in m.aliases
-    scheme = m.schemes["RTX4060"]
-    assert isinstance(scheme, Scheme)
-    assert scheme.required_devices == frozenset({"RTX 4060"})  # 存储原样,匹配时归一化
-    assert scheme.memory_mb == {"RTX 4060": 5120}
-    assert scheme.command.exe == "q.bat"
 
 
 def test_model_mode_values():

@@ -1,39 +1,42 @@
 import pytest
 from fastapi.testclient import TestClient
+from helpers import cfg as build_cfg
+from helpers import model as build_model
+from helpers import scheme as build_scheme
 
 from llm_manager.app import create_app
-
-_CFG = """
-program: {host: 0.0.0.0, port: 8080, alive_time: 60, log_level: INFO, log_dir: logs}
-Local-Models:
-  Qwen3-4B:
-    aliases: ["Qwen3-4B"]
-    mode: Chat
-    port: 10001
-    RTX4060:
-      required_devices: ["rtx 4060"]
-      command: {exe: "q.bat"}
-      memory_mb: {"rtx 4060": 5120}
-"""
+from llm_manager.data.config_store import write_appconfig
+from llm_manager.data.persistence import open_db
 
 
 def test_app_boots_and_health_ok(tmp_path):
-    cfg_path = tmp_path / "config.yaml"
-    cfg_path.write_text(_CFG, encoding="utf-8")
-    app = create_app(db_path=tmp_path / "t.db", legacy_yaml=cfg_path)
+    db = open_db(tmp_path / "t.db")
+    write_appconfig(
+        db,
+        build_cfg(
+            models={
+                "Qwen3-4B": build_model(
+                    ("Qwen3-4B",),
+                    10001,
+                    schemes={
+                        "RTX4060": build_scheme(devices=("rtx 4060",), memory_mb={"rtx 4060": 5120})
+                    },
+                )
+            }
+        ),
+    )
+    db.conn.close()
+    app = create_app(db_path=tmp_path / "t.db")
     with TestClient(app) as client:
         resp = client.get("/health")
     assert resp.status_code == 200
 
 
 def test_create_app_validates_and_fails_fast_on_bad_config(tmp_path):
-    cfg_path = tmp_path / "config.yaml"
-    cfg_path.write_text(
-        "program: {host: 0.0.0.0, port: 8080, alive_time: 60, log_level: INFO}\n"
-        "Local-Models:\n"
-        "  A: {aliases: [x], mode: Chat, port: 1}\n"
-        "  B: {aliases: [x], mode: Chat, port: 1}\n",
-        encoding="utf-8",
-    )
+    db = open_db(tmp_path / "t.db")
+    write_appconfig(
+        db, build_cfg(models={"A": build_model(("x",), 1)})
+    )  # 无 scheme → validate 报错
+    db.conn.close()
     with pytest.raises(ValueError):
-        create_app(db_path=tmp_path / "t.db", legacy_yaml=cfg_path)
+        create_app(db_path=tmp_path / "t.db")

@@ -22,7 +22,6 @@ import signal
 import subprocess
 import sys
 import threading
-from pathlib import Path
 
 from llm_manager import RESTART_EXIT_CODE
 from llm_manager.supervisor import process_group_kwargs
@@ -98,7 +97,7 @@ def _run_worker() -> None:
 
     from llm_manager.app import create_app
 
-    app = create_app(legacy_yaml=Path("config.yaml"))
+    app = create_app()
     cfg = app.state.config_store.snapshot()
     server = uvicorn.Server(
         uvicorn.Config(app, host=cfg.program.host, port=cfg.program.port, lifespan="on")

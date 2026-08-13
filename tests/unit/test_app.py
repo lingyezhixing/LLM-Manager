@@ -3,24 +3,34 @@ import time
 
 import pytest
 from fastapi.testclient import TestClient
+from helpers import cfg as build_cfg
+from helpers import model as build_model
+from helpers import scheme as build_scheme
 
 from llm_manager import state
 from llm_manager.app import create_app, create_dev_app
+from llm_manager.data.config_store import write_appconfig
+from llm_manager.data.persistence import open_db
 from llm_manager.state import ModelStatus
 
-_CFG_BODY = """
-program: {host: 127.0.0.1, port: 8080, alive_time: 60, log_level: INFO}
-Local-Models:
-  m1:
-    aliases: ["m1"]
-    mode: Chat
-    port: 8000
-    auto_start: true
-    RTX4060:
-      required_devices: ["rtx 4060"]
-      command: {exe: "nonexistent.cmd"}
-      memory_mb: {"rtx 4060": 2048}
-"""
+
+def _seed(db_path, *, models=None, program=None):
+    """write_appconfig 预置 DB(启动期 initialize 检测到已 initialized → 跳过 seed)。"""
+    db = open_db(db_path)
+    try:
+        write_appconfig(db, build_cfg(models=models, program=program))
+    finally:
+        db.conn.close()
+
+
+_M1 = lambda: {
+    "m1": build_model(
+        ("m1",),
+        8000,
+        auto_start=True,
+        schemes={"RTX4060": build_scheme(devices=("rtx 4060",), memory_mb={"rtx 4060": 2048})},
+    )
+}
 
 
 def test_lifespan_starts_and_stops_background(tmp_path, monkeypatch):
@@ -35,9 +45,8 @@ def test_lifespan_starts_and_stops_background(tmp_path, monkeypatch):
         "Chat",
         lambda alias, port, start_time=None, timeout=300: ProbeResult(False, "test fast-fail"),
     )
-    cfg_path = tmp_path / "config.yaml"
-    cfg_path.write_text(_CFG_BODY, encoding="utf-8")
-    app = create_app(db_path=tmp_path / "t.db", legacy_yaml=cfg_path)
+    _seed(tmp_path / "t.db", models=_M1())
+    app = create_app(db_path=tmp_path / "t.db")
     with TestClient(app) as c:
         assert c.get("/health").status_code == 200  # fire-and-forget:就绪不等 auto_start
         deadline = time.monotonic() + 10  # 秒失败探针:m1 应 <2s FAILED(留余量)
@@ -47,30 +56,22 @@ def test_lifespan_starts_and_stops_background(tmp_path, monkeypatch):
     # with 退出 → lifespan finally:stop_event.set() + unload_all + cancel+gather,干净关闭无异常
 
 
-def test_create_app_warm_start_skips_import(tmp_path):
-    """同库二次 create_app(无 legacy_yaml)→ 已 initialized → 跳过导入,保留 DB 状态。"""
-    cfg_path = tmp_path / "config.yaml"
-    cfg_path.write_text(_CFG_BODY, encoding="utf-8")
-    create_app(db_path=tmp_path / "t.db", legacy_yaml=cfg_path)  # 首次:导入
-    # 二次:不带 legacy_yaml,库已 initialized → seed/import 都跳过,仅 env 写库
+def test_create_app_preserves_db_state_across_boot(tmp_path):
+    """同一 DB 反复 create_app:已 initialized → 跳过 seed,保留既有模型。"""
+    _seed(tmp_path / "t.db", models=_M1())
+    app1 = create_app(db_path=tmp_path / "t.db")
+    assert "m1" in app1.state.config_store.snapshot().models
     app2 = create_app(db_path=tmp_path / "t.db")
-    assert "m1" in app2.state.config_store.snapshot().models  # 保留首次导入的模型
+    assert "m1" in app2.state.config_store.snapshot().models  # 二次启动保留 DB 状态
 
 
 def test_create_app_closes_db_on_bootstrap_error(tmp_path):
-    cfg_path = tmp_path / "config.yaml"
-    cfg_path.write_text(
-        "program: {host: 0.0.0.0, port: 8080, alive_time: 60, log_level: INFO}\n"
-        "Local-Models:\n  A: {aliases: [x], mode: Chat, port: 1}\n"  # 无 scheme → validate 报错
-        "  B: {aliases: [x], mode: Chat, port: 1}\n",  # alias/port 冲突
-        encoding="utf-8",
-    )
     db_path = tmp_path / "t.db"
+    # 无效配置(schema 合法但 validate 失败:无 device scheme)→ create_app 抛 ValueError
+    _seed(db_path, models={"A": build_model(("x",), 1)})
     with pytest.raises(ValueError):
-        create_app(db_path=db_path, legacy_yaml=cfg_path)
+        create_app(db_path=db_path)
     # db.conn 应已关闭:可重新打开(Windows 上未关会锁文件)
-    from llm_manager.data.persistence import open_db
-
     open_db(db_path).conn.execute("SELECT 1").fetchone()  # 不抛
 
 
@@ -79,14 +80,15 @@ def test_crud_then_catalog_reflects_without_restart(tmp_path, monkeypatch):
     monkeypatch.setattr(
         "llm_manager.devices.common.is_lhm_available", lambda: False
     )  # 隔离 LHM 慢枚举
-    cfg_path = tmp_path / "config.yaml"
-    cfg_path.write_text(
-        "program: {host: 0.0.0.0, port: 8080, alive_time: 60, log_level: INFO}\n"
-        "Local-Models:\n  A: {aliases: [a], mode: Chat, port: 9001,"
-        "    S: {required_devices: [gpu], command: {exe: a.bat}, memory_mb: {gpu: 1}}}\n",
-        encoding="utf-8",
+    _seed(
+        tmp_path / "t.db",
+        models={
+            "A": build_model(
+                ("a",), 9001, schemes={"S": build_scheme(devices=("gpu",), memory_mb={"gpu": 1})}
+            )
+        },
     )
-    app = create_app(db_path=tmp_path / "t.db", legacy_yaml=cfg_path)
+    app = create_app(db_path=tmp_path / "t.db")
     with TestClient(app) as c:
         # 初始:A 在册
         assert "a" in {m["id"] for m in c.get("/v1/models").json()["data"]}
@@ -128,16 +130,14 @@ def test_log_level_from_config_applied(tmp_path, monkeypatch):
     monkeypatch.setattr(
         "llm_manager.app.setup_logging", lambda level="INFO", **kw: levels.append(level)
     )
-    cfg_path = tmp_path / "config.yaml"
-    cfg_path.write_text(_CFG_BODY.replace("log_level: INFO", "log_level: DEBUG"), encoding="utf-8")
-    create_app(db_path=tmp_path / "t.db", legacy_yaml=cfg_path)
+    _seed(tmp_path / "t.db", models=_M1(), program={"log_level": "DEBUG"})
+    create_app(db_path=tmp_path / "t.db")
     assert levels == ["DEBUG"]
 
 
 def test_create_dev_app_leaves_no_fake_server(tmp_path, monkeypatch):
     monkeypatch.setenv("LLM_MANAGER_DB_PATH", str(tmp_path / "t.db"))
     monkeypatch.chdir(tmp_path)
-    (tmp_path / "config.yaml").write_text("program: {}\n", encoding="utf-8")
     app = create_dev_app()
     assert getattr(app.state, "uvicorn_server", None) is None
 

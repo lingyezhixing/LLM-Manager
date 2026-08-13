@@ -1,12 +1,9 @@
-"""Config: YAML load → frozen dataclasses. Device names normalized once (lowercase+strip)."""
+"""Config: 纯数据 + validate(DB 读取 → frozen dataclasses;设备名存储原样,匹配时归一化)。"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from pathlib import Path
-
-import yaml
 
 PROGRAM_DEFAULTS: dict[str, str] = {
     "host": "0.0.0.0",
@@ -192,41 +189,9 @@ class AppConfig:
     claude_configs: dict[str, dict[str, str]]
 
 
-def load(path: Path) -> AppConfig:
-    raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    p = raw.get("program", {})
-    program = ProgramConfig(
-        host=p.get("host", PROGRAM_DEFAULTS["host"]),
-        port=int(p.get("port", int(PROGRAM_DEFAULTS["port"]))),
-        alive_time=int(p.get("alive_time", int(PROGRAM_DEFAULTS["alive_time"]))),
-        log_level=p.get("log_level", PROGRAM_DEFAULTS["log_level"]),
-        claude_settings_path=p.get("claude_settings_path"),
-    )
-    models: dict[str, ModelConfig] = {}
-    reserved = {"aliases", "mode", "port", "auto_start"}
-    for name, m in raw.get("Local-Models", {}).items():
-        schemes: dict[str, Scheme] = {}
-        for key, val in m.items():
-            if key in reserved or not isinstance(val, dict):
-                continue
-            schemes[key] = Scheme.from_dict({**val, "config_source": key})
-        models[name] = ModelConfig(
-            aliases=tuple(m.get("aliases", [])),  # tuple 保 yaml 顺序,aliases[0]=served
-            mode=m.get("mode", "Chat"),
-            port=int(m["port"]),
-            auto_start=bool(m.get("auto_start", False)),
-            schemes=schemes,
-        )
-    wol_raw = raw.get("wake_on_lan")
-    wol = WakeOnLanConfig(wol_raw["broadcast_address"], wol_raw["mac_address"]) if wol_raw else None
-    return AppConfig(
-        program=program, models=models, wol=wol, claude_configs=raw.get("claude_configs", {})
-    )
-
-
 def validate(cfg: AppConfig) -> list[str]:
     errors: list[str] = []
-    # 程序级:端口范围(YAML 导入/config.load 的 int() 不查范围,在此兜底)
+    # 程序级:端口范围(DB 读取/写入的 int() 不查范围,在此兜底)
     if not 1 <= cfg.program.port <= 65535:
         errors.append(f"Program port {cfg.program.port} out of range (1-65535)")
     seen_ports: dict[int, str] = {}

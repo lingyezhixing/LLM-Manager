@@ -1,5 +1,5 @@
-"""DB-backed config store. 单一源 = 数据库(spec D4)。本模块逐步填充:settings KV → 模型世界读写
-→ ConfigStore → bootstrap。config.py 的 load() 被复用为 YAML→DB 一次性导入器。"""
+"""DB-backed config store. 单一源 = 数据库(spec D4)。本模块:settings KV → 模型世界读写
+→ ConfigStore → bootstrap(空库 seed 默认 + env 写库)。无 YAML 导入。"""
 
 from __future__ import annotations
 
@@ -7,7 +7,6 @@ import json
 import logging
 import os
 from collections.abc import Callable
-from pathlib import Path
 
 from llm_manager import config
 from llm_manager.config import (
@@ -392,15 +391,8 @@ def apply_env_overrides(db: Db) -> None:
             raise
 
 
-def initialize(db: Db, legacy_yaml: Path | None) -> None:
-    """启动期 provision:空库 → 导入 legacy_yaml(校验失败即抛,不落脏数据)或种子默认;然后 env 写库。"""
+def initialize(db: Db) -> None:
+    """启动期 provision:空库 → seed 默认(无 YAML 导入,DB 为配置单一源);然后 env 写库。"""
     if not is_initialized(db):
-        if legacy_yaml is not None and legacy_yaml.exists():
-            cfg = config.load(legacy_yaml)
-            errors = config.validate(cfg)
-            if errors:
-                raise ValueError("Invalid legacy config:\n" + "\n".join(f"  - {e}" for e in errors))
-            write_appconfig(db, cfg)
-        else:
-            seed_defaults(db)
+        seed_defaults(db)
     apply_env_overrides(db)

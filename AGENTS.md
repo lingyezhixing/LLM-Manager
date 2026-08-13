@@ -21,7 +21,7 @@ lmdeploy / vLLM …),对外暴露 OpenAI / Anthropic / Responses 兼容 API,记�
 ## 2. 架构分层(依赖单向无环)
 
 ```
-config   ── 纯数据 + validate(YAML/DB → frozen dataclasses;设备名存储原样,匹配时归一化)
+config   ── 纯数据 + validate(DB → frozen dataclasses;设备名存储原样,匹配时归一化)
   ↓
 state    ── 内存状态机(ModelStatus)+ 单派发 inflight Future + activity(无锁,单线程)
   ↓
@@ -62,7 +62,8 @@ tray     ── 系统托盘(自重启触发 / WOL / Claude 预设应用)
    llama.cpp `-a` 的服务名;客户端请求按任意别名路由,但 served name 固定为 aliases[0]。
 8. **DB 配置单一源**。运行时只读 DB 快照(`ConfigStore.snapshot()`,frozen)。env
    (`LLM_MANAGER_*`)在启动期写库(`apply_env_overrides`),不直接覆盖运行变量。
-   YAML `config.load()` 仅作首次导入(空库时)。
+   **无 YAML 导入**:空库由 `initialize` seed 默认值(程序参数),模型经 WebUI CRUD
+   添加——DB 完全接管。
 
 ## 4. 配置写回路径
 

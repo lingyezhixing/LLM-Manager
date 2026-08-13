@@ -17,8 +17,10 @@ import json
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from helpers import cfg as build_cfg
+from helpers import model as build_model
+from helpers import scheme as build_scheme
 
-from llm_manager import config
 from llm_manager.data import logs as _logs
 from llm_manager.data.config_store import ConfigStore, write_appconfig
 from llm_manager.data.persistence import open_db
@@ -35,27 +37,24 @@ class _NoLife:
         return ModelStatus.STOPPED
 
 
-_CFG = """
-program: {host: 0.0.0.0, port: 8080, alive_time: 60, log_level: INFO}
-Local-Models:
-  m1:
-    aliases: ["m1a"]
-    mode: Chat
-    port: 8001
-    RTX4060:
-      required_devices: ["rtx 4060"]
-      command: {exe: "q.bat"}
-      memory_mb: {"rtx 4060": 2048}
-"""
-
-
 def _build(tmp_path):
     """App + DB + 两个会话。system 会话持久化直建(无广播器,SSE 不测系统);
     model 会话走 logs 管线建(登记广播器,SSE 实时推可测)。"""
-    p = tmp_path / "config.yaml"
-    p.write_text(_CFG, encoding="utf-8")
     db = open_db(tmp_path / "t.db")
-    write_appconfig(db, config.load(p))
+    write_appconfig(
+        db,
+        build_cfg(
+            models={
+                "m1": build_model(
+                    ("m1a",),
+                    8001,
+                    schemes={
+                        "RTX4060": build_scheme(devices=("rtx 4060",), memory_mb={"rtx 4060": 2048})
+                    },
+                )
+            }
+        ),
+    )
     store = ConfigStore(db)
     app = FastAPI()
     register_routes(app, _NoLife(), db, {})

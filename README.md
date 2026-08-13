@@ -117,34 +117,7 @@ docker compose up -d             # 日常：改代码/配置后重启即可，�
 - **设备管理**：设备名存储原样（匹配时归一化）；模型配置页按需发起**网络唤醒**（发送魔术包）唤醒远程设备。
 - **环境变量**（可选，启动时覆写并持久化）：`LLM_MANAGER_HOST` / `LLM_MANAGER_PORT` / `LLM_MANAGER_ALIVE_TIME` / `LLM_MANAGER_LOG_LEVEL` / `LLM_MANAGER_DB_PATH`。
 
-首次启动（空库）时，若项目根目录存在 `config.yaml`（旧版 YAML 配置，结构参考下方），会作为一次性引导导入；否则使用默认配置。导入后配置以 DB 为准，`config.yaml` 不再被读取。
-
-### 旧版 YAML 导入格式（可选）
-
-```yaml
-program:
-  host: "0.0.0.0"
-  port: 8080
-  log_level: "INFO"
-  alive_time: 60          # 模型空闲超时时间（分钟），超时后自动关闭
-  claude_settings_path: "C:\\Users\\<you>\\.claude\\settings.json"  # 可选：托盘 Claude 配置切换的目标文件
-
-Local-Models:
-  Qwen-14B-Chat:
-    aliases: ["gpt-3.5-turbo", "qwen-14b"]  # aliases[0]=主别名=下游 served name
-    mode: "Chat"                            # Chat / Embedding / Reranker
-    port: 10001
-    auto_start: false
-
-    RTX4060:                                # scheme 名 = config_source
-      required_devices: ["rtx 4060"]        # 需与系统识别名称一致（nvidia-smi）
-      memory_mb: {"rtx 4060": 8000}
-      command:                              # 结构化启动命令（替代旧版 script_path）
-        exe: "lmdeploy"
-        args: ["serve", "api_server", "E:/models/Qwen-14B", "--server-port", "10001"]
-        env: {"CUDA_VISIBLE_DEVICES": "0"}
-        conda_env: "lmdeploy"               # 可选：conda 环境
-```
+首次启动（空库）时自动 seed 默认程序配置（监听地址 / 端口 / 日志级别等），模型定义通过 WebUI「系统配置 → 模型配置」添加。**DB 为配置唯一来源，无 YAML 导入**（旧版 `config.yaml` 已移除）。
 
 > ✅ **说明**：设备不满足前一个 scheme 时自动回退到下一个（多 GPU 启动灵活性）。
 

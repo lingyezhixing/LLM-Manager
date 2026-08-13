@@ -50,14 +50,14 @@ async def _startup_update_check(app: FastAPI) -> None:
             app.state.update_status = UpdateStatus(ok=False, error="启动更新检查失败")
 
 
-def create_app(db_path: Path | None = None, *, legacy_yaml: Path | None = None) -> FastAPI:
+def create_app(db_path: Path | None = None) -> FastAPI:
     resolved_db = Path(db_path or os.environ.get("LLM_MANAGER_DB_PATH", "data/llm_manager.db"))
     db = open_db(resolved_db)
     _logs.init(db)  # 接线日志存储(幂等)
     try:
         from llm_manager.data.config_store import ConfigStore, initialize
 
-        initialize(db, legacy_yaml)
+        initialize(db)
         store = ConfigStore(db)
         cfg = store.snapshot()
         errors = config.validate(cfg)
@@ -193,5 +193,5 @@ def create_app(db_path: Path | None = None, *, legacy_yaml: Path | None = None) 
 
 def create_dev_app() -> FastAPI:
     """No-arg factory for ``uvicorn --factory --reload`` (development mode)."""
-    app = create_app(legacy_yaml=Path("config.yaml"))
+    app = create_app()
     return app

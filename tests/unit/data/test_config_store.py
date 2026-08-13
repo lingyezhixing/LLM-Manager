@@ -212,43 +212,25 @@ def test_seed_defaults_marks_initialized(tmp_path):
     assert get_setting(db, "log_retention_days") == "30"
 
 
-def test_initialize_imports_legacy_yaml_when_db_empty(tmp_path):
-    yaml_path = tmp_path / "config.yaml"
-    yaml_path.write_text(
-        "program: {host: 0.0.0.0, port: 8080, alive_time: 60, log_level: INFO}\n"
-        "Local-Models:\n"
-        "  Qwen3-4B:\n"
-        '    aliases: ["Qwen3-4B"]\n'
-        "    mode: Chat\n"
-        "    port: 10001\n"
-        "    RTX4060:\n"
-        '      required_devices: ["rtx 4060"]\n'
-        '      command: {exe: "q.bat"}\n'
-        '      memory_mb: {"rtx 4060": 5120}\n',
-        encoding="utf-8",
-    )
+def test_initialize_seeds_defaults_on_empty_db(tmp_path):
     db = open_db(tmp_path / "t.db")
-    initialize(db, legacy_yaml=yaml_path)
+    initialize(db)
+    assert is_initialized(db) is True
+    # 无 YAML 导入:程序默认 + 空模型世界(模型由 WebUI CRUD 添加)
     out = read_appconfig(db)
-    assert "Qwen3-4B" in out.models
-    assert out.models["Qwen3-4B"].schemes["RTX4060"].required_devices == frozenset({"rtx 4060"})
+    assert out.models == {}
+    assert out.program.host == "0.0.0.0"
+    assert out.program.port == 8080
 
 
-def test_initialize_skips_import_when_already_initialized(tmp_path):
-    yaml_path = tmp_path / "config.yaml"
-    yaml_path.write_text(
-        "program: {host: 0.0.0.0, port: 8080, alive_time: 60, log_level: INFO}\n"
-        "Local-Models:\n  X: {aliases: [x], mode: Chat, port: 1, S: {required_devices: [gpu], command: {exe: a.bat}, memory_mb: {gpu: 1}}}\n",
-        encoding="utf-8",
-    )
+def test_initialize_skips_seed_when_initialized(tmp_path):
     db = open_db(tmp_path / "t.db")
-    initialize(db, legacy_yaml=yaml_path)  # 第一次:导入 X
-    # 把模型世界清空(模拟后续手动 DB 状态),再 initialize → 不应重新导入
+    initialize(db)
     with db.write_lock:
-        db.conn.execute("DELETE FROM model_defs")
+        db.conn.execute("UPDATE system_settings SET value='127.0.0.1' WHERE key='host'")
         db.conn.commit()
-    initialize(db, legacy_yaml=yaml_path)  # 已 initialized(system_settings 非空)→ 跳过
-    assert read_appconfig(db).models == {}
+    initialize(db)  # 已 initialized → 不覆盖既有设置
+    assert get_setting(db, "host") == "127.0.0.1"
 
 
 def test_apply_env_overrides_writes_set_env(monkeypatch, tmp_path):
@@ -269,66 +251,11 @@ def test_apply_env_overrides_ignores_unset_env(monkeypatch, tmp_path):
     assert get_setting(db, "port") == "8080"  # 默认值不动
 
 
-def test_initialize_applies_env_after_import(monkeypatch, tmp_path):
-    yaml_path = tmp_path / "config.yaml"
-    yaml_path.write_text(
-        "program: {host: 0.0.0.0, port: 8080, alive_time: 60, log_level: INFO}\n", encoding="utf-8"
-    )
+def test_initialize_applies_env_after_seed(monkeypatch, tmp_path):
     monkeypatch.setenv("LLM_MANAGER_PORT", "7000")
     db = open_db(tmp_path / "t.db")
-    initialize(db, legacy_yaml=yaml_path)
-    assert get_setting(db, "port") == "7000"  # env 覆盖导入值
-
-
-def test_initialize_rejects_invalid_yaml_and_leaves_db_clean(tmp_path):
-    yaml_path = tmp_path / "config.yaml"
-    # 模型 M 缺 aliases → config.validate 报 "has no aliases" → initialize 抛 ValueError,不写库
-    yaml_path.write_text(
-        "program: {host: 0.0.0.0, port: 8080, alive_time: 60, log_level: INFO}\n"
-        "Local-Models:\n"
-        "  M:\n"
-        "    mode: Chat\n"
-        "    port: 1\n"
-        "    S:\n"
-        "      required_devices: [gpu]\n"
-        "      command: {exe: a.bat}\n"
-        "      memory_mb: {gpu: 1}\n",
-        encoding="utf-8",
-    )
-    db = open_db(tmp_path / "t.db")
-    with pytest.raises(ValueError):
-        initialize(db, legacy_yaml=yaml_path)
-    # validate 在 write_appconfig 之前 → DB 干净,gate 未翻
-    assert is_initialized(db) is False
-    assert read_appconfig(db).models == {}
-
-
-def test_initialize_failed_import_keeps_gate_open_for_recovery(tmp_path, monkeypatch):
-    yaml_path = tmp_path / "config.yaml"
-    yaml_path.write_text(
-        "program: {host: 0.0.0.0, port: 8080, alive_time: 60, log_level: INFO}\n"
-        "Local-Models:\n"
-        "  M: {aliases: [m], mode: Chat, port: 1, S: {required_devices: [gpu], command: {exe: a.bat}, memory_mb: {gpu: 1}}}\n",
-        encoding="utf-8",
-    )
-    db = open_db(tmp_path / "t.db")
-
-    # 模拟导入期 DB 失败(如磁盘满):write_appconfig 抛 → initialize 不吞错,gate 保持开
-    def boom(db, cfg, **kw):
-        raise RuntimeError("disk full")
-
-    import llm_manager.data.config_store as cs
-
-    monkeypatch.setattr(cs, "write_appconfig", boom)
-    with pytest.raises(RuntimeError):
-        initialize(db, legacy_yaml=yaml_path)
-    assert is_initialized(db) is False
-
-    # 恢复真实 write_appconfig,第二次 initialize 正常导入
-    monkeypatch.undo()
-    initialize(db, legacy_yaml=yaml_path)
-    assert is_initialized(db) is True
-    assert "M" in read_appconfig(db).models
+    initialize(db)
+    assert get_setting(db, "port") == "7000"  # env 覆盖 seed 默认值
 
 
 def test_apply_env_overrides_rejects_non_int_port_without_poisoning_db(monkeypatch, tmp_path):

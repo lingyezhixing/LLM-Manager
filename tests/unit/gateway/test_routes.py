@@ -3,6 +3,9 @@ from pathlib import Path
 import httpx
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from helpers import cfg as build_cfg
+from helpers import model as build_model
+from helpers import scheme as build_scheme
 
 from llm_manager import config
 from llm_manager.data.config_store import ConfigStore, write_appconfig
@@ -10,37 +13,34 @@ from llm_manager.data.persistence import open_db
 from llm_manager.gateway.routes import register_routes
 from llm_manager.state import ModelStatus
 
-_CFG_BODY = """
-program: {host: 0.0.0.0, port: 8080, alive_time: 60, log_level: INFO}
-Local-Models:
-  m1:
-    aliases: ["m1"]
-    mode: Chat
-    port: 8000
-    RTX4060:
-      required_devices: ["rtx 4060"]
-      command: {exe: "q.bat"}
-      memory_mb: {"rtx 4060": 2048}
-"""
 
-_CFG_DISTINCT = """
-program: {host: 0.0.0.0, port: 8080, alive_time: 60, log_level: INFO}
-Local-Models:
-  internal-qwen-key:                   # primary_name: 仅内部区分用的 YAML 键(不应外露)
-    aliases: ["qwen2.5-32b-instruct"]  # aliases[0]: 主别名 = 下游 served name = 客户端调用名
-    mode: Chat
-    port: 8001
-    RTX4060:
-      required_devices: ["rtx 4060"]
-      command: {exe: "q.bat"}
-      memory_mb: {"rtx 4060": 2048}
-"""
+def _cfg() -> config.AppConfig:
+    return build_cfg(
+        models={
+            "m1": build_model(
+                ("m1",),
+                8000,
+                schemes={
+                    "RTX4060": build_scheme(devices=("rtx 4060",), memory_mb={"rtx 4060": 2048})
+                },
+            )
+        }
+    )
 
 
-def _cfg(tmp_path: Path) -> config.AppConfig:
-    p = tmp_path / "config.yaml"
-    p.write_text(_CFG_BODY, encoding="utf-8")
-    return config.load(p)
+def _cfg_distinct() -> config.AppConfig:
+    # 契约:internal-qwen-key(内部键,不应外露)→ aliases[0]=qwen2.5-32b-instruct(对外身份)
+    return build_cfg(
+        models={
+            "internal-qwen-key": build_model(
+                ("qwen2.5-32b-instruct",),
+                8001,
+                schemes={
+                    "RTX4060": build_scheme(devices=("rtx 4060",), memory_mb={"rtx 4060": 2048})
+                },
+            )
+        }
+    )
 
 
 class _FakeLife:
@@ -57,27 +57,25 @@ def _register(app, cfg, client_pool=None):
     app.state.db = db
 
 
-def test_health_returns_200(tmp_path):
+def test_health_returns_200():
     app = FastAPI()
-    _register(app, _cfg(tmp_path))
+    _register(app, _cfg())
     with TestClient(app) as c:
         assert c.get("/health").status_code == 200
 
 
-def test_v1_models_returns_catalog(tmp_path):
+def test_v1_models_returns_catalog():
     app = FastAPI()
-    _register(app, _cfg(tmp_path))
+    _register(app, _cfg())
     with TestClient(app) as c:
         r = c.get("/v1/models")
     assert r.status_code == 200 and "m1" in {m["id"] for m in r.json()["data"]}
 
 
-def test_v1_models_lists_primary_alias_not_internal_key(tmp_path):
+def test_v1_models_lists_primary_alias_not_internal_key():
     """契约(fix):/v1/models 的 id 必须是 aliases[0](主别名 = 下游 served name = 客户端调用名),
-    而非 primary_name(仅内部区分用的 YAML 键,不应外露)。"""
-    p = tmp_path / "config.yaml"
-    p.write_text(_CFG_DISTINCT, encoding="utf-8")
-    cfg = config.load(p)
+    而非 primary_name(仅内部区分用的配置键,不应外露)。"""
+    cfg = _cfg_distinct()
     app = FastAPI()
     _register(app, cfg)
     with TestClient(app) as c:
@@ -88,15 +86,15 @@ def test_v1_models_lists_primary_alias_not_internal_key(tmp_path):
     assert "internal-qwen-key" not in ids  # 内部键不外露
 
 
-def test_options_preflight_returns_204_with_cors(tmp_path):
+def test_options_preflight_returns_204_with_cors():
     app = FastAPI()
-    _register(app, _cfg(tmp_path))
+    _register(app, _cfg())
     with TestClient(app) as c:
         r = c.options("/v1/chat/completions")
     assert r.status_code == 204 and r.headers.get("access-control-allow-origin") == "*"
 
 
-def test_non_get_catchall_forwards_to_proxy(tmp_path):
+def test_non_get_catchall_forwards_to_proxy():
     # catch_all 不再 501;MockTransport 强制 ConnectError → 502(隔离,不依赖真实端口占用)
     def fail_handler(req):
         raise httpx.ConnectError("no upstream (test)", request=req)
@@ -105,7 +103,7 @@ def test_non_get_catchall_forwards_to_proxy(tmp_path):
     client = httpx.AsyncClient(
         base_url="http://127.0.0.1:8000", transport=httpx.MockTransport(fail_handler)
     )
-    _register(app, _cfg(tmp_path), client_pool={8000: client})
+    _register(app, _cfg(), client_pool={8000: client})
     with TestClient(app) as c:
         r = c.post("/v1/chat/completions", json={"model": "m1"})
     assert r.status_code == 502
@@ -123,7 +121,7 @@ def test_spa_served_and_api_unaffected_when_dist_exists(tmp_path, monkeypatch):
     monkeypatch.setattr(routes_mod, "_FRONTEND_DIST", fake_dist)
 
     app = FastAPI()
-    _register(app, _cfg(tmp_path))
+    _register(app, _cfg())
     with TestClient(app) as c:
         assert c.get("/").status_code == 200  # index.html
         assert "SPA" in c.get("/").text
@@ -144,7 +142,7 @@ def test_spa_rejects_path_traversal(tmp_path, monkeypatch):
     secret.write_text("LEAKED-SECRET", encoding="utf-8")
     monkeypatch.setattr(routes_mod, "_FRONTEND_DIST", fake_dist)
     app = FastAPI()
-    _register(app, _cfg(tmp_path))
+    _register(app, _cfg())
     with TestClient(app) as c:
         for url in ["/%2e%2e/config.yaml", "/..%2fconfig.yaml", "/%2e%2e/%2e%2e/config.yaml"]:
             r = c.get(url, follow_redirects=False)
@@ -161,18 +159,18 @@ def test_spa_boots_when_dist_lacks_assets(tmp_path, monkeypatch):
     (fake_dist / "index.html").write_text("<html>SPA</html>", encoding="utf-8")  # 注意:无 assets/
     monkeypatch.setattr(routes_mod, "_FRONTEND_DIST", fake_dist)
     app = FastAPI()
-    _register(app, _cfg(tmp_path))  # 不应抛 RuntimeError
+    _register(app, _cfg())  # 不应抛 RuntimeError
     with TestClient(app) as c:
         assert c.get("/").status_code == 200
         assert c.get("/health").status_code == 200
 
 
-def test_v1_models_reflects_store_reload(tmp_path):
+def test_v1_models_reflects_store_reload():
     """读穿:store.reload() 后 /v1/models 反映新模型,无需重启/重注册。"""
     from dataclasses import replace
 
     app = FastAPI()
-    _register(app, _cfg(tmp_path))
+    _register(app, _cfg())
     with TestClient(app) as c:
         m2 = config.ModelConfig(
             aliases=("m2",),
