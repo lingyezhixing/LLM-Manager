@@ -51,7 +51,6 @@ export function SystemOverview() {
       description: "将拉取最新代码并重启程序,期间正在服务的模型会中断。仅向前更新,不支持回退;与本地未提交改动冲突时会被拒绝。",
       confirmText: "更新并重启",
       cancelText: "取消",
-      danger: true,
     });
     if (!ok) return;
     app.triggerUpdate(mode);
@@ -125,7 +124,7 @@ export function SystemOverview() {
             </Button>
             <Button
               type="button"
-              variant="destructive"
+              variant="default"
               size="sm"
               onClick={onUpdate}
               disabled={!canUpdate || app.pending}
