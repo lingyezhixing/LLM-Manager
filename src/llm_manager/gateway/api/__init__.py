@@ -9,6 +9,7 @@ from llm_manager.gateway.api.data_api import register_data_routes
 from llm_manager.gateway.api.devices import register_devices_routes
 from llm_manager.gateway.api.logs import register_logs_routes
 from llm_manager.gateway.api.models import register_models_routes
+from llm_manager.gateway.api.tools_api import register_tools_routes
 from llm_manager.gateway.api.usage import register_usage_routes
 
 
@@ -19,5 +20,6 @@ def build_api_router(lifecycle) -> APIRouter:
     register_usage_routes(api)
     register_logs_routes(api)
     register_config_routes(api)
+    register_tools_routes(api)
     register_data_routes(api)
     return api

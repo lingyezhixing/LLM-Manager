@@ -8,7 +8,6 @@ restart 检测:对比 snapshot.program 的 host/port/claude_settings_path/log_le
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import os
 import time
@@ -36,7 +35,6 @@ from llm_manager.gateway.api.common import (
     get_db,
     restart_fields,
 )
-from llm_manager.tools import claude
 from llm_manager.version import get_version
 
 logger = logging.getLogger(__name__)
@@ -53,24 +51,11 @@ class ProgramUpdate(BaseModel):
     claude_settings_path: str | None = None
 
 
-class WolUpdate(BaseModel):
-    broadcast_address: str = Field(min_length=1)  # B8:必填非空(清除走 DELETE,不靠空串半残配置)
-    mac_address: str = Field(min_length=1)
-
-
-class ClaudeConfigsUpdate(BaseModel):
-    configs: dict[str, dict[str, str]]
-
-
 class LogRetentionUpdate(BaseModel):
     """日志保留规则:恒生效的两个参数(按时间保留 N 天 + 按条数保留 N 条,系统与模型日志同时适用)。"""
 
     days: int | None = Field(default=None, ge=1)
     count: int | None = Field(default=None, ge=1)
-
-
-class ClaudeApplyRequest(BaseModel):
-    name: str
 
 
 class CommandInput(BaseModel):
@@ -338,75 +323,6 @@ def register_config_routes(api: APIRouter) -> None:
             set_settings(get_db(request), updates)
         cfg = get_config_store(request).reload()
         return config_write_result(request, cfg)
-
-    @api.put("/config/wol")
-    def put_wol(request: Request, body: WolUpdate) -> dict:
-        # 两字段均必填非空(WolUpdate min_length=1);清除走 DELETE。原 `is not None` 是死分支
-        # (Pydantic 必填 str 恒非 None)。整组写,与 delete_wol 对称。
-        set_settings(
-            get_db(request),
-            {
-                "wol_broadcast": body.broadcast_address,
-                "wol_mac": body.mac_address,
-            },
-        )
-        cfg = get_config_store(request).reload()
-        return config_write_result(request, cfg)
-
-    @api.delete("/config/wol")
-    def delete_wol(request: Request) -> dict:
-        """清除 WOL 配置(删双键 → snapshot.wol=None,托盘动作提示未配置)。
-        与 put_wol 对称:WOL 是双键一对,清除必须整对删,不留孤儿键。"""
-        db = get_db(request)
-        with db.write_lock:
-            db.conn.execute("DELETE FROM system_settings WHERE key IN ('wol_broadcast', 'wol_mac')")
-            db.conn.commit()
-        cfg = get_config_store(request).reload()
-        return config_write_result(request, cfg)
-
-    @api.post("/config/wol/send")
-    def send_wol_now(request: Request, body: WolUpdate) -> dict:
-        """立即发送魔术包(WebUI「发送魔术包」;按请求体地址,与托盘 send_wol 同款)。
-        广播/MAC 非法(如 build_magic_packet 校验失败)→ 422。"""
-        from llm_manager.tools import wol as wol_impl
-
-        try:
-            wol_impl.send_wol(body.mac_address, body.broadcast_address)
-        except Exception as e:
-            raise HTTPException(422, f"发送失败: {e}") from e
-        return {"ok": True}
-
-    @api.put("/config/claude")
-    def put_claude(request: Request, body: ClaudeConfigsUpdate) -> dict:
-        set_settings(
-            get_db(request), {"claude_configs": json.dumps(body.configs, ensure_ascii=False)}
-        )
-        cfg = get_config_store(request).reload()
-        return config_write_result(request, cfg)
-
-    @api.post("/config/claude/apply")
-    def apply_claude_preset(request: Request, body: ClaudeApplyRequest) -> dict:
-        """把已存预设写入 Claude settings.json(非破坏,仅更新 env 键)。404 未知预设;400 未配置路径。"""
-        cfg = get_config_store(request).snapshot()
-        preset = (cfg.claude_configs or {}).get(body.name)
-        if preset is None:
-            raise HTTPException(404, f"preset '{body.name}' not found")
-        path = cfg.program.claude_settings_path
-        if not path:
-            raise HTTPException(400, "未配置 Claude settings 路径")
-        try:
-            claude.apply_preset(Path(path), dict(preset))
-        except OSError as e:
-            raise HTTPException(500, f"写入 settings.json 失败:{e}")
-        return {"applied": body.name}
-
-    @api.get("/config/claude/current")
-    def current_claude_preset(request: Request) -> dict:
-        """探测当前生效预设(按 ANTHROPIC_BASE_URL 子串匹配);未配置路径/读失败 → "(未知)"。"""
-        cfg = get_config_store(request).snapshot()
-        path = Path(cfg.program.claude_settings_path) if cfg.program.claude_settings_path else None
-        current = claude.detect_current_preset(path, dict(cfg.claude_configs)) if path else "(未知)"
-        return {"current": current}
 
     @api.put("/config/logs")
     def put_logs(request: Request, body: LogRetentionUpdate) -> dict:
