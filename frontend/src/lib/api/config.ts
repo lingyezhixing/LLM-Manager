@@ -42,46 +42,6 @@ export interface WolConfig {
   mac_address: string;
 }
 
-// 系统页网络区:WOL 配置写回(PUT /api/config/wol,两字段必填,Pydantic 422 拦部分更新)。
-export async function updateWol(body: WolConfig): Promise<ConfigWriteResult> {
-  const res = await fetch("/api/config/wol", {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) throw await parseApiError(res);
-  return (await res.json()) as ConfigWriteResult;
-}
-
-// 清除 WOL 配置(DELETE /api/config/wol:删双键 → wol=null,托盘动作提示未配置)。
-export async function deleteWol(): Promise<ConfigWriteResult> {
-  const res = await fetch("/api/config/wol", { method: "DELETE" });
-  if (!res.ok) throw await parseApiError(res);
-  return (await res.json()) as ConfigWriteResult;
-}
-
-// 立即发送魔术包(POST /api/config/wol/send;按传入地址直接发,无需先保存)。
-export async function sendWol(body: WolConfig): Promise<{ ok: boolean }> {
-  const res = await fetch("/api/config/wol/send", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) throw await parseApiError(res);
-  return (await res.json()) as { ok: boolean };
-}
-
-// Claude 预设:整组全量替换(PUT /api/config/claude)。
-export async function updateClaudeConfigs(configs: Record<string, Record<string, string>>): Promise<ConfigWriteResult> {
-  const res = await fetch("/api/config/claude", {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ configs }),
-  });
-  if (!res.ok) throw await parseApiError(res);
-  return (await res.json()) as ConfigWriteResult;
-}
-
 // 日志保留规则写回(PUT /api/config/logs;日志规则已并入 AppConfig 快照,恒不触发重启)。
 export async function updateLogRetention(body: LogRetention): Promise<ConfigWriteResult> {
   const res = await fetch("/api/config/logs", {
@@ -91,24 +51,6 @@ export async function updateLogRetention(body: LogRetention): Promise<ConfigWrit
   });
   if (!res.ok) throw await parseApiError(res);
   return (await res.json()) as ConfigWriteResult;
-}
-
-// 应用预设到 Claude settings.json(POST /api/config/claude/apply)。
-export async function applyClaudePreset(name: string): Promise<{ applied: string }> {
-  const res = await fetch("/api/config/claude/apply", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name }),
-  });
-  if (!res.ok) throw await parseApiError(res);
-  return (await res.json()) as { applied: string };
-}
-
-// 当前生效预设(GET /api/config/claude/current,探测不到 "(未知)")。
-export async function fetchClaudeCurrent(): Promise<{ current: string }> {
-  const res = await fetch("/api/config/claude/current");
-  if (!res.ok) throw await parseApiError(res);
-  return (await res.json()) as { current: string };
 }
 
 export type ProgramUpdate = Partial<ProgramConfig>;
