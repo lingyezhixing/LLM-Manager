@@ -1,27 +1,20 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import {
-  applyClaudePreset,
-  deleteWol,
-  fetchClaudeCurrent,
   fetchConfig,
   fetchHealth,
   fetchRestartStatus,
   fetchSystemInfo,
   restartApp,
-  sendWol,
-  updateClaudeConfigs,
   updateLogRetention,
   updateProgram,
-  updateWol,
   type LogRetention,
   type ProgramUpdate,
-  type WolConfig,
 } from "@/lib/api";
 
 // 配置写回后失效:config(读穿取新值)+ restart-status(顶部横幅按新状态刷新)。
 // 供 useUpdateProgram/useUpdateWol/useUpdateClaudeConfigs 共用;日志保留/应用预设语义不同,各管各的。
-function invalidateConfig(qc: QueryClient) {
+export function invalidateConfig(qc: QueryClient) {
   qc.invalidateQueries({ queryKey: ["config"] });
   qc.invalidateQueries({ queryKey: ["restart-status"] });
 }
@@ -47,37 +40,6 @@ export function useUpdateProgram() {
   });
 }
 
-export function useUpdateWol() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (body: WolConfig) => updateWol(body),
-    onSuccess: () => invalidateConfig(qc),
-  });
-}
-
-export function useDeleteWol() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: () => deleteWol(),
-    onSuccess: () => invalidateConfig(qc),
-  });
-}
-
-// 发送魔术包(无副作用于配置,不需失效)。
-export function useSendWol() {
-  return useMutation({
-    mutationFn: (body: WolConfig) => sendWol(body),
-  });
-}
-
-export function useUpdateClaudeConfigs() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (configs: Record<string, Record<string, string>>) => updateClaudeConfigs(configs),
-    onSuccess: () => invalidateConfig(qc),
-  });
-}
-
 // 日志保留规则已并入 AppConfig 快照(retention_from_store 每轮读 fresh,即时生效);
 // 非 _RESTART_FIELDS → 恒不触发重启(无需失效 restart-status);失效 config(其 logs 字段 get_setting 直读)。
 export function useUpdateLogRetention() {
@@ -88,19 +50,6 @@ export function useUpdateLogRetention() {
       qc.invalidateQueries({ queryKey: ["config"] });
     },
   });
-}
-
-// 应用后失效 current 查询(否则 ClaudePanel「当前生效」保持陈旧——代码审查 Minor)。
-export function useApplyClaudePreset() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (name: string) => applyClaudePreset(name),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["config", "claude", "current"] }),
-  });
-}
-
-export function useClaudeCurrent() {
-  return useQuery({ queryKey: ["config", "claude", "current"], queryFn: fetchClaudeCurrent });
 }
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));

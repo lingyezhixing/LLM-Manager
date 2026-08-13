@@ -7,13 +7,8 @@ import { Field, TextArea, TextInput } from "@/components/ui/form";
 import { useConfirm } from "@/lib/hooks/use-confirm";
 import { useToast } from "@/lib/hooks/use-toast";
 import { type ConfigResponse } from "@/lib/api";
-import {
-  useApplyClaudePreset,
-  useClaudeCurrent,
-  useConfig,
-  useUpdateClaudeConfigs,
-  useUpdateProgram,
-} from "@/lib/hooks/use-config";
+import { useConfig, useUpdateProgram } from "@/lib/hooks/use-config";
+import { useApplyClaudePreset, useClaudeCurrent, useUpdateClaudeConfigs } from "@/lib/hooks/use-tools";
 
 // 解析预设 JSON 文本:须为 str→str 对象。失败 → { ok:false, message }。
 function parseEnvJson(text: string): { ok: true; value: Record<string, string> } | { ok: false; message: string } {
