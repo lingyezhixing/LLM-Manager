@@ -12,6 +12,7 @@ import {
   updateProgram,
   type LogRetention,
   type ProgramUpdate,
+  type UpdateTarget,
 } from "@/lib/api";
 import { errMsg } from "@/lib/format";
 
@@ -84,11 +85,11 @@ async function awaitReconnect(timeoutMs: number): Promise<void> {
 
 // 自重启流程:触发后端关闭(202)→ poll /health 两阶段重连 → 恢复后整页 reload 反映新状态。
 // /api/config/restart(配置字段重启)与 /api/update/apply(自更新重启)共用同一流程。
-function useReconnectReload(action: () => Promise<unknown>) {
+function useReconnectReload<T>(action: (arg: T) => Promise<unknown>) {
   const [restarting, setRestarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const mutate = useMutation({
-    mutationFn: action,
+    mutationFn: (arg: T) => action(arg),
     onSuccess: async () => {
       setRestarting(true);
       setError(null);
@@ -102,18 +103,18 @@ function useReconnectReload(action: () => Promise<unknown>) {
     },
     onError: (e: unknown) => setError(errMsg(e)),
   });
-  return { trigger: () => mutate.mutate(), restarting, pending: mutate.isPending, error };
+  return { trigger: (arg: T) => mutate.mutate(arg), restarting, pending: mutate.isPending, error };
 }
 
 export function useRestartApp() {
-  const r = useReconnectReload(restartApp);
-  return { triggerRestart: r.trigger, restarting: r.restarting, pending: r.pending, error: r.error };
+  const r = useReconnectReload(() => restartApp());
+  return { triggerRestart: () => r.trigger(undefined), restarting: r.restarting, pending: r.pending, error: r.error };
 }
 
-// 自更新:先 POST /api/update/apply(后端 git pull + 触发重启),成功后走同一重连流程。
+// 自更新:POST /api/update/apply(target 细粒度)→ 成功后走同一重连流程。
 export function useUpdateApp() {
-  const r = useReconnectReload(applyUpdate);
-  return { triggerUpdate: r.trigger, updating: r.restarting, pending: r.pending, error: r.error };
+  const r = useReconnectReload((target: UpdateTarget) => applyUpdate(target));
+  return { triggerUpdate: (target: UpdateTarget) => r.trigger(target), updating: r.restarting, pending: r.pending, error: r.error };
 }
 
 export function useUpdateStatus() {

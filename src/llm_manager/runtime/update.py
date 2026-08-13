@@ -1,14 +1,16 @@
-"""Git 自更新编排(标签版本 + 严格 ff-only)。
+"""Git 自更新编排(仅向前更新,严格 ff-only;无回退 / 无版本选择 / 无提交树浏览)。
 
-版本以 git 标签为唯一事实源:当前版本 = HEAD 最近可达标签(``git describe --tags
---abbrev=0``),最新版本 = origin/main 最近可达标签(fetch 后,即"更新实际拿到的版本")。
-更新 = ``git fetch origin`` + ``git merge --ff-only origin/main`` —— 仅快速前进,工作树有未提交改动 /
-本地历史分叉一律拒绝(绝不 stash / 覆盖)。更新成功后在 API 层置 ``restart_requested``
-→ worker 以退出码 81 退出 → parent 监督器拉全新 worker;editable 安装下工作树即源码,
-新进程 import 即新代码。网络仅由用户显式触发(检查/应用按钮),后台永不自动。
+版本以 git 标签为身份(当前 = HEAD 最近可达标签);更新目标两个细粒度:
+* ``tag``    → origin/main 最近可达标签(稳定发布,推荐);
+* ``commit`` → origin/main 最新提交(前沿)。
 
-``check_update`` / ``apply_update`` 接受可注入的 ``root``(缺省 = 仓库根,与
-routes._FRONTEND_DIST 同源),测试用临时 git 仓库即本地 bare origin,无网络依赖。
+只允许向前:本地有未提交改动时不预拒,交给 git 原语判定——仅与更新内容冲突的改动
+才会被拒(绝不 stash / 覆盖);历史分叉同样拒绝。**不做回退**:数据库结构只向前迁移,
+旧代码无法解读新 schema,故不支持回到旧版本,也不支持任选历史提交。
+
+网络仅由用户显式触发(检查/应用按钮),后台永不自动。``check_update`` /
+``apply_update`` 接受可注入的 ``root``(缺省 = 仓库根),测试用临时 git 仓库即
+本地 bare origin,无网络依赖。
 """
 
 from __future__ import annotations
@@ -16,68 +18,38 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[3]
-_MAIN = "origin/main"
 _FETCH_TIMEOUT = 30.0  # 网络拉取超时(秒)
 _NO_TAG = "未打标签"
 
 # 非交互:远端要凭据/提示时静默失败,绝不挂起等待用户输入。
 _GIT_ENV = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_ASKPASS": "echo"}
 
+_TARGETS = ("commit", "tag")
+
 
 class UpdateError(Exception):
-    """更新被拒/失败(工作树脏、历史分叉、网络失败、git 缺失)。detail 即给用户的文案。"""
+    """更新被拒/失败(目标解析失败、历史分叉、冲突、网络失败、git 缺失)。detail 即给用户的文案。"""
 
 
 @dataclass(frozen=True)
 class UpdateStatus:
-    """检查结果快照(API 层 asdict 直出)。ok=False 时仅 current_version 有意义。"""
+    """检查结果快照(API 层 asdict 直出)。ok=False 时仅 current_* 有意义。"""
 
     ok: bool = False  # git 可用且远端可达(其余字段才可信)
     error: str | None = None  # ok=False 时的人类可读原因
     current_version: str = ""  # HEAD 最近可达标签;无标签 → "未打标签"
     current_sha: str = ""  # 本地 HEAD 短 SHA
-    latest_version: str | None = None  # origin 最新标签;远端无标签 → None
-    latest_sha: str | None = None  # origin/main 短 SHA
-    up_to_date: bool = False  # HEAD 已含 origin/main 全部提交
-    available: bool = False  # 可 ff-only 更新(干净 + 未分叉 + 远端领先)
-    dirty: bool = False  # 工作树有未提交改动(更新将被拒)
-    conflicted: bool = False  # 本地与远端历史分叉(无法 ff-only)
-    commits_behind: int = 0  # HEAD..origin/main 提交数
-
-
-@dataclass
-class _RepoState:
-    """一次检查收集的原始事实,派生 ok/available/conflicted/up_to_date。"""
-
-    dirty: bool = False
-    current_version: str = ""
-    current_sha: str = ""
-    latest_version: str | None = None
-    latest_sha: str | None = None
-    behind: int = 0
-    diverged: bool = False
-    errors: list[str] = field(default_factory=list)
-
-    def to_status(self) -> UpdateStatus:
-        ok = not self.errors
-        clean = not self.dirty and not self.diverged
-        return UpdateStatus(
-            ok=ok,
-            error="; ".join(self.errors) if self.errors else None,
-            current_version=self.current_version,
-            current_sha=self.current_sha,
-            latest_version=self.latest_version,
-            latest_sha=self.latest_sha,
-            up_to_date=ok and self.behind == 0 and not self.diverged,
-            available=ok and clean and self.behind > 0,
-            dirty=self.dirty,
-            conflicted=self.diverged,
-            commits_behind=self.behind,
-        )
+    dirty: bool = False  # 工作树有未提交改动(仅提示,不预拒)
+    conflicted: bool = False  # 本地与远端历史分叉(两个目标均不可用)
+    tag: str | None = None  # 最新标签名;远端无标签 → None
+    tag_sha: str | None = None
+    tag_available: bool = False  # 可 ff-only 更新到该标签
+    commit_sha: str | None = None  # origin/main 最新提交短 SHA
+    commit_available: bool = False  # 可 ff-only 更新到该提交
 
 
 def _git(root: Path, args: list[str], *, timeout: float) -> subprocess.CompletedProcess:
@@ -107,12 +79,12 @@ def _git_or_error(
         raise UpdateError(f"git 命令超时:{e.cmd}") from e
 
 
-def _short(sha: str) -> str:
-    return sha[:7] if sha else ""
-
-
 def _strip(line: str) -> str:
     return line.rstrip("\n")
+
+
+def _short(sha: str) -> str:
+    return sha[:7] if sha else ""
 
 
 def _is_git_repo(root: Path) -> bool:
@@ -121,91 +93,126 @@ def _is_git_repo(root: Path) -> bool:
 
 
 def _describe_tag(root: Path, ref: str = "HEAD") -> str | None:
-    """ref 最近可达标签;无 → None。git describe 对 ref 无对象时返回码非 0。"""
+    """ref 最近可达标签;无 → None。"""
     r = _git_or_error(root, ["describe", "--tags", "--abbrev=0", ref], timeout=5.0)
     return _strip(r.stdout) if r.returncode == 0 else None
 
 
-def _gather(root: Path) -> _RepoState:
-    """收集一次检查的事实:本地身份/干净度 → fetch(更新 origin/main,不动工作树)
-    → 与远端对比。任何一步失败记入 errors(其余字段继续收集)。"""
-    st = _RepoState()
+def _full(root: Path, ref: str) -> str:
+    """ref 完整 SHA;不存在 → ""。"""
+    r = _git_or_error(root, ["rev-parse", ref], timeout=5.0)
+    return _strip(r.stdout) if r.returncode == 0 else ""
+
+
+def _is_ancestor(root: Path, a: str, b: str) -> bool:
+    return _git_or_error(root, ["merge-base", "--is-ancestor", a, b], timeout=5.0).returncode == 0
+
+
+def _merge_failure_hint(root: Path, proc: subprocess.CompletedProcess) -> str:
+    """merge 失败归因:冲突(本地改动被覆盖)→ 提示清理;非 ff(分叉)→ 提示手动处理;否则通用。"""
+    dirty = bool(_git_or_error(root, ["status", "--porcelain"], timeout=5.0).stdout.strip())
+    msg = _strip(proc.stderr) or _strip(proc.stdout) or "未知错误"
+    if dirty:
+        return "本地有未提交改动与更新冲突,请先提交或还原(git status 查看)"
+    if "fast-forward" in msg.lower():
+        return "本地与远端历史分叉,无法快速前进更新,需手动处理(git rebase / merge)"
+    return f"更新合并失败:{msg}"
+
+
+def check_update(root: Path | None = None) -> UpdateStatus:
+    """检查更新:git 可用性 + 工作树干净度 + fetch(更新 origin/main,不动工作树)+ 两目标可用性。"""
+    root = root or _PROJECT_ROOT
+    current_version = ""
+    current_sha = ""
     try:
         if not _is_git_repo(root):
-            st.errors.append("非 git 仓库,无法自更新")
-            return st
+            return UpdateStatus(ok=False, error="非 git 仓库,无法自更新")
+        current_version = _describe_tag(root) or _NO_TAG
+        current_sha = _short(_full(root, "HEAD"))
+        dirty = bool(_git_or_error(root, ["status", "--porcelain"], timeout=5.0).stdout.strip())
     except UpdateError as e:
-        st.errors.append(str(e))
-        return st
-
-    try:
-        st.current_version = _describe_tag(root) or _NO_TAG
-        st.current_sha = _short(
-            _strip(_git_or_error(root, ["rev-parse", "--short", "HEAD"]).stdout)
+        return UpdateStatus(
+            ok=False, error=str(e), current_version=current_version, current_sha=current_sha
         )
-        r = _git_or_error(root, ["status", "--porcelain"], timeout=5.0)
-        st.dirty = bool(r.stdout.strip())
-    except UpdateError as e:
-        st.errors.append(str(e))
 
     try:
         r = _git_or_error(root, ["fetch", "origin"], timeout=_FETCH_TIMEOUT)
         if r.returncode != 0:
-            st.errors.append(f"拉取远端失败:{_strip(r.stderr) or _strip(r.stdout) or '未知错误'}")
-            return st
-        remote = _strip(_git_or_error(root, ["rev-parse", "origin/main"]).stdout)
-        if not remote:
-            st.errors.append("远端无 main 分支")
-            return st
-        st.latest_sha = _short(remote)
-        # 最新版本 = origin/main 最近可达标签(fetch 后的本地 tag 即远端随行标签;
-        # 反映"更新后实际拿到的版本",比 ls-remote 版本排序更贴实际)
-        st.latest_version = _describe_tag(root, "origin/main")
-        head = _strip(_git_or_error(root, ["rev-parse", "HEAD"]).stdout)
-        if head == remote:
-            st.behind = 0
-            st.diverged = False
-        else:
-            count = _git_or_error(root, ["rev-list", "--count", "HEAD..origin/main"], timeout=5.0)
-            st.behind = int(count.stdout.strip() or 0)
-            ancestor = _git_or_error(
-                root, ["merge-base", "--is-ancestor", "HEAD", "origin/main"], timeout=5.0
+            return UpdateStatus(
+                ok=False,
+                error=f"拉取远端失败:{_strip(r.stderr) or _strip(r.stdout) or '未知错误'}",
+                current_version=current_version,
+                current_sha=current_sha,
+                dirty=dirty,
             )
-            st.diverged = ancestor.returncode != 0
-    except (UpdateError, ValueError):
-        st.errors.append("远端比较失败")
+        remote = _full(root, "origin/main")
+        head = _full(root, "HEAD")
+        if not remote:
+            return UpdateStatus(
+                ok=False,
+                error="远端无 main 分支",
+                current_version=current_version,
+                current_sha=current_sha,
+                dirty=dirty,
+            )
+        diverged = head != remote and not _is_ancestor(root, head, remote)
+        # 目标可用 = 未分叉 且 目标不在 HEAD 之后(HEAD 是目标的祖先,可 ff-only 追上)
+        commit_sha = _short(remote)
+        commit_available = not diverged and head != remote and _is_ancestor(root, head, remote)
+        tag = _describe_tag(root, "origin/main")
+        tag_full = _full(root, tag) if tag else ""
+        tag_sha = _short(tag_full) if tag_full else None
+        tag_available = (
+            bool(tag_full)
+            and not diverged
+            and tag_full != head
+            and _is_ancestor(root, head, tag_full)
+        )
+        return UpdateStatus(
+            ok=True,
+            current_version=current_version,
+            current_sha=current_sha,
+            dirty=dirty,
+            conflicted=diverged,
+            tag=tag,
+            tag_sha=tag_sha,
+            tag_available=tag_available,
+            commit_sha=commit_sha,
+            commit_available=commit_available,
+        )
+    except UpdateError as e:
+        return UpdateStatus(
+            ok=False,
+            error=str(e),
+            current_version=current_version,
+            current_sha=current_sha,
+            dirty=dirty,
+        )
 
-    return st
 
+def apply_update(root: Path | None = None, *, target: str = "commit") -> str:
+    """拉取并向前更新到目标细粒度(commit=origin/main 最新提交 / tag=最新标签)。
 
-def check_update(root: Path | None = None) -> UpdateStatus:
-    """检查更新:git 可用性 + 工作树干净度 + fetch(更新 origin/main,不动工作树)+ 版本对比。"""
-    return _gather(root or _PROJECT_ROOT).to_status()
-
-
-def apply_update(root: Path | None = None) -> str:
-    """拉取并更新到 origin/main(严格 ff-only)。
-
-    * 工作树脏 / 本地分叉 → UpdateError(绝不 stash/覆盖);
-    * 拉取(网络失败 → UpdateError)→ ff-only 合并(失败 → UpdateError);
+    * 目标解析失败(无标签等)→ UpdateError;
+    * 历史分叉 / 本地改动与更新冲突 → UpdateError(只 ff-only,绝不 stash / 覆盖 / 回退);
     * 返回更新后的 HEAD 短 SHA。API 层据此置 restart_requested 触发重启。
     """
     root = root or _PROJECT_ROOT
-    st = _gather(root)
-    if st.errors:
-        raise UpdateError("; ".join(st.errors))
-    if st.dirty:
-        raise UpdateError("工作树有未提交改动,更新前请先提交或还原(git status 查看)")
-    if st.diverged:
-        raise UpdateError("本地与远端历史分叉,无法快速前进更新,需手动处理(git rebase / merge)")
-    if st.behind == 0:
-        return st.current_sha
-
+    if target not in _TARGETS:
+        raise UpdateError("未知更新目标(仅支持 commit / tag)")
     r = _git_or_error(root, ["fetch", "origin"], timeout=_FETCH_TIMEOUT)
     if r.returncode != 0:
         raise UpdateError(f"拉取远端失败:{_strip(r.stderr) or _strip(r.stdout) or '未知错误'}")
-    r = _git_or_error(root, ["merge", "--ff-only", _MAIN], timeout=_FETCH_TIMEOUT)
-    if r.returncode != 0:
-        raise UpdateError(f"更新合并失败:{_strip(r.stderr) or _strip(r.stdout) or '未知错误'}")
-    new_sha = _strip(_git_or_error(root, ["rev-parse", "--short", "HEAD"]).stdout)
-    return new_sha
+
+    if target == "tag":
+        tag = _describe_tag(root, "origin/main")
+        if tag is None:
+            raise UpdateError("远端无标签可更新(最新提交仍可用)")
+        ref = tag
+    else:
+        ref = "origin/main"
+
+    merge = _git_or_error(root, ["merge", "--ff-only", ref], timeout=_FETCH_TIMEOUT)
+    if merge.returncode != 0:
+        raise UpdateError(_merge_failure_hint(root, merge))
+    return _short(_full(root, "HEAD"))

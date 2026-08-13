@@ -95,14 +95,18 @@ tray     ── 系统托盘(自重启触发 / WOL / Claude 预设应用)
 - `POST /api/config/restart`(WebUI 顶部重启横幅)走 `restart_requested → worker exit 81 → parent 拉新`。
 - `LLM-Manager.bat` 仅作 Windows 静默后台启动(VBS),不参与重启。
 
-### 5.1 自更新(标签版本 + 严格 ff-only)
+### 5.1 自更新(仅向前,双目标细粒度,严格 ff-only)
 
-- **版本 = git 标签**(当前 = `git describe --tags --abbrev=0 HEAD`,最新 =
-  `origin/main` 最近可达标签)——以标签为版本号,不以单个 commit。发版必须打标签。
+- **版本身份 = git 标签**(当前 = `git describe --tags --abbrev=0 HEAD`)。发版必须打标签。
+- **更新目标两个细粒度**:`tag`(origin/main 最近可达标签,稳定发布)/ `commit`
+  (origin/main 最新提交,前沿)。**无回退 / 无版本选择 / 无提交树浏览**——数据库结构
+  只向前迁移,旧代码无法解读新 schema,故不支持回到旧版本。
 - **流程**:`GET /api/update/status`(fetch 对比,不动工作树;离线 → ok=False+error)/
-  `POST /api/update/apply`(fetch + `git merge --ff-only origin/main` → `trigger_restart` →
-  exit 81 → parent 拉新 worker。editable 安装下工作树即源码,新进程 import 即新代码)。
-- **严格语义**:工作树脏 / 本地历史分叉 → 409,绝不 stash/覆盖。仅 ff-only。
+  `POST /api/update/apply` body `{"target": "tag"|"commit"}`(fetch + `git merge
+  --ff-only <目标>` → `trigger_restart` → exit 81 → parent 拉新 worker。editable
+  安装下工作树即源码,新进程 import 即新代码)。
+- **严格语义**:本地未提交改动不预拒——交给 git 原语,仅与更新内容冲突时拒绝(绝不
+  stash/覆盖);本地历史分叉同样拒绝。均 409。
 - **网络纪律**:唯一联网点,仅用户显式按钮触发(系统页「更新」区),后台永不自动。
 - 测试:`tests/unit/runtime/test_update.py`(本地 bare origin,无网络)、
   `tests/unit/gateway/test_api_update.py`(API 契约)。
