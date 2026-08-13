@@ -1,5 +1,5 @@
 // 系统页顶部「系统与更新」信息条:程序信息(启动时间、运行时长)与自更新
-// (检测模式 版本|提交、当前版本/提交、最新(落后 N)、检查更新/更新)合并在第一行。
+// (检测模式 版本|提交、当前版本(版本(提交短号))、最新(落后 N)、检查更新/更新)合并在第一行。
 //
 // 检测语义:程序启动时后端后台检测一次并缓存,前端只读缓存——刷新/进页不触发检测;
 // 「检查更新」按钮(POST /check)是唯一手动重新检测入口;「更新」仅在所选模式目标
@@ -60,14 +60,10 @@ export function SystemOverview() {
   const canUpdate = !!st && !st.conflicted && isAvailable(st, mode);
   const behind = st ? behindOf(st, mode) : 0;
   const latest = st ? latestVal(st, mode) : "—";
-  // 当前版本 = 版本标签(提交短号),如 v3.0.0a2(f7dbf33)
-  const currentVersion = st && (st.current_version || st.current_sha)
-    ? st.current_version
-      ? st.current_sha
-        ? `${st.current_version}(${st.current_sha})`
-        : st.current_version
-      : st.current_sha
-    : "—";
+  // 当前版本 = 版本标签(提交短号),如 v3.0.0a2(f7dbf33);有其一则只显示其一
+  const ver = st?.current_version ?? "";
+  const sha = st?.current_sha ?? "";
+  const currentVersion = ver && sha ? `${ver}(${sha})` : ver || sha || "—";
   // 加载中(缓存未就绪)不显示误导性禁用原因
   const updateTitle = st === undefined
     ? undefined
