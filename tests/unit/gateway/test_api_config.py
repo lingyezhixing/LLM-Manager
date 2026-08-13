@@ -122,7 +122,7 @@ def test_delete_wol_clears_config(tmp_path):
 
 
 def test_send_wol_now_posts_magic_packet(tmp_path, monkeypatch):
-    from llm_manager.tray import wol as wol_module
+    from llm_manager.tools import wol as wol_module
 
     sent: list[tuple[str, str]] = []
     monkeypatch.setattr(

@@ -30,7 +30,7 @@ from llm_manager.data.config_store import (
     set_settings,
 )
 from llm_manager.gateway.api.common import get_config_store, get_db
-from llm_manager.tray import claude
+from llm_manager.tools import claude
 from llm_manager.version import get_version
 
 logger = logging.getLogger(__name__)
@@ -385,7 +385,7 @@ def register_config_routes(api: APIRouter) -> None:
     def send_wol_now(request: Request, body: WolUpdate) -> dict:
         """立即发送魔术包(WebUI「发送魔术包」;按请求体地址,与托盘 send_wol 同款)。
         广播/MAC 非法(如 build_magic_packet 校验失败)→ 422。"""
-        from llm_manager.tray import wol as wol_impl
+        from llm_manager.tools import wol as wol_impl
 
         try:
             wol_impl.send_wol(body.mac_address, body.broadcast_address)

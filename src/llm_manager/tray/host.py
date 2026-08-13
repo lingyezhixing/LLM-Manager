@@ -25,7 +25,7 @@ from typing import Any
 
 from llm_manager import config
 from llm_manager.runtime import background
-from llm_manager.tray import claude, wol
+from llm_manager.tools import claude, wol
 
 logger = logging.getLogger(__name__)
 

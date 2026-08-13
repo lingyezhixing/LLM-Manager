@@ -1,4 +1,4 @@
-from llm_manager.tray.wol import build_magic_packet
+from llm_manager.tools.wol import build_magic_packet
 
 
 def test_magic_packet_shape():

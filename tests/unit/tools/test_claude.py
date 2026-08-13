@@ -1,6 +1,6 @@
 import json
 
-from llm_manager.tray.claude import apply_preset, detect_current_preset
+from llm_manager.tools.claude import apply_preset, detect_current_preset
 
 
 def test_apply_preset_nests_under_env(tmp_path):
