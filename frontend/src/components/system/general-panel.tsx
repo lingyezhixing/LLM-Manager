@@ -2,7 +2,7 @@ import { type ReactNode, useEffect, useRef, useState } from "react";
 import { ConfigSaveBar } from "@/components/config-save-bar";
 import { ErrorState } from "@/components/ui/error-state";
 import { Field, NumberInput, Select, TextInput } from "@/components/ui/form";
-import { numFromStr as num } from "@/lib/format";
+import { errMsg, numFromStr as num } from "@/lib/format";
 import { InfoTile } from "@/components/ui/info-tile";
 import { useToast } from "@/lib/hooks/use-toast";
 import { LogRetentionEditor } from "@/components/system/log-retention-editor";
@@ -78,13 +78,16 @@ export function GeneralPanel() {
   }, [data]);
 
   if (isError) {
-    return <ErrorState message={(error as Error).message} onRetry={() => refetch()} />;
+    return <ErrorState message={errMsg(error)} onRetry={() => refetch()} />;
   }
   if (isLoading || !form) {
     return <div className="text-sm text-muted-foreground">加载中…</div>;
   }
 
-  const initial: GeneralForm = { program: data!.program, logs: data!.logs };
+  // M7:form 非空 ⇒ data 已就绪(form 只在 data 就绪后填充);此处兜底防 data 中途变 undefined
+  const initial: GeneralForm = data
+    ? { program: data.program, logs: data.logs }
+    : { program: form.program, logs: form.logs };
   // dirty 以 syncedRef(最近采纳的服务端值)为基准,而非 live data——外部刷新被中途丢弃后,
   // 若用户恰好还原到 syncedRef,保存条应熄灭而非出现「点了没反应」的幽灵态。
   const dirty = syncedRef.current !== null && !sameForm(form, syncedRef.current);
@@ -160,7 +163,7 @@ export function GeneralPanel() {
       {dirty && (
         <ConfigSaveBar
           saving={saving}
-          error={saveError ? (saveError as Error).message : null}
+          error={saveError ? errMsg(saveError) : null}
           onSave={onSave}
           onReset={() => {
             syncedRef.current = initial;

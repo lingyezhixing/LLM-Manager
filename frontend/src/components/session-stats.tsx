@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ErrorState } from "@/components/ui/error-state";
 import { InfoTile } from "@/components/ui/info-tile";
 import { fetchSessionUsage } from "@/lib/api";
-import { formatCost, formatTokens } from "@/lib/format";
+import { errMsg, formatCost, formatTokens } from "@/lib/format";
 import { useNowTick } from "@/lib/hooks/use-now-tick";
 
 /** Compact uptime: 45s / 12m / 3h 12m / 2d 5h. */
@@ -26,7 +26,7 @@ export function SessionStats() {
   });
   const now = useNowTick(1000);
 
-  if (isError) return <ErrorState message={(error as Error).message} onRetry={() => refetch()} />;
+  if (isError) return <ErrorState message={errMsg(error)} onRetry={() => refetch()} />;
   if (isLoading || !data) return <p className="text-sm text-muted-foreground">加载中…</p>;
 
   const pct = Math.round(data.hit_rate * 1000) / 10;  // 1 decimal place

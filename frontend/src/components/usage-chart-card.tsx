@@ -7,7 +7,7 @@ import { LineChart } from "lucide-react";
 import { ErrorState } from "@/components/ui/error-state";
 import { TokenChart } from "@/components/token-chart";
 import { fetchUsageCostSeries, fetchUsageSeries, type UsageSeries, type UsageSeriesParams } from "@/lib/api";
-import { formatCost } from "@/lib/format";
+import { errMsg, formatCost } from "@/lib/format";
 import { chartPresetFor, type UsagePreset } from "@/lib/usage-range";
 
 type View = "total" | "models" | "cost";
@@ -59,7 +59,7 @@ export function UsageChartCard({
       {view === "cost" ? (
         costSeriesQ.isError ? (
           <div className="flex h-[192px] items-center justify-center">
-            <ErrorState message={(costSeriesQ.error as Error).message} onRetry={() => costSeriesQ.refetch()} />
+            <ErrorState message={errMsg(costSeriesQ.error)} onRetry={() => costSeriesQ.refetch()} />
           </div>
         ) : costSeriesQ.isLoading || !costSeriesQ.data ? (
           <div className="flex h-[192px] items-center justify-center text-sm text-muted-foreground">加载中…</div>
@@ -70,7 +70,7 @@ export function UsageChartCard({
         )
       ) : isError ? (
         <div className="flex h-[192px] items-center justify-center">
-          <ErrorState message={(error as Error).message} onRetry={() => refetchSeries()} />
+          <ErrorState message={errMsg(error)} onRetry={() => refetchSeries()} />
         </div>
       ) : isLoading || !data ? (
         <div className="flex h-[192px] items-center justify-center text-sm text-muted-foreground">加载中…</div>

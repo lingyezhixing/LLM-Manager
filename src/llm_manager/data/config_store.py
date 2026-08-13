@@ -148,7 +148,8 @@ def _write_appconfig_locked(db: Db, cfg: AppConfig) -> None:
                         s_ord,
                     ),
                 )
-            db.conn.execute("DELETE FROM pricing_tiers WHERE pricing_id=?", (mid,))
+            # 新插入的 model_defs id 尚无 pricing_tiers 行(FK CASCADE 已由 model_defs 删除清理),
+            # 无需 DELETE;直接 INSERT。
             for t in m.pricing.tiers:
                 db.conn.execute(
                     "INSERT INTO pricing_tiers (pricing_id, tier_index, min_input, max_input, "

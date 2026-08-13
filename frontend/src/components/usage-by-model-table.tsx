@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 
 import { ErrorState } from "@/components/ui/error-state";
 import { fetchUsageByModel, fetchUsageCost, type UsageSeriesParams } from "@/lib/api";
-import { formatCost, formatCount, formatHitRate, formatLatency, formatPercent, formatTokens } from "@/lib/format";
+import { errMsg, formatCost, formatCount, formatHitRate, formatLatency, formatPercent, formatTokens } from "@/lib/format";
 
 type SortKey = "input_tokens" | "output_tokens" | "cache_n" | "request_count" | "hit_rate" | "latency_ms" | "cost";
 
@@ -29,7 +29,7 @@ export function UsageByModelTable({
   const [sortKey, setSortKey] = useState<SortKey>("input_tokens");
   const [desc, setDesc] = useState(true);
 
-  if (isError) return <Card><ErrorState message={(error as Error).message} onRetry={() => refetchByModel()} /></Card>;
+  if (isError) return <Card><ErrorState message={errMsg(error)} onRetry={() => refetchByModel()} /></Card>;
   if (isLoading) return <Card>加载中…</Card>;
   if (!data || data.length === 0) return <Card><Empty /></Card>;
 
@@ -52,7 +52,7 @@ export function UsageByModelTable({
   return (
     <Card>
       {costQ.isError && (
-        <ErrorState className="mb-3" prefix="成本加载失败" message={(costQ.error as Error).message} onRetry={() => costQ.refetch()} />
+        <ErrorState className="mb-3" prefix="成本加载失败" message={errMsg(costQ.error)} onRetry={() => costQ.refetch()} />
       )}
       <table className="w-full text-sm">
         <thead>

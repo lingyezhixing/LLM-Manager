@@ -1,6 +1,6 @@
 import type { ModelInfo } from "@/lib/api";
 import { startModel, stopModel } from "@/lib/api";
-import { formatIdle } from "@/lib/format";
+import { errMsg, formatIdle } from "@/lib/format";
 import { useToast } from "@/lib/hooks/use-toast";
 
 // 状态点用主题 token 的 CSS 变量(success/primary-accent/destructive/muted-foreground),随主题变、不荧光。
@@ -52,7 +52,7 @@ export function ModelCard({ m, selected, nowMs, onSelect }: {
           {statusText}
         </div>
       </div>
-      <button onClick={(e) => { e.stopPropagation(); btn.fn().catch((err: unknown) => toast.error((err as Error).message)); }}
+      <button onClick={(e) => { e.stopPropagation(); btn.fn().catch((err: unknown) => toast.error(errMsg(err))); }}
         className={`shrink-0 rounded-md border px-3 py-1.5 text-[10.5px] font-medium transition-colors ${
           btn.cls === "go" ? "border-primary bg-primary text-primary-foreground hover:opacity-90"
           : btn.cls === "stop" ? "border-destructive bg-destructive text-destructive-foreground hover:opacity-90"

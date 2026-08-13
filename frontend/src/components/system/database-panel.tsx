@@ -2,6 +2,7 @@ import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/lib/hooks/use-confirm";
 import { ErrorState } from "@/components/ui/error-state";
 import { InfoTile } from "@/components/ui/info-tile";
+import { errMsg } from "@/lib/format";
 import { useToast } from "@/lib/hooks/use-toast";
 import { useDeleteModelData, useOrphanedModels, useStorageStats } from "@/lib/hooks/use-data";
 
@@ -35,14 +36,14 @@ export function DatabasePanel() {
     if (!ok) return;
     del.mutate(name, {
       onSuccess: () => toast.success(`已删除「${name}」的数据`),
-      onError: (e: unknown) => toast.error((e as Error).message),
+      onError: (e: unknown) => toast.error(errMsg(e)),
     });
   };
 
   if (stats.isError || orphaned.isError) {
     return (
       <ErrorState
-        message={((stats.error ?? orphaned.error) as Error).message}
+        message={errMsg(stats.error ?? orphaned.error)}
         onRetry={() => { stats.refetch(); orphaned.refetch(); }}
       />
     );

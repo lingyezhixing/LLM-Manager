@@ -2,6 +2,7 @@ import type { KeyboardEvent } from "react";
 import { Button } from "@/components/ui/button";
 import { ComboboxInput } from "@/components/ui/combobox";
 import { NumberInput, TextInput } from "@/components/ui/form";
+import { isPendingKey, PENDING_KEY_PREFIX } from "@/lib/pending-keys";
 
 // 可复用行编辑器原子(模型定义 CRUD 用;后续其它键值/列表字段可复用)。
 // StringListEditor:有序字符串列表(args / required_devices / aliases)。
@@ -9,6 +10,12 @@ import { NumberInput, TextInput } from "@/components/ui/form";
 // 受控:父级持数组/对象,onChange 回传新值。全部不可变更新(无原地改)。
 
 const removeBtn = "shrink-0 h-9 px-2 text-xs text-muted-foreground hover:text-destructive";
+
+let pendingSeq = 0;
+
+function newPendingKey(): string {
+  return `${PENDING_KEY_PREFIX}${pendingSeq++}`;
+}
 
 export function StringListEditor({
   values,
@@ -64,6 +71,11 @@ export function KeyValueEditor({
 
   const setKey = (i: number, key: string) => {
     const [oldKey, val] = pairs[i];
+    // 撞键守卫:目标键已是其它行的键(且非待填哨兵)→ 拒绝,防静默覆盖丢值。
+    if (
+      key !== "" && key !== oldKey && !isPendingKey(key)
+      && pairs.some(([k], j) => j !== i && k === key)
+    ) return;
     const rest = { ...entries };
     delete rest[oldKey];
     rest[key] = val;
@@ -76,7 +88,8 @@ export function KeyValueEditor({
     delete rest[pairs[i][0]];
     onChange(rest);
   };
-  const add = () => onChange({ ...entries, "": numeric ? 0 : "" });
+  // 空行用唯一哨兵键(非 ""):Record 模型下多个待填行可共存(用 "" 会互相覆盖)。
+  const add = () => onChange({ ...entries, [newPendingKey()]: numeric ? 0 : "" });
 
   return (
     <div className="flex flex-col gap-2">

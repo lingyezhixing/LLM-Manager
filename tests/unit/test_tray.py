@@ -10,8 +10,8 @@ import asyncio
 
 import pytest
 
-from llm_manager.config import AppConfig, ProgramConfig
 from llm_manager import tray
+from llm_manager.config import AppConfig, ProgramConfig
 
 
 def _cfg(claude_configs=None):

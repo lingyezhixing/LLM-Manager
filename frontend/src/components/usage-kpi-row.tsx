@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ErrorState } from "@/components/ui/error-state";
 import { InfoTile } from "@/components/ui/info-tile";
 import { fetchUsageCost, fetchUsageSummary, type UsageSeriesParams } from "@/lib/api";
-import { formatCost, formatCount, formatHitRate, formatTokens } from "@/lib/format";
+import { errMsg, formatCost, formatCount, formatHitRate, formatTokens } from "@/lib/format";
 
 export function UsageKpiRow({
   params,
@@ -23,7 +23,7 @@ export function UsageKpiRow({
     refetchInterval: refetch,
   });
   if (isError) {
-    return <ErrorState message={(error as Error).message} onRetry={() => refetchSummary()} />;
+    return <ErrorState message={errMsg(error)} onRetry={() => refetchSummary()} />;
   }
   if (isLoading || !data) {
     return (

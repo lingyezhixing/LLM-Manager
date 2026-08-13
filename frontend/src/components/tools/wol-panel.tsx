@@ -4,6 +4,7 @@ import { ConfigSaveBar } from "@/components/config-save-bar";
 import { useConfirm } from "@/lib/hooks/use-confirm";
 import { ErrorState } from "@/components/ui/error-state";
 import { Field, TextInput } from "@/components/ui/form";
+import { errMsg } from "@/lib/format";
 import { useToast } from "@/lib/hooks/use-toast";
 import type { WolConfig } from "@/lib/api";
 import { useConfig } from "@/lib/hooks/use-config";
@@ -37,7 +38,7 @@ export function WolPanel() {
   }, [data?.wol]);
 
   if (isError) {
-    return <ErrorState message={(error as Error).message} onRetry={() => refetch()} />;
+    return <ErrorState message={errMsg(error)} onRetry={() => refetch()} />;
   }
   if (isLoading) {
     return <div className="text-sm text-muted-foreground">加载中…</div>;
@@ -64,14 +65,14 @@ export function WolPanel() {
         setForm(empty);
         toast.success("网络唤醒配置已还原");
       },
-      onError: (e: unknown) => toast.error((e as Error).message),
+      onError: (e: unknown) => toast.error(errMsg(e)),
     });
   };
 
   const onSend = () => {
     send.mutate(form, {
       onSuccess: () => toast.success("魔术包已发送"),
-      onError: (e: unknown) => toast.error((e as Error).message),
+      onError: (e: unknown) => toast.error(errMsg(e)),
     });
   };
 
@@ -89,7 +90,7 @@ export function WolPanel() {
       {dirty && (
         <ConfigSaveBar
           saving={update.isPending}
-          error={update.error ? (update.error as Error).message : null}
+          error={update.error ? errMsg(update.error) : null}
           onSave={() =>
             update.mutate(form, {
               onSuccess: () => {

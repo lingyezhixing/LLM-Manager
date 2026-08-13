@@ -6,6 +6,7 @@ import { CalendarRangePicker } from "@/components/calendar-range-picker";
 import { ErrorState } from "@/components/ui/error-state";
 import { TokenChart } from "@/components/token-chart";
 import { fetchUsageSeries, type UsageSeriesParams } from "@/lib/api";
+import { errMsg } from "@/lib/format";
 import {
   chartPresetFor,
   fmtRange,
@@ -82,7 +83,7 @@ export function TokenCurveCard() {
       </div>
       {isError ? (
         <div className="flex h-[160px] items-center justify-center">
-          <ErrorState message={(error as Error).message} onRetry={() => refetch()} />
+          <ErrorState message={errMsg(error)} onRetry={() => refetch()} />
         </div>
       ) : isLoading || !data ? (
         <div className="flex h-[160px] items-center justify-center text-sm text-muted-foreground">加载中…</div>

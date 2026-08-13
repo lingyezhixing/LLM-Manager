@@ -227,14 +227,8 @@ def _delete_old_sessions(old: str) -> Callable:
 
     def drop(db, old_cfg, _new_cfg):
         aliases = old_cfg.models[old].aliases if old in old_cfg.models else ()
-        terms = {old, *aliases}
-        if not terms:
-            return
-        ph = ",".join("?" * len(terms))
-        db.conn.execute(
-            f"DELETE FROM log_sessions WHERE model_name IN ({ph}) OR alias IN ({ph})",
-            (*terms, *terms),
-        )
+        # 在 mutate_appconfig 的同一写事务内执行(不 commit,由调用方统一提交)。
+        _logs._delete_sessions_locked(db, {old, *aliases})
 
     return drop
 

@@ -19,7 +19,8 @@ from pathlib import Path
 import httpx
 from fastapi import FastAPI
 
-from llm_manager import config
+from llm_manager import config, supervisor
+from llm_manager import tray as tray_host
 from llm_manager.data import logs as _logs
 from llm_manager.data.log_handler import SystemLogHandler, setup_logging
 from llm_manager.data.persistence import open_db
@@ -34,7 +35,6 @@ from llm_manager.runtime.heartbeat import heartbeat_loop
 from llm_manager.runtime.lifecycle import Lifecycle
 from llm_manager.runtime.log_retention import log_retention_loop, retention_from_store
 from llm_manager.supervisor import Supervisor
-from llm_manager import tray as tray_host
 
 logger = logging.getLogger(__name__)
 
@@ -203,15 +203,10 @@ def _worker_command() -> list[str]:
 
 
 def _spawn_kwargs() -> dict:
-    """worker 进程隔离参数(同 supervisor._popen_kwargs):Win 独立进程组 / POSIX 新会话,
-    使 parent 能显式转发信号(否则 Ctrl-C 直接打到 worker、绕过 parent 编排)。stdio 继承,
-    worker 的 setup_logging 自带控制台+文件 handler,日志直通 parent 控制台。"""
-    kwargs: dict = {"stdout": None, "stderr": None, "stdin": None}
-    if os.name == "nt":
-        kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
-    else:
-        kwargs["start_new_session"] = True
-    return kwargs
+    """worker 进程隔离参数(复用 supervisor 的平台隔离 helper):Win 独立进程组 /
+    POSIX 新会话,使 parent 能显式转发信号(否则 Ctrl-C 直接打到 worker、绕过 parent
+    编排)。stdio 继承,worker 的 setup_logging 自带控制台+文件 handler,日志直通 parent 控制台。"""
+    return {"stdout": None, "stderr": None, "stdin": None, **supervisor.process_group_kwargs()}
 
 
 def _forwardable_signals() -> list:

@@ -32,11 +32,16 @@ export interface UsageSeries {
 
 export type UsageSeriesParams = { period: string } | { start: number; end: number };
 
+// period 快捷窗口 ↔ 显式 [start,end] 两种参数形态 → URL 查询串。
+function qsForParams(params: UsageSeriesParams): string {
+  const q: Record<string, string> = "period" in params
+    ? { period: params.period }
+    : { start: String(params.start), end: String(params.end) };
+  return new URLSearchParams(q).toString();
+}
+
 export async function fetchUsageSeries(params: UsageSeriesParams): Promise<UsageSeries> {
-  const qs = new URLSearchParams(
-    "period" in params ? { period: params.period } : { start: String(params.start), end: String(params.end) },
-  );
-  return apiJson<UsageSeries>(`/api/usage/series?${qs.toString()}`);
+  return apiJson<UsageSeries>(`/api/usage/series?${qsForParams(params)}`);
 }
 
 export interface UsageSummary {
@@ -49,10 +54,7 @@ export interface UsageSummary {
 }
 
 export async function fetchUsageSummary(params: UsageSeriesParams): Promise<UsageSummary> {
-  const qs = new URLSearchParams(
-    "period" in params ? { period: params.period } : { start: String(params.start), end: String(params.end) },
-  );
-  return apiJson<UsageSummary>(`/api/usage/summary?${qs.toString()}`);
+  return apiJson<UsageSummary>(`/api/usage/summary?${qsForParams(params)}`);
 }
 
 export interface ByModelEntry {
@@ -67,10 +69,7 @@ export interface ByModelEntry {
 }
 
 export async function fetchUsageByModel(params: UsageSeriesParams): Promise<ByModelEntry[]> {
-  const qs = new URLSearchParams(
-    "period" in params ? { period: params.period } : { start: String(params.start), end: String(params.end) },
-  );
-  return apiJson<ByModelEntry[]>(`/api/usage/by-model?${qs.toString()}`);
+  return apiJson<ByModelEntry[]>(`/api/usage/by-model?${qsForParams(params)}`);
 }
 
 // 计费成本 — cost 汇总 + cost 时间序列(序列与 usage/series 同形)。Match gateway/api/usage.py
@@ -86,15 +85,9 @@ export interface CostSummary {
 }
 
 export async function fetchUsageCost(params: UsageSeriesParams): Promise<CostSummary> {
-  const qs = new URLSearchParams(
-    "period" in params ? { period: params.period } : { start: String(params.start), end: String(params.end) },
-  );
-  return apiJson<CostSummary>(`/api/usage/cost?${qs.toString()}`);
+  return apiJson<CostSummary>(`/api/usage/cost?${qsForParams(params)}`);
 }
 
 export async function fetchUsageCostSeries(params: UsageSeriesParams): Promise<UsageSeries> {
-  const qs = new URLSearchParams(
-    "period" in params ? { period: params.period } : { start: String(params.start), end: String(params.end) },
-  );
-  return apiJson<UsageSeries>(`/api/usage/cost-series?${qs.toString()}`);
+  return apiJson<UsageSeries>(`/api/usage/cost-series?${qsForParams(params)}`);
 }

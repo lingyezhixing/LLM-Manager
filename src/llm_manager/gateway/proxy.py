@@ -176,6 +176,7 @@ async def forward(request: Request, path: str, lifecycle, cfg, db, client_pool) 
         raise HTTPException(503, f"model '{primary}' not routing (status={status.value})")
 
     request_start = time.time()
+    resp = None  # 池化 httpx 连接;错误路径必须 aclose 归还(见下两个 except)
     try:
         port = cfg.models[primary].port
         client = _get_or_create_client(client_pool, port)
@@ -198,24 +199,30 @@ async def forward(request: Request, path: str, lifecycle, cfg, db, client_pool) 
                 status_code=resp.status_code,
                 headers=_strip_headers(resp.headers, extra=("connection", "content-encoding")),
             )
-        content = await resp.aread()
-        await resp.aclose()
+        try:
+            content = await resp.aread()
+        finally:
+            # aread 抛错(上游中断)也要 aclose,否则池化连接泄漏不复用
+            await resp.aclose()
+        status_code = resp.status_code
+        headers = _strip_headers(resp.headers, extra=("connection", "content-encoding"))
+        resp = None  # 已关闭,防 except 重复 aclose
         await _record_usage(db, primary, path, content, request_start, time.time())
         state.end_request(primary)
-        logger.info("RESP %d model=%s %.2fs", resp.status_code, primary, time.monotonic() - t0)
-        return Response(
-            content=content,
-            status_code=resp.status_code,
-            headers=_strip_headers(resp.headers, extra=("connection", "content-encoding")),
-        )
+        logger.info("RESP %d model=%s %.2fs", status_code, primary, time.monotonic() - t0)
+        return Response(content=content, status_code=status_code, headers=headers)
     except HTTPException:
         state.end_request(primary)
         raise
     except httpx.HTTPError as e:
+        if resp is not None:
+            await resp.aclose()
         state.end_request(primary)
         logger.warning("upstream error model=%s: %s", primary, e)
         raise HTTPException(502, f"upstream error: {e}")
     except Exception as e:  # noqa: BLE001
+        if resp is not None:
+            await resp.aclose()
         state.end_request(primary)
         logger.warning("internal model=%s: %s", primary, e)
         raise HTTPException(500, f"internal: {e}")

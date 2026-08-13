@@ -6,6 +6,7 @@ import { ErrorState } from "@/components/ui/error-state";
 import { Field, TextArea, TextInput } from "@/components/ui/form";
 import { useConfirm } from "@/lib/hooks/use-confirm";
 import { useToast } from "@/lib/hooks/use-toast";
+import { errMsg } from "@/lib/format";
 import { type ConfigResponse } from "@/lib/api";
 import { useConfig, useUpdateProgram } from "@/lib/hooks/use-config";
 import { useApplyClaudePreset, useClaudeCurrent, useUpdateClaudeConfigs } from "@/lib/hooks/use-tools";
@@ -22,7 +23,7 @@ function parseEnvJson(text: string): { ok: true; value: Record<string, string> }
     }
     return { ok: true, value: v as Record<string, string> };
   } catch (e) {
-    return { ok: false, message: `JSON 格式错误:${(e as Error).message}` };
+    return { ok: false, message: `JSON 格式错误:${errMsg(e)}` };
   }
 }
 
@@ -176,7 +177,7 @@ function ClaudePresetCard({
             {update.isPending ? "保存中…" : "保存"}
           </Button>
         </div>
-        {mutError && <p className="mt-2 text-xs text-destructive">操作失败:{(mutError as Error).message}</p>}
+        {mutError && <p className="mt-2 text-xs text-destructive">操作失败:{errMsg(mutError)}</p>}
       </div>
     </div>
   );
@@ -218,13 +219,13 @@ export function ClaudePanel() {
           setPathSaved(pathInput);
           toast.success("Claude settings 路径已保存");
         },
-        onError: (e: unknown) => toast.error((e as Error).message),
+        onError: (e: unknown) => toast.error(errMsg(e)),
       },
     );
   };
 
   if (isError) {
-    return <ErrorState message={(error as Error).message} onRetry={() => refetch()} />;
+    return <ErrorState message={errMsg(error)} onRetry={() => refetch()} />;
   }
   if (isLoading) {
     return <div className="text-sm text-muted-foreground">加载中…</div>;

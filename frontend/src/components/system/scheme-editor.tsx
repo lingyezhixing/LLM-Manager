@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { CommandEditor } from "@/components/system/command-editor";
 import { Field, TextInput } from "@/components/ui/form";
 import { KeyValueEditor } from "@/components/ui/repeatable-fields";
+import { isPendingKey } from "@/lib/pending-keys";
 import { apiJson } from "@/lib/api/shared";
 import type { DevicesResponse, SchemeDef } from "@/lib/api";
 
@@ -63,7 +64,8 @@ export function SchemeEditor({
             onChange({
               ...value,
               memory_mb: entries as Record<string, number>,
-              required_devices: Object.keys(entries),
+              // 待填哨兵键不算已要求设备(用户尚未填写真实设备名)
+              required_devices: Object.keys(entries).filter((k) => !isPendingKey(k)),
             })
           }
           numeric

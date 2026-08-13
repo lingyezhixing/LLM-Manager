@@ -113,8 +113,8 @@ def _lhm_computer():
                     import clr  # type: ignore[import-not-found]
 
                     clr.AddReference(str(_LHM_DLL))  # type: ignore[attr-defined]
-                    from LibreHardwareMonitor.Hardware import (
-                        Computer,  # type: ignore[import-not-found]
+                    from LibreHardwareMonitor.Hardware import (  # type: ignore[import-not-found]
+                        Computer,
                     )
 
                     c = Computer()

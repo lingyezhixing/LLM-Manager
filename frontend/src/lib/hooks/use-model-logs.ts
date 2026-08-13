@@ -66,6 +66,7 @@ export function useLogViewer(api: LogApi | null, runKey: number | null) {
   const loadingTopRef = useRef(false);   // F5:向上加载重入守卫(同步 ref,防触顶连续滚动在 state 更新生效前重入)
   const followingRef = useRef(true);
   const liveRef = useRef(true);
+  const genRef = useRef(0);  // H1:视图代次——api/runKey 重订阅时 ++,在途异步(回退/翻页/搜索)先比对再 setState
   useEffect(() => { followingRef.current = following; }, [following]);
   useEffect(() => { liveRef.current = historyPage === null; }, [historyPage]);
 
@@ -81,7 +82,9 @@ export function useLogViewer(api: LogApi | null, runKey: number | null) {
   useEffect(() => {
     setLiveLines([]); setHistoryPrefix([]); setHistoryPage(null); setFollowing(true); setNewCount(0);
     setMatches([]); setMatchTotal(0); setMatchIdx(-1); setHasSearched(false); setAtOldest(false);
+    setSearching(false);   // H1:清在途搜索 spinner(旧代次 runSearch 的 finally 已比对代次跳过)
     if (!api) return;   // 无会话(模型未启动 / 定位中):视图已重置,保持空态
+    const gen = ++genRef.current;   // H1:代次递增——旧代次在途回调发现代次不符即丢弃
     let receivedAny = false;   // 本次订阅是否收到过行
     const es = new EventSource(api.streamUrl(levelParam));
     es.onmessage = (ev) => {
@@ -101,7 +104,10 @@ export function useLogViewer(api: LogApi | null, runKey: number | null) {
       // 已结束会话:stream 端点 404 → error 且不会重连(规范:非 200 直接 fail)。
       // 运行中会话的首连瞬时错误:回退页先顶上,重连成功后的回填由 id 守卫去重,实时尾照常。
       api.fetchPage(Number.MAX_SAFE_INTEGER, WINDOW, levelParam)
-        .then((page) => { setLiveLines((prev) => (prev.length > 0 ? prev : page)); })
+        .then((page) => {
+          if (genRef.current !== gen) return;  // H1:代次已变(重订阅),丢弃旧回退页
+          setLiveLines((prev) => (prev.length > 0 ? prev : page));
+        })
         .catch(() => { /* best-effort */ });
     };
     return () => es.close();
@@ -144,8 +150,10 @@ export function useLogViewer(api: LogApi | null, runKey: number | null) {
     if (el) pendingTopFixRef.current = { h: el.scrollHeight, t: el.scrollTop }; // prepend 前基准
     loadingTopRef.current = true;                 // 同步置位 ref 守卫
     setLoadingTop(true);                          // state 仅驱动 UI
+    const gen = genRef.current;                   // H1:比对代次,防重订阅后旧页混入新视图
     try {
       const page = await api.fetchPage(firstId, WINDOW, levelParam);
+      if (genRef.current !== gen) return;         // H1:代次已变,丢弃
       const newer = page.filter((l) => l.id < firstId);   // 去重(后端返回 id<firstId 的最近 WINDOW 行)
       if (newer.length === 0) { setAtOldest(true); return; }
       setHistoryPrefix((prev) => {
@@ -177,8 +185,12 @@ export function useLogViewer(api: LogApi | null, runKey: number | null) {
     if (inView) {
       setScrollTargetId(target);
     } else {
+      const gen = genRef.current;             // H1:重订阅后旧翻页不落新视图
       api.fetchPage(target + 1, WINDOW, levelParam)
-        .then((page) => { setHistoryPage(page); setScrollTargetId(target); })
+        .then((page) => {
+          if (genRef.current !== gen) return;
+          setHistoryPage(page); setScrollTargetId(target);
+        })
         .catch(() => { /* best-effort */ });
     }
   }, [api, levelParam, historyPage, liveView]);
@@ -188,14 +200,16 @@ export function useLogViewer(api: LogApi | null, runKey: number | null) {
     setHasSearched(true);                    // bug1:标记已执行搜索(无论 q 是否空)
     if (!q.trim()) { setMatches([]); setMatchTotal(0); setMatchIdx(-1); return; }
     setSearching(true);
+    const gen = genRef.current;              // H1:重订阅后旧搜索结果不落新视图
     try {
       const res = await api.search(q, levelParam);
+      if (genRef.current !== gen) return;
       setMatches(res.matches);
       setMatchTotal(res.total);              // F9:真实总数;matches 可能被后端 500 截断
       const idx = res.matches.length ? 0 : -1;
       setMatchIdx(idx);
       if (idx >= 0) jumpToMatch(res.matches, idx);
-    } finally { setSearching(false); }
+    } finally { if (genRef.current === gen) setSearching(false); }
   }, [api, levelParam, jumpToMatch]);
 
   // bug1:用户改输入 → 更新输入框文本 + 清上次搜索结果 + hasSearched(回「未搜索」态,不显示「无匹配」)。

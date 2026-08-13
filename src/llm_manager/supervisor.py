@@ -41,12 +41,18 @@ class ProcessRunner(Protocol):
     def on_exit(self, pid: int, cb: Callable[[int], None]) -> None: ...
 
 
+def process_group_kwargs() -> dict:
+    """平台隔离参数:Win 独立进程组 / POSIX 新会话。parent 监督器(_spawn_kwargs)与
+    本模块 _popen_kwargs 共用,保证 worker/模型子进程都以独立进程组启动(可显式转发信号)。"""
+    if os.name == "nt":
+        return {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+    return {"start_new_session": True}
+
+
 def _popen_kwargs() -> dict:
     kw: dict = {"text": True, "encoding": "utf-8", "errors": "replace"}
-    if os.name == "nt":
-        kw["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
-    else:
-        kw["start_new_session"] = True
+    kw.update(process_group_kwargs())
+    if os.name != "nt":
         kw["close_fds"] = True
     return kw
 

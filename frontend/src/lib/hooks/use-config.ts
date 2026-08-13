@@ -11,6 +11,7 @@ import {
   type LogRetention,
   type ProgramUpdate,
 } from "@/lib/api";
+import { errMsg } from "@/lib/format";
 
 // 配置写回后失效:config(读穿取新值)+ restart-status(顶部横幅按新状态刷新)。
 // 供 useUpdateProgram/useUpdateWol/useUpdateClaudeConfigs 共用;日志保留/应用预设语义不同,各管各的。
@@ -80,9 +81,8 @@ async function awaitReconnect(timeoutMs: number): Promise<void> {
 }
 
 // 自重启:POST /api/config/restart(202)→ 触发后端关闭+退出 81→监督器重启。
-// 前端 poll /health 两阶段重连,恢复后失效 restart-status + reload 反映新参数。
+// 前端 poll /health 两阶段重连,恢复后整页 reload 反映新参数。
 export function useRestartApp() {
-  const qc = useQueryClient();
   const [restarting, setRestarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const mutate = useMutation({
@@ -92,14 +92,13 @@ export function useRestartApp() {
       setError(null);
       try {
         await awaitReconnect(60_000);
-        qc.invalidateQueries({ queryKey: ["restart-status"] });
-        window.location.reload();
+        window.location.reload();   // 整页 reload 自然带回新配置,无需先 invalidate
       } catch {
         setError("重启超时,请手动检查后刷新页面。");
         setRestarting(false);
       }
     },
-    onError: (e: unknown) => setError((e as Error).message),
+    onError: (e: unknown) => setError(errMsg(e)),
   });
   return { triggerRestart: () => mutate.mutate(), restarting, error };
 }

@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/lib/hooks/use-confirm";
 import { ErrorState } from "@/components/ui/error-state";
+import { errMsg } from "@/lib/format";
 import { useToast } from "@/lib/hooks/use-toast";
 import { ModelDefForm } from "@/components/system/model-def-form";
 import { useDeleteModelDef, useModelDef, useModelDefs, useRestartModel } from "@/lib/hooks/use-model-defs";
@@ -87,7 +88,7 @@ export function ModelDefPanel() {
   if (list.isLoading) {
     formArea = <div className="text-sm text-muted-foreground">加载中…</div>;
   } else if (list.isError) {
-    formArea = <ErrorState message={(list.error as Error).message} onRetry={() => list.refetch()} />;
+    formArea = <ErrorState message={errMsg(list.error)} onRetry={() => list.refetch()} />;
   } else if (typeof effSelected === "string") {
     formArea =
       detail.isLoading || !detail.data ? (
@@ -153,7 +154,7 @@ export function ModelDefPanel() {
           </Button>
           {del.error && (
             <div className="px-3 text-xs text-destructive">
-              删除失败:{(del.error as Error).message}
+              删除失败:{errMsg(del.error)}
             </div>
           )}
         </div>
@@ -174,7 +175,7 @@ export function ModelDefPanel() {
                     setHint(null);
                     toast.success(`已重启 ${hint.served}`);
                   },
-                  onError: (e: unknown) => toast.error((e as Error).message),
+                  onError: (e: unknown) => toast.error(errMsg(e)),
                 })
               }
               disabled={restart.isPending}

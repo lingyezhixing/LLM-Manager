@@ -342,21 +342,28 @@ def log_end_session(db: Db, session_id: int, end: float) -> None:
         db.conn.commit()
 
 
+def _delete_sessions_locked(db: Db, terms: set[str]) -> int:
+    """DELETE log_sessions 中 model_name 或 alias ∈ terms。caller 持 write_lock,不 commit。"""
+    if not terms:
+        return 0
+    ph = ",".join("?" * len(terms))
+    cur = db.conn.execute(
+        f"DELETE FROM log_sessions WHERE model_name IN ({ph}) OR alias IN ({ph})",
+        (*terms, *terms),
+    )
+    return cur.rowcount
+
+
 def delete_model_sessions(db: Db, model_name: str, aliases: tuple[str, ...]) -> int:
     """删模型定义时连带删除其全部日志会话(级联 log_lines,ON DELETE CASCADE)。
 
     设计:删定义 = 删日志 + 保留请求记录(请求记录成为孤立模型,由数据管理页的
     孤立模型清理,见 persistence.orphaned_models)。匹配 model_name(恒为 primary)
     + alias(aliases[0] 或旧数据变体),belt-and-braces。返回删除的会话数。"""
-    terms = {model_name, *aliases}
     with db.write_lock:
-        ph = ",".join("?" * len(terms))
-        cur = db.conn.execute(
-            f"DELETE FROM log_sessions WHERE model_name IN ({ph}) OR alias IN ({ph})",
-            (*terms, *terms),
-        )
+        n = _delete_sessions_locked(db, {model_name, *aliases})
         db.conn.commit()
-        return cur.rowcount
+        return n
 
 
 def log_session_exists(db: Db, session_id: int) -> bool:

@@ -65,3 +65,8 @@ export function numFromStr(s: string): number {
 export function numOrNull(s: string): number | null {
   return s === "" ? null : Number(s);
 }
+
+/** 未知错误 → 可展示消息。运行期抛非 Error(字符串/对象)不崩溃。 */
+export function errMsg(e: unknown): string {
+  return e instanceof Error ? e.message : String(e ?? "未知错误");
+}

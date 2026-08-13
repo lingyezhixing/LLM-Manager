@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Field, NumberInput, Select, Switch, TextInput } from "@/components/ui/form";
 import { numFromStr as num } from "@/lib/format";
 import { StringListEditor } from "@/components/ui/repeatable-fields";
+import { isPendingKey } from "@/lib/pending-keys";
 import { PricingEditor } from "@/components/system/pricing-editor";
 import { SchemeEditor } from "@/components/system/scheme-editor";
 import { useConfirm } from "@/lib/hooks/use-confirm";
@@ -48,11 +49,11 @@ function clientValid(form: ModelDef): boolean {
   );
 }
 
-// 保存前清理:去 args/required_devices 空串、env/memory_mb 空键(防 argv 传空参)。
+// 保存前清理:去 args/required_devices 空串、env/memory_mb 空键/待填哨兵(防 argv 传空参、哨兵漏存)。
 function stripEmptyKeys(rec: Record<string, string | number>): Record<string, string | number> {
   const out: Record<string, string | number> = {};
   for (const [k, v] of Object.entries(rec)) {
-    if (k.trim() !== "") out[k] = v;
+    if (k.trim() !== "" && !isPendingKey(k)) out[k] = v;
   }
   return out;
 }
@@ -68,11 +69,11 @@ function cleanPayload(m: ModelDef): ModelDef {
         if (d.trim() !== "") memory_mb[d] = s.memory_mb[d] ?? 0;
       }
       for (const [k, v] of Object.entries(s.memory_mb)) {
-        if (k.trim() !== "" && !(k in memory_mb)) memory_mb[k] = v;   // 保留 required 之外的显存条目
+        if (k.trim() !== "" && !isPendingKey(k) && !(k in memory_mb)) memory_mb[k] = v;   // 保留 required 之外的显存条目
       }
       return {
         ...s,
-        required_devices: s.required_devices.filter((d) => d !== ""),
+        required_devices: s.required_devices.filter((d) => d.trim() !== ""),
         command: {
           ...s.command,
           args: s.command.args.filter((a) => a !== ""),
