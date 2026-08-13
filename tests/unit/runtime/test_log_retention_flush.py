@@ -9,7 +9,7 @@ import asyncio
 
 from llm_manager.data import logs
 from llm_manager.data.persistence import open_db
-from llm_manager.runtime import log_retention
+from llm_manager.runtime import background as log_retention
 
 
 def test_flush_survives_deleted_session(tmp_path):

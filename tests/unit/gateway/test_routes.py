@@ -114,13 +114,13 @@ def test_non_get_catchall_forwards_to_proxy(tmp_path):
 def test_spa_served_and_api_unaffected_when_dist_exists(tmp_path, monkeypatch):
     """StaticFiles+SPA fallback:GET / → index.html;既有 /health、/api/config/models 不受影响;
     未命中 GET 路径回退 index.html(SPA 前端路由)。"""
-    import llm_manager.gateway.spa as spa_mod
+    import llm_manager.gateway.routes as routes_mod
 
     fake_dist = tmp_path / "dist"
     (fake_dist / "assets").mkdir(parents=True)
     (fake_dist / "assets" / "app.js").write_text("console.log(1)", encoding="utf-8")
     (fake_dist / "index.html").write_text("<html>SPA</html>", encoding="utf-8")
-    monkeypatch.setattr(spa_mod, "_FRONTEND_DIST", fake_dist)
+    monkeypatch.setattr(routes_mod, "_FRONTEND_DIST", fake_dist)
 
     app = FastAPI()
     _register(app, _cfg(tmp_path))
@@ -135,14 +135,14 @@ def test_spa_served_and_api_unaffected_when_dist_exists(tmp_path, monkeypatch):
 
 def test_spa_rejects_path_traversal(tmp_path, monkeypatch):
     """路径穿越防御:GET /%2e%2e/... 必须返回 404,不能读 dist 外的文件。"""
-    import llm_manager.gateway.spa as spa_mod
+    import llm_manager.gateway.routes as routes_mod
 
     fake_dist = tmp_path / "dist"
     (fake_dist / "assets").mkdir(parents=True)
     (fake_dist / "index.html").write_text("<html>SPA</html>", encoding="utf-8")
     secret = tmp_path / "config.yaml"  # dist 的同级文件(dist/../config.yaml)
     secret.write_text("LEAKED-SECRET", encoding="utf-8")
-    monkeypatch.setattr(spa_mod, "_FRONTEND_DIST", fake_dist)
+    monkeypatch.setattr(routes_mod, "_FRONTEND_DIST", fake_dist)
     app = FastAPI()
     _register(app, _cfg(tmp_path))
     with TestClient(app) as c:
@@ -154,12 +154,12 @@ def test_spa_rejects_path_traversal(tmp_path, monkeypatch):
 
 def test_spa_boots_when_dist_lacks_assets(tmp_path, monkeypatch):
     """dist 存在但无 assets/ 子目录时,网关仍能启动且 GET / 返回 index.html。"""
-    import llm_manager.gateway.spa as spa_mod
+    import llm_manager.gateway.routes as routes_mod
 
     fake_dist = tmp_path / "dist"
     fake_dist.mkdir(parents=True)
     (fake_dist / "index.html").write_text("<html>SPA</html>", encoding="utf-8")  # 注意:无 assets/
-    monkeypatch.setattr(spa_mod, "_FRONTEND_DIST", fake_dist)
+    monkeypatch.setattr(routes_mod, "_FRONTEND_DIST", fake_dist)
     app = FastAPI()
     _register(app, _cfg(tmp_path))  # 不应抛 RuntimeError
     with TestClient(app) as c:
@@ -175,10 +175,9 @@ def test_v1_models_reflects_store_reload(tmp_path):
     _register(app, _cfg(tmp_path))
     with TestClient(app) as c:
         m2 = config.ModelConfig(
-            "m2",
-            ("m2",),
-            "Chat",
-            8002,
+            aliases=("m2",),
+            mode="Chat",
+            port=8002,
             schemes={
                 "s": config.Scheme("s", frozenset({"rtx 4060"}), config.Command(exe="q.bat"), {})
             },

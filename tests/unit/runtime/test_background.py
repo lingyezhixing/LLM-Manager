@@ -192,12 +192,11 @@ def _auto_cfg(models_devs):
 
     models = {
         name: ModelConfig(
-            name,
-            (name,),
-            "Chat",
-            i + 1,
-            False,
-            {"S": Scheme("S", frozenset({dev}), Command(exe="a.bat"), {dev: 1024})},
+            aliases=(name,),
+            mode="Chat",
+            port=i + 1,
+            auto_start=False,
+            schemes={"S": Scheme("S", frozenset({dev}), Command(exe="a.bat"), {dev: 1024})},
         )
         for i, (name, dev) in enumerate(models_devs)
     }

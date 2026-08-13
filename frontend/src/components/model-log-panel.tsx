@@ -1,4 +1,5 @@
 import { LogLines } from "@/components/logs/log-lines";
+import { LogPane } from "@/components/logs/log-pane";
 import type { ModelInfo } from "@/lib/api";
 import { useModelLogs } from "@/lib/hooks/use-model-logs";
 
@@ -12,8 +13,8 @@ export function ModelLogPanel({ m }: { m: ModelInfo }) {
   const h = useModelLogs(m.alias, m.pid, active);   // pid 作 runKey:停止/重启时重连并清空
   const dotColor = active ? "var(--color-success)" : "var(--color-muted-foreground)";
   return (
-    <div className="flex h-full flex-col overflow-hidden rounded-lg border border-border bg-card">
-      <div className="flex items-center justify-between border-b border-border px-3.5 py-2">
+    <LogPane
+      header={
         <span className="text-[12px] font-semibold text-foreground">
           <span className="mr-1 inline-block size-[7px] rounded-full align-middle" style={{ background: dotColor }} />
           {m.alias}
@@ -21,10 +22,11 @@ export function ModelLogPanel({ m }: { m: ModelInfo }) {
             {m.mode} · :{m.port} · pid {m.pid ?? "—"}
           </span>
         </span>
-      </div>
+      }
+    >
       {active
         ? <LogLines h={h} />
         : <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">模型未运行,无日志</div>}
-    </div>
+    </LogPane>
   );
 }

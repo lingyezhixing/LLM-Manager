@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Loading } from "@/components/ui/card";
 import { useConfirm } from "@/lib/hooks/use-confirm";
 import { ErrorState } from "@/components/ui/error-state";
-import { errMsg } from "@/lib/format";
+import { byPort, errMsg } from "@/lib/format";
 import { useToast } from "@/lib/hooks/use-toast";
 import { ModelDefForm } from "@/components/system/model-def-form";
 import { useDeleteModelDef, useModelDef, useModelDefs, useRestartModel } from "@/lib/hooks/use-model-defs";
@@ -20,7 +20,7 @@ export function ModelDefPanel() {
   const confirm = useConfirm();
   const toast = useToast();
 
-  const items = [...(list.data ?? [])].sort((a, b) => a.port - b.port);
+  const items = byPort(list.data ?? []);
   const effSelected = selected === undefined ? (items[0]?.name ?? null) : selected;
   const detail = useModelDef(effSelected);
   const del = useDeleteModelDef();

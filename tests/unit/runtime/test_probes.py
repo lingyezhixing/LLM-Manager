@@ -1,7 +1,7 @@
 import httpx
 
-from llm_manager import probes
-from llm_manager.probes import ProbeResult, _deep_request, probe_registry
+from llm_manager.runtime import probes
+from llm_manager.runtime.probes import ProbeResult, _deep_request, probe_registry
 
 
 def test_registry_has_all_three_modes():

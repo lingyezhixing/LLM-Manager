@@ -9,7 +9,7 @@ import { ErrorState } from "@/components/ui/error-state";
 import { TokenChart } from "@/components/token-chart";
 import { fetchUsageCostSeries, fetchUsageSeries, type UsageSeries, type UsageSeriesParams } from "@/lib/api";
 import { errMsg, formatCost } from "@/lib/format";
-import { chartPresetFor, type DateRange, type UsagePreset } from "@/lib/usage-range";
+import { chartPresetFor, EMPTY_COST, EMPTY_REQUESTS, type DateRange, type UsagePreset } from "@/lib/usage-range";
 
 type View = "total" | "models" | "cost";
 
@@ -29,6 +29,7 @@ export function UsageChartCard({
     queryKey: ["usage", "series", params],
     queryFn: () => fetchUsageSeries(params),
     refetchInterval: refetch,
+    enabled: view !== "cost",   // 成本视图不轮询 token 序列(与 cost-series 对称)
   });
   const costSeriesQ = useQuery({
     queryKey: ["usage", "cost-series", params],
@@ -69,7 +70,7 @@ export function UsageChartCard({
             <Loading />
           </div>
         ) : costSeriesQ.data.buckets.length === 0 ? (
-          <Empty label="该时间范围内暂无成本" className="h-[192px]" />
+          <Empty label={EMPTY_COST} className="h-[192px]" />
         ) : (
           <TokenChart data={costSeriesQ.data} preset={chartPreset} formatY={formatCost} />
         )
@@ -82,7 +83,7 @@ export function UsageChartCard({
           <Loading />
         </div>
       ) : data.buckets.length === 0 ? (
-        <Empty label="该时间范围内暂无请求" className="h-[192px]" />
+        <Empty label={EMPTY_REQUESTS} className="h-[192px]" />
       ) : (
         <TokenChart data={view === "total" ? totalOnly(data) : data} preset={chartPreset} />
       )}

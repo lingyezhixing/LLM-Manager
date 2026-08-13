@@ -3,14 +3,18 @@ import { ConfigSaveBar } from "@/components/config-save-bar";
 import { Loading } from "@/components/ui/card";
 import { ErrorState } from "@/components/ui/error-state";
 import { Field, NumberInput, Select, TextInput } from "@/components/ui/form";
-import { errMsg, formatClock, numFromStr as num } from "@/lib/format";
+import { errMsg, formatClock, numFromStr as num, portError } from "@/lib/format";
 import { InfoTile } from "@/components/ui/info-tile";
 import { useToast } from "@/lib/hooks/use-toast";
 import { LogRetentionEditor } from "@/components/system/log-retention-editor";
 import { type LogRetention, type ProgramConfig } from "@/lib/api";
-import { useConfig, useUpdateLogRetention, useUpdateProgram } from "@/lib/hooks/use-config";
+import {
+  useConfig,
+  useSystemInfo,
+  useUpdateLogRetention,
+  useUpdateProgram,
+} from "@/lib/hooks/use-config";
 import { useNowTick } from "@/lib/hooks/use-now-tick";
-import { useSystemInfo } from "@/lib/hooks/use-config";
 import { useSyncedForm } from "@/lib/hooks/use-synced-form";
 
 const LOG_LEVELS = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"];
@@ -77,7 +81,7 @@ export function GeneralPanel() {
   const initial: GeneralForm = data
     ? { program: data.program, logs: data.logs }
     : { program: form.program, logs: form.logs };
-  const portValid = form.program.port >= 1 && form.program.port <= 65535;
+  const portValid = portError(form.program.port) === null;
   const aliveValid = form.program.alive_time >= 0;
   const set = (p: ProgramConfig) => setForm({ ...form, program: p });
   const setLogs = (l: LogRetention) => setForm({ ...form, logs: l });
@@ -122,7 +126,7 @@ export function GeneralPanel() {
           <TextInput id="cfg-host" value={form.program.host} onChange={(e) => set({ ...form.program, host: e.target.value })} />
         </Field>
         <Field label="监听端口" htmlFor="cfg-port"
-          error={!portValid && form.program.port !== 0 ? "端口须在 1–65535" : null}>
+          error={form.program.port !== 0 ? portError(form.program.port) : null}>
           <NumberInput id="cfg-port" value={form.program.port} onChange={(e) => set({ ...form.program, port: num(e.target.value) })} />
         </Field>
         <Field label="空闲检测 (分钟)" htmlFor="cfg-alive"

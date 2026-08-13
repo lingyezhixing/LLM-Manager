@@ -8,8 +8,8 @@ from llm_manager import state
 from llm_manager.config import AppConfig, Command, ModelConfig, ProgramConfig, Scheme
 from llm_manager.data import logs
 from llm_manager.devices import DeviceInfo
-from llm_manager.probes import ProbeResult
 from llm_manager.runtime.lifecycle import Lifecycle
+from llm_manager.runtime.probes import ProbeResult
 from llm_manager.state import ModelStatus
 from llm_manager.supervisor import ProcessRecord
 
@@ -23,7 +23,7 @@ class FakeSupervisor:
         self.exit_cbs: dict[int, object] = {}
         self.spawn_raises: Exception | None = None
 
-    async def spawn(self, cmd, *, shell=True, on_output=None, env=None, cwd=None):
+    async def spawn(self, cmd, *, on_output=None, env=None, cwd=None):
         if self.spawn_raises:
             exc, self.spawn_raises = self.spawn_raises, None
             raise exc
@@ -89,7 +89,6 @@ class FakeDevices:
 
 def _model(name="m1", mode="Chat", port=8000, dev="rtx 4060", mem=2048):
     return ModelConfig(
-        primary_name=name,
         aliases=(name,),
         mode=mode,
         port=port,
@@ -107,7 +106,7 @@ def _model(name="m1", mode="Chat", port=8000, dev="rtx 4060", mem=2048):
 def _cfg(*models):
     return AppConfig(
         program=ProgramConfig(host="127.0.0.1", port=8080, alive_time=60, log_level="INFO"),
-        models={m.primary_name: m for m in models},
+        models={m.aliases[0]: m for m in models},
         wol=None,
         claude_configs={},
     )
@@ -273,8 +272,8 @@ async def test_post_spawn_stop_kills_orphan_no_leak():
     life, sup, _, _ = _make()
     orig_spawn = sup.spawn
 
-    async def spy_spawn(cmd, *, shell=False, on_output=None, env=None, cwd=None):
-        rec = await orig_spawn(cmd, shell=shell, on_output=on_output)
+    async def spy_spawn(cmd, *, on_output=None, env=None, cwd=None):
+        rec = await orig_spawn(cmd, on_output=on_output)
         life._stop_events["m1"].set()  # 恰在 spawn 返回、临界段前
         return rec
 
@@ -447,10 +446,10 @@ async def test_spawn_lock_serializes_concurrent_spawns():
     spawn_log: list = []
     _real_spawn = sup.spawn
 
-    async def logged_spawn(cmd, *, shell=False, on_output=None, env=None, cwd=None):
+    async def logged_spawn(cmd, *, on_output=None, env=None, cwd=None):
         spawn_log.append(("start", _t.monotonic()))
         await asyncio.sleep(0.05)  # 模拟 spawn 耗时:无锁则 a/b spawn 并行交错,有锁则串行
-        rec = await _real_spawn(cmd, shell=shell, on_output=on_output)
+        rec = await _real_spawn(cmd, on_output=on_output)
         spawn_log.append(("end", _t.monotonic()))
         return rec
 
@@ -525,9 +524,9 @@ class _CapturingSupervisor(FakeSupervisor):
         super().__init__()
         self.on_output = None
 
-    async def spawn(self, cmd, *, shell=True, on_output=None, env=None, cwd=None):
+    async def spawn(self, cmd, *, on_output=None, env=None, cwd=None):
         self.on_output = on_output
-        return await super().spawn(cmd, shell=shell, on_output=on_output)
+        return await super().spawn(cmd, on_output=on_output)
 
 
 async def test_pipeline_wires_on_output_to_logs_capture(tmp_path):
@@ -588,12 +587,11 @@ async def test_pipeline_conda_env_wraps_with_cmd_on_windows():
     import os as _os
 
     m = ModelConfig(
-        "m1",
-        ("m1",),
-        "Chat",
-        8000,
-        False,
-        {
+        aliases=("m1",),
+        mode="Chat",
+        port=8000,
+        auto_start=False,
+        schemes={
             "s": Scheme(
                 "s",
                 frozenset({"rtx 4060"}),
@@ -807,10 +805,10 @@ async def test_stop_during_spawn_closes_log_session(tmp_path):
         spawn_entered = asyncio.Event()
         orig_spawn = sup.spawn
 
-        async def slow_spawn(cmd, *, shell=False, on_output=None, env=None, cwd=None):
+        async def slow_spawn(cmd, *, on_output=None, env=None, cwd=None):
             spawn_entered.set()
             await asyncio.sleep(0.05)  # 给 stop() 在 spawn await 中插入的窗口
-            return await orig_spawn(cmd, shell=shell, on_output=on_output)
+            return await orig_spawn(cmd, on_output=on_output)
 
         sup.spawn = slow_spawn
         task = asyncio.create_task(life.ensure_running("m1"))

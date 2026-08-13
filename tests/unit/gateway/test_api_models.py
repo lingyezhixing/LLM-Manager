@@ -138,10 +138,9 @@ def test_api_models_reflects_store_reload(tmp_path):
         from dataclasses import replace
 
         m2 = config.ModelConfig(
-            "m2-key",
-            ("m2-served",),
-            "Chat",
-            8002,
+            aliases=("m2-served",),
+            mode="Chat",
+            port=8002,
             schemes={
                 "s": config.Scheme("s", frozenset({"rtx 4060"}), config.Command(exe="q.bat"), {})
             },

@@ -4,6 +4,7 @@ import { useEventStream } from "@/lib/hooks/use-event-stream";
 import { useNowTick } from "@/lib/hooks/use-now-tick";
 import { ModelCard } from "@/components/model-card";
 import { ModelLogPanel } from "@/components/model-log-panel";
+import { byPort, streamErrorText } from "@/lib/format";
 import type { ModelsResponse } from "@/lib/api";
 
 /**
@@ -15,7 +16,7 @@ export default function ModelsPage() {
   const { data, error } = useEventStream<ModelsResponse>("/api/models/stream");
   const now = useNowTick(1000);
   const [sel, setSel] = useState<string | null>(null);
-  const models = [...(data?.data ?? [])].sort((a, b) => a.port - b.port);   // 统一按 port 升序
+  const models = byPort(data?.data ?? []);
   const selected = models.find((mm) => mm.alias === sel) ?? models[0] ?? null;
 
   return (
@@ -24,7 +25,7 @@ export default function ModelsPage() {
       <div className="grid h-[calc(100dvh-104px)] gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,4fr)]">
         <div className="flex flex-col gap-2 overflow-auto">
           {error
-            ? <p className="text-sm text-muted-foreground">模型数据加载失败(后端未连接,将自动重试)</p>
+            ? <p className="text-sm text-muted-foreground">{streamErrorText("模型")}</p>
             : data === null
               ? <Loading />
               : models.length === 0

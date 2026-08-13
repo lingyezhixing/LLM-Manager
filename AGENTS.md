@@ -25,9 +25,9 @@ state    ── 内存状态机(ModelStatus)+ 单派发 inflight Future + activi
   ↓
 supervisor ── 子进程管理(_procs/_exit_cbs/_readers 三表 + kill_tree + 单 _wait 协程)
   ↓
-runtime  ── lifecycle(编排)/scheduling(纯函数资源决策)/heartbeat(30s)/log_retention
+runtime  ── lifecycle(编排)/scheduling(纯函数资源决策)/background(心跳 30s + 日志保留 + 空闲回收 + 自启)
   ↓
-data     ── persistence(schema/迁移)+ logs(会话/行/SSE 广播)+ usage(计费)+ config_store(DB 配置)
+data     ── persistence(schema/迁移)+ logs(会话/行 SQL + 捕获/广播/flush)+ usage(计费 + 会话计数)+ config_store(DB 配置)
   ↓
 gateway  ── proxy(流式代理 + 用量计量)+ api/*(REST/SSE 端点)+ aliases(别名解析)
   ↓
@@ -81,7 +81,7 @@ tray     ── 系统托盘(自重启触发 / WOL / Claude 预设应用)
 
 ## 5. 自重启(parent + worker,类 NapCat)
 
-- **架构**:`python -m llm_manager` = parent 监督器(常驻、不碰 DB、不持 app 状态);
+- **架构**:`python -m llm_manager`(= `runner.py` 的 parent 监督器;常驻、不碰 DB、不持 app 状态);
   spawn `python -m llm_manager --worker`(=worker,跑 create_app + server.run)。
   worker 退出码 81 → parent 拉全新 worker(每次全新进程,OS 回收一切,构造性干净);
   0 → parent 退;其他(崩溃)→ parent 亦退,**不自愈**(可见失败)。
@@ -115,12 +115,11 @@ npx tsc -b           # 仅类型检查
 |---|---|---|
 | `state` | `_state` / `_inflight` | 模型状态机 + 单派发 Future |
 | `data.logs` | `_sessions` / `_alias_to_session` / `_pending` / `_db` / `_flush_chain` | 日志会话 live 集 + alias↔会话映射 + 待落库 + flush 串行链 |
-| `data.usage` | `_live_segments` | 运行中计费段(崩溃随进程消失) |
+| `data.usage` | `_live_segments` / `_c` | 运行中计费段(崩溃随进程消失)+ 进程内用量计数器(重启清零,概览 session-stats 卡) |
 | `devices` | `_LHM_COMPUTER`(LibreHardwareMonitor) | 780M/Intel 核显传感器单例(Windows);Linux Intel iGPU 走 i915 识别 + intel_gpu_top 采样、AMD 走 amdgpu sysfs(均无单例) |
-| `data.session` | `_c`(进程内用量计数器) | 概览 session-stats 卡的 token 累计(重启清零) |
 
-测试接缝:state/session 有 `_reset()`、logs 有 `reset()`;usage 无 `_reset`,
-由 `tests/unit/data/test_persistence.py` 的本地 fixture 直接清 `_live_segments`。
+测试接缝:state 有 `_reset()`、logs 有 `reset()`、usage 有 `_reset_counters()`(session 计数);
+usage 的 `_live_segments` 由 `tests/unit/data/test_persistence.py` 的本地 fixture 直接清。
 **新增模块级可变状态前先想清楚**:它隐式假设「整个进程只有一个 app 实例」,
 破坏该假设会牵连 live 集语义。
 

@@ -28,7 +28,7 @@ def test_lifespan_starts_and_stops_background(tmp_path, monkeypatch):
     monkeypatch.setattr("llm_manager.devices.common.is_lhm_available", lambda: False)
     # 探针秒失败(跳过真实 60s 重试循环):仍证明 auto_start 后台真起 + 失败容错(不抛)+ 不阻塞 /health。
     # 测试的真实契约是「后台任务起 + 失败路径走通 + /health 不阻塞」,「重试 60s」只是 startup_timeout 的副作用。
-    from llm_manager.probes import ProbeResult, probe_registry
+    from llm_manager.runtime.probes import ProbeResult, probe_registry
 
     monkeypatch.setitem(
         probe_registry,
@@ -143,7 +143,7 @@ def test_create_dev_app_leaves_no_fake_server(tmp_path, monkeypatch):
 
 
 def test_exit_code_for_returns_sentinel_only_when_requested():
-    from llm_manager.app import RESTART_EXIT_CODE, exit_code_for
+    from llm_manager.runner import RESTART_EXIT_CODE, exit_code_for
 
     assert exit_code_for(False) == 0
     assert exit_code_for(True) == RESTART_EXIT_CODE == 81
@@ -153,7 +153,7 @@ def test_exit_code_for_returns_sentinel_only_when_requested():
 
 
 def test_should_respawn_only_on_restart_sentinel():
-    from llm_manager.app import RESTART_EXIT_CODE, _should_respawn
+    from llm_manager.runner import RESTART_EXIT_CODE, _should_respawn
 
     assert _should_respawn(RESTART_EXIT_CODE) is True
     assert _should_respawn(0) is False
@@ -163,7 +163,7 @@ def test_should_respawn_only_on_restart_sentinel():
 
 
 def test_worker_command_contains_executable_and_flag():
-    from llm_manager.app import _WORKER_FLAG, _worker_command
+    from llm_manager.runner import _WORKER_FLAG, _worker_command
 
     cmd = _worker_command()
     assert cmd[0] == sys.executable
@@ -174,7 +174,7 @@ def test_worker_command_contains_executable_and_flag():
 def test_spawn_kwargs_windows_uses_process_group(monkeypatch):
     import subprocess
 
-    import llm_manager.app as appmod
+    import llm_manager.runner as appmod
 
     monkeypatch.setattr(appmod.os, "name", "nt")
     kw = appmod._spawn_kwargs()
@@ -182,7 +182,7 @@ def test_spawn_kwargs_windows_uses_process_group(monkeypatch):
 
 
 def test_spawn_kwargs_posix_uses_new_session(monkeypatch):
-    import llm_manager.app as appmod
+    import llm_manager.runner as appmod
 
     monkeypatch.setattr(appmod.os, "name", "posix")
     kw = appmod._spawn_kwargs()
@@ -196,7 +196,7 @@ def test_spawn_kwargs_posix_uses_new_session(monkeypatch):
 def test_forwardable_signals_per_os(monkeypatch):
     import signal as _sig
 
-    import llm_manager.app as appmod
+    import llm_manager.runner as appmod
 
     monkeypatch.setattr(appmod.os, "name", "nt")
     assert appmod._forwardable_signals() == [_sig.SIGINT]
@@ -208,7 +208,7 @@ def test_forwardable_signals_per_os(monkeypatch):
 def test_send_shutdown_windows_sends_ctrl_break(monkeypatch):
     import signal as _sig
 
-    import llm_manager.app as appmod
+    import llm_manager.runner as appmod
 
     monkeypatch.setattr(appmod.os, "name", "nt")
     sent = {}
@@ -226,7 +226,7 @@ def test_send_shutdown_windows_sends_ctrl_break(monkeypatch):
 def test_send_shutdown_posix_killpg(monkeypatch):
     import signal as _sig
 
-    import llm_manager.app as appmod
+    import llm_manager.runner as appmod
 
     monkeypatch.setattr(appmod.os, "name", "posix")
     killed = {}
@@ -247,7 +247,7 @@ def test_send_shutdown_posix_killpg(monkeypatch):
 
 
 def test_send_shutdown_missing_process_is_silent(monkeypatch):
-    import llm_manager.app as appmod
+    import llm_manager.runner as appmod
 
     monkeypatch.setattr(appmod.os, "name", "posix")
 
@@ -266,7 +266,7 @@ def test_send_shutdown_missing_process_is_silent(monkeypatch):
 
 
 def test_force_kill_when_still_running():
-    import llm_manager.app as appmod
+    import llm_manager.runner as appmod
 
     killed = {}
 
@@ -282,7 +282,7 @@ def test_force_kill_when_still_running():
 
 
 def test_force_kill_noop_when_exited():
-    import llm_manager.app as appmod
+    import llm_manager.runner as appmod
 
     class FakeProc:
         def poll(self):
@@ -298,7 +298,7 @@ def test_force_kill_noop_when_exited():
 
 
 def test_main_dispatches_to_worker_when_flag(monkeypatch):
-    import llm_manager.app as appmod
+    import llm_manager.runner as appmod
 
     called = {}
     monkeypatch.setattr(appmod, "_run_worker", lambda: called.__setitem__("w", True))
@@ -309,7 +309,7 @@ def test_main_dispatches_to_worker_when_flag(monkeypatch):
 
 
 def test_main_dispatches_to_parent_by_default(monkeypatch):
-    import llm_manager.app as appmod
+    import llm_manager.runner as appmod
 
     called = {}
     monkeypatch.setattr(appmod, "_run_worker", lambda: called.__setitem__("w", True))

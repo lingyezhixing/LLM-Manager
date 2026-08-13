@@ -19,7 +19,7 @@ import threading
 import time
 from dataclasses import dataclass
 
-from llm_manager.data.persistence import Db
+from llm_manager.data.persistence import Db, push_end_times
 from llm_manager.realtime import Broadcaster
 
 logger = logging.getLogger(__name__)
@@ -297,7 +297,7 @@ def resolve_session(alias: str) -> int | None:
     return _alias_to_session.get(alias)
 
 
-# ---------------- log sessions / log lines (SQL 存储层,自 persistence 并入) ----------------
+# ---------------- log sessions / log lines (SQL 存储层) ----------------
 
 
 def log_start_session(
@@ -322,17 +322,7 @@ def log_heartbeat_live(db: Db, now: float) -> int:
     误差 ≤ 心跳间隔);下次启动 live_session_ids 为空,残留会话天然 status=ended、
     end_time≈死亡时刻——无需启动收口。运行中状态由 live_session_ids(_sessions)表达,
     end_time 只管时间。"""
-    ids = live_session_ids()
-    if not ids:
-        return 0
-    placeholders = ",".join("?" * len(ids))
-    with db.write_lock:
-        cur = db.conn.execute(
-            f"UPDATE log_sessions SET end_time=? WHERE id IN ({placeholders})", (now, *ids)
-        )
-        n = cur.rowcount
-        db.conn.commit()
-        return n
+    return push_end_times(db, "log_sessions", live_session_ids(), now)
 
 
 def log_end_session(db: Db, session_id: int, end: float) -> None:

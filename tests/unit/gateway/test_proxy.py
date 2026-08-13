@@ -25,7 +25,6 @@ def _usage_rows(db, name="m1"):
 
 def _cfg():
     m = ModelConfig(
-        primary_name="m1",
         aliases=("m1", "alias1"),
         mode="Chat",
         port=8000,

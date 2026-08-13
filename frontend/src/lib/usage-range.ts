@@ -34,7 +34,7 @@ export const USAGE_REFETCH: Record<UsagePreset, number | false> = {
 };
 
 /** Preset → 显示区间(当前时刻语义,与后端 _resolve_range 一致:10m=now-600 等)。 */
-export function rangeForPreset(preset: Exclude<UsagePreset, "custom">): DateRange {
+function rangeForPreset(preset: Exclude<UsagePreset, "custom">): DateRange {
   const to = new Date();
   const from = new Date();
   if (preset === "10m") from.setMinutes(from.getMinutes() - 10);
@@ -55,6 +55,10 @@ export function fmtRange(r: DateRange): string {
   const t = `${r.to.getMonth() + 1}-${r.to.getDate()}`;
   return `${f} ~ ${t}`;
 }
+
+/** 空态文案(该时间范围无数据)— token 卡/用量图/按模型表共用。 */
+export const EMPTY_REQUESTS = "该时间范围内暂无请求";
+export const EMPTY_COST = "该时间范围内暂无成本";
 
 /** 图表 x 轴时间标签粒度(对应 TokenChart.fmtTs 的 preset 分支)— token 卡与用量页共用。
  * 自定义区间按跨度选粒度:≤12h 含秒、日内 HH:MM、≤7d 带日时分、更长仅日期——

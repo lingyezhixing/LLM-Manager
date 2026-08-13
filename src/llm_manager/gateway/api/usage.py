@@ -20,8 +20,8 @@ import time
 from fastapi import APIRouter, Request
 from pydantic import BaseModel
 
-from llm_manager.data import session
 from llm_manager.data.usage import (
+    session_snapshot,
     usage_by_model,
     usage_cost,
     usage_cost_series,
@@ -122,7 +122,7 @@ def register_usage_routes(router: APIRouter) -> None:
     @router.get("/usage/session", response_model=SessionUsageResponse)
     def session_usage_endpoint(request: Request) -> SessionUsageResponse:
         started = getattr(request.app.state, "started_at", None) or time.time()
-        s = session.snapshot(started)
+        s = session_snapshot(started)
         total_cost = 0.0
         store = getattr(request.app.state, "config_store", None)
         if store is not None:

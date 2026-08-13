@@ -4,7 +4,7 @@ import pytest
 
 from llm_manager.data import logs as _logs
 from llm_manager.data.persistence import open_db
-from llm_manager.runtime import log_retention
+from llm_manager.runtime import background as log_retention
 
 
 @pytest.fixture

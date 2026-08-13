@@ -52,7 +52,6 @@ def _sample_cfg() -> AppConfig:
         program=ProgramConfig(host="0.0.0.0", port=8080, alive_time=60, log_level="INFO"),
         models={
             "Qwen3-4B": ModelConfig(
-                primary_name="Qwen3-4B",
                 aliases=("Qwen3-4B", "q4"),
                 mode="Chat",
                 port=10001,
@@ -106,7 +105,6 @@ def test_write_appconfig_replaces_model_world(tmp_path):
         program=ProgramConfig(host="0.0.0.0", port=8080, alive_time=60, log_level="INFO"),
         models={
             "M2": ModelConfig(
-                primary_name="M2",
                 aliases=("M2",),
                 mode="Chat",
                 port=2,
@@ -128,7 +126,7 @@ def test_write_appconfig_rolls_back_on_mid_write_failure(tmp_path):
         db,
         AppConfig(
             program=ProgramConfig("0.0.0.0", 8080, 60, "INFO"),
-            models={"keep": ModelConfig("keep", ("keep",), "Chat", 1)},
+            models={"keep": ModelConfig(aliases=("keep",), mode="Chat", port=1)},
             wol=None,
             claude_configs={},
         ),
@@ -136,7 +134,10 @@ def test_write_appconfig_rolls_back_on_mid_write_failure(tmp_path):
     # 再写一个中途必失败的配置:两模型共用 alias "x" → UNIQUE(alias) 触发 IntegrityError
     bad = AppConfig(
         program=ProgramConfig("0.0.0.0", 8080, 60, "INFO"),
-        models={"A": ModelConfig("A", ("x",), "Chat", 1), "B": ModelConfig("B", ("x",), "Chat", 2)},
+        models={
+            "A": ModelConfig(aliases=("x",), mode="Chat", port=1),
+            "B": ModelConfig(aliases=("x",), mode="Chat", port=2),
+        },
         wol=None,
         claude_configs={},
     )
@@ -185,7 +186,7 @@ def test_config_store_snapshot_and_reload(tmp_path):
         db,
         AppConfig(
             program=ProgramConfig("0.0.0.0", 8080, 60, "INFO"),
-            models={"M": ModelConfig("M", ("M",), "Chat", 1)},
+            models={"M": ModelConfig(aliases=("M",), mode="Chat", port=1)},
             wol=None,
             claude_configs={},
         ),
@@ -407,10 +408,9 @@ def test_mutate_appconfig_applies_fn_and_returns_new_cfg(tmp_path):
 
     def add(cfg):
         m = ModelConfig(
-            "New",
-            ("new",),
-            "Chat",
-            7000,
+            aliases=("new",),
+            mode="Chat",
+            port=7000,
             schemes={"s": Scheme("s", frozenset({"gpu"}), Command(exe="x"), {})},
         )
         return replace(cfg, models={**cfg.models, "New": m})
@@ -429,10 +429,9 @@ def test_mutate_appconfig_rolls_back_on_validation_failure(tmp_path):
     # fn 加一个模型,其 alias "q4" 与既有冲突 → validate 失败 → 必须回滚
     def clash(cfg):
         dup = ModelConfig(
-            "Dup",
-            ("q4",),
-            "Chat",
-            7000,
+            aliases=("q4",),
+            mode="Chat",
+            port=7000,
             schemes={"s": Scheme("s", frozenset({"gpu"}), Command(exe="x"), {})},
         )
         return replace(cfg, models={**cfg.models, "Dup": dup})
@@ -458,7 +457,6 @@ def test_pricing_round_trips_through_config_store(tmp_path):
         program=ProgramConfig("0.0.0.0", 8080, 60, "INFO"),
         models={
             "M": ModelConfig(
-                primary_name="M",
                 aliases=("M",),
                 mode="Chat",
                 port=1,
@@ -505,12 +503,11 @@ def test_pricing_survives_unrelated_model_world_rewrite(tmp_path):
     db = open_db(tmp_path / "t.db")
     scheme = Scheme("S", frozenset({"gpu"}), Command(exe="q"), {"gpu": 1})
     priced = ModelConfig(
-        "M",
-        ("M",),
-        "Chat",
-        1,
-        False,
-        {"S": scheme},
+        aliases=("M",),
+        mode="Chat",
+        port=1,
+        auto_start=False,
+        schemes={"S": scheme},
         pricing=Pricing(tiers=(PricingTier(tier_index=1, input_price=5.0),)),
     )
     write_appconfig(

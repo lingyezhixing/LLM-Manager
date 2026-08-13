@@ -1,17 +1,25 @@
-"""Background loops: idle reclamation + auto-start."""
+"""Background loops: idle reclamation + auto-start + 30s heartbeat + log retention."""
 
 from __future__ import annotations
 
 import asyncio
 import logging
 import time
+from typing import TYPE_CHECKING
 
 from llm_manager import state
+from llm_manager.data import logs as _logs
+from llm_manager.data.usage import runtime_heartbeat_live
 from llm_manager.runtime.loops import tick_loop
+
+if TYPE_CHECKING:
+    from llm_manager.data.config_store import ConfigStore
+    from llm_manager.data.persistence import Db
 
 logger = logging.getLogger(__name__)
 
 AUTO_START_MARGIN: float = 30.0
+HEARTBEAT_INTERVAL = 30.0  # 秒:老项目同款节奏,崩溃最多丢最后 30s
 
 
 def _plan_batches(models_schemes: list) -> tuple[list[str], list[str]]:
@@ -98,9 +106,7 @@ async def auto_start(
     for name in models:
         scheme = _cfg.select_adaptive(cfg.models[name], online)
         if scheme is None:
-            required = sorted(
-                {d for s in cfg.models[name].schemes.values() for d in s.required_devices}
-            )
+            required = sorted(_cfg.required_devices(cfg.models[name]))
             logger.info(
                 "auto_start skip %s: no adaptive scheme (required %s, online %s)",
                 name,
@@ -122,3 +128,66 @@ async def auto_start(
         await asyncio.to_thread(monitor.refresh)
         await _one(name)
     logger.info("auto_start batch complete")
+
+
+# ---------- heartbeat ----------
+
+
+async def heartbeat_loop(
+    db: Db, stop_event: asyncio.Event, interval: float = HEARTBEAT_INTERVAL
+) -> None:
+    """常驻心跳任务:每 interval 把所有进行中会话/运行段的 end_time 推到 now。
+    wait_first=True:启动先睡一轮再首次写(启动即写无意义,且让 DB 连接先行就绪)。
+
+    运行中标识由内存态表达(logs._sessions / usage._live_segments),end_time 只管时间、
+    不兼任状态——故心跳可直接写 end_time 而不破坏「运行中」语义。崩溃/强杀(如直接
+    关机)后 end_time 停在最后一次心跳(≈死亡时刻,误差 ≤ 心跳间隔);新进程内存集合
+    为空,残留会话/段天然 status=ended,无需启动收口。模型正常停止时 lifecycle 再写
+    一次精确 end_time(最终值)。"""
+
+    async def _tick() -> None:
+        now = time.time()
+        # SQLite 写移出事件循环线程(与 log_cleanup 一致);两个 UPDATE 均为极小写。
+        await asyncio.to_thread(_logs.log_heartbeat_live, db, now)
+        await asyncio.to_thread(runtime_heartbeat_live, db, now)
+
+    await tick_loop(stop_event, interval, _tick, wait_first=True)
+
+
+# ---------- log retention ----------
+
+
+def retention_from_store(store: ConfigStore) -> tuple[int, int]:
+    """retention 接线:单次快照取 days/count(log_retention_loop 每轮注入)。"""
+    p = store.snapshot().program
+    return p.log_retention_days, p.log_retention_count
+
+
+async def log_retention_loop(
+    db, get_settings, stop_event: asyncio.Event, *, period: float = 60.0, now: float | None = None
+) -> None:
+    """每轮取 fresh 保留规则执行 log_cleanup。get_settings 注入(可测)。
+    单轮异常记日志继续(与 idle_reclamation_loop 同款兜底)。
+
+    两条常驻规则(保 N 天 / 保 N 会话)每轮独立执行,谁先触发谁先清。
+    live_session_ids 传给 log_cleanup 排除(belt-and-braces:保留规则不删直播会话,
+    否则其 DB 行被删后 logs.flush 落库 FK 失败)。"""
+
+    async def _tick() -> None:
+        days, count = get_settings()
+        if days > 0 and count > 0:
+            removed_s, removed_l = await asyncio.to_thread(
+                _logs.log_cleanup,
+                db,
+                days,
+                count,
+                now,
+                live_session_ids=_logs.live_session_ids(),
+            )
+            if removed_s:
+                logger.info("log retention cleaned %d sessions / %d lines", removed_s, removed_l)
+
+    def _on_error(e: Exception) -> None:
+        logger.error("log retention iteration error: %s", e)
+
+    await tick_loop(stop_event, period, _tick, on_error=_on_error)

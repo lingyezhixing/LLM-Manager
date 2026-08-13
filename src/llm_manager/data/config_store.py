@@ -257,7 +257,6 @@ def _read_appconfig_locked(db: Db) -> AppConfig:
             tiers=tiers,
         )
         models[row["name"]] = ModelConfig(
-            primary_name=row["name"],
             aliases=aliases,
             mode=row["mode"],
             port=row["port"],

@@ -1,4 +1,4 @@
-"""Alias → primary_name 解析,OpenAI 兼容代理与管理 API 共用。"""
+"""Alias → 模型名(内部 dict key)解析,OpenAI 兼容代理与管理 API 共用。"""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from llm_manager import config
 
 
 def resolve_alias_checked(cfg: config.AppConfig, alias: str | None) -> str:
-    """alias → primary_name。缺失 → 400(代理侧可达;管理 API 的 alias 是必需
+    """alias → 模型名(内部 key)。缺失 → 400(代理侧可达;管理 API 的 alias 是必需
     路径参数,该分支不可达);未知别名 → 404。"""
     if not alias:
         raise HTTPException(400, "请求体(JSON)中缺少 'model' 字段")

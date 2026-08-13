@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Field, NumberInput, Select, Switch, TextInput } from "@/components/ui/form";
-import { numFromStr as num } from "@/lib/format";
+import { numFromStr as num, portError } from "@/lib/format";
 import { StringListEditor } from "@/components/ui/repeatable-fields";
 import { isPendingKey } from "@/lib/pending-keys";
 import { PricingEditor } from "@/components/system/pricing-editor";
@@ -122,7 +122,7 @@ export function ModelDefForm({ model, onSaved, onDirtyChange, onDelete }: ModelD
   const saving = mutation.isPending;
   const errorMsg = mutation.error ? (mutation.error as Error).message : null;
 
-  const portValid = form.port >= 1 && form.port <= 65535;
+  const portValid = portError(form.port) === null;
   const canSave = clientValid(form) && portValid;
 
   const set = <K extends keyof ModelDef>(k: K, v: ModelDef[K]) => setForm({ ...form, [k]: v });
@@ -214,7 +214,7 @@ export function ModelDefForm({ model, onSaved, onDirtyChange, onDelete }: ModelD
             ))}
           </Select>
         </Field>
-        <Field className="sm:col-span-2" label="端口" htmlFor="mdf-port" error={!portValid && form.port !== 0 ? "端口须在 1–65535" : null}>
+        <Field className="sm:col-span-2" label="端口" htmlFor="mdf-port" error={form.port !== 0 ? portError(form.port) : null}>
           <NumberInput id="mdf-port" value={form.port} onChange={(e) => set("port", num(e.target.value))} />
         </Field>
         <Field className="sm:col-span-1" label="自启动" htmlFor="mdf-auto">

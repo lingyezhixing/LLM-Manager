@@ -7,9 +7,10 @@ from pathlib import Path
 from fastapi import APIRouter, FastAPI
 from fastapi.testclient import TestClient
 
-from llm_manager.data import session
 from llm_manager.data.persistence import open_db
+from llm_manager.data.usage import _reset_counters as _reset
 from llm_manager.data.usage import record_usage
+from llm_manager.data.usage import session_add as add
 from llm_manager.gateway.api.usage import register_usage_routes
 
 
@@ -34,8 +35,8 @@ def _app(db=None, cfg=None) -> FastAPI:
 
 
 def test_usage_session_returns_totals() -> None:
-    session._reset()
-    session.add(100, 50, 30, 70)
+    _reset()
+    add(100, 50, 30, 70)
     with TestClient(_app()) as c:
         r = c.get("/api/usage/session")
     assert r.status_code == 200
@@ -90,12 +91,11 @@ def test_usage_session_total_cost_since_start(tmp_path) -> None:
         program=ProgramConfig("0.0.0.0", 8080, 60, "INFO"),
         models={
             "m1": ModelConfig(
-                "m1",
-                ("m1",),
-                "Chat",
-                1,
-                False,
-                {"s": Scheme("s", frozenset({"gpu"}), Command(exe="x"), {"gpu": 1})},
+                aliases=("m1",),
+                mode="Chat",
+                port=1,
+                auto_start=False,
+                schemes={"s": Scheme("s", frozenset({"gpu"}), Command(exe="x"), {"gpu": 1})},
                 pricing=Pricing(
                     tiers=(PricingTier(tier_index=1, input_price=3.0, output_price=9.0),)
                 ),
@@ -233,23 +233,21 @@ def test_usage_cost_endpoint_tier_and_hourly(tmp_path):
         program=ProgramConfig("0.0.0.0", 8080, 60, "INFO"),
         models={
             "m1": ModelConfig(
-                "m1",
-                ("m1",),
-                "Chat",
-                1,
-                False,
-                {"s": Scheme("s", frozenset({"gpu"}), Command(exe="x"), {"gpu": 1})},
+                aliases=("m1",),
+                mode="Chat",
+                port=1,
+                auto_start=False,
+                schemes={"s": Scheme("s", frozenset({"gpu"}), Command(exe="x"), {"gpu": 1})},
                 pricing=Pricing(
                     tiers=(PricingTier(tier_index=1, input_price=3.0, output_price=9.0),)
                 ),
             ),
             "m2": ModelConfig(
-                "m2",
-                ("m2",),
-                "Chat",
-                2,
-                False,
-                {"s": Scheme("s", frozenset({"gpu"}), Command(exe="x"), {"gpu": 1})},
+                aliases=("m2",),
+                mode="Chat",
+                port=2,
+                auto_start=False,
+                schemes={"s": Scheme("s", frozenset({"gpu"}), Command(exe="x"), {"gpu": 1})},
                 pricing=Pricing(pricing_type="hourly", hourly_price=10.0),
             ),
         },
@@ -285,12 +283,11 @@ def test_usage_cost_series_endpoint_returns_buckets(tmp_path):
         program=ProgramConfig("0.0.0.0", 8080, 60, "INFO"),
         models={
             "m1": ModelConfig(
-                "m1",
-                ("m1",),
-                "Chat",
-                1,
-                False,
-                {"s": Scheme("s", frozenset({"gpu"}), Command(exe="x"), {"gpu": 1})},
+                aliases=("m1",),
+                mode="Chat",
+                port=1,
+                auto_start=False,
+                schemes={"s": Scheme("s", frozenset({"gpu"}), Command(exe="x"), {"gpu": 1})},
                 pricing=Pricing(tiers=(PricingTier(tier_index=1, input_price=3.0),)),
             ),
         },

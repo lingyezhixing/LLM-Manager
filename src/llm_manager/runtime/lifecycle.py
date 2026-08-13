@@ -22,13 +22,14 @@ from llm_manager.config import (
     AppConfig,
     ModelConfig,
     Scheme,
+    required_devices,
     resolve_alias,
     select_adaptive,
     substitute_vars,
 )
 from llm_manager.data import logs as _logs
-from llm_manager.probes import ProbeResult
 from llm_manager.runtime import scheduling
+from llm_manager.runtime.probes import ProbeResult
 from llm_manager.state import ModelStatus
 
 if TYPE_CHECKING:
@@ -104,7 +105,7 @@ class Lifecycle:
     async def stop(self, alias: str) -> ModelStatus:
         if state.get_status(alias) in (ModelStatus.STOPPED, ModelStatus.FAILED):
             return state.get_status(alias)
-        state.set_status(alias, ModelStatus.STOPPED, force=True, reason="user stop")
+        state.set_status(alias, ModelStatus.STOPPED, force=True)
         self._runtime_end(
             alias
         )  # 关 runtime 段:必须在首个 await 前 pop alias→seg_id(防并发 restart 抢先开新段覆盖映射;按 id 关,幂等)
@@ -176,7 +177,7 @@ class Lifecycle:
         if scheme is None:
             # 消息带 required vs online 对比:可区分「设备真离线」与「required 名不匹配」
             # (匹配=token 全子集,如 'rtx4060' 拆不成 {rtx,4060} 永远不匹配)
-            required = sorted({d for s in model.schemes.values() for d in s.required_devices})
+            required = sorted(required_devices(model))
             msg = f"no adaptive scheme (required {required}, online {sorted(online)})"
             logger.warning("%s: %s", alias, msg)
             state.record_failure(alias, msg)

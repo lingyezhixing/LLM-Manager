@@ -55,7 +55,6 @@ export function useLogViewer(api: LogApi | null, runKey: number | null) {
   const [hasSearched, setHasSearched] = useState(false);   // bug1:跟踪搜索执行,而非输入框内容
   const [searching, setSearching] = useState(false);
   const [scrollTargetId, setScrollTargetId] = useState<number | null>(null);
-  const [loadingTop, setLoadingTop] = useState(false);     // 向上加载防抖
   const [atOldest, setAtOldest] = useState(false);         // 已加载到最早(id=1)
   const [level, setLevel] = useState<string>("");   // 级别过滤(后端查询参数);变更 → 重订阅 + 清搜索
   const [input, setInput] = useState("");           // 搜索输入框文本(经 LogLines 读写)
@@ -63,7 +62,7 @@ export function useLogViewer(api: LogApi | null, runKey: number | null) {
 
   const scroller = useRef<HTMLDivElement | null>(null);
   const pendingTopFixRef = useRef<{ h: number; t: number } | null>(null); // prepend 视口维持基准
-  const loadingTopRef = useRef(false);   // F5:向上加载重入守卫(同步 ref,防触顶连续滚动在 state 更新生效前重入)
+  const loadingTopRef = useRef(false);   // F5:向上加载重入守卫(同步 ref,防触顶连续滚动重入)
   const followingRef = useRef(true);
   const liveRef = useRef(true);
   const genRef = useRef(0);  // H1:视图代次——api/runKey 重订阅时 ++,在途异步(回退/翻页/搜索)先比对再 setState
@@ -139,8 +138,8 @@ export function useLogViewer(api: LogApi | null, runKey: number | null) {
   }, [displayed, scrollTargetId]);
 
   // bug2:向上加载更早日志——prepend 到 historyPrefix,维持视口,防抖,上限,到顶。
-  // F5:重入守卫用 ref(同步置位),非 state——state 从 setLoadingTop(true) 到新闭包生效有窗口,
-  // 触顶连续滚动会用旧闭包(loadingTop 仍 false)重入,导致同页历史重复 prepend + key 冲突。
+  // F5:重入守卫用同步 ref(置位即生效)——触顶连续滚动若用 state 判定,更新生效前会
+  // 用旧闭包重入,导致同页历史重复 prepend + key 冲突。
   const loadMoreAbove = useCallback(async () => {
     if (!api || loadingTopRef.current || mode !== "live") return;
     const firstId = historyPrefix.length > 0 ? historyPrefix[0].id
@@ -149,7 +148,6 @@ export function useLogViewer(api: LogApi | null, runKey: number | null) {
     const el = scroller.current;
     if (el) pendingTopFixRef.current = { h: el.scrollHeight, t: el.scrollTop }; // prepend 前基准
     loadingTopRef.current = true;                 // 同步置位 ref 守卫
-    setLoadingTop(true);                          // state 仅驱动 UI
     const gen = genRef.current;                   // H1:比对代次,防重订阅后旧页混入新视图
     try {
       const page = await api.fetchPage(firstId, WINDOW, levelParam);
@@ -163,7 +161,6 @@ export function useLogViewer(api: LogApi | null, runKey: number | null) {
       if (newer[0].id <= 1) setAtOldest(true);             // 加载到最早(id=1)
     } catch { /* best-effort */ } finally {
       loadingTopRef.current = false;
-      setLoadingTop(false);
     }
   }, [api, levelParam, mode, historyPrefix, liveLines]);
 
@@ -253,7 +250,7 @@ export function useLogViewer(api: LogApi | null, runKey: number | null) {
     displayed, mode, newCount, scroller, onScroll,
     matches, matchTotal, matchIdx, searching, hasSearched, matchSet, currentMatch,
     runSearch, onInput, nextMatch, prevMatch, backToLive,
-    loadingTop, atOldest,
+    atOldest,
     level, setLevel, input,
   };
 }

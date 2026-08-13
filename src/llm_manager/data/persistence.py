@@ -17,6 +17,21 @@ class Db:
     write_lock: threading.Lock
 
 
+def push_end_times(db: Db, table: str, ids: set[int], now: float) -> int:
+    """心跳共用:把一批进行中项(log_sessions / model_runtime)的 end_time 推到 now。
+    由调用方选好 id 集(内存 live 集),本函数负责建 IN 占位符 + UPDATE + commit。"""
+    if not ids:
+        return 0
+    placeholders = ",".join("?" * len(ids))
+    with db.write_lock:
+        cur = db.conn.execute(
+            f"UPDATE {table} SET end_time=? WHERE id IN ({placeholders})", (now, *ids)
+        )
+        n = cur.rowcount
+        db.conn.commit()
+        return n
+
+
 def open_db(path: Path) -> Db:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)

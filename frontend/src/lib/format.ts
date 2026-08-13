@@ -29,9 +29,40 @@ function formatDuration(sec: number, precision: DurationPrecision): string {
   return `${h}h ${Math.round((sec % 3600) / 60)}m`;
 }
 
-/** 精确空闲时长(含秒)— 模型卡/概览空闲显示。 */
-export function formatIdle(sec: number): string {
+/** 精确空闲时长(含秒)— 供 idleText 内部使用(空闲文案唯一入口)。 */
+function formatIdle(sec: number): string {
   return formatDuration(sec, "full");
+}
+
+/** last_access(epoch 秒)→ 距今空闲秒数(从未访问 → 0)。 */
+function idleSeconds(lastAccessEpoch: number, nowMs: number): number {
+  if (lastAccessEpoch <= 0) return 0;
+  return Math.max(0, Math.floor((nowMs - lastAccessEpoch * 1000) / 1000));
+}
+
+/** 空闲文案:「空闲 {精确时长}」;从未访问 → "".模型卡/概览共用。 */
+export function idleText(lastAccessEpoch: number, nowMs: number): string {
+  return lastAccessEpoch > 0 ? `空闲 ${formatIdle(idleSeconds(lastAccessEpoch, nowMs))}` : "";
+}
+
+/** 请求中文案:`{n} 请求中`(模型卡/概览共用)。 */
+export function pendingLabel(pending: number): string {
+  return `${pending} 请求中`;
+}
+
+/** SSE 流加载失败文案(模型/设备流共用):`{什么}数据加载失败(后端未连接,将自动重试)`。 */
+export function streamErrorText(what: string): string {
+  return `${what}数据加载失败(后端未连接,将自动重试)`;
+}
+
+/** 统一按 port 升序排序(模型列表/模型摘要/模型定义面板共用)。 */
+export function byPort<T extends { port: number }>(items: T[]): T[] {
+  return [...items].sort((a, b) => a.port - b.port);
+}
+
+/** 端口合法性校验(与后端 ge=1/le=65535 对齐):非法 → 错误文案,合法 → null。 */
+export function portError(port: number): string | null {
+  return port >= 1 && port <= 65535 ? null : "端口须在 1–65535";
 }
 
 /** 时长(小时级舍秒)— 日志会话列表。 */

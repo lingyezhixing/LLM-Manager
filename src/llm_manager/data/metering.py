@@ -5,7 +5,7 @@ Ported from legacy core/token_parsers.py (behavior preserved verbatim)。
 未知路径默认回退 parse_generic(保守按字段分类,非顺序盲试;仅无歧义信号
 返回非零,宁可漏计也不误记)。显式注册表仍为主路,新增已知端点应显式注册。
 
-另含共享用量指标 helper(hit_rate),供 session/usage 引用。"""
+另含共享用量指标 helper(hit_rate),供 usage(计费/会话计数)引用。"""
 
 from __future__ import annotations
 
@@ -203,8 +203,6 @@ def parse_generic(body: bytes) -> TokenUsage:
     anthropic 与 responses 同字段不同 cache 语义的错配。仅无歧义信号返回非零,
     否则归零——宁可漏计也不误记(用量/计费是 DB 事实)。显式注册表仍为主路。"""
     s = _body_str(body)
-    if "timings" in s:
-        return parse_openai(body)  # llama.cpp native(infill 等);parse_openai 内含 timings 分支
     if "input_tokens_details" in s:
         return parse_responses(body)  # OpenAI Responses 缓存口径
     if "cache_read_input_tokens" in s or "cache_creation_input_tokens" in s:

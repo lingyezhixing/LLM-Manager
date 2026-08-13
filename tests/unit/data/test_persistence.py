@@ -411,12 +411,11 @@ def _cfg_with(pricing):
         program=ProgramConfig("0.0.0.0", 8080, 60, "INFO"),
         models={
             "m1": ModelConfig(
-                "m1",
-                ("m1",),
-                "Chat",
-                1,
-                False,
-                {"s": Scheme("s", frozenset({"gpu"}), Command(exe="x"), {"gpu": 1})},
+                aliases=("m1",),
+                mode="Chat",
+                port=1,
+                auto_start=False,
+                schemes={"s": Scheme("s", frozenset({"gpu"}), Command(exe="x"), {"gpu": 1})},
                 pricing=pricing,
             )
         },
@@ -489,12 +488,11 @@ def test_usage_cost_free_model_yields_zero_and_is_omitted(tmp_path):
         program=ProgramConfig("0.0.0.0", 8080, 60, "INFO"),
         models={
             "m1": ModelConfig(
-                "m1",
-                ("m1",),
-                "Chat",
-                1,
-                False,
-                {"s": Scheme("s", frozenset({"gpu"}), Command(exe="x"), {"gpu": 1})},
+                aliases=("m1",),
+                mode="Chat",
+                port=1,
+                auto_start=False,
+                schemes={"s": Scheme("s", frozenset({"gpu"}), Command(exe="x"), {"gpu": 1})},
             )
         },
         wol=None,

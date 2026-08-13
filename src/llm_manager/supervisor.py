@@ -31,7 +31,6 @@ class ProcessRunner(Protocol):
         self,
         cmd,
         *,
-        shell: bool = False,
         on_output: Callable[[str, str], None] | None = None,
         env: dict[str, str] | None = None,
         cwd: str | None = None,
@@ -68,7 +67,6 @@ class Supervisor:
         self,
         cmd,
         *,
-        shell: bool = False,
         on_output: Callable[[str, str], None] | None = None,
         env: dict[str, str] | None = None,
         cwd: str | None = None,
@@ -77,7 +75,6 @@ class Supervisor:
         popen = await asyncio.to_thread(
             subprocess.Popen,
             cmd,
-            shell=shell,
             stdout=(subprocess.PIPE if on_output is not None else None),
             stderr=(subprocess.PIPE if on_output is not None else None),
             env=env,

@@ -4,7 +4,7 @@ The stream pushes a full snapshot on change (status/pid/pending/failure/last_acc
 driven by the subscriber-gated ``ModelFeed``. idle/uptime are intentionally NOT in the
 snapshot (they're time-derived): the frontend ticks them locally from ``started_at`` and
 ``last_access`` (wall-clock epochs). Pydantic schemas → OpenAPI (types hand-mirrored
-in frontend/src/lib/api.ts).
+in frontend/src/lib/api/models.ts).
 """
 
 from __future__ import annotations

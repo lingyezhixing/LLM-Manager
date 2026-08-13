@@ -2,7 +2,7 @@
 
 On connect it sends the current snapshot immediately, then each refresh from the
 subscriber-gated ``DeviceFeed`` (2s). Pydantic schemas → OpenAPI (types hand-mirrored
-in ``frontend/src/lib/api.ts``). The SSE generator is extracted (``_device_stream``)
+in ``frontend/src/lib/api/models.ts``). The SSE generator is extracted (``_device_stream``)
 so it can be unit-tested directly without the HTTP stack.
 """
 

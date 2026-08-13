@@ -1,8 +1,8 @@
 """System log handler + root-logger setup(控制台 + 时间戳文件 + 清理)。app.py 组合根只做接线。
 
-SystemLogHandler forwards logging records into the LogStore queue without
+SystemLogHandler forwards logging records into the logs capture queue without
 blocking the caller. Dropped records never affect the main program (the collector
-is O(1) append; batching/persistence happen in the LogStore flush task).
+is O(1) append; batching/persistence happen in the data/logs.py flush task).
 To be wired by app.py lifespan (install/remove); tests and non-lifespan paths stay clean.
 """
 

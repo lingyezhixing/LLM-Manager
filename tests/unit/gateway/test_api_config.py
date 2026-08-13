@@ -157,7 +157,6 @@ def test_to_model_config_preserves_device_names():
         ],
     )
     mc = _to_model_config(body)
-    assert mc.primary_name == "M"
     assert mc.aliases == ("M",)
     scheme = mc.schemes["RTX4060"]
     assert scheme.required_devices == frozenset({"RTX 4060"})  # 存储原样(所见即所存)

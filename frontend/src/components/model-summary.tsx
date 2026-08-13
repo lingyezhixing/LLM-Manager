@@ -2,19 +2,15 @@ import { Link } from "react-router-dom";
 import { Activity } from "lucide-react";
 import { Card, Loading } from "@/components/ui/card";
 import { InfoTile } from "@/components/ui/info-tile";
-import { formatIdle } from "@/lib/format";
+import { byPort, idleText, pendingLabel, streamErrorText } from "@/lib/format";
 import { useEventStream } from "@/lib/hooks/use-event-stream";
 import { useNowTick } from "@/lib/hooks/use-now-tick";
 import type { ModelInfo, ModelsResponse } from "@/lib/api";
 
 /** Per-model trailing status line, with idle ticked locally from last_access. */
 function activityText(m: ModelInfo, nowMs: number): string {
-  if (m.pending > 0) return `${m.pending} 请求中`;
-  if (m.last_access > 0) {
-    const idleSec = Math.max(0, Math.floor((nowMs - m.last_access * 1000) / 1000));
-    return `空闲 ${formatIdle(idleSec)}`;
-  }
-  return "";
+  if (m.pending > 0) return pendingLabel(m.pending);
+  return idleText(m.last_access, nowMs);
 }
 
 /**
@@ -25,12 +21,11 @@ export function ModelSummary() {
   const { data, error } = useEventStream<ModelsResponse>("/api/models/stream");
   const now = useNowTick(1000);
 
-  if (error) return <p className="text-sm text-muted-foreground">模型数据加载失败(后端未连接,将自动重试)</p>;
+  if (error) return <p className="text-sm text-muted-foreground">{streamErrorText("模型")}</p>;
   if (!data) return <Loading />;
 
   const models: ModelInfo[] = data.data ?? [];
-  const running = models.filter((m) => m.status === "routing")
-    .sort((a, b) => a.port - b.port);   // 统一按 port 升序
+  const running = byPort(models.filter((m) => m.status === "routing"));
   const stopped = models.filter((m) => m.status === "stopped");
   const failed = models.filter((m) => m.status === "failed");
 

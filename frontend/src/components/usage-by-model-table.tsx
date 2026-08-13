@@ -6,6 +6,7 @@ import { Card, Empty, Loading } from "@/components/ui/card";
 import { ErrorState } from "@/components/ui/error-state";
 import { fetchUsageByModel, fetchUsageCost, type UsageSeriesParams } from "@/lib/api";
 import { errMsg, formatCost, formatCount, formatLatency, formatPercent, formatTokens } from "@/lib/format";
+import { EMPTY_REQUESTS } from "@/lib/usage-range";
 
 type SortKey = "input_tokens" | "output_tokens" | "cache_n" | "request_count" | "hit_rate" | "latency_ms" | "cost";
 
@@ -32,7 +33,7 @@ export function UsageByModelTable({
 
   if (isError) return <Card><ErrorState message={errMsg(error)} onRetry={() => refetchByModel()} /></Card>;
   if (isLoading) return <Card><Loading /></Card>;
-  if (!data || data.length === 0) return <Card><Empty label="该时间范围内暂无请求" /></Card>;
+  if (!data || data.length === 0) return <Card><Empty label={EMPTY_REQUESTS} /></Card>;
 
   const rows = [...data].sort((a, b) => {
     if (sortKey === "cost") {

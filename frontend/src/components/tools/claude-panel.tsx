@@ -29,6 +29,16 @@ function parseEnvJson(text: string): { ok: true; value: Record<string, string> }
   }
 }
 
+// JSON 语义相等(忽略格式差异):useSyncedForm 的 dirty/follow 判定用。保存成功后
+// config refetch 会把服务端预设按 2 空格重序列化回传——若按字符串比较,会在刚保存完
+// 就把用户手写格式覆盖成服务端格式(回归);语义相等则不动文本。
+function jsonEq(a: string, b: string): boolean {
+  const pa = parseEnvJson(a);
+  const pb = parseEnvJson(b);
+  if (pa.ok && pb.ok) return JSON.stringify(pa.value) === JSON.stringify(pb.value);
+  return a === b;
+}
+
 // ── 单张方案卡片 ─────────────────────────────────────────────
 // mode="edit":已保存预设,name/preset 由父级传入,名字只读(创建后锁定);
 // mode="new":新建卡,名字可输入、自动展开、不可折叠,保存成功后 onCreated。
@@ -72,14 +82,19 @@ function ClaudePresetCard({
     if (!isNew && isCurrent) setExpanded(true);
   }, [isNew, isCurrent]);
   const [nameInput, setNameInput] = useState("");
-  const [json, setJson] = useState(isNew ? "{}" : JSON.stringify(preset, null, 2));
-  const [baselineJson, setBaselineJson] = useState(json);
+  // useSyncedForm:json/baseline 同步契约(外部刷新且未编辑时跟随,保存成功 commit 推进)。
+  // 新建卡 serverValue=null(不进外部跟随)+ alwaysDirty(恒脏);编辑卡以 JSON 文本为 form。
+  const { form: json, setForm: setJson, dirty, commit } = useSyncedForm<string>(
+    isNew ? null : JSON.stringify(preset, null, 2),
+    JSON.stringify(preset ?? {}, null, 2),
+    jsonEq,
+    { alwaysDirty: isNew },
+  );
 
   const parsed = parseEnvJson(json);
   const jsonErr = parsed && !parsed.ok ? parsed.message : null;
   const nameOk = !isNew || nameInput.trim().length > 0;
   const collision = isNew && nameInput.trim() !== "" && names.includes(nameInput.trim());
-  const dirty = isNew || json !== baselineJson;
   const editName = isNew ? nameInput.trim() : (name ?? "");
 
   const saveEnabled = dirty && nameOk && !collision && !jsonErr && !update.isPending;
@@ -92,7 +107,7 @@ function ClaudePresetCard({
     const next = { ...latestPresets(), [editName]: parsed.value };
     update.mutate(next, {
       onSuccess: () => {
-        setBaselineJson(json);
+        commit(json);
         if (isNew) {
           toast.success(`已创建预设「${editName}」`);
           onCreated?.(editName);

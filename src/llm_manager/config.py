@@ -73,14 +73,6 @@ class Scheme:
             memory_mb={k: int(v) for k, v in d.get("memory_mb", {}).items()},
         )
 
-    def to_dict(self) -> dict:
-        return {
-            "config_source": self.config_source,
-            "required_devices": sorted(self.required_devices),
-            "command": self.command.to_dict(),
-            "memory_mb": dict(self.memory_mb),
-        }
-
 
 @dataclass(frozen=True, slots=True)
 class PricingTier:
@@ -149,7 +141,6 @@ class Pricing:
 
 @dataclass(frozen=True, slots=True)
 class ModelConfig:
-    primary_name: str
     aliases: tuple[
         str, ...
     ]  # 有序:aliases[0]=主别名=下游 served name(lmdeploy --model-name / llama.cpp -a)
@@ -171,7 +162,9 @@ def substitute_vars(text: str, model: ModelConfig) -> str:
     """启动命令变量替换:{{port}} → 模型端口,{{alias}} → 第一别名(下游 served name)。
     在 launch 构建 argv 时统一应用,使顶部端口/别名修改自动传导到启动命令。"""
     alias = model.aliases[0] if model.aliases else ""
-    return text.replace("{{port}}", str(model.port)).replace("{{alias}}", alias)
+    return text.replace(SUBST_PLACEHOLDERS[0], str(model.port)).replace(
+        SUBST_PLACEHOLDERS[1], alias
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -218,7 +211,6 @@ def load(path: Path) -> AppConfig:
                 continue
             schemes[key] = Scheme.from_dict({**val, "config_source": key})
         models[name] = ModelConfig(
-            primary_name=name,
             aliases=tuple(m.get("aliases", [])),  # tuple 保 yaml 顺序,aliases[0]=served
             mode=m.get("mode", "Chat"),
             port=int(m["port"]),
@@ -308,6 +300,11 @@ def referenced_devices(cfg: AppConfig) -> set[str]:
             names |= set(scheme.required_devices)
             names |= set(scheme.memory_mb)
     return names
+
+
+def required_devices(model: ModelConfig) -> set[str]:
+    """模型级 ∪ scheme.required_devices(无 adaptive scheme 时的错误消息共用)。"""
+    return {d for s in model.schemes.values() for d in s.required_devices}
 
 
 def resolve_alias(cfg: AppConfig, alias: str) -> str:

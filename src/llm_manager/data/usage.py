@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from llm_manager.data.metering import hit_rate
-from llm_manager.data.persistence import Db
+from llm_manager.data.persistence import Db, push_end_times
 
 if TYPE_CHECKING:
     from llm_manager.config import AppConfig, Pricing, PricingTier
@@ -90,17 +90,7 @@ def runtime_heartbeat_live(db: Db, now: float) -> int:
     由 heartbeat_loop 每 30s 调用。崩溃/强杀后 end_time 停在最后一次心跳(≈死亡时刻,
     误差 ≤ 心跳间隔)——usage_cost 直接读 end_time,不再按 now 持续计费、不含停机时长,
     也无需启动收口。"""
-    ids = live_segment_ids()
-    if not ids:
-        return 0
-    placeholders = ",".join("?" * len(ids))
-    with db.write_lock:
-        cur = db.conn.execute(
-            f"UPDATE model_runtime SET end_time=? WHERE id IN ({placeholders})", (now, *ids)
-        )
-        n = cur.rowcount
-        db.conn.commit()
-        return n
+    return push_end_times(db, "model_runtime", live_segment_ids(), now)
 
 
 def record_runtime_end(db: Db, segment_id: int, end: float) -> None:
@@ -121,6 +111,11 @@ class UsageSeries:
     total: list[float]  # value per bucket summed across models
 
 
+def _clock_offset(bucket_seconds: int) -> int:
+    """时钟对齐偏移:本地时区对齐(如日窗口对齐本地零点)。"""
+    return (-time.localtime().tm_gmtoff) % bucket_seconds
+
+
 def _bucket_axis(start_ts: float, end_ts: float, bucket_seconds: int) -> tuple[float, list[float]]:
     """时钟对齐桶轴:(first_bucket_start, [buckets])。空窗/非正桶 → (0.0, []).
 
@@ -131,7 +126,7 @@ def _bucket_axis(start_ts: float, end_ts: float, bucket_seconds: int) -> tuple[f
     """
     if end_ts <= start_ts or bucket_seconds <= 0:
         return 0.0, []
-    offset = (-time.localtime().tm_gmtoff) % bucket_seconds
+    offset = _clock_offset(bucket_seconds)
     first = float(math.floor((start_ts - offset) / bucket_seconds) * bucket_seconds + offset)
     n = max(1, math.ceil((end_ts - first) / bucket_seconds))
     return first, [first + i * bucket_seconds for i in range(n)]
@@ -151,6 +146,7 @@ def usage_series(db: Db, *, start_ts: float, end_ts: float, bucket_seconds: int)
     if not buckets:
         return UsageSeries(buckets=[], models={}, total=[])
 
+    offset = _clock_offset(bucket_seconds)
     rows = db.conn.execute(
         """SELECT m.original_name AS model,
                   CAST((r.end_time - :offset) / :bucket AS INTEGER) * :bucket + :offset AS bucket,
@@ -162,7 +158,7 @@ def usage_series(db: Db, *, start_ts: float, end_ts: float, bucket_seconds: int)
             "start": start_ts,
             "end": end_ts,
             "bucket": bucket_seconds,
-            "offset": (-time.localtime().tm_gmtoff) % bucket_seconds,
+            "offset": offset,
         },
     ).fetchall()
 
@@ -267,6 +263,28 @@ def _overlap(a_start: float, a_end: float, b_start: float, b_end: float) -> floa
     return max(0.0, min(a_end, b_end) - max(a_start, b_start))
 
 
+def _hourly_cost(
+    seg_start: float, seg_end: float, hourly_price: float, win_start: float, win_end: float
+) -> float:
+    """运行段与窗口 [win_start, win_end) 重叠秒数 × 小时单价/3600(usage_cost 与
+    usage_cost_series 共用,避免计费语义在汇总/分桶两处漂移)。"""
+    return _overlap(win_start, win_end, seg_start, seg_end) * hourly_price / 3600.0
+
+
+def _tier_cost_row(models, row) -> float:
+    """逐请求 tier_cost(usage_cost 与 usage_cost_series 共用)。非 tier/未配置 → 0.0。"""
+    mc = models.get(row["model"])
+    if mc is None or mc.pricing.pricing_type != "tier":
+        return 0.0
+    return tier_cost(
+        mc.pricing,
+        int(row["input_tokens"]),
+        int(row["output_tokens"]),
+        int(row["cache_n"]),
+        int(row["prompt_n"]),
+    )
+
+
 def _tier_matches(t: PricingTier, inp: int, out: int) -> bool:  # type: ignore[name-defined]
     """First-tier-wins window match (legacy semantics): min=0 closed, else open;
     max None/negative = unbounded."""
@@ -339,16 +357,7 @@ def usage_cost(
             (start_ts, end_ts),
         ).fetchall()
         for row in rows:
-            mc = cfg.models.get(row["model"])
-            if mc is None or mc.pricing.pricing_type != "tier":
-                continue
-            c = tier_cost(
-                mc.pricing,
-                int(row["input_tokens"]),
-                int(row["output_tokens"]),
-                int(row["cache_n"]),
-                int(row["prompt_n"]),
-            )
+            c = _tier_cost_row(cfg.models, row)
             if c:
                 acc[row["model"]] = acc.get(row["model"], 0.0) + c
 
@@ -370,9 +379,9 @@ def usage_cost(
             if not rate:
                 continue
             sess_end = row["end_time"] if row["end_time"] is not None else now_ts
-            overlap = _overlap(start_ts, end_ts, row["start_time"], sess_end)
-            if overlap > 0:
-                acc[row["model"]] = acc.get(row["model"], 0.0) + overlap * rate / 3600.0
+            c = _hourly_cost(row["start_time"], sess_end, rate, start_ts, end_ts)
+            if c > 0:
+                acc[row["model"]] = acc.get(row["model"], 0.0) + c
 
     ptype = {n: m.pricing.pricing_type for n, m in cfg.models.items()}
     by_model = [
@@ -419,16 +428,7 @@ def usage_cost_series(
             (*names, start_ts, end_ts),
         ).fetchall()
         for row in rows:
-            mc = tier_models.get(row["model"])
-            if mc is None:
-                continue
-            c = tier_cost(
-                mc.pricing,
-                int(row["input_tokens"]),
-                int(row["output_tokens"]),
-                int(row["cache_n"]),
-                int(row["prompt_n"]),
-            )
+            c = _tier_cost_row(tier_models, row)
             if c <= 0:
                 continue
             idx = int((row["end_time"] - first) // bucket_seconds)
@@ -438,7 +438,7 @@ def usage_cost_series(
 
     # hourly:单次批量查询所有 hourly 模型的运行段,逐桶摊重叠时长(原 O(N) 查询 → 1 次)。
     hourly_rates = {
-        n: m.pricing.hourly_price / 3600.0
+        n: m.pricing.hourly_price
         for n, m in cfg.models.items()
         if m.pricing.pricing_type == "hourly" and m.pricing.hourly_price > 0
     }
@@ -458,10 +458,72 @@ def usage_cost_series(
             sess_end = row["end_time"] if row["end_time"] is not None else now_ts
             for i in range(n):
                 b_start = first + i * bucket_seconds
-                ov = _overlap(b_start, b_start + bucket_seconds, row["start_time"], sess_end)
-                if ov > 0:
-                    cost = ov * rate
+                cost = _hourly_cost(
+                    row["start_time"], sess_end, rate, b_start, b_start + bucket_seconds
+                )
+                if cost > 0:
                     models.setdefault(row["model"], [0.0] * n)[i] += cost
                     total[i] += cost
 
     return UsageSeries(buckets=buckets, models=models, total=total)
+
+
+# ---------- session:进程内用量计数器(重启清零,概览 session-stats 卡) ----------
+
+# Fed by the proxy's ``_record_usage`` path (same token parse as the persisted rows, see
+# ``data/metering``). Module-level singleton (like ``state.py``) — asyncio single-thread →
+# increments need no lock. ``started_at`` is the process-start wall-clock epoch, passed in
+# by the caller; the frontend fetches it and ticks uptime locally. Metering semantics (all
+# parsers): ``cache_tokens`` = hit, ``prompt_tokens`` = miss, ``input_tokens`` = cache + prompt
+# → hit_rate = cache_hit / (cache_hit + cache_miss).
+
+
+@dataclass(frozen=True, slots=True)
+class SessionTotals:
+    started_at: float  # process start (wall-clock epoch seconds)
+    input_tokens: int
+    output_tokens: int
+    cache_hit: int
+    cache_miss: int
+    hit_rate: float
+
+
+@dataclass(slots=True)
+class _Counters:
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cache_tokens: int = 0  # hits
+    prompt_tokens: int = 0  # misses
+
+
+_c: _Counters = _Counters()
+
+
+def _reset_counters() -> None:
+    """Test helper: clear counters (production resets only via process restart)."""
+    global _c
+    _c = _Counters()
+
+
+def session_add(
+    input_tokens: int, output_tokens: int, cache_tokens: int, prompt_tokens: int
+) -> None:
+    _c.input_tokens += input_tokens
+    _c.output_tokens += output_tokens
+    _c.cache_tokens += cache_tokens
+    _c.prompt_tokens += prompt_tokens
+
+
+def session_snapshot(started_at: float) -> SessionTotals:
+    """started_at 由调用方传入(app 实例级,与 /api/system/info 单源);
+    (进程启动时刻的 wall-clock epoch,time.time() 值)。"""
+    hit = _c.cache_tokens
+    miss = _c.prompt_tokens
+    return SessionTotals(
+        started_at=started_at,
+        input_tokens=_c.input_tokens,
+        output_tokens=_c.output_tokens,
+        cache_hit=hit,
+        cache_miss=miss,
+        hit_rate=hit_rate(hit, miss),
+    )

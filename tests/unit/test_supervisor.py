@@ -14,7 +14,7 @@ def test_spawn_returns_process_record_and_exits():
         sup = Supervisor()
         # cross-platform trivial command
         cmd = [sys.executable, "-c", "print('hi')"]
-        rec = await sup.spawn(cmd, shell=False)
+        rec = await sup.spawn(cmd)
         assert isinstance(rec, ProcessRecord)
         assert rec.pid > 0
         # let it finish + wait-task fire
@@ -35,7 +35,7 @@ def test_on_exit_callback_fires_when_process_exits():
         # placeholder pid 0 registration (real one set at spawn below)
         sup.on_exit(0, lambda code: seen.append(code))
         cmd = [sys.executable, "-c", "print('hi')"]
-        rec = await sup.spawn(cmd, shell=False)
+        rec = await sup.spawn(cmd)
         sup.on_exit(rec.pid, lambda code: seen.append(code))
         await asyncio.sleep(1.0)
         assert seen, "on_exit callback did not fire"
@@ -49,7 +49,7 @@ def test_kill_tree_clears_process_tables():
 
     async def main():
         sup = Supervisor()
-        rec = await sup.spawn([sys.executable, "-c", "import time; time.sleep(30)"], shell=False)
+        rec = await sup.spawn([sys.executable, "-c", "import time; time.sleep(30)"])
         sup.on_exit(rec.pid, lambda code: None)
         await asyncio.sleep(0.3)
         assert rec.pid in sup._procs and rec.pid in sup._wait_tasks and rec.pid in sup._exit_cbs

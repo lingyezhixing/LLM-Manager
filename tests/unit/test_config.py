@@ -57,10 +57,12 @@ def test_validate_flags_port_and_alias_clash_and_bad_mode():
     cfg = AppConfig(
         program=ProgramConfig(host="0.0.0.0", port=8080, alive_time=60, log_level="INFO"),
         models={
-            "A": ModelConfig("A", ("x",), "Chat", 1, False, {}),
-            "B": ModelConfig("B", ("x",), "Embedding", 1, False, {}),
-            "C": ModelConfig("C", ("y",), "Bogus", 2, False, {}),
-            "D": ModelConfig("D", ("z",), "Chat", 3, False, {}),
+            "A": ModelConfig(aliases=("x",), mode="Chat", port=1, auto_start=False, schemes={}),
+            "B": ModelConfig(
+                aliases=("x",), mode="Embedding", port=1, auto_start=False, schemes={}
+            ),
+            "C": ModelConfig(aliases=("y",), mode="Bogus", port=2, auto_start=False, schemes={}),
+            "D": ModelConfig(aliases=("z",), mode="Chat", port=3, auto_start=False, schemes={}),
         },
         wol=None,
         claude_configs={},
@@ -77,12 +79,11 @@ def test_validate_passes_clean_config():
         program=ProgramConfig(host="0.0.0.0", port=8080, alive_time=60, log_level="INFO"),
         models={
             "A": ModelConfig(
-                "A",
-                ("a",),
-                "Chat",
-                1,
-                False,
-                {"S": Scheme("S", frozenset({"gpu"}), Command(exe="a.bat"), {"gpu": 1})},
+                aliases=("a",),
+                mode="Chat",
+                port=1,
+                auto_start=False,
+                schemes={"S": Scheme("S", frozenset({"gpu"}), Command(exe="a.bat"), {"gpu": 1})},
             )
         },
         wol=None,
@@ -94,7 +95,13 @@ def test_validate_passes_clean_config():
 def test_select_adaptive_first_subset_wins():
     s_gpu = Scheme("GPU", frozenset({"gpu"}), Command(exe="g.bat"), {"gpu": 1})
     s_apu = Scheme("APU", frozenset({"apu"}), Command(exe="a.bat"), {"apu": 1})
-    m = ModelConfig("M", ("M",), "Chat", 1, False, {"GPU": s_gpu, "APU": s_apu})
+    m = ModelConfig(
+        aliases=("M",),
+        mode="Chat",
+        port=1,
+        auto_start=False,
+        schemes={"GPU": s_gpu, "APU": s_apu},
+    )
     assert select_adaptive(m, {"gpu"}).config_source == "GPU"
     assert select_adaptive(m, {"apu"}).config_source == "APU"
     assert select_adaptive(m, set()) is None
@@ -103,7 +110,7 @@ def test_select_adaptive_first_subset_wins():
 def test_resolve_alias_to_primary():
     cfg = AppConfig(
         program=ProgramConfig(host="0.0.0.0", port=8080, alive_time=60, log_level="INFO"),
-        models={"Qwen3-4B": ModelConfig("Qwen3-4B", ("Qwen3-4B", "q4"), "Chat", 1)},
+        models={"Qwen3-4B": ModelConfig(aliases=("Qwen3-4B", "q4"), mode="Chat", port=1)},
         wol=None,
         claude_configs={},
     )
@@ -138,9 +145,7 @@ def test_referenced_devices_unions_required_and_memory_keys():
         command=Command(exe="b.bat"),
         memory_mb={"780m": 2048, "v100": 0},
     )
-    m = ModelConfig(
-        primary_name="M", aliases=("m",), mode="Chat", port=1000, schemes={"S1": s1, "S2": s2}
-    )
+    m = ModelConfig(aliases=("m",), mode="Chat", port=1000, schemes={"S1": s1, "S2": s2})
     cfg = AppConfig(
         program=ProgramConfig("0.0.0.0", 8080, 60, "INFO"),
         models={"M": m},
@@ -158,7 +163,7 @@ def test_referenced_devices_empty_when_no_schemes():
         referenced_devices,
     )
 
-    m = ModelConfig(primary_name="M", aliases=("m",), mode="Chat", port=1000)
+    m = ModelConfig(aliases=("m",), mode="Chat", port=1000)
     cfg = AppConfig(
         program=ProgramConfig("0.0.0.0", 8080, 60, "INFO"),
         models={"M": m},
@@ -171,7 +176,7 @@ def test_referenced_devices_empty_when_no_schemes():
 def test_pricing_defaults_to_free_tier():
     from llm_manager.config import ModelConfig
 
-    m = ModelConfig("M", ("M",), "Chat", 1, False, {})
+    m = ModelConfig(aliases=("M",), mode="Chat", port=1, auto_start=False, schemes={})
     assert m.pricing.pricing_type == "tier"
     assert m.pricing.hourly_price == 0.0
     assert m.pricing.tiers == ()
@@ -184,12 +189,11 @@ def test_validate_rejects_duplicate_tier_index_and_negative_price():
         program=ProgramConfig("0.0.0.0", 8080, 60, "INFO"),
         models={
             "M": ModelConfig(
-                "M",
-                ("M",),
-                "Chat",
-                1,
-                False,
-                {"S": Scheme("S", frozenset({"gpu"}), Command(exe="a.bat"), {"gpu": 1})},
+                aliases=("M",),
+                mode="Chat",
+                port=1,
+                auto_start=False,
+                schemes={"S": Scheme("S", frozenset({"gpu"}), Command(exe="a.bat"), {"gpu": 1})},
                 pricing=Pricing(
                     tiers=(
                         PricingTier(tier_index=1, input_price=-1.0),
@@ -218,12 +222,11 @@ def test_validate_rejects_empty_alias_and_intra_model_duplicate():
         program=_prog(),
         models={
             "M": ModelConfig(
-                "M",
-                ("dup", "dup", ""),
-                "Chat",
-                1,
-                False,
-                {"S": Scheme("S", frozenset({"gpu"}), Command(exe="a.bat"), {"gpu": 1})},
+                aliases=("dup", "dup", ""),
+                mode="Chat",
+                port=1,
+                auto_start=False,
+                schemes={"S": Scheme("S", frozenset({"gpu"}), Command(exe="a.bat"), {"gpu": 1})},
             )
         },
         wol=None,
@@ -239,12 +242,11 @@ def test_validate_rejects_out_of_range_ports():
         program=_prog(port=99999),
         models={
             "M": ModelConfig(
-                "M",
-                ("m",),
-                "Chat",
-                0,
-                False,
-                {"S": Scheme("S", frozenset({"gpu"}), Command(exe="a.bat"), {"gpu": 1})},
+                aliases=("m",),
+                mode="Chat",
+                port=0,
+                auto_start=False,
+                schemes={"S": Scheme("S", frozenset({"gpu"}), Command(exe="a.bat"), {"gpu": 1})},
             )
         },
         wol=None,
@@ -260,12 +262,11 @@ def test_validate_rejects_out_of_range_ports():
 
 def _model(port: int = 10004, aliases: tuple[str, ...] = ("Qwen3.5-2B", "q")) -> ModelConfig:
     return ModelConfig(
-        "M",
-        aliases,
-        "Chat",
-        port,
-        False,
-        {"S": Scheme("S", frozenset({"gpu"}), Command(exe="a.bat"), {"gpu": 1})},
+        aliases=aliases,
+        mode="Chat",
+        port=port,
+        auto_start=False,
+        schemes={"S": Scheme("S", frozenset({"gpu"}), Command(exe="a.bat"), {"gpu": 1})},
     )
 
 

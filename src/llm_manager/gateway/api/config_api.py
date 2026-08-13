@@ -2,7 +2,7 @@
 
 校验层 = Pydantic 请求模型(FastAPI 自动 422)。写经 set_settings(多键原子)→ store.reload()。
 restart 检测:对比 snapshot.program 的 host/port/claude_settings_path/log_level 与 app.state.boot_program(启动期捕获)。
-读穿仅 system_settings 影响的消费方(idle 循环/tray/logging)——lifecycle/catalog/models 随模型 CRUD。
+读穿仅 system_settings 影响的消费方(idle 循环/tray/logging)——lifecycle/models 随模型 CRUD。
 """
 
 from __future__ import annotations
@@ -18,6 +18,7 @@ from typing import Literal
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from llm_manager import RESTART_EXIT_CODE
 from llm_manager.config import AppConfig, ModelConfig, Pricing, Scheme
 from llm_manager.data import logs as _logs
 from llm_manager.data.config_store import (
@@ -38,9 +39,6 @@ from llm_manager.gateway.api.common import (
 from llm_manager.version import get_version
 
 logger = logging.getLogger(__name__)
-
-# 退出码 81 契约:生产监督器与 Dev-Backend.bat 均在其上重启
-RESTART_EXIT_CODE = 81
 
 
 class ProgramUpdate(BaseModel):
@@ -111,7 +109,6 @@ def _to_model_config(body: ModelDefInput) -> ModelConfig:
             raise ValueError(f"duplicate scheme config_source '{s.config_source}'")
         schemes[s.config_source] = Scheme.from_dict(s.model_dump())
     return ModelConfig(
-        primary_name=body.name,
         aliases=tuple(body.aliases),
         mode=body.mode,
         port=body.port,

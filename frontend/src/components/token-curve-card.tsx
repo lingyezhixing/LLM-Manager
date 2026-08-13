@@ -8,7 +8,7 @@ import { TokenChart } from "@/components/token-chart";
 import { UsageRangePicker } from "@/components/usage-range-picker";
 import { fetchUsageSeries, type UsageSeriesParams } from "@/lib/api";
 import { errMsg } from "@/lib/format";
-import { chartPresetFor, paramsForState, USAGE_REFETCH, type UsageRangeState } from "@/lib/usage-range";
+import { chartPresetFor, EMPTY_REQUESTS, paramsForState, USAGE_REFETCH, type UsageRangeState } from "@/lib/usage-range";
 
 /** Token 消耗 card:preset 胶囊 + 自选日历(复用用量页的 UsageRangePicker)。区间/节奏/
  * 参数推导与用量页共用 lib/usage-range(语义与后端 _resolve_range 一致:当前时刻,非日界)。 */
@@ -40,7 +40,7 @@ export function TokenCurveCard() {
           <Loading />
         </div>
       ) : data.buckets.length === 0 ? (
-        <Empty label="该时间范围内暂无请求" className="h-[160px]" />
+        <Empty label={EMPTY_REQUESTS} className="h-[160px]" />
       ) : (
         <TokenChart data={data} preset={chartPresetFor(range.preset, range.custom)} />
       )}
