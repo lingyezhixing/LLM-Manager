@@ -48,8 +48,10 @@ class UpdateStatus:
     tag: str | None = None  # 最新标签名;远端无标签 → None
     tag_sha: str | None = None
     tag_available: bool = False  # 可 ff-only 更新到该标签
+    tag_behind: int = 0  # HEAD..tag 提交数(落后数,仅展示)
     commit_sha: str | None = None  # origin/main 最新提交短 SHA
     commit_available: bool = False  # 可 ff-only 更新到该提交
+    commit_behind: int = 0  # HEAD..origin/main 提交数(落后数,仅展示)
 
 
 def _git(root: Path, args: list[str], *, timeout: float) -> subprocess.CompletedProcess:
@@ -108,6 +110,12 @@ def _is_ancestor(root: Path, a: str, b: str) -> bool:
     return _git_or_error(root, ["merge-base", "--is-ancestor", a, b], timeout=5.0).returncode == 0
 
 
+def _behind(root: Path, range_: str) -> int:
+    """range_ 左侧有而右侧没有的提交数(HEAD..ref 的落后数)。"""
+    r = _git_or_error(root, ["rev-list", "--count", range_], timeout=5.0)
+    return int(r.stdout.strip() or 0)
+
+
 def _merge_failure_hint(root: Path, proc: subprocess.CompletedProcess) -> str:
     """merge 失败归因:冲突(本地改动被覆盖)→ 提示清理;非 ff(分叉)→ 提示手动处理;否则通用。"""
     dirty = bool(_git_or_error(root, ["status", "--porcelain"], timeout=5.0).stdout.strip())
@@ -159,6 +167,7 @@ def check_update(root: Path | None = None) -> UpdateStatus:
         # 目标可用 = 未分叉 且 目标不在 HEAD 之后(HEAD 是目标的祖先,可 ff-only 追上)
         commit_sha = _short(remote)
         commit_available = not diverged and head != remote and _is_ancestor(root, head, remote)
+        commit_behind = _behind(root, "HEAD..origin/main") if head != remote else 0
         tag = _describe_tag(root, "origin/main")
         tag_full = _full(root, tag) if tag else ""
         tag_sha = _short(tag_full) if tag_full else None
@@ -168,6 +177,7 @@ def check_update(root: Path | None = None) -> UpdateStatus:
             and tag_full != head
             and _is_ancestor(root, head, tag_full)
         )
+        tag_behind = _behind(root, f"HEAD..{tag}") if tag_full and tag_full != head else 0
         return UpdateStatus(
             ok=True,
             current_version=current_version,
@@ -177,8 +187,10 @@ def check_update(root: Path | None = None) -> UpdateStatus:
             tag=tag,
             tag_sha=tag_sha,
             tag_available=tag_available,
+            tag_behind=tag_behind,
             commit_sha=commit_sha,
             commit_available=commit_available,
+            commit_behind=commit_behind,
         )
     except UpdateError as e:
         return UpdateStatus(

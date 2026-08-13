@@ -118,13 +118,15 @@ export function useUpdateApp() {
 }
 
 export function useUpdateStatus() {
-  // enabled:false → 进入更新区不自动检测(离线优先),仅「检查更新」按钮 refetch 才联网;
-  // 失败不自动重试、窗口聚焦不重取。
+  // 启动时自动检测一次(挂载于 App 根 StartupUpdateCheck);staleTime:Infinity →
+  // 数据永不失效,此后任何重挂载/聚焦/重连都不再自动联网,仅「检查更新」按钮
+  // 手动 refetch 才会再查。失败不自动重试。
   return useQuery({
     queryKey: ["update", "status"],
     queryFn: fetchUpdateStatus,
-    enabled: false,
+    staleTime: Infinity,
     refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
     retry: false,
   });
 }

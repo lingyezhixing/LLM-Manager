@@ -3,19 +3,16 @@ import { ConfigSaveBar } from "@/components/config-save-bar";
 import { Loading } from "@/components/ui/card";
 import { ErrorState } from "@/components/ui/error-state";
 import { Field, NumberInput, Select, TextInput } from "@/components/ui/form";
-import { errMsg, formatClock, numFromStr as num, portError } from "@/lib/format";
-import { InfoTile } from "@/components/ui/info-tile";
+import { errMsg, numFromStr as num, portError } from "@/lib/format";
 import { useToast } from "@/lib/hooks/use-toast";
 import { LogRetentionEditor } from "@/components/system/log-retention-editor";
-import { UpdatePanel } from "@/components/system/update-panel";
+import { SystemOverview } from "@/components/system/system-overview";
 import { type LogRetention, type ProgramConfig } from "@/lib/api";
 import {
   useConfig,
-  useSystemInfo,
   useUpdateLogRetention,
   useUpdateProgram,
 } from "@/lib/hooks/use-config";
-import { useNowTick } from "@/lib/hooks/use-now-tick";
 import { useSyncedForm } from "@/lib/hooks/use-synced-form";
 
 const LOG_LEVELS = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"];
@@ -56,8 +53,6 @@ function FieldGrid({ children }: { children: ReactNode }) {
 
 export function GeneralPanel() {
   const { data, isLoading, isError, error, refetch } = useConfig();
-  const { data: info } = useSystemInfo();
-  const now = useNowTick(1000);
   const update = useUpdateProgram();
   const updateLogs = useUpdateLogRetention();
   const toast = useToast();
@@ -113,13 +108,7 @@ export function GeneralPanel() {
 
   return (
     <div>
-      {info && (
-        <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-3">
-          <InfoTile label="版本" value={info.version} valueClass="break-all text-foreground" />
-          <InfoTile label="启动时间" value={new Date(info.started_at * 1000).toLocaleString()} valueClass="break-all text-foreground" />
-          <InfoTile label="运行时长" value={formatClock(now / 1000 - info.started_at)} valueClass="break-all text-foreground" />
-        </div>
-      )}
+      <SystemOverview />
 
       <SectionTitle>监听与运行</SectionTitle>
       <FieldGrid>
@@ -160,9 +149,6 @@ export function GeneralPanel() {
           saveDisabled={!portValid || !aliveValid || form.logs.days < 1 || form.logs.count < 1}
         />
       )}
-
-      <SectionTitle>更新</SectionTitle>
-      <UpdatePanel />
     </div>
   );
 }

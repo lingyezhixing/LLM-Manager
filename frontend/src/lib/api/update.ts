@@ -14,8 +14,10 @@ export interface UpdateStatus {
   tag: string | null;
   tag_sha: string | null;
   tag_available: boolean;
+  tag_behind: number;
   commit_sha: string | null;
   commit_available: boolean;
+  commit_behind: number;
 }
 
 export async function fetchUpdateStatus(): Promise<UpdateStatus> {

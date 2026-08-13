@@ -78,6 +78,7 @@ def test_uptodate(repo: Path) -> None:
     assert st.tag == "v1.0.0" and st.tag_sha == st.current_sha
     assert st.commit_sha == st.current_sha
     assert not st.tag_available and not st.commit_available
+    assert st.tag_behind == 0 and st.commit_behind == 0
 
 
 def test_targets_available_and_apply(repo: Path) -> None:
@@ -87,19 +88,23 @@ def test_targets_available_and_apply(repo: Path) -> None:
     assert st.tag == "v1.1.0" and st.tag_sha == tag_sha
     assert st.commit_sha == head_sha
     assert st.tag_available and st.commit_available
+    assert st.tag_behind == 1 and st.commit_behind == 2  # c2(标签)+ c3(未标签)
 
     # 先更新到标签 → 停在 c2(带标签),仍在 origin/main 之后
     assert apply_update(repo, target="tag") == tag_sha
     assert _git(repo, "rev-parse", "--short", "HEAD") == tag_sha
     after = check_update(repo)
     assert after.tag_available is False  # 已在最新标签上
+    assert after.tag_behind == 0
     assert after.commit_available is True  # 仍落后未打标签的 c3
+    assert after.commit_behind == 1
 
     # 再更新到提交 → 追上 origin/main 最前沿
     assert apply_update(repo, target="commit") == head_sha
     assert not _git(repo, "status", "--porcelain")
     done = check_update(repo)
     assert not done.commit_available and not done.tag_available
+    assert done.commit_behind == 0 and done.tag_behind == 0
     assert done.current_version == "v1.1.0"
 
 
