@@ -118,12 +118,12 @@ export function useUpdateApp() {
 }
 
 export function useUpdateStatus() {
-  // 只按需取:打开更新页/点「检查更新」才 fetch;不窗口聚焦重取、失败不自动重试
-  // (离线时保持安静,面板以 error 呈现)。
+  // enabled:false → 进入更新区不自动检测(离线优先),仅「检查更新」按钮 refetch 才联网;
+  // 失败不自动重试、窗口聚焦不重取。
   return useQuery({
     queryKey: ["update", "status"],
     queryFn: fetchUpdateStatus,
-    staleTime: 5 * 60_000,
+    enabled: false,
     refetchOnWindowFocus: false,
     retry: false,
   });

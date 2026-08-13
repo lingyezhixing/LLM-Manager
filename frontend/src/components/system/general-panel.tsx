@@ -7,6 +7,7 @@ import { errMsg, formatClock, numFromStr as num, portError } from "@/lib/format"
 import { InfoTile } from "@/components/ui/info-tile";
 import { useToast } from "@/lib/hooks/use-toast";
 import { LogRetentionEditor } from "@/components/system/log-retention-editor";
+import { UpdatePanel } from "@/components/system/update-panel";
 import { type LogRetention, type ProgramConfig } from "@/lib/api";
 import {
   useConfig,
@@ -159,6 +160,9 @@ export function GeneralPanel() {
           saveDisabled={!portValid || !aliveValid || form.logs.days < 1 || form.logs.count < 1}
         />
       )}
+
+      <SectionTitle>更新</SectionTitle>
+      <UpdatePanel />
     </div>
   );
 }
