@@ -1,12 +1,10 @@
 import { NavTab, NavTabs } from "@/components/ui/nav-tabs";
 
-export type SystemZone = "general" | "models" | "network" | "claude" | "database";
+export type SystemZone = "general" | "models" | "database";
 
 const ZONES: { key: SystemZone; label: string }[] = [
   { key: "general", label: "系统配置" },
   { key: "models", label: "模型配置" },
-  { key: "network", label: "网络唤醒" },
-  { key: "claude", label: "Claude Code" },
   { key: "database", label: "数据库管理" },
 ];
 
