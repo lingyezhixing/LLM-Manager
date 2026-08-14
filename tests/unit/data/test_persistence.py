@@ -533,6 +533,21 @@ def test_usage_cost_series_hourly_spreads_across_buckets(tmp_path):
     assert res.total == [60.0, 60.0]  # 60s each × 1 元/s
 
 
+def test_usage_cost_series_hourly_join_by_model_id(tmp_path):
+    """回归:hourly 批量查询 JOIN 须按 r.model_id=mm.id(曾误写 r.id=mm.id——单模型
+    单段时两者 id 巧合相等而测试误过;第二运行段 id=2 对 model id=1 即可区分)。"""
+    from llm_manager.config import Pricing
+
+    db = open_db(tmp_path / "t.db")
+    s1 = record_runtime_start(db, "m1", start=0.0)
+    record_runtime_end(db, s1, end=60.0)
+    s2 = record_runtime_start(db, "m1", start=60.0)  # 段 id=2 ≠ model id=1
+    record_runtime_end(db, s2, end=120.0)
+    cfg = _cfg_with(Pricing(pricing_type="hourly", hourly_price=3600.0))
+    res = usage_cost_series(db, cfg, start_ts=0, end_ts=120, bucket_seconds=60, now=9999.0)
+    assert res.total == [60.0, 60.0]  # 两段各 60s × 1 元/s;坏 JOIN 会丢第二段 → [60, 0]
+
+
 def test_usage_cost_series_empty_range_returns_no_buckets(tmp_path):
     from llm_manager.config import Pricing
 
