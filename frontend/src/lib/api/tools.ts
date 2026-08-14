@@ -28,13 +28,15 @@ export async function sendWol(body: WolConfig): Promise<{ ok: boolean }> {
 }
 
 // Claude 预设:整组全量替换(PUT /api/tools/claude)。
+// apply 指定时保存后同步写 Claude settings.json(编辑当前生效预设的「保存并生效」)。
 export async function updateClaudeConfigs(
   configs: Record<string, Record<string, string>>,
+  apply?: string,
 ): Promise<ConfigWriteResult> {
   return apiJson<ConfigWriteResult>("/api/tools/claude", {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ configs }),
+    body: JSON.stringify({ configs, ...(apply ? { apply } : {}) }),
   });
 }
 

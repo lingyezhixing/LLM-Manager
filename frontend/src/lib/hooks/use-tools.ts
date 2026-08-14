@@ -36,8 +36,13 @@ export function useSendWol() {
 export function useUpdateClaudeConfigs() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (configs: Record<string, Record<string, string>>) => updateClaudeConfigs(configs),
-    onSuccess: () => invalidateConfig(qc),
+    mutationFn: (body: { configs: Record<string, Record<string, string>>; apply?: string }) =>
+      updateClaudeConfigs(body.configs, body.apply),
+    onSuccess: (data) => {
+      invalidateConfig(qc);
+      // 保存并生效 → settings.json 已变,current 探测须刷新,否则「生效中」标记陈旧。
+      if (data.applied) qc.invalidateQueries({ queryKey: ["tools", "claude", "current"] });
+    },
   });
 }
 

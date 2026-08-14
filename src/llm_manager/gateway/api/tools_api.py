@@ -29,6 +29,9 @@ class WolUpdate(BaseModel):
 
 class ClaudeConfigsUpdate(BaseModel):
     configs: dict[str, dict[str, str]]
+    # 保存后同步应用的预设名(编辑当前生效预设时「保存并生效」)。应用失败则整请求 500——
+    # DB 已保存(单一事实源),settings.json 未动,用户可改路径后重试「应用」。
+    apply: str | None = None
 
 
 class ClaudeApplyRequest(BaseModel):
@@ -69,11 +72,29 @@ def register_tools_routes(api: APIRouter) -> None:
 
     @api.put("/tools/claude")
     def put_claude(request: Request, body: ClaudeConfigsUpdate) -> dict:
+        """保存预设(整组替换 DB);body.apply 指定时保存后同步写 Claude settings.json(保存并生效)。
+        校验先行:apply 名须存在于新 configs(404)、须已配置 settings 路径(400)——均不落脏数据。"""
+        apply_ctx: tuple[Path, str, dict[str, str]] | None = None
+        if body.apply is not None:
+            if body.apply not in body.configs:
+                raise HTTPException(404, f"preset '{body.apply}' not found")
+            raw = get_config_store(request).snapshot().program.claude_settings_path
+            if not raw:
+                raise HTTPException(400, "未配置 Claude settings 路径")
+            apply_ctx = (Path(raw), body.apply, dict(body.configs[body.apply]))
         set_settings(
             get_db(request), {"claude_configs": json.dumps(body.configs, ensure_ascii=False)}
         )
         cfg = get_config_store(request).reload()
-        return config_write_result(request, cfg)
+        result = config_write_result(request, cfg)
+        if apply_ctx is not None:
+            path, name, preset = apply_ctx
+            try:
+                claude.apply_preset(path, preset)
+            except OSError as e:
+                raise HTTPException(500, f"写入 settings.json 失败:{e}")
+            result["applied"] = name
+        return result
 
     @api.post("/tools/claude/apply")
     def apply_claude_preset(request: Request, body: ClaudeApplyRequest) -> dict:

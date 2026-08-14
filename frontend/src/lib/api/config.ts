@@ -35,6 +35,8 @@ export interface ConfigWriteResult {
   needs_restart: boolean;
   restart_fields: string[];
   serving: string[];
+  /** 仅 /api/tools/claude 带 apply 时返回:已同步应用的预设名。 */
+  applied?: string;
 }
 
 export interface WolConfig {

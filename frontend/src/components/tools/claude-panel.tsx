@@ -105,17 +105,21 @@ function ClaudePresetCard({
   const onSave = () => {
     if (!parsed?.ok || !editName) return;
     const next = { ...latestPresets(), [editName]: parsed.value };
-    update.mutate(next, {
-      onSuccess: () => {
-        commit(json);
-        if (isNew) {
-          toast.success(`已创建预设「${editName}」`);
-          onCreated?.(editName);
-        } else {
-          toast.success("已保存");
-        }
+    // 当前生效预设 → 「保存并生效」:整组 PUT 带 apply,后端保存后同步写 settings.json。
+    update.mutate(
+      { configs: next, apply: isCurrent ? editName : undefined },
+      {
+        onSuccess: () => {
+          commit(json);
+          if (isNew) {
+            toast.success(`已创建预设「${editName}」`);
+            onCreated?.(editName);
+          } else {
+            toast.success(isCurrent ? `已保存并生效「${editName}」` : "已保存");
+          }
+        },
       },
-    });
+    );
   };
 
   const onDelete = async () => {
@@ -130,7 +134,7 @@ function ClaudePresetCard({
     if (!ok) return;
     const next = { ...latestPresets() };
     delete next[editName];
-    update.mutate(next, { onSuccess: () => toast.success(`已删除预设「${editName}」`) });
+    update.mutate({ configs: next }, { onSuccess: () => toast.success(`已删除预设「${editName}」`) });
   };
 
   const onApply = () => {
@@ -191,7 +195,7 @@ function ClaudePresetCard({
         </Field>
         <div className="mt-1 flex items-center justify-end gap-2">
           <Button type="button" size="sm" onClick={onSave} disabled={!saveEnabled}>
-            {update.isPending ? "保存中…" : "保存"}
+            {update.isPending ? "保存中…" : isCurrent ? "保存并生效" : "保存"}
           </Button>
         </div>
         {mutError && <p className="mt-2 text-xs text-destructive">操作失败:{errMsg(mutError)}</p>}

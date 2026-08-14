@@ -102,6 +102,65 @@ def test_put_claude_replaces_configs(tmp_path):
     assert c.get("/api/config").json()["claude"] == {"GLM": {"ANTHROPIC_BASE_URL": "http://x"}}
 
 
+def test_put_claude_save_and_apply_writes_settings(tmp_path):
+    # 编辑当前生效预设:保存同时写 settings.json(PUT 带 apply)。非破坏:顶层/env 既有键保留。
+    settings = tmp_path / "settings.json"
+    settings.write_text(
+        json.dumps({"apiKeyHelper": "off", "env": {"EXISTING": "1"}}), encoding="utf-8"
+    )
+    with TestClient(_app(tmp_path)) as c:
+        c.put("/api/tools/claude", json={"configs": {"GLM": {"ANTHROPIC_BASE_URL": "http://glm"}}})
+        c.put("/api/config/program", json={"claude_settings_path": str(settings)})
+        r = c.put(
+            "/api/tools/claude",
+            json={
+                "configs": {"GLM": {"ANTHROPIC_BASE_URL": "http://glm/v2"}},
+                "apply": "GLM",
+            },
+        )
+    assert r.status_code == 200
+    assert r.json()["applied"] == "GLM"
+    assert c.get("/api/config").json()["claude"] == {"GLM": {"ANTHROPIC_BASE_URL": "http://glm/v2"}}
+    data = json.loads(settings.read_text(encoding="utf-8"))
+    assert data["apiKeyHelper"] == "off"  # 非破坏:顶层键保留
+    assert data["env"]["EXISTING"] == "1"  # env 既有键保留
+    assert data["env"]["ANTHROPIC_BASE_URL"] == "http://glm/v2"
+
+
+def test_put_claude_apply_unknown_preset_404_not_saved(tmp_path):
+    # apply 名不在新 configs → 404,DB 不落脏数据。
+    with TestClient(_app(tmp_path)) as c:
+        r = c.put(
+            "/api/tools/claude",
+            json={"configs": {"GLM": {"ANTHROPIC_BASE_URL": "http://x"}}, "apply": "NOPE"},
+        )
+    assert r.status_code == 404
+    assert c.get("/api/config").json()["claude"] == {}
+
+
+def test_put_claude_apply_without_path_400_not_saved(tmp_path):
+    with TestClient(_app(tmp_path)) as c:
+        r = c.put(
+            "/api/tools/claude",
+            json={"configs": {"GLM": {"ANTHROPIC_BASE_URL": "http://x"}}, "apply": "GLM"},
+        )
+    assert r.status_code == 400
+    assert c.get("/api/config").json()["claude"] == {}
+
+
+def test_put_claude_apply_write_failure_500_saved(tmp_path):
+    # settings 路径指向已存在目录 → 写失败 → 500;DB 已保存(单一事实源),settings.json 未动。
+    with TestClient(_app(tmp_path)) as c:
+        c.put("/api/config/program", json={"claude_settings_path": str(tmp_path)})
+        r = c.put(
+            "/api/tools/claude",
+            json={"configs": {"GLM": {"ANTHROPIC_BASE_URL": "http://x"}}, "apply": "GLM"},
+        )
+    assert r.status_code == 500
+    assert "写入 settings.json 失败" in r.json()["detail"]
+    assert c.get("/api/config").json()["claude"] == {"GLM": {"ANTHROPIC_BASE_URL": "http://x"}}
+
+
 def test_apply_claude_preset_writes_settings_preserving_other_keys(tmp_path):
     settings = tmp_path / "settings.json"
     settings.write_text(
