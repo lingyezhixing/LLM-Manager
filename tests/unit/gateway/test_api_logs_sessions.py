@@ -213,3 +213,24 @@ def test_session_stream_backfill_and_live(client):
 
     res = asyncio.run(go())
     assert [ll["text"] for ll in res] == ["listening", "live line"]
+
+
+def test_sessions_orphan_ended_null_end_time_no_crash(client):
+    """孤儿会话(status=ended 且 end_time NULL,崩溃残留)不崩,duration_s=None。"""
+    c, db, _sid_sys, _sid_m = client
+
+    # 直插孤儿行:ended(不在 live 集)+ end_time NULL
+    with db.write_lock:
+        cur = db.conn.execute(
+            "INSERT INTO log_sessions (type, model_name, alias, start_time, end_time) "
+            "VALUES ('model', 'm', 'm', 1000.0, NULL)"
+        )
+        db.conn.commit()
+        sid = cur.lastrowid
+    resp = c.get("/api/logs/sessions")
+    assert resp.status_code == 200
+    rows = [r for r in resp.json() if r["id"] == sid]
+    assert len(rows) == 1
+    assert rows[0]["status"] == "ended"
+    assert rows[0]["end_time"] is None
+    assert rows[0]["duration_s"] is None  # 修复前:TypeError 杀进程

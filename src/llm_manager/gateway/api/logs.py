@@ -74,7 +74,10 @@ def _to_session(r) -> LogSessionResponse:
         start_time=r["start_time"],
         end_time=r["end_time"],
         status=status,
-        duration_s=(r["end_time"] - r["start_time"]) if status == "ended" else None,
+        # 孤儿会话(ended 但 end_time NULL,崩溃残留)→ duration None,防 TypeError 杀进程
+        duration_s=(
+            (r["end_time"] - r["start_time"]) if status == "ended" and r["end_time"] is not None else None
+        ),
         line_count=r["line_count"],
     )
 
