@@ -76,7 +76,9 @@ def _to_session(r) -> LogSessionResponse:
         status=status,
         # 孤儿会话(ended 但 end_time NULL,崩溃残留)→ duration None,防 TypeError 杀进程
         duration_s=(
-            (r["end_time"] - r["start_time"]) if status == "ended" and r["end_time"] is not None else None
+            (r["end_time"] - r["start_time"])
+            if status == "ended" and r["end_time"] is not None
+            else None
         ),
         line_count=r["line_count"],
     )
@@ -131,7 +133,12 @@ def register_logs_routes(api: APIRouter) -> None:
     ) -> list[LogSessionResponse]:
         m = _resolve_model(request, model)
         rows = _logs.log_sessions(
-            get_db(request), type_=type, model_name=m, limit=limit, before_id=before
+            get_db(request),
+            type_=type,
+            model_name=m,
+            limit=limit,
+            before_id=before,
+            live_ids=_logs.live_session_ids(),
         )
         return [_to_session(r) for r in rows]
 

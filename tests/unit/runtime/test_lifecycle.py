@@ -571,7 +571,7 @@ async def test_stop_ends_log_session(tmp_path):
         assert sid is not None
         await lc.stop("m1")
         assert logs.resolve_session("m1") is None
-        rows = logs.log_sessions(db, type_="model", model_name="m1")
+        rows = logs.log_sessions(db, type_="model", model_name="m1", live_ids=None)
         assert len(rows) == 1 and rows[0]["end_time"] is not None
         # stop 后 capture 无进行中会话可入 → 丢弃(行数不变,不污染历史)
         logs.capture("m1", "dropped after stop", "out")
@@ -713,7 +713,7 @@ async def test_model_log_session_open_on_spawn_closed_on_stop(tmp_path):
         await life.ensure_running("m1")
         sid = logs.resolve_session("m1")
         assert sid is not None
-        rows = logs.log_sessions(db, type_="model", model_name="m1")
+        rows = logs.log_sessions(db, type_="model", model_name="m1", live_ids=None)
         assert len(rows) == 1 and rows[0]["end_time"] is None  # 进行中
         assert rows[0]["alias"] == "m1"  # alias=aliases[0](served name)
         # spawn 输出 → 该会话的日志行(接线 on_output → capture 按 alias 关联)
@@ -724,7 +724,7 @@ async def test_model_log_session_open_on_spawn_closed_on_stop(tmp_path):
 
         await life.stop("m1")
         assert logs.resolve_session("m1") is None
-        rows = logs.log_sessions(db, type_="model", model_name="m1")
+        rows = logs.log_sessions(db, type_="model", model_name="m1", live_ids=None)
         assert rows[0]["end_time"] is not None  # stop 收口(旧 bug:end_session 收到字符串静默 no-op)
     finally:
         logs.reset()
@@ -743,7 +743,7 @@ async def test_model_log_session_closed_on_crash(tmp_path):
         assert logs.resolve_session("m1") is not None
         sup.trigger_exit(1000, code=1)
         assert logs.resolve_session("m1") is None
-        rows = logs.log_sessions(db, type_="model", model_name="m1")
+        rows = logs.log_sessions(db, type_="model", model_name="m1", live_ids=None)
         assert len(rows) == 1 and rows[0]["end_time"] is not None
     finally:
         logs.reset()
@@ -764,7 +764,9 @@ async def test_model_log_session_restart_opens_new_session_closes_old(tmp_path):
         await life.ensure_running("m1")
         sid2 = logs.resolve_session("m1")
         assert sid1 != sid2 and sid2 is not None
-        rows = logs.log_sessions(db, type_="model", model_name="m1")  # id 降序:最新在前
+        rows = logs.log_sessions(
+            db, type_="model", model_name="m1", live_ids=None
+        )  # id 降序:最新在前
         assert len(rows) == 2
         assert rows[0]["end_time"] is None  # 新会话进行中
         assert rows[1]["end_time"] is not None  # 旧会话已收口
@@ -786,7 +788,7 @@ async def test_model_log_session_closed_on_probe_failure(tmp_path):
         status = await life.ensure_running("m1")
         assert status == ModelStatus.FAILED
         assert logs.resolve_session("m1") is None
-        rows = logs.log_sessions(db, type_="model", model_name="m1")
+        rows = logs.log_sessions(db, type_="model", model_name="m1", live_ids=None)
         assert len(rows) == 1 and rows[0]["end_time"] is not None
     finally:
         logs.reset()
@@ -818,7 +820,7 @@ async def test_stop_during_spawn_closes_log_session(tmp_path):
         assert status == ModelStatus.STOPPED
         assert 1000 in sup.killed  # orphan 被 kill
         assert logs.resolve_session("m1") is None
-        rows = logs.log_sessions(db, type_="model", model_name="m1")
+        rows = logs.log_sessions(db, type_="model", model_name="m1", live_ids=None)
         assert len(rows) == 1 and rows[0]["end_time"] is not None  # 无泄漏:orphan 分支已收口
     finally:
         logs.reset()
@@ -842,8 +844,8 @@ async def test_model_log_sessions_tracked_per_alias(tmp_path):
         await life.stop("m1")
         assert logs.resolve_session("m1") is None
         assert logs.resolve_session("m2") is not None  # m2 会话不受影响
-        rows1 = logs.log_sessions(db, type_="model", model_name="m1")
-        rows2 = logs.log_sessions(db, type_="model", model_name="m2")
+        rows1 = logs.log_sessions(db, type_="model", model_name="m1", live_ids=None)
+        rows2 = logs.log_sessions(db, type_="model", model_name="m2", live_ids=None)
         assert rows1[0]["end_time"] is not None
         assert rows2[0]["end_time"] is None
     finally:

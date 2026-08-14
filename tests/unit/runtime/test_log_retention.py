@@ -37,7 +37,7 @@ def test_loop_cleans_by_time(db):
         await asyncio.wait_for(loop, timeout=1.0)
 
     asyncio.run(go())
-    rows = _logs.log_sessions(db)
+    rows = _logs.log_sessions(db, live_ids=None)
     assert [r["id"] for r in rows] == [new]
 
 
@@ -54,7 +54,7 @@ def test_loop_count_rule(db):
         await asyncio.wait_for(loop, timeout=1.0)
 
     asyncio.run(go())
-    rows = _logs.log_sessions(db)
+    rows = _logs.log_sessions(db, live_ids=None)
     assert len(rows) == 1 and rows[0]["start_time"] == 5000.0
 
 
@@ -104,14 +104,14 @@ def test_loop_reads_fresh_settings_each_round(db):
             log_retention.log_retention_loop(db, getter, stop, period=0.02, now=6000.0)
         )
         await asyncio.wait_for(second_read.wait(), timeout=1.0)
-        assert len(_logs.log_sessions(db)) == 2  # 旧值两轮确实未清理
+        assert len(_logs.log_sessions(db, live_ids=None)) == 2  # 旧值两轮确实未清理
         settings[0] = (9999, 1)  # 换新规则
         await asyncio.wait_for(new_read.wait(), timeout=1.0)
         stop.set()
         await asyncio.wait_for(loop, timeout=1.0)  # 等新值那轮的清理收尾
 
     asyncio.run(go())
-    rows = _logs.log_sessions(db)
+    rows = _logs.log_sessions(db, live_ids=None)
     assert len(rows) == 1 and rows[0]["start_time"] == 5000.0
 
 
@@ -131,4 +131,4 @@ def test_loop_disabled_gate(db):
         await asyncio.wait_for(loop, timeout=1.0)
 
     asyncio.run(go())
-    assert len(_logs.log_sessions(db)) == 2
+    assert len(_logs.log_sessions(db, live_ids=None)) == 2

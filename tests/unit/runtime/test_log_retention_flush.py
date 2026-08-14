@@ -22,7 +22,7 @@ def test_flush_survives_deleted_session(tmp_path):
         for i in range(12):
             logs.log_start_session(db, "model", f"m{i}", f"m{i}", float(2000 + i))
         removed_s, removed_l = logs.log_cleanup(db, days=9999, count=10, now=99999.0)
-        assert sid not in [r["id"] for r in logs.log_sessions(db)]  # live 行已被删
+        assert sid not in [r["id"] for r in logs.log_sessions(db, live_ids=None)]  # live 行已被删
         assert removed_s == 3 and removed_l == 0
 
         logs.capture_system("x", 1.0, "INFO")  # 排入死会话行
@@ -48,10 +48,8 @@ def test_log_cleanup_skips_live_sessions(tmp_path):
     live = logs.log_start_session(db, "system", None, None, 1000.0)
     for i in range(12):
         logs.log_start_session(db, "model", f"m{i}", f"m{i}", float(2000 + i))
-    removed_s, removed_l = logs.log_cleanup(
-        db, days=9999, count=10, now=99999.0, live_session_ids={live}
-    )
-    rows = [r["id"] for r in logs.log_sessions(db)]
+    removed_s, removed_l = logs.log_cleanup(db, days=9999, count=10, now=99999.0, live_ids={live})
+    rows = [r["id"] for r in logs.log_sessions(db, live_ids=None)]
     assert live in rows
     assert sorted(rows) == [live] + list(range(4, 14))  # 删了最旧 3 个中的 2 个(非 live)
     assert (removed_s, removed_l) == (2, 0)
@@ -68,9 +66,9 @@ def test_log_cleanup_time_rule_skips_live(tmp_path):
         days=2,
         count=100,
         now=200000.0,  # cutoff=27200
-        live_session_ids={live},
+        live_ids={live},
     )
-    assert [r["id"] for r in logs.log_sessions(db)] == [live]
+    assert [r["id"] for r in logs.log_sessions(db, live_ids=None)] == [live]
     assert removed_s == 1
     db.conn.close()
 
@@ -99,7 +97,7 @@ def test_loop_skips_live_sessions_in_module(tmp_path):
         asyncio.run(go())
         # 6 会话、count=1 → 删最旧 5 个(id 1..5):live(id 1)被排除幸存,
         # 最新结束会话(id 6)按规则幸存。无 wiring 时 live 会被删 → 回归可测。
-        assert sorted(r["id"] for r in logs.log_sessions(db)) == [1, 6]
+        assert sorted(r["id"] for r in logs.log_sessions(db, live_ids=None)) == [1, 6]
     finally:
         logs.reset()
         db.conn.close()

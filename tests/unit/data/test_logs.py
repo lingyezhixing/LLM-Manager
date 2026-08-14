@@ -224,11 +224,11 @@ def test_log_session_crud(tmp_path):
     db = open_db(tmp_path / "t.db")
     sid = logs.log_start_session(db, "system", None, None, 1000.0)
     sid2 = logs.log_start_session(db, "model", "m1", "m1-alias", 2000.0)
-    rows = logs.log_sessions(db)
+    rows = logs.log_sessions(db, live_ids=None)
     assert [r["id"] for r in rows] == [sid2, sid]  # 倒序
     assert rows[0]["type"] == "model" and rows[0]["alias"] == "m1-alias"
     logs.log_end_session(db, sid, 1500.0)
-    rows = logs.log_sessions(db, type_="system")
+    rows = logs.log_sessions(db, type_="system", live_ids=None)
     assert rows[0]["end_time"] == 1500.0 and rows[0]["status"] == "ended"
 
 
@@ -258,7 +258,7 @@ def test_log_session_line_count(tmp_path):
     sid = logs.log_start_session(db, "system", None, None, 1000.0)
     logs.log_insert_lines(db, sid, [(1, 1000.1, "sys", "info", "a")])
     logs.log_insert_lines(db, sid, [(2, 1000.2, "sys", "info", "b")])
-    rows = logs.log_sessions(db)
+    rows = logs.log_sessions(db, live_ids=None)
     assert rows[0]["line_count"] == 2
 
 
@@ -285,11 +285,11 @@ def test_log_sessions_model_filter_and_before_pagination(tmp_path):
     s1 = logs.log_start_session(db, "model", "m1", "m1a", 1000.0)
     s2 = logs.log_start_session(db, "model", "m2", "m2a", 2000.0)
     s3 = logs.log_start_session(db, "system", None, None, 3000.0)
-    rows = logs.log_sessions(db, model_name="m1")
+    rows = logs.log_sessions(db, model_name="m1", live_ids=None)
     assert [r["id"] for r in rows] == [s1]
-    rows = logs.log_sessions(db, limit=2)
+    rows = logs.log_sessions(db, limit=2, live_ids=None)
     assert [r["id"] for r in rows] == [s3, s2]
-    rows = logs.log_sessions(db, limit=2, before_id=s3)
+    rows = logs.log_sessions(db, limit=2, before_id=s3, live_ids=None)
     assert [r["id"] for r in rows] == [s2, s1]
 
 
@@ -358,7 +358,7 @@ def test_log_cleanup_time_and_count(tmp_path):
 
     removed_s, removed_l = logs.log_cleanup(db, days=2, count=10, now=200000.0)
     assert removed_s == 3 and removed_l == 6
-    assert logs.log_sessions(db) == []
+    assert logs.log_sessions(db, live_ids=None) == []
     assert logs.log_lines_backfill(db, old_sys, limit=10) == []
 
 
@@ -369,7 +369,7 @@ def test_log_cleanup_count_keeps_newest(tmp_path):
         logs.log_insert_lines(db, sid, [(1, float(1000 + i) + 0.1, "sys", "info", f"l{i}")])
     removed_s, removed_l = logs.log_cleanup(db, days=9999, count=2, now=10000.0)
     assert removed_s == 1 and removed_l == 1  # 最旧 1 会话(1 行)
-    rows = logs.log_sessions(db)
+    rows = logs.log_sessions(db, live_ids=None)
     assert [r["start_time"] for r in rows] == [1002.0, 1001.0]
 
 
@@ -381,7 +381,7 @@ def test_log_cleanup_both_rules_independent(tmp_path):
     logs.log_insert_lines(db, sid2, [(1, 5000.1, "sys", "info", "b")])
     removed_s, removed_l = logs.log_cleanup(db, days=1, count=10, now=90000.0)  # 仅时间规则触发
     assert removed_s == 1 and removed_l == 1
-    assert [r["id"] for r in logs.log_sessions(db)] == [sid2]
+    assert [r["id"] for r in logs.log_sessions(db, live_ids=None)] == [sid2]
 
 
 def test_log_cleanup_both_rules_fire_simultaneously(tmp_path):
@@ -396,7 +396,7 @@ def test_log_cleanup_both_rules_fire_simultaneously(tmp_path):
     logs.log_insert_lines(db, sid3, [(1, 5000.1, "sys", "info", "c")])
     removed_s, removed_l = logs.log_cleanup(db, days=1, count=2, now=90000.0)
     assert removed_s == 2 and removed_l == 2
-    rows = logs.log_sessions(db)
+    rows = logs.log_sessions(db, live_ids=None)
     assert [r["id"] for r in rows] == [sid3]
     assert [r["start_time"] for r in rows] == [5000.0]
 
@@ -407,7 +407,7 @@ def test_log_cleanup_no_doomed_returns_zero(tmp_path):
     sid = logs.log_start_session(db, "system", None, None, 1000.0)
     logs.log_insert_lines(db, sid, [(1, 1000.1, "sys", "info", "a")])
     assert logs.log_cleanup(db, days=9999, count=10, now=10000.0) == (0, 0)
-    rows = logs.log_sessions(db)
+    rows = logs.log_sessions(db, live_ids=None)
     assert [r["id"] for r in rows] == [sid]
     assert rows[0]["line_count"] == 1
 
@@ -425,7 +425,7 @@ def test_log_cleanup_chunks_large_doomed_sets(tmp_path):
         logs.log_insert_lines(db, sid, [(1, 1001.0, "sys", "info", "x")])
     removed_s, removed_l = logs.log_cleanup(db, days=2, count=10000, now=200000.0)
     assert removed_s == 1000 and removed_l == 200
-    assert logs.log_sessions(db) == []
+    assert logs.log_sessions(db, live_ids=None) == []
 
 
 def test_log_heartbeat_live_writes_end_time(store):
@@ -435,7 +435,7 @@ def test_log_heartbeat_live_writes_end_time(store):
     ended = logs.start_session("model", "m2", "m2")
     logs.end_session(ended)
     assert logs.log_heartbeat_live(store, 5_000_000_000.0) == 1
-    rows = {r["id"]: r for r in logs.log_sessions(store)}
+    rows = {r["id"]: r for r in logs.log_sessions(store, live_ids=None)}
     assert rows[live]["end_time"] == 5_000_000_000.0  # 进行中 → end_time 推到心跳值
     assert rows[ended]["end_time"] is not None  # 已结束保留 end_session 写的精确值
     assert rows[ended]["end_time"] != 5_000_000_000.0  # 不被心跳覆盖
@@ -445,8 +445,8 @@ def test_log_sessions_status_uses_live_set(store):
     """status 由内存 live_session_ids 判定,不看 end_time(心跳后 live 会话 end_time 非 NULL 仍 running)。"""
     live = logs.start_session("model", "m1", "m1")
     logs.log_heartbeat_live(store, 5_000_000_000.0)  # live 的 end_time → 非 NULL
-    rows = {r["id"]: r for r in logs.log_sessions(store)}
+    rows = {r["id"]: r for r in logs.log_sessions(store, live_ids=logs.live_session_ids())}
     assert rows[live]["status"] == "running"  # 在 _sessions,虽 end_time 非 NULL
     logs.end_session(live)  # 移出 _sessions
-    rows2 = {r["id"]: r for r in logs.log_sessions(store)}
+    rows2 = {r["id"]: r for r in logs.log_sessions(store, live_ids=logs.live_session_ids())}
     assert rows2[live]["status"] == "ended"

@@ -182,7 +182,7 @@ async def log_retention_loop(
                 days,
                 count,
                 now,
-                live_session_ids=_logs.live_session_ids(),
+                live_ids=_logs.live_session_ids(),
             )
             if removed_s:
                 logger.info("log retention cleaned %d sessions / %d lines", removed_s, removed_l)

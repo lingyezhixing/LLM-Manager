@@ -22,12 +22,12 @@ def test_lifespan_opens_and_closes_system_session(tmp_path):
     with TestClient(app):
         sid = logs.current_system_session_id()
         assert sid is not None  # lifespan 已开系统会话
-        rows = logs.log_sessions(app.state.db, type_="system")
+        rows = logs.log_sessions(app.state.db, type_="system", live_ids=logs.live_session_ids())
         assert rows[0]["end_time"] is None  # 进行中
     # shutdown 后连接已关:重开检查 end_time 落库
     db2 = open_db(tmp_path / "t.db")
     try:
-        rows = logs.log_sessions(db2, type_="system")
+        rows = logs.log_sessions(db2, type_="system", live_ids=logs.live_session_ids())
         assert rows[0]["end_time"] is not None  # shutdown 收口
     finally:
         db2.conn.close()
@@ -46,7 +46,7 @@ def test_lifespan_new_system_session_after_crash(tmp_path):
         db.conn.close()
     app = create_app(db_path=db_path)
     with TestClient(app):
-        rows = logs.log_sessions(app.state.db, type_="system")
+        rows = logs.log_sessions(app.state.db, type_="system", live_ids=logs.live_session_ids())
         by_id = {r["id"]: r for r in rows}
         assert by_id[resid]["status"] == "ended"  # 不在 live_session_ids → ended(无需收口)
         current = logs.current_system_session_id()
@@ -55,7 +55,10 @@ def test_lifespan_new_system_session_after_crash(tmp_path):
     # shutdown 关闭新会话(current 的 end_time 被写;resid 是 SQL 直插假残留,end_time 未经心跳)
     db2 = open_db(db_path)
     try:
-        rows = {r["id"]: r for r in logs.log_sessions(db2, type_="system")}
+        rows = {
+            r["id"]: r
+            for r in logs.log_sessions(db2, type_="system", live_ids=logs.live_session_ids())
+        }
         assert rows[current]["end_time"] is not None  # 新会话 shutdown 时关闭
     finally:
         db2.conn.close()
