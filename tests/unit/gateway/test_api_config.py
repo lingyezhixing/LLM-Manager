@@ -135,7 +135,7 @@ def test_put_program_claude_settings_path_is_restart_classified(tmp_path):
 
 
 def test_to_model_config_preserves_device_names():
-    from llm_manager.gateway.api.config_api import (
+    from llm_manager.gateway.api.config_schemas import (
         CommandInput,
         ModelDefInput,
         SchemeInput,
@@ -167,7 +167,7 @@ def test_to_model_config_preserves_device_names():
 def test_to_model_config_rejects_duplicate_scheme_config_source():
     import pytest
 
-    from llm_manager.gateway.api.config_api import (
+    from llm_manager.gateway.api.config_schemas import (
         CommandInput,
         ModelDefInput,
         SchemeInput,
@@ -197,7 +197,7 @@ def _empty_cfg():
 
 
 def _body(name="M", port=8000, aliases=None):
-    from llm_manager.gateway.api.config_api import CommandInput, ModelDefInput, SchemeInput
+    from llm_manager.gateway.api.config_schemas import CommandInput, ModelDefInput, SchemeInput
 
     return ModelDefInput(
         name=name,
