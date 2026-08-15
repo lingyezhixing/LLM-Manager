@@ -41,6 +41,7 @@
 - **日志全落库**（SQLite）：系统日志会话 + 模型日志，WebUI 双 Tab 日志页（会话列表 + 实时行详情，SSE 流式）。
 - **保留规则**：按时间 / 按条数自动清理，可配置。
 - **数据管理**：删除模型数据（级联 + VACUUM 回收）、孤立模型检测、存储统计。
+- **v3.1 起不再兼容 Round-2 时代旧库**：启动检测到旧结构（ts 列/model_pricing/model_scripts）会明确拒绝（LegacySchemaError），请备份后删库重建或留在 v3.0。
 
 ### 7. WebUI 前端
 - React 19 + Vite + TypeScript + Tailwind v4 + TanStack Query，双主题（深 / 亮），实时监控。

@@ -178,5 +178,5 @@ usage 的 `_live_segments` 由 `tests/unit/data/test_persistence.py` 的本地 f
   单例语义/契约不变,后续新增表单一律用它。
 - **🔵1 create_task 任务集**:6 处 fire-and-forget 任务内部均已捕异常,实际未检索异常风险低;
   跨模块引用集 helper 性价比不足。
-- 其它:双账本(内存计数 + DB 落库)、`_migrate` 历史链退役窗口、前端 `useLogViewer` 改 useReducer
-  + 虚拟化、时长格式化函数收敛——均纯清理,不影响正确性。
+- **_migrate 迁移链退役(2026-08-14 已完成)**:Round-2 时代旧库检测即拒(LegacySchemaError),用户确认全部署为新库;历史折叠逻辑(ts 列删除/model_pricing 表迁移)整体删除,仅保留「检测旧结构→明确拒绝」守护。见 git 59e4465 后 `_migrate` 实现(152 行)。
+- 其它:双账本(内存计数 + DB 落库)、前端 `useLogViewer` 改 useReducer + 虚拟化、时长格式化函数收敛——均纯清理,不影响正确性。

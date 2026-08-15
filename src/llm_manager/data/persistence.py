@@ -11,6 +11,10 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 
+class LegacySchemaError(RuntimeError):
+    """Round-2 时代旧库(v3.1 迁移链退役后不再支持)。"""
+
+
 @dataclass(frozen=True, slots=True)
 class Db:
     conn: sqlite3.Connection
@@ -40,6 +44,7 @@ def open_db(path: Path) -> Db:
     conn.execute("PRAGMA busy_timeout = 5000")
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA journal_mode = WAL")
+    _migrate(conn)  # Must check legacy schema BEFORE CREATE IF NOT EXISTS
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS models (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -134,102 +139,24 @@ def open_db(path: Path) -> Db:
         );
         CREATE INDEX IF NOT EXISTS idx_log_lines_session ON log_lines(session_id, id);
     """)
-    _migrate(conn)
     conn.commit()
     return Db(conn=conn, write_lock=threading.Lock())
 
 
 def _migrate(conn: sqlite3.Connection) -> None:
-    """Drop the obsolete ``ts`` column if present (Round-2 era). Option A folds the
-    timestamp back into start_time/end_time (now wall-clock again, as in legacy). No-op
-    on fresh DBs.
+    """v3.1 起迁移链退役(2026-08-14,用户确认全部署均为新库):只检测、不迁移。
 
-    显式事务包裹全程:Python sqlite3 legacy 模式下 DDL 逐条 autocommit,无事务则中途
-    崩溃会留下半迁移状态(数据未搬完而表已删,或 pricing_tiers_new 残留)。BEGIN 后
-    DDL 不再隐式提交,整段原子——异常 ROLLBACK 回退,下次 open_db 从头重跑。"""
-    conn.execute("BEGIN")
-    try:
-        cols = {row[1] for row in conn.execute("PRAGMA table_info(model_requests)")}
-        if "ts" in cols:
-            # SQLite refuses DROP COLUMN while an index references it; drop the index first.
-            conn.execute("DROP INDEX IF EXISTS idx_model_requests_ts")
-            conn.execute("ALTER TABLE model_requests DROP COLUMN ts")
-        # 回改:support_cache 从阶梯级上移到模型级(model_pricing)。
-        # 旧库:model_pricing 无该列则补;pricing_tiers 有该列则删(SQLite ≥3.35 支持 DROP COLUMN)。
-        # 新库已无 model_pricing(代码优化 2026-08-03 并入 model_defs)→ 存在性判定防 no such table。
-        if conn.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='model_pricing'"
-        ).fetchone():
-            mp_cols = {row[1] for row in conn.execute("PRAGMA table_info(model_pricing)")}
-            if "support_cache" not in mp_cols:
-                conn.execute(
-                    "ALTER TABLE model_pricing ADD COLUMN support_cache INTEGER NOT NULL DEFAULT 0"
-                )
-        pt_cols = {row[1] for row in conn.execute("PRAGMA table_info(pricing_tiers)")}
-        if "support_cache" in pt_cols:
-            conn.execute("ALTER TABLE pricing_tiers DROP COLUMN support_cache")
-        # === 代码优化(2026-08-03):model_scripts → model_schemes.command 列 ===
-        if conn.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='model_schemes'"
-        ).fetchone():
-            sc_cols = {row[1] for row in conn.execute("PRAGMA table_info(model_schemes)")}
-            if "command" not in sc_cols:
-                conn.execute("ALTER TABLE model_schemes ADD COLUMN command TEXT")
-                conn.execute(
-                    "UPDATE model_schemes SET command = "
-                    "(SELECT s.command FROM model_scripts s WHERE s.scheme_id = model_schemes.id)"
-                )
-                conn.execute("DROP TABLE IF EXISTS model_scripts")
-            # 无 scripts 行的 scheme(或此前中断残留的 NULL)→ 归一为新库 DEFAULT '{}' 形态
-            conn.execute("UPDATE model_schemes SET command='{}' WHERE command IS NULL")
-        # === model_pricing → model_defs 3 列 ===
-        md_cols = {row[1] for row in conn.execute("PRAGMA table_info(model_defs)")}
-        if "pricing_type" not in md_cols:
-            conn.execute("ALTER TABLE model_defs ADD COLUMN pricing_type TEXT")
-            conn.execute("ALTER TABLE model_defs ADD COLUMN hourly_price REAL")
-            conn.execute("ALTER TABLE model_defs ADD COLUMN support_cache INTEGER")
-            if conn.execute(
-                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='model_pricing'"
-            ).fetchone():
-                conn.execute(
-                    "UPDATE model_defs SET "
-                    "pricing_type = COALESCE((SELECT pricing_type FROM model_pricing WHERE model_id = model_defs.id), 'tier'), "
-                    "hourly_price = COALESCE((SELECT hourly_price FROM model_pricing WHERE model_id = model_defs.id), 0), "
-                    "support_cache = COALESCE((SELECT support_cache FROM model_pricing WHERE model_id = model_defs.id), 0)"
-                )
-        # 无 model_pricing 行的模型 → 归一为新库 NOT NULL DEFAULT 形态
-        conn.execute(
-            "UPDATE model_defs SET pricing_type='tier', hourly_price=0, support_cache=0 WHERE pricing_type IS NULL"
+    检测 Round-2 时代遗留特征(model_requests.ts 列 / model_pricing / model_scripts
+    表)→ LegacySchemaError(明确诊断,优于静默半迁移)。新库 CREATE IF NOT EXISTS
+    即终态。若未来需要再兼容,历史实现见 git(840a4ac 前)。"""
+    legacy = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name IN ('model_pricing','model_scripts')"
+    ).fetchone()
+    if legacy or "ts" in {r[1] for r in conn.execute("PRAGMA table_info(model_requests)")}:
+        raise LegacySchemaError(
+            "数据库为 v3.1 之前时代的旧结构,已不再支持自动迁移;"
+            "请备份后删除 data/ 下数据库重建(配置经 WebUI 重新录入),或留在 v3.0 使用"
         )
-        # === pricing_tiers 重建改 FK → model_defs(id)(必须在 DROP model_pricing 前 COPY) ===
-        pt_fks = {row[2] for row in conn.execute("PRAGMA foreign_key_list(pricing_tiers)")}
-        if "model_pricing" in pt_fks:
-            conn.execute("""
-                CREATE TABLE pricing_tiers_new (
-                    pricing_id INTEGER NOT NULL,
-                    tier_index INTEGER NOT NULL,
-                    min_input INTEGER, max_input INTEGER,
-                    min_output INTEGER, max_output INTEGER,
-                    input_price REAL, output_price REAL,
-                    cache_write_price REAL, cache_read_price REAL,
-                    FOREIGN KEY (pricing_id) REFERENCES model_defs(id) ON DELETE CASCADE,
-                    PRIMARY KEY (pricing_id, tier_index)
-                )""")
-            conn.execute("INSERT INTO pricing_tiers_new SELECT * FROM pricing_tiers")
-            conn.execute("DROP TABLE pricing_tiers")
-            conn.execute("ALTER TABLE pricing_tiers_new RENAME TO pricing_tiers")
-        # === 旧 model_pricing 表删除(数据已搬,此时 tiers 已重建) ===
-        if conn.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='model_pricing'"
-        ).fetchone():
-            conn.execute("DROP TABLE model_pricing")
-    except Exception:
-        try:
-            conn.execute("ROLLBACK")
-        except sqlite3.Error:
-            pass  # 无活跃事务(BEGIN 本身失败)时不掩盖原始错误
-        raise
-    conn.execute("COMMIT")
 
 
 @dataclass(frozen=True, slots=True)

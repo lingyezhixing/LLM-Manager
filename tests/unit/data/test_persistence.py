@@ -2,7 +2,6 @@
 (record_usage / record_runtime / usage_series / usage_cost 等,data/usage.py)的测试;
 日志 SQL 存储层测试在 tests/unit/data/test_logs.py(与 src 布局对齐)。"""
 
-import json
 import sqlite3
 import threading
 from pathlib import Path
@@ -150,31 +149,6 @@ def test_usage_series_buckets_are_clock_aligned_not_start_relative(tmp_path):
     result = usage_series(db, start_ts=10, end_ts=130, bucket_seconds=60)  # unaligned start
     assert result.buckets == [0, 60, 120]  # first = floor(10/60)*60 = 0
     assert result.models["m1"] == [0, 2, 0]  # end=70 → bucket 60 → idx 1
-
-
-def test_migrate_drops_legacy_ts_column(tmp_path):
-    """A Round-2 DB with a ts column gets it dropped on open (Option A folds the timestamp
-    back into start_time/end_time, now wall-clock as in legacy)."""
-    import sqlite3
-
-    p = tmp_path / "legacy.db"
-    conn = sqlite3.connect(str(p))
-    conn.executescript(
-        "CREATE TABLE models (id INTEGER PRIMARY KEY AUTOINCREMENT, original_name TEXT UNIQUE NOT NULL, "
-        "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);"
-        "CREATE TABLE model_requests (id INTEGER PRIMARY KEY AUTOINCREMENT, model_id INTEGER NOT NULL, "
-        "ts REAL NOT NULL DEFAULT 0, start_time REAL NOT NULL, end_time REAL NOT NULL, "
-        "input_tokens INTEGER NOT NULL, output_tokens INTEGER NOT NULL, cache_n INTEGER NOT NULL, "
-        "prompt_n INTEGER NOT NULL, FOREIGN KEY (model_id) REFERENCES models(id));"
-        "CREATE INDEX idx_model_requests_ts ON model_requests(ts);"
-    )
-    conn.commit()
-    conn.close()
-
-    db = open_db(p)  # migration drops ts
-    cols = {r[1] for r in db.conn.execute("PRAGMA table_info(model_requests)")}
-    assert "ts" not in cols
-    assert "start_time" in cols and "end_time" in cols
 
 
 def test_usage_summary_aggregates_half_open_range(tmp_path):
@@ -557,39 +531,6 @@ def test_usage_cost_series_empty_range_returns_no_buckets(tmp_path):
     assert res.buckets == [] and res.total == [] and res.models == {}
 
 
-def test_migrate_moves_support_cache_to_model_pricing(tmp_path):
-    """回改迁移:旧库(model_pricing 无 support_cache、pricing_tiers 有)→ 开库后上移到模型级。
-    叠加 2026-08-03 代码优化迁移:model_pricing 随后并入 model_defs、pricing_tiers 重建改 FK、
-    旧表删除——最终 support_cache 落在 model_defs 上。"""
-    import sqlite3
-
-    p = tmp_path / "legacy.db"
-    conn = sqlite3.connect(str(p))
-    conn.executescript(
-        "CREATE TABLE model_defs (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, "
-        "mode TEXT NOT NULL, port INTEGER NOT NULL, auto_start INTEGER NOT NULL DEFAULT 0, ord INTEGER NOT NULL DEFAULT 0);"
-        "CREATE TABLE model_pricing (model_id INTEGER PRIMARY KEY, pricing_type TEXT NOT NULL DEFAULT 'tier', "
-        "hourly_price REAL NOT NULL DEFAULT 0, "
-        "FOREIGN KEY (model_id) REFERENCES model_defs(id) ON DELETE CASCADE);"
-        "CREATE TABLE pricing_tiers (pricing_id INTEGER NOT NULL, tier_index INTEGER NOT NULL, "
-        "min_input INTEGER, max_input INTEGER, min_output INTEGER, max_output INTEGER, "
-        "input_price REAL, output_price REAL, support_cache INTEGER NOT NULL DEFAULT 0, "
-        "cache_write_price REAL, cache_read_price REAL, "
-        "FOREIGN KEY (pricing_id) REFERENCES model_pricing(model_id) ON DELETE CASCADE, "
-        "PRIMARY KEY (pricing_id, tier_index));"
-    )
-    conn.commit()
-    conn.close()
-
-    db = open_db(p)  # 迁移:model_pricing 补列 → 并入 model_defs;pricing_tiers 删列重建
-    md_cols = {r[1] for r in db.conn.execute("PRAGMA table_info(model_defs)")}
-    pt_cols = {r[1] for r in db.conn.execute("PRAGMA table_info(pricing_tiers)")}
-    tables = {r[0] for r in db.conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-    assert "support_cache" in md_cols
-    assert "support_cache" not in pt_cols
-    assert "model_pricing" not in tables and "model_scripts" not in tables
-
-
 def test_storage_stats_empty(tmp_path):
     db = open_db(tmp_path / "t.db")
     s = storage_stats(db, configured=set(), size_bytes=123)
@@ -659,6 +600,23 @@ def test_delete_model_data_in_memory_db_no_crash():
     assert delete_model_data(db, "m1") is True  # VACUUM 异常被吞,不阻塞删除
 
 
+def test_open_db_rejects_legacy_schema(tmp_path):
+    """v3.1 起迁移链退役:Round-2 时代旧库(ts 列/model_pricing 表)明确拒绝,
+    不再静默折叠——给清晰诊断而非半迁移状态。"""
+    p = tmp_path / "legacy.db"
+    conn = sqlite3.connect(p)
+    conn.execute("CREATE TABLE model_requests (id INTEGER PRIMARY KEY, ts REAL)")
+    conn.commit()
+    conn.close()
+    from llm_manager.data.persistence import LegacySchemaError, open_db
+
+    try:
+        open_db(p)
+        raise AssertionError("should have raised LegacySchemaError")
+    except LegacySchemaError as e:
+        assert "v3.1" in str(e)
+
+
 # ---- 代码优化(2026-08-03):model_scripts/model_pricing 并入父表 ----
 
 
@@ -674,73 +632,3 @@ def test_open_db_creates_flat_config_tables(tmp_path):
     assert {"pricing_type", "hourly_price", "support_cache"} <= md_cols
     fks = {row[2] for row in db.conn.execute("PRAGMA foreign_key_list(pricing_tiers)")}
     assert fks == {"model_defs"}
-
-
-def test_migrate_folds_scripts_and_pricing_into_parents(tmp_path):
-    """老库(带数据)→ open_db 迁移:model_schemes.command 取回 scripts 内容;
-    model_defs 3 列取回 pricing 内容;pricing_tiers 数据保留且 FK 改指 model_defs;
-    两旧表消失;二次 open_db 幂等。"""
-    p = tmp_path / "t.db"
-    conn = sqlite3.connect(p)
-    conn.executescript("""
-        CREATE TABLE model_defs (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL,
-            mode TEXT NOT NULL, port INTEGER NOT NULL, auto_start INTEGER NOT NULL DEFAULT 0,
-            ord INTEGER NOT NULL DEFAULT 0);
-        CREATE TABLE model_aliases (model_id INTEGER NOT NULL, alias TEXT NOT NULL, ord INTEGER NOT NULL,
-            FOREIGN KEY (model_id) REFERENCES model_defs(id) ON DELETE CASCADE, UNIQUE(alias));
-        CREATE TABLE model_schemes (id INTEGER PRIMARY KEY AUTOINCREMENT, model_id INTEGER NOT NULL,
-            config_source TEXT NOT NULL, required_devices TEXT NOT NULL DEFAULT '[]',
-            memory_mb TEXT NOT NULL DEFAULT '{}', ord INTEGER NOT NULL DEFAULT 0,
-            FOREIGN KEY (model_id) REFERENCES model_defs(id) ON DELETE CASCADE,
-            UNIQUE(model_id, config_source));
-        CREATE TABLE model_scripts (scheme_id INTEGER PRIMARY KEY, command TEXT NOT NULL,
-            FOREIGN KEY (scheme_id) REFERENCES model_schemes(id) ON DELETE CASCADE);
-        CREATE TABLE model_pricing (model_id INTEGER PRIMARY KEY, pricing_type TEXT NOT NULL DEFAULT 'tier',
-            hourly_price REAL NOT NULL DEFAULT 0, support_cache INTEGER NOT NULL DEFAULT 0,
-            FOREIGN KEY (model_id) REFERENCES model_defs(id) ON DELETE CASCADE);
-        CREATE TABLE pricing_tiers (pricing_id INTEGER NOT NULL, tier_index INTEGER NOT NULL,
-            min_input INTEGER, max_input INTEGER, min_output INTEGER, max_output INTEGER,
-            input_price REAL, output_price REAL, cache_write_price REAL, cache_read_price REAL,
-            FOREIGN KEY (pricing_id) REFERENCES model_pricing(model_id) ON DELETE CASCADE,
-            PRIMARY KEY (pricing_id, tier_index));
-        INSERT INTO model_defs (name, mode, port) VALUES ('M', 'Chat', 1);
-        INSERT INTO model_schemes (model_id, config_source) VALUES (1, 'S');
-        INSERT INTO model_scripts (scheme_id, command) VALUES (1, '{"exe": "q.bat"}');
-        INSERT INTO model_pricing (model_id, pricing_type, hourly_price, support_cache) VALUES (1, 'hourly', 2.5, 1);
-        INSERT INTO pricing_tiers (pricing_id, tier_index, input_price, output_price) VALUES (1, 1, 3.0, 9.0);
-    """)
-    conn.commit()
-    conn.close()
-
-    db = open_db(p)  # 迁移
-    tables = {r[0] for r in db.conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-    assert "model_scripts" not in tables and "model_pricing" not in tables
-    sc = db.conn.execute("SELECT command FROM model_schemes").fetchone()
-    assert json.loads(sc["command"]) == {"exe": "q.bat"}
-    md = db.conn.execute(
-        "SELECT pricing_type, hourly_price, support_cache FROM model_defs"
-    ).fetchone()
-    assert (md["pricing_type"], md["hourly_price"], md["support_cache"]) == ("hourly", 2.5, 1)
-    t = db.conn.execute("SELECT pricing_id, tier_index, input_price FROM pricing_tiers").fetchone()
-    assert (t["pricing_id"], t["tier_index"], t["input_price"]) == (1, 1, 3.0)
-    fks = {row[2] for row in db.conn.execute("PRAGMA foreign_key_list(pricing_tiers)")}
-    assert fks == {"model_defs"}
-    db2 = open_db(p)  # 幂等:二次打开不抛、结构不变
-    assert "model_scripts" not in {
-        r[0] for r in db2.conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
-    }
-
-
-def test_migrate_new_fk_cascades_from_model_defs(tmp_path):
-    """重建后的 pricing_tiers 随 model_defs 删除级联(新 FK 生效)。"""
-    db = open_db(tmp_path / "t.db")
-    with db.write_lock:
-        cur = db.conn.execute("INSERT INTO model_defs (name, mode, port) VALUES ('M', 'Chat', 1)")
-        db.conn.execute(
-            "INSERT INTO pricing_tiers (pricing_id, tier_index) VALUES (?, 1)", (cur.lastrowid,)
-        )
-        db.conn.commit()
-    with db.write_lock:
-        db.conn.execute("DELETE FROM model_defs WHERE name='M'")
-        db.conn.commit()
-    assert db.conn.execute("SELECT COUNT(*) FROM pricing_tiers").fetchone()[0] == 0
