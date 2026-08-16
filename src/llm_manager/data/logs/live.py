@@ -102,7 +102,9 @@ def reset() -> None:
 def start_session(
     type_: str, model_name: str | None = None, alias: str | None = None, start: float | None = None
 ) -> int:
-    """开新会话(落库),登记广播器。alias→session 映射被新会话接管;
+    """model_name 恒为 primary_name(规范名,即模型定义名);alias 为模型会话的显示用 served name 快照(取 aliases[0]),仅模型会话传。
+
+    开新会话(落库),登记广播器。alias→session 映射被新会话接管;
     type_="system" 的会话同时登记为当前系统会话。
     未接线 DB(_db 为 None,lifecycle 单测)→ 仅内存会话(不落库,与 end_session 对称)。"""
     global _system_session_id, _mem_sid_seq

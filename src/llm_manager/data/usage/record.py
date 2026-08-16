@@ -1,5 +1,7 @@
 """运行段记录与 live 集管理(record_usage + runtime lifecycle)。
 
+本文档的 segment=计费运行段(model_runtime 行,模型达到 ROUTING 起止);logs 包的 session=日志会话(log_sessions 行,进程/模型生命周期起止)。两概念随模型启停一一对应创建,但表独立、id 独立、语义独立(计费 vs 日志)。
+
 运行段语义(不变量 6 的 usage 侧):end_time 只管时间戳字段,不标识运行中;
 内存态 live 集(_live_segments)才是「进行中」的权威来源。心跳持续推 end_time,
 崩溃后 end_time 停在最后一次心跳(≈死亡时刻),但 live 集随进程消失。
