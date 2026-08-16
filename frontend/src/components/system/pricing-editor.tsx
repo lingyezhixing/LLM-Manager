@@ -13,7 +13,7 @@ function TierInput({ label, value, onChange, disabled }: {
 }) {
   return (
     <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-      <span className="truncate text-[10px] leading-none text-muted-foreground">{label}</span>
+      <span className="truncate text-micro leading-none text-muted-foreground">{label}</span>
       <NumberInput
         value={value}
         disabled={disabled}

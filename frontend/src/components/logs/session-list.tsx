@@ -18,12 +18,12 @@ export function SessionList({
             className={`rounded-md border px-2.5 py-1.5 text-left transition-colors ${
               active ? "border-primary-accent bg-primary-accent/12" : "border-border-subtle bg-card-2 hover:bg-card-hover"
             }`}>
-            <div className="flex items-center gap-1.5 text-[11px] font-medium text-foreground">
+            <div className="flex items-center gap-1.5 text-ui font-medium text-foreground">
               {running && <span className="size-1.5 shrink-0 rounded-full bg-success" />}
               <span className="tabular-nums">{fmtTime(s.start_time)}</span>
-              <span className="ml-auto font-mono text-[10px] text-muted-foreground">{s.line_count} 行</span>
+              <span className="ml-auto font-mono text-micro text-muted-foreground">{s.line_count} 行</span>
             </div>
-            <div className="text-[10px] text-muted-foreground">
+            <div className="text-micro text-muted-foreground">
               {running ? "进行中" : `时长 ${fmtDuration(s.duration_s ?? 0)}`}
             </div>
           </button>

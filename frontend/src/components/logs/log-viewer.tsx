@@ -11,7 +11,7 @@ export function LogViewer({ session }: { session: LogSession }) {
       header={
         <span className="text-[12px] font-semibold text-foreground">
           {session.alias ?? "系统日志"}
-          <span className="ml-2 text-[10.5px] font-normal text-muted-foreground">
+          <span className="ml-2 text-dense font-normal text-muted-foreground">
             #{session.id} · {session.status === "running" ? "进行中" : "已结束"} · {session.line_count} 行
           </span>
         </span>

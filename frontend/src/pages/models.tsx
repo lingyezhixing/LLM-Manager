@@ -22,7 +22,7 @@ export default function ModelsPage() {
   return (
     <>
       {/* 高度 = 视口 - 壳层 chrome(胶囊 40 + sticky top-4 16 + main pt-8 32 + pb 16 = 104px) */}
-      <div className="grid h-[calc(100dvh-104px)] gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,4fr)]">
+      <div className="grid h-[calc(100dvh-var(--shell-chrome))] gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,4fr)]">
         <div className="flex flex-col gap-2 overflow-auto">
           {error
             ? <p className="text-sm text-muted-foreground">{streamErrorText("模型")}</p>

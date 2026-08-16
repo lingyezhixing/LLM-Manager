@@ -125,7 +125,7 @@ export function SystemOverview() {
                   key={m.key}
                   type="button"
                   onClick={() => setMode(m.key)}
-                  className={`rounded-full border border-border px-2.5 py-0.5 text-[11px] ${
+                  className={`rounded-full border border-border px-2.5 py-0.5 text-ui ${
                     mode === m.key ? "bg-primary-accent/12 font-medium text-primary-accent" : "text-muted-foreground hover:text-foreground"
                   }`}
                 >

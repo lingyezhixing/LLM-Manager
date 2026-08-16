@@ -23,7 +23,7 @@ export function LogLines({ h }: { h: LogLinesView }) {
 
   return (
     <>
-      <div className="flex flex-wrap items-center gap-2 border-b border-border bg-muted/30 px-3.5 py-1.5 text-[10.5px]">
+      <div className="flex flex-wrap items-center gap-2 border-b border-border bg-muted/30 px-3.5 py-1.5 text-dense">
         {LOG_LEVEL_FILTERS.map((lv) => (
           <button key={lv} onClick={() => setLevel(lv)}
             className={`rounded border px-2 py-0.5 transition-colors ${level === lv ? "border-transparent bg-primary-accent/12 font-medium text-primary-accent" : "border-border bg-card text-muted-foreground hover:text-foreground"}`}>
@@ -56,8 +56,8 @@ export function LogLines({ h }: { h: LogLinesView }) {
           ) : h.hasSearched ? <span className="text-muted-foreground">无匹配</span> : null}
       </div>
       <div ref={h.scroller} onScroll={h.onScroll}
-        className="relative flex-1 overflow-auto bg-background p-3 font-mono text-[11px] leading-relaxed">
-        {h.atOldest && <div className="py-1 text-center text-[10px] text-muted-foreground/60">已加载最早</div>}
+        className="relative flex-1 overflow-auto bg-background p-3 font-mono text-ui leading-relaxed">
+        {h.atOldest && <div className="py-1 text-center text-micro text-muted-foreground/60">已加载最早</div>}
         {h.displayed.map((l) => {
           const isMatch = h.matchSet.has(l.id);
           const isCurrent = h.currentMatch === l.id;
@@ -71,7 +71,7 @@ export function LogLines({ h }: { h: LogLinesView }) {
         })}
         {showJump && (
           <button onClick={h.backToLive}
-            className="absolute bottom-3 right-3.5 rounded-full bg-primary px-3 py-1 text-[10.5px] font-medium text-primary-foreground shadow-card hover:opacity-90">
+            className="absolute bottom-3 right-3.5 rounded-full bg-primary px-3 py-1 text-dense font-medium text-primary-foreground shadow-card hover:opacity-90">
             {jumpLabel}
           </button>
         )}

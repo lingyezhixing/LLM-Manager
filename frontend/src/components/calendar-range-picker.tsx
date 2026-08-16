@@ -49,7 +49,7 @@ function MonthGrid({
   ];
   return (
     <div className="w-[168px]">
-      <div className="mb-1 grid grid-cols-7 text-center text-[10px] text-muted-foreground">
+      <div className="mb-1 grid grid-cols-7 text-center text-micro text-muted-foreground">
         {WEEKDAYS.map((w) => (
           <div key={w} className="py-0.5">{w}</div>
         ))}
@@ -66,7 +66,7 @@ function MonthGrid({
               type="button"
               onClick={() => onPick(d)}
               className={[
-                "h-6 rounded text-[11px]",
+                "h-6 rounded text-ui",
                 isStart || isEnd
                   ? "bg-primary text-primary-foreground"
                   : isMid

@@ -18,7 +18,7 @@ export function ModelLogPanel({ m }: { m: ModelInfo }) {
         <span className="text-[12px] font-semibold text-foreground">
           <span className="mr-1 inline-block size-[7px] rounded-full align-middle" style={{ background: dotColor }} />
           {m.alias}
-          <span className="ml-2 text-[10.5px] font-normal text-muted-foreground">
+          <span className="ml-2 text-dense font-normal text-muted-foreground">
             {m.mode} · :{m.port} · pid {m.pid ?? "—"}
           </span>
         </span>

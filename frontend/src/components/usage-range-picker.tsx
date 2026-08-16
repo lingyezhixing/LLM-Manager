@@ -23,7 +23,7 @@ export function UsageRangePicker({
             onChange({ preset: p.key, custom: value.custom });
             setCalOpen(false);
           }}
-          className={`rounded-full border border-border px-2.5 py-0.5 text-[11px] ${
+          className={`rounded-full border border-border px-2.5 py-0.5 text-ui ${
             value.preset === p.key ? "bg-primary-accent/12 font-medium text-primary-accent" : "text-muted-foreground hover:text-foreground"
           }`}
         >
@@ -33,7 +33,7 @@ export function UsageRangePicker({
       <button
         type="button"
         onClick={() => setCalOpen(true)}
-        className={`rounded-full border border-border px-2.5 py-0.5 text-[11px] ${
+        className={`rounded-full border border-border px-2.5 py-0.5 text-ui ${
           value.preset === "custom" ? "bg-primary-accent/12 font-medium text-primary-accent" : "text-muted-foreground hover:text-foreground"
         }`}
       >

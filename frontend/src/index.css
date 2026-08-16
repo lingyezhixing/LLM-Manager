@@ -198,6 +198,15 @@
   --radius-md: 8px;
   --radius-lg: 12px;
   --radius-xl: 14px;
+  /* 字号 token(2026-08-14 收敛:此前为 text-[10.5px] 等任意值,值不变只收编) */
+  --text-micro: 10px;        /* 最小注释级:日历星期/已加载最早/tier 标签 */
+  --text-dense: 10.5px;      /* 高密度数据行:模型卡 meta/日志工具条 */
+  --text-ui: 11px;           /* 小控件:pill/mono 日志行/会话列表标题 */
+  --text-card-title: 12.5px; /* 卡片标题:模型卡/日志面板标题 */
+  /* 布局 token */
+  --container-sidebar: 13.125rem;
+  /* 视口扣减常量:壳层 chrome(胶囊 40 + sticky 16 + main pt-8 32 + pb-4 16 = 104px) */
+  --shell-chrome: 104px;
   --animate-page-in: page-in 150ms ease-out;
 }
 

@@ -62,7 +62,7 @@ export default function LogsPage() {
         ))}
         {tab === "model" && (
           <select value={model} onChange={(e) => setModel(e.target.value)}
-            className="ml-auto rounded border border-border bg-background px-2 py-1 text-[11px] text-foreground">
+            className="ml-auto rounded border border-border bg-background px-2 py-1 text-ui text-foreground">
             <option value="">全部模型</option>
             {models.map((m) => <option key={m} value={m}>{m}</option>)}
           </select>
