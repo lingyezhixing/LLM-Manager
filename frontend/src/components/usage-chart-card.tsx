@@ -10,6 +10,7 @@ import { TokenChart } from "@/components/token-chart";
 import { fetchUsageCostSeries, fetchUsageSeries, type UsageSeries, type UsageSeriesParams } from "@/lib/api";
 import { errMsg, formatCost } from "@/lib/format";
 import { chartPresetFor, EMPTY_COST, EMPTY_REQUESTS, type DateRange, type UsagePreset } from "@/lib/usage-range";
+import { qk } from "@/lib/api/keys";
 
 type View = "total" | "models" | "cost";
 
@@ -26,13 +27,13 @@ export function UsageChartCard({
 }) {
   const [view, setView] = useState<View>("models");
   const { data, isLoading, isError, error, refetch: refetchSeries } = useQuery({
-    queryKey: ["usage", "series", params],
+    queryKey: qk.usageSeries(params),
     queryFn: () => fetchUsageSeries(params),
     refetchInterval: refetch,
     enabled: view !== "cost",   // 成本视图不轮询 token 序列(与 cost-series 对称)
   });
   const costSeriesQ = useQuery({
-    queryKey: ["usage", "cost-series", params],
+    queryKey: qk.usageCostSeries(params),
     queryFn: () => fetchUsageCostSeries(params),
     refetchInterval: refetch,
     enabled: view === "cost",

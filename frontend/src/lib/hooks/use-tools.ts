@@ -9,6 +9,7 @@ import {
   type WolConfig,
 } from "@/lib/api";
 import { invalidateConfig } from "@/lib/hooks/use-config";
+import { qk } from "@/lib/api/keys";
 
 export function useUpdateWol() {
   const qc = useQueryClient();
@@ -41,7 +42,7 @@ export function useUpdateClaudeConfigs() {
     onSuccess: (data) => {
       invalidateConfig(qc);
       // 保存并生效 → settings.json 已变,current 探测须刷新,否则「生效中」标记陈旧。
-      if (data.applied) qc.invalidateQueries({ queryKey: ["tools", "claude", "current"] });
+      if (data.applied) qc.invalidateQueries({ queryKey: qk.claudeCurrent });
     },
   });
 }
@@ -51,10 +52,10 @@ export function useApplyClaudePreset() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (name: string) => applyClaudePreset(name),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["tools", "claude", "current"] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.claudeCurrent }),
   });
 }
 
 export function useClaudeCurrent() {
-  return useQuery({ queryKey: ["tools", "claude", "current"], queryFn: fetchClaudeCurrent });
+  return useQuery({ queryKey: qk.claudeCurrent, queryFn: fetchClaudeCurrent });
 }

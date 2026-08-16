@@ -7,6 +7,7 @@ import { ErrorState } from "@/components/ui/error-state";
 import { fetchUsageByModel, fetchUsageCost, type UsageSeriesParams } from "@/lib/api";
 import { errMsg, formatCost, formatCount, formatLatency, formatPercent, formatTokens } from "@/lib/format";
 import { EMPTY_REQUESTS } from "@/lib/usage-range";
+import { qk } from "@/lib/api/keys";
 
 type SortKey = "input_tokens" | "output_tokens" | "cache_n" | "request_count" | "hit_rate" | "latency_ms" | "cost";
 
@@ -18,12 +19,12 @@ export function UsageByModelTable({
   refetch: number | false;
 }) {
   const { data, isLoading, isError, error, refetch: refetchByModel } = useQuery({
-    queryKey: ["usage", "by-model", params],
+    queryKey: qk.usageByModel(params),
     queryFn: () => fetchUsageByModel(params),
     refetchInterval: refetch,
   });
   const costQ = useQuery({
-    queryKey: ["usage", "cost", params],
+    queryKey: qk.usageCost(params),
     queryFn: () => fetchUsageCost(params),
     refetchInterval: refetch,
   });

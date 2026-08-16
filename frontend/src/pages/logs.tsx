@@ -6,6 +6,7 @@ import { NavTab, NavTabs } from "@/components/ui/nav-tabs";
 import { SessionList } from "@/components/logs/session-list";
 import { LogViewer } from "@/components/logs/log-viewer";
 import { Loading } from "@/components/ui/card";
+import { qk } from "@/lib/api/keys";
 
 type Tab = LogSession["type"];
 
@@ -19,7 +20,7 @@ export default function LogsPage() {
   // 若取过滤后响应,选 "m1" 后选项会收缩成 ["m1"],选无会话的模型会清空 —— 违反
   // §8"稳定历史派生列表"。含已删模型的残留 alias,后端按会话历史回退解析(不再 404)。
   const modelsQ = useQuery({
-    queryKey: ["sessions", "model-options"],
+    queryKey: qk.sessionModelOptions,
     queryFn: () => fetchSessions({ type: "model", limit: 50 }),
     enabled: tab === "model",
   });
@@ -29,7 +30,7 @@ export default function LogsPage() {
   // 选中会话保持(仍存在则不动;被保留策略清掉或首载时选第一个)。
   // 404(如选项取到后会话被保留策略清掉)走 catch → 空列表。
   const sessionsQ = useQuery({
-    queryKey: ["sessions", "list", tab, model],
+    queryKey: qk.sessionsList(tab, model),
     queryFn: () =>
       fetchSessions(
         tab === "system" ? { type: "system", limit: 50 }

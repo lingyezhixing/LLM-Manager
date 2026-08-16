@@ -9,6 +9,7 @@ import { UsageRangePicker } from "@/components/usage-range-picker";
 import { fetchUsageSeries, type UsageSeriesParams } from "@/lib/api";
 import { errMsg } from "@/lib/format";
 import { chartPresetFor, EMPTY_REQUESTS, paramsForState, USAGE_REFETCH, type UsageRangeState } from "@/lib/usage-range";
+import { qk } from "@/lib/api/keys";
 
 /** Token 消耗 card:preset 胶囊 + 自选日历(复用用量页的 UsageRangePicker)。区间/节奏/
  * 参数推导与用量页共用 lib/usage-range(语义与后端 _resolve_range 一致:当前时刻,非日界)。 */
@@ -17,7 +18,7 @@ export function TokenCurveCard() {
   const params: UsageSeriesParams = paramsForState(range);
 
   const { data, isLoading, isError, error, refetch } = useQuery({
-    queryKey: ["usage", "series", params],
+    queryKey: qk.usageSeries(params),
     queryFn: () => fetchUsageSeries(params),
     refetchInterval: USAGE_REFETCH[range.preset],
   });

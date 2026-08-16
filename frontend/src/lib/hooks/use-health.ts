@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { fetchHealth } from "@/lib/api";
+import { qk } from "@/lib/api/keys";
 
 /**
  * Backend reachable? Polls /health every 5s. Optimistic online until a fetch errors
@@ -8,7 +9,7 @@ import { fetchHealth } from "@/lib/api";
  */
 export function useHealth(): boolean {
   const q = useQuery({
-    queryKey: ["health"],
+    queryKey: qk.health,
     queryFn: fetchHealth,
     refetchInterval: 5000,
     retry: 1,

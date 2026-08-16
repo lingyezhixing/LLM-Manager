@@ -17,24 +17,25 @@ import {
   type UpdateTarget,
 } from "@/lib/api";
 import { errMsg } from "@/lib/format";
+import { qk } from "@/lib/api/keys";
 
 // 配置写回后失效:config(读穿取新值)+ restart-status(顶部横幅按新状态刷新)。
 // 供 useUpdateProgram/useUpdateWol/useUpdateClaudeConfigs 共用;日志保留/应用预设语义不同,各管各的。
 export function invalidateConfig(qc: QueryClient) {
-  qc.invalidateQueries({ queryKey: ["config"] });
-  qc.invalidateQueries({ queryKey: ["restart-status"] });
+  qc.invalidateQueries({ queryKey: qk.config });
+  qc.invalidateQueries({ queryKey: qk.restartStatus });
 }
 
 export function useSystemInfo() {
-  return useQuery({ queryKey: ["system", "info"], queryFn: fetchSystemInfo });
+  return useQuery({ queryKey: qk.systemInfo, queryFn: fetchSystemInfo });
 }
 
 export function useConfig() {
-  return useQuery({ queryKey: ["config"], queryFn: fetchConfig });
+  return useQuery({ queryKey: qk.config, queryFn: fetchConfig });
 }
 
 export function useRestartStatus() {
-  return useQuery({ queryKey: ["restart-status"], queryFn: fetchRestartStatus });
+  return useQuery({ queryKey: qk.restartStatus, queryFn: fetchRestartStatus });
 }
 
 // 项目首个 useMutation:写后失效 config + restart-status,横幅按新状态刷新。
@@ -53,7 +54,7 @@ export function useUpdateLogRetention() {
   return useMutation({
     mutationFn: (body: LogRetention) => updateLogRetention(body),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["config"] });
+      qc.invalidateQueries({ queryKey: qk.config });
     },
   });
 }
@@ -124,7 +125,7 @@ export function useUpdateStatus() {
   // 启动检测未完成(checking=true)时短轮询等待结果——这是等「程序启动时那一次检测」,
   // 不新增任何检测;完成后轮询自动停止。
   return useQuery({
-    queryKey: ["update", "status"],
+    queryKey: qk.updateStatus,
     queryFn: fetchUpdateStatus,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
@@ -141,6 +142,6 @@ export function useUpdateCheck() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: checkUpdate,
-    onSuccess: (data) => qc.setQueryData(["update", "status"], data),
+    onSuccess: (data) => qc.setQueryData(qk.updateStatus, data),
   });
 }

@@ -6,6 +6,7 @@ import { KeyValueEditor } from "@/components/ui/repeatable-fields";
 import { isPendingKey } from "@/lib/pending-keys";
 import { apiJson } from "@/lib/api/shared";
 import type { DevicesResponse, SchemeDef } from "@/lib/api";
+import { qk } from "@/lib/api/keys";
 
 // 一个 scheme:config_source + command 块 + required_devices + memory_mb。
 // 受控:父级持 SchemeDef[](本组件只管一个,index/onChange/onRemove 由父级驱动)。
@@ -29,7 +30,7 @@ export function SchemeEditor({
   // 设备名下拉建议:一次性 GET /api/devices(快照,零采样开销);1 分钟 staleTime 缓存,
   // 设备名变化频率极低,不重复请求。
   const { data: deviceNames } = useQuery({
-    queryKey: ["device-names"],
+    queryKey: qk.deviceNames,
     queryFn: async () => {
       const res = await apiJson<DevicesResponse>("/api/devices");
       return res.data.map((d) => d.device_name);

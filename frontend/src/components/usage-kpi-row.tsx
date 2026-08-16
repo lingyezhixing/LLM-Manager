@@ -4,6 +4,7 @@ import { ErrorState } from "@/components/ui/error-state";
 import { InfoTile } from "@/components/ui/info-tile";
 import { fetchUsageCost, fetchUsageSummary, type UsageSeriesParams } from "@/lib/api";
 import { errMsg, formatCost, formatCount, formatPercent, formatTokens } from "@/lib/format";
+import { qk } from "@/lib/api/keys";
 
 export function UsageKpiRow({
   params,
@@ -13,12 +14,12 @@ export function UsageKpiRow({
   refetch: number | false;
 }) {
   const { data, isLoading, isError, error, refetch: refetchSummary } = useQuery({
-    queryKey: ["usage", "summary", params],
+    queryKey: qk.usageSummary(params),
     queryFn: () => fetchUsageSummary(params),
     refetchInterval: refetch,
   });
   const costQ = useQuery({
-    queryKey: ["usage", "cost", params],
+    queryKey: qk.usageCost(params),
     queryFn: () => fetchUsageCost(params),
     refetchInterval: refetch,
   });

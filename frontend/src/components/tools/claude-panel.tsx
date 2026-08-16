@@ -12,6 +12,7 @@ import { type ConfigResponse } from "@/lib/api";
 import { useConfig, useUpdateProgram } from "@/lib/hooks/use-config";
 import { useApplyClaudePreset, useClaudeCurrent, useUpdateClaudeConfigs } from "@/lib/hooks/use-tools";
 import { useSyncedForm } from "@/lib/hooks/use-synced-form";
+import { qk } from "@/lib/api/keys";
 
 // 解析预设 JSON 文本:须为 str→str 对象。失败 → { ok:false, message }。
 function parseEnvJson(text: string): { ok: true; value: Record<string, string> } | { ok: false; message: string } {
@@ -72,7 +73,7 @@ function ClaudePresetCard({
   // F6:保存/删除时从查询缓存读最新 presets 构造 payload,而非用父级传入的 presets 快照——
   // 两卡连续保存时,后保存者的快照可能不含先保存者的改动 → 整组 PUT 覆盖丢失(lost update)。
   const latestPresets = (): Record<string, Record<string, string>> =>
-    (queryClient.getQueryData<ConfigResponse>(["config"])?.claude) ?? {};
+    (queryClient.getQueryData<ConfigResponse>(qk.config)?.claude) ?? {};
 
   // 默认:生效中的卡展开,其余收起;新建卡必展开。
   const [expanded, setExpanded] = useState(isNew || isCurrent);

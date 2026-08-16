@@ -5,12 +5,13 @@ import { InfoTile } from "@/components/ui/info-tile";
 import { fetchSessionUsage } from "@/lib/api";
 import { errMsg, formatCost, formatTokens, formatUptime } from "@/lib/format";
 import { useNowTick } from "@/lib/hooks/use-now-tick";
+import { qk } from "@/lib/api/keys";
 
 /** Session stats (since gateway start). Totals refetch every 10s——token 是内存读、成本是
  *  DB 查询,3s 过频;uptime ticks locally. */
 export function SessionStats() {
   const { data, isLoading, isError, error, refetch } = useQuery({
-    queryKey: ["usage", "session"],
+    queryKey: qk.sessionUsage,
     queryFn: fetchSessionUsage,
     refetchInterval: 10_000,
   });

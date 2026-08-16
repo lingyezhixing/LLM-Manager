@@ -7,6 +7,7 @@ import { InfoTile } from "@/components/ui/info-tile";
 import { errMsg } from "@/lib/format";
 import { useToast } from "@/lib/hooks/use-toast";
 import { deleteModelData, fetchOrphanedModels, fetchStorageStats } from "@/lib/api";
+import { qk } from "@/lib/api/keys";
 
 // 数据库管理页(迁移 legacy DataManagement):存储统计 + 孤立模型清理 + 模型数据详情。
 // 每载入获取一次(refetchOnMount: "always"),不轮询。删除 = 级联清数据 + 自动 VACUUM(后端)。
@@ -19,12 +20,12 @@ function formatBytes(n: number | null): string {
 
 export function DatabasePanel() {
   const stats = useQuery({
-    queryKey: ["data", "storage-stats"],
+    queryKey: qk.storageStats,
     queryFn: fetchStorageStats,
     refetchOnMount: "always",
   });
   const orphaned = useQuery({
-    queryKey: ["data", "orphaned"],
+    queryKey: qk.orphaned,
     queryFn: fetchOrphanedModels,
     refetchOnMount: "always",
   });
@@ -33,8 +34,8 @@ export function DatabasePanel() {
   const del = useMutation({
     mutationFn: (name: string) => deleteModelData(name),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["data", "storage-stats"] });
-      qc.invalidateQueries({ queryKey: ["data", "orphaned"] });
+      qc.invalidateQueries({ queryKey: qk.storageStats });
+      qc.invalidateQueries({ queryKey: qk.orphaned });
     },
   });
   const confirm = useConfirm();

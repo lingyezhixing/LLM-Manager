@@ -8,16 +8,17 @@ import {
   updateModelDef,
   type ModelDef,
 } from "@/lib/api";
+import { qk } from "@/lib/api/keys";
 
 // 查询键独立于 ["config"](配置更新不连带重取模型列表);mutation 内联失效。
 export function useModelDefs() {
-  return useQuery({ queryKey: ["model-defs"], queryFn: fetchModelDefs });
+  return useQuery({ queryKey: qk.modelDefs, queryFn: fetchModelDefs });
 }
 
 // name=null 时 enabled:false(创建态不取详情)。
 export function useModelDef(name: string | null) {
   return useQuery({
-    queryKey: ["model-defs", name],
+    queryKey: name !== null ? qk.modelDef(name) : ["model-defs", null] as const,
     queryFn: () => fetchModelDef(name as string),
     enabled: name !== null,
   });
@@ -27,7 +28,7 @@ export function useCreateModelDef() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (body: ModelDef) => createModelDef(body),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["model-defs"] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.modelDefs }),
   });
 }
 
@@ -38,7 +39,7 @@ export function useUpdateModelDef(name: string) {
   return useMutation({
     mutationFn: (vars: { body: ModelDef; migrate: boolean }) => updateModelDef(name, vars.body, vars.migrate),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["model-defs"] });
+      qc.invalidateQueries({ queryKey: qk.modelDefs });
     },
   });
 }
@@ -47,7 +48,7 @@ export function useDeleteModelDef() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (name: string) => deleteModelDef(name),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["model-defs"] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.modelDefs }),
   });
 }
 
