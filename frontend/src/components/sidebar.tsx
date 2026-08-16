@@ -19,10 +19,10 @@ interface SidebarProps {
 export function Sidebar({ collapsed }: SidebarProps) {
   return (
     <aside
-      className={`${collapsed ? "w-16" : "w-(--container-sidebar)"} flex shrink-0 flex-col border-r border-border bg-sidebar backdrop-blur-xl transition-[width] duration-200`}
+      className={`${collapsed ? "w-16" : "w-(--container-sidebar)"} flex shrink-0 flex-col border-r border-border bg-sidebar backdrop-blur-xl transition-[width] duration-(--motion-base)`}
     >
       <div
-        className={`flex items-center px-4 pb-6 pt-5 transition-[padding] duration-200 ${
+        className={`flex items-center px-4 pb-6 pt-5 transition-[padding] duration-(--motion-base) ${
           // 折叠态左右 padding 居中。三禁令:① justify-content 切换立即生效不可过渡
           // (图标瞬跳);② calc 百分比在过渡中按当前容器宽实时解析(产生驼峰峰值);
           // ③ 圆点尺寸变更时同步此值。公式:(aside 4rem - 圆点 0.75rem)/2 = 1.625rem。
@@ -31,17 +31,17 @@ export function Sidebar({ collapsed }: SidebarProps) {
       >
         {/* logo accent bar:展开=竖条,折叠=居中圆点(视觉锚点,呼应导航 active dot) */}
         <span
-          className={`shrink-0 rounded-full bg-primary-accent transition-[width,height,border-radius] duration-200 ${
+          className={`shrink-0 rounded-full bg-primary-accent transition-[width,height,border-radius] duration-(--motion-base) ${
             collapsed ? "size-3" : "h-5 w-1"
           }`}
         />
         <span
-          className={`grid transition-[grid-template-columns] duration-200 ${
+          className={`grid transition-[grid-template-columns] duration-(--motion-base) ${
             collapsed ? "grid-cols-[0fr]" : "ml-2.5 grid-cols-[1fr]"
           }`}
         >
           <span
-            className={`min-w-0 overflow-hidden whitespace-nowrap text-xl font-bold tracking-wide text-foreground transition-opacity duration-200 ${
+            className={`min-w-0 overflow-hidden whitespace-nowrap text-xl font-bold tracking-wide text-foreground transition-opacity duration-(--motion-base) ${
               collapsed ? "opacity-0" : "opacity-100"
             }`}
           >
@@ -73,7 +73,7 @@ export function Sidebar({ collapsed }: SidebarProps) {
               <>
                 <Icon className="size-4 shrink-0" />
                 <span
-                  className={`grid transition-[grid-template-columns] duration-200 ${
+                  className={`grid transition-[grid-template-columns] duration-(--motion-base) ${
                     collapsed ? "grid-cols-[0fr]" : "ml-3 min-w-0 flex-1 grid-cols-[1fr]"
                   }`}
                 >
@@ -81,7 +81,7 @@ export function Sidebar({ collapsed }: SidebarProps) {
                 </span>
                 {isActive && (
                   <span
-                    className={`size-1.5 shrink-0 rounded-full bg-primary-accent transition-[width,margin,opacity] duration-200 ${
+                    className={`size-1.5 shrink-0 rounded-full bg-primary-accent transition-[width,margin,opacity] duration-(--motion-base) ${
                       collapsed ? "w-0 opacity-0" : "ml-auto opacity-100"
                     }`}
                   />

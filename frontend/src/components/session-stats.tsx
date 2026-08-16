@@ -42,7 +42,7 @@ export function SessionStats() {
           <span className="font-semibold text-primary-accent">{pct}%</span>
         </div>
         <div className="mt-1.5 h-1.5 overflow-hidden rounded bg-destructive/25">
-          <div className="h-full bg-success transition-[width] duration-300" style={{ width: `${pct}%` }} />
+          <div className="h-full bg-success transition-[width] duration-(--motion-slow)" style={{ width: `${pct}%` }} />
         </div>
       </div>
       {/* 本次启动消耗:独立小卡(与命中率同款式)——后端 compute-on-read 窗口 [started_at, now) */}

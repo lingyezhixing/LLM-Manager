@@ -3,7 +3,8 @@
 /* ===== Design tokens. Components use ONLY semantic tokens (bg-card etc).
    2 themes via [data-theme]; :root = 深色克制. Principles (2026-08-04 redesign):
    glass ONLY on shell (sidebar + pill bar); content cards = semi-transparent solid,
-   NO blur; no gradients; no constant animation; single primary hue (212°) w/ full
+   NO blur; no gradients; 动效即反馈——只为状态变化服务(进入/退出/加载/活性),无常驻装饰动画;
+   时长/缓动一律走 --motion-* token; single primary hue (212°) w/ full
    50-900 scale; numeric values always font-mono; warm theme removed. ===== */
 
 :root, [data-theme="dark"] {
@@ -207,6 +208,12 @@
   --container-sidebar: 13.125rem;
   /* 视口扣减常量:壳层 chrome(胶囊 40 + sticky 16 + main pt-8 32 + pb-4 16 = 104px) */
   --shell-chrome: 104px;
+  /* motion token(动效即反馈原则,spec §5):时长/缓动单源 */
+  --motion-fast: 120ms;    /* 退场/微反馈 */
+  --motion-enter: 150ms;   /* 进场(dialog/toast) */
+  --motion-base: 200ms;    /* hover/常规过渡 */
+  --motion-slow: 300ms;    /* 数据条宽度等长过渡 */
+  --motion-ease: cubic-bezier(0.2, 0, 0.15, 1);
   --animate-page-in: page-in 150ms ease-out;
 }
 

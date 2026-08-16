@@ -11,7 +11,7 @@ import { AlertCircle, CheckCircle2, Info, X } from "lucide-react";
 import { ToastContext, type ToastApi } from "@/lib/toast";
 
 // ---------- 命令式 toast:portal 到 body,右下堆叠,自动消失 ----------
-// 与 ConfirmProvider 同范式(context + 单例队列 + portal)。无动效(遵设计原则),
+// 与 ConfirmProvider 同范式(context + 单例队列 + portal)。
 // 走语义 token(success/destructive),lucide 图标打包内联(离线安全)。
 type ToastType = "success" | "error" | "info";
 

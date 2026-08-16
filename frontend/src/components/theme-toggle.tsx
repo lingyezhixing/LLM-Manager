@@ -19,7 +19,7 @@ export function ThemeToggle({ collapsed = false }: { collapsed?: boolean }) {
       {isDark ? <Sun className="size-3.5 shrink-0" /> : <Moon className="size-3.5 shrink-0" />}
       {/* 同 sidebar:文字 grid-cols 收缩过渡,条件渲染会造成瞬间消失闪一下 */}
       <span
-        className={`grid transition-[grid-template-columns] duration-200 ${
+        className={`grid transition-[grid-template-columns] duration-(--motion-base) ${
           collapsed ? "grid-cols-[0fr]" : "ml-2 grid-cols-[1fr]"
         }`}
       >

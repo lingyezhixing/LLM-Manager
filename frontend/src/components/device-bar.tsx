@@ -52,7 +52,7 @@ function DeviceCard({
       </div>
       <div className="mt-1 h-1 overflow-hidden rounded bg-muted">
         <div
-          className="h-full bg-primary transition-[width] duration-300"
+          className="h-full bg-primary transition-[width] duration-(--motion-slow)"
           style={{ width: `${Math.min(100, Math.max(0, d.usage_percentage))}%` }}
         />
       </div>
@@ -70,7 +70,7 @@ function DeviceCard({
       </div>
       <div className="mt-1 h-1 overflow-hidden rounded bg-muted">
         <div
-          className="h-full bg-success transition-[width] duration-300"
+          className="h-full bg-success transition-[width] duration-(--motion-slow)"
           style={{ width: `${pctOf(d.used_memory_mb, d.total_memory_mb)}%` }}
         />
       </div>
