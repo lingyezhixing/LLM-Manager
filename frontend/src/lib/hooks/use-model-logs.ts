@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useReducer } from "react";
 import type { LogLine, LogSearch } from "@/lib/api";
 import { fetchSessionLines, fetchSessions, LOG_PAGE_LIMIT, searchSessionLogs } from "@/lib/api";
 
@@ -28,6 +28,156 @@ function sessionLogApi(sessionId: number): LogApi {
 }
 
 /**
+ * Reducer 状态:视图态(表单态 level/input 留 useState,生命周期不同)。
+ */
+interface ViewerState {
+  liveLines: LogLine[];
+  historyPrefix: LogLine[];
+  historyPage: LogLine[] | null;
+  following: boolean;
+  newCount: number;
+  matches: number[];
+  matchTotal: number;
+  matchIdx: number;
+  hasSearched: boolean;
+  searching: boolean;
+  scrollTargetId: number | null;
+  atOldest: boolean;
+}
+
+const initialState: ViewerState = {
+  liveLines: [],
+  historyPrefix: [],
+  historyPage: null,
+  following: true,
+  newCount: 0,
+  matches: [],
+  matchTotal: 0,
+  matchIdx: -1,
+  hasSearched: false,
+  searching: false,
+  scrollTargetId: null,
+  atOldest: false,
+};
+
+type Action =
+  | { t: "reset" }                       // api/level/runKey 重订阅(H1 代次由 genRef 管,不进 state)
+  | { t: "sse"; line: LogLine }          // 实时行(WINDOW 裁剪 + id 守卫防重连重复)
+  | { t: "fallback"; page: LogLine[] }   // 已结束会话回退页(仅当前为空时顶上)
+  | { t: "following"; v: boolean }
+  | { t: "increment-new" }
+  | { t: "clear-new" }
+  | { t: "prepend"; lines: LogLine[] }   // 向上加载(MAX_PREFIX 裁剪)
+  | { t: "history-page"; page: LogLine[] }
+  | { t: "back-live" }
+  | { t: "search-start" }
+  | { t: "search-done"; matches: number[]; total: number }
+  | { t: "input" }                       // 清搜索回未搜态(bug1)
+  | { t: "match-idx"; i: number }
+  | { t: "scroll-target"; id: number | null }
+  | { t: "at-oldest"; v: boolean }
+  | { t: "searching"; v: boolean };
+
+/**
+ * Reducer:视图态状态机。各分支 1:1 对应原 setState 逻辑(条件/守卫原样)。
+ */
+function viewerReducer(state: ViewerState, action: Action): ViewerState {
+  switch (action.t) {
+    case "reset":
+      return { ...initialState };
+
+    case "sse": {
+      // 原逻辑:防重连回填重复(id 守卫) + WINDOW 裁剪
+      const { line } = action;
+      const prev = state.liveLines;
+      if (prev.length > 0 && line.id <= prev[prev.length - 1].id) return state;
+      const next = prev.length >= WINDOW ? prev.slice(prev.length - WINDOW + 1) : prev;
+      return { ...state, liveLines: [...next, line] };
+    }
+
+    case "fallback":
+      // 原逻辑:仅当前为空时顶上
+      return state.liveLines.length === 0 ? { ...state, liveLines: action.page } : state;
+
+    case "following":
+      return { ...state, following: action.v };
+
+    case "increment-new":
+      return { ...state, newCount: state.newCount + 1 };
+
+    case "clear-new":
+      return { ...state, newCount: 0 };
+
+    case "prepend": {
+      // 原逻辑:MAX_PREFIX 裁剪 + 去重由调用方过滤(newer)
+      const merged = [...action.lines, ...state.historyPrefix];
+      const next = merged.length > MAX_PREFIX ? merged.slice(merged.length - MAX_PREFIX) : merged;
+      return { ...state, historyPrefix: next };
+    }
+
+    case "history-page":
+      return { ...state, historyPage: action.page };
+
+    case "back-live":
+      // 原逻辑:清历史页 + historyPrefix + 重置 following/newCount/atOldest
+      return {
+        ...state,
+        historyPage: null,
+        historyPrefix: [],
+        following: true,
+        newCount: 0,
+        atOldest: false,
+      };
+
+    case "search-start":
+      // 原逻辑:标记已执行搜索(bug1) + 清空匹配
+      return {
+        ...state,
+        hasSearched: true,
+        matches: [],
+        matchTotal: 0,
+        matchIdx: -1,
+      };
+
+    case "search-done":
+      // 原逻辑:设置匹配 + matchTotal(F9) + 初始索引
+      return {
+        ...state,
+        matches: action.matches,
+        matchTotal: action.total,
+        matchIdx: action.matches.length ? 0 : -1,
+      };
+
+    case "input":
+      // 原逻辑:清搜索 + 回未搜态(bug1) + 清历史页 + scrollTarget
+      return {
+        ...state,
+        matches: [],
+        matchTotal: 0,
+        matchIdx: -1,
+        hasSearched: false,
+        scrollTargetId: null,
+        historyPage: null,
+      };
+
+    case "match-idx":
+      return { ...state, matchIdx: action.i };
+
+    case "scroll-target":
+      return { ...state, scrollTargetId: action.id };
+
+    case "at-oldest":
+      return { ...state, atOldest: action.v };
+
+    case "searching":
+      return { ...state, searching: action.v };
+
+    default:
+      return state;
+  }
+}
+
+/**
  * 单日志源查看器(单会话持久日志,由 api 参数决定;api=null 时保持空态不订阅)。两种模式:
  *  - live:订阅 streamUrl 的 SSE,实时追加(贴底跟进);滚到顶部自动加载更早历史(prepend 到
  *   historyPrefix),滚轮上滚暂停跟进,来新行累加 newCount。
@@ -44,18 +194,7 @@ function sessionLogApi(sessionId: number): LogApi {
  * key={sessionId} 重建组件)。
  */
 export function useLogViewer(api: LogApi | null, runKey: number | null) {
-  const [liveLines, setLiveLines] = useState<LogLine[]>([]);
-  const [historyPrefix, setHistoryPrefix] = useState<LogLine[]>([]);     // live 模式顶部加载的历史(旧→新)
-  const [historyPage, setHistoryPage] = useState<LogLine[] | null>(null); // 搜索跳转载入的历史页(history 模式)
-  const [following, setFollowing] = useState(true);
-  const [newCount, setNewCount] = useState(0);
-  const [matches, setMatches] = useState<number[]>([]);
-  const [matchTotal, setMatchTotal] = useState(0);   // F9:后端全量检索的真实匹配数(matches 可能被 500 截断)
-  const [matchIdx, setMatchIdx] = useState(-1);
-  const [hasSearched, setHasSearched] = useState(false);   // bug1:跟踪搜索执行,而非输入框内容
-  const [searching, setSearching] = useState(false);
-  const [scrollTargetId, setScrollTargetId] = useState<number | null>(null);
-  const [atOldest, setAtOldest] = useState(false);         // 已加载到最早(id=1)
+  const [state, dispatch] = useReducer(viewerReducer, initialState);
   const [level, setLevel] = useState<string>("");   // 级别过滤(后端查询参数);变更 → 重订阅 + 清搜索
   const [input, setInput] = useState("");           // 搜索输入框文本(经 LogLines 读写)
   const levelParam = level || undefined;
@@ -65,13 +204,13 @@ export function useLogViewer(api: LogApi | null, runKey: number | null) {
   const loadingTopRef = useRef(false);   // F5:向上加载重入守卫(同步 ref,防触顶连续滚动重入)
   const followingRef = useRef(true);
   const liveRef = useRef(true);
-  const genRef = useRef(0);  // H1:视图代次——api/runKey 重订阅时 ++,在途异步(回退/翻页/搜索)先比对再 setState
-  useEffect(() => { followingRef.current = following; }, [following]);
-  useEffect(() => { liveRef.current = historyPage === null; }, [historyPage]);
+  const genRef = useRef(0);  // H1:视图代次——api/runKey 重订阅时 ++,在途异步(回退/翻页/搜索)先比对再 dispatch
+  useEffect(() => { followingRef.current = state.following; }, [state.following]);
+  useEffect(() => { liveRef.current = state.historyPage === null; }, [state.historyPage]);
 
-  const liveView = useMemo(() => [...historyPrefix, ...liveLines], [historyPrefix, liveLines]);
-  const displayed = historyPage ?? liveView;
-  const mode: "live" | "history" = historyPage ? "history" : "live";
+  const liveView = useMemo(() => [...state.historyPrefix, ...state.liveLines], [state.historyPrefix, state.liveLines]);
+  const displayed = state.historyPage ?? liveView;
+  const mode: "live" | "history" = state.historyPage ? "history" : "live";
 
   // SSE 实时尾(随 api/level/runKey 重订阅,重置视图 + 搜索)。新行不在「实时+跟进」态则记 newCount。
   // runKey(pid)随模型停止/重启变化 → 重连到新进程流并清空旧日志(否则同一 alias 重启后新日志进不来)。
@@ -79,9 +218,7 @@ export function useLogViewer(api: LogApi | null, runKey: number | null) {
   // (翻页/搜索/向上加载照常)。瞬时错误(运行中会话)EventSource 自行重连;若先收到过行则不回退,
   // 避免与重连后的回填重复。onmessage 里的 id 守卫兜底防重复追加(回退与回填交错时)。
   useEffect(() => {
-    setLiveLines([]); setHistoryPrefix([]); setHistoryPage(null); setFollowing(true); setNewCount(0);
-    setMatches([]); setMatchTotal(0); setMatchIdx(-1); setHasSearched(false); setAtOldest(false);
-    setSearching(false);   // H1:清在途搜索 spinner(旧代次 runSearch 的 finally 已比对代次跳过)
+    dispatch({ t: "reset" });
     if (!api) return;   // 无会话(模型未启动 / 定位中):视图已重置,保持空态
     const gen = ++genRef.current;   // H1:代次递增——旧代次在途回调发现代次不符即丢弃
     let receivedAny = false;   // 本次订阅是否收到过行
@@ -90,12 +227,8 @@ export function useLogViewer(api: LogApi | null, runKey: number | null) {
       try {
         const l = JSON.parse(ev.data) as LogLine;
         receivedAny = true;
-        setLiveLines((prev) => {
-          if (prev.length > 0 && l.id <= prev[prev.length - 1].id) return prev;  // 防重连回填重复
-          const next = prev.length >= WINDOW ? prev.slice(prev.length - WINDOW + 1) : prev;
-          return [...next, l];
-        });
-        if (!(liveRef.current && followingRef.current)) setNewCount((n) => n + 1);
+        dispatch({ t: "sse", line: l });
+        if (!(liveRef.current && followingRef.current)) dispatch({ t: "increment-new" });
       } catch { /* 帧异常忽略 */ }
     };
     es.onerror = () => {
@@ -105,7 +238,7 @@ export function useLogViewer(api: LogApi | null, runKey: number | null) {
       api.fetchPage(Number.MAX_SAFE_INTEGER, WINDOW, levelParam)
         .then((page) => {
           if (genRef.current !== gen) return;  // H1:代次已变(重订阅),丢弃旧回退页
-          setLiveLines((prev) => (prev.length > 0 ? prev : page));
+          dispatch({ t: "fallback", page });
         })
         .catch(() => { /* best-effort */ });
     };
@@ -114,10 +247,10 @@ export function useLogViewer(api: LogApi | null, runKey: number | null) {
 
   // 跟进:live + following → 新行贴底。
   useEffect(() => {
-    if (mode === "live" && following && scroller.current) {
+    if (mode === "live" && state.following && scroller.current) {
       scroller.current.scrollTop = scroller.current.scrollHeight;
     }
-  }, [liveLines, following, mode]);
+  }, [state.liveLines, state.following, mode]);
 
   // bug2:prepend 后维持视口位置(DOM 更新后同步调整 scrollTop,在 paint 前)。
   useLayoutEffect(() => {
@@ -127,24 +260,24 @@ export function useLogViewer(api: LogApi | null, runKey: number | null) {
       el.scrollTop = fix.t + (el.scrollHeight - fix.h);
       pendingTopFixRef.current = null;
     }
-  }, [historyPrefix]);
+  }, [state.historyPrefix]);
 
   // 滚动到搜索目标(渲染后)。
   useEffect(() => {
-    if (scrollTargetId == null || !scroller.current) return;
-    const el = scroller.current.querySelector(`[data-line-id="${scrollTargetId}"]`);
+    if (state.scrollTargetId == null || !scroller.current) return;
+    const el = scroller.current.querySelector(`[data-line-id="${state.scrollTargetId}"]`);
     if (el) (el as HTMLElement).scrollIntoView({ block: "center" });
-    setScrollTargetId(null);
-  }, [displayed, scrollTargetId]);
+    dispatch({ t: "scroll-target", id: null });
+  }, [displayed, state.scrollTargetId]);
 
   // bug2:向上加载更早日志——prepend 到 historyPrefix,维持视口,防抖,上限,到顶。
   // F5:重入守卫用同步 ref(置位即生效)——触顶连续滚动若用 state 判定,更新生效前会
   // 用旧闭包重入,导致同页历史重复 prepend + key 冲突。
   const loadMoreAbove = useCallback(async () => {
     if (!api || loadingTopRef.current || mode !== "live") return;
-    const firstId = historyPrefix.length > 0 ? historyPrefix[0].id
-      : (liveLines.length > 0 ? liveLines[0].id : null);
-    if (firstId == null || firstId <= 1) { setAtOldest(true); return; }   // 已到最早(id 从 1 起)
+    const firstId = state.historyPrefix.length > 0 ? state.historyPrefix[0].id
+      : (state.liveLines.length > 0 ? state.liveLines[0].id : null);
+    if (firstId == null || firstId <= 1) { dispatch({ t: "at-oldest", v: true }); return; }   // 已到最早(id 从 1 起)
     const el = scroller.current;
     if (el) pendingTopFixRef.current = { h: el.scrollHeight, t: el.scrollTop }; // prepend 前基准
     loadingTopRef.current = true;                 // 同步置位 ref 守卫
@@ -153,16 +286,13 @@ export function useLogViewer(api: LogApi | null, runKey: number | null) {
       const page = await api.fetchPage(firstId, WINDOW, levelParam);
       if (genRef.current !== gen) return;         // H1:代次已变,丢弃
       const newer = page.filter((l) => l.id < firstId);   // 去重(后端返回 id<firstId 的最近 WINDOW 行)
-      if (newer.length === 0) { setAtOldest(true); return; }
-      setHistoryPrefix((prev) => {
-        const merged = [...newer, ...prev];
-        return merged.length > MAX_PREFIX ? merged.slice(merged.length - MAX_PREFIX) : merged;
-      });
-      if (newer[0].id <= 1) setAtOldest(true);             // 加载到最早(id=1)
+      if (newer.length === 0) { dispatch({ t: "at-oldest", v: true }); return; }
+      dispatch({ t: "prepend", lines: newer });
+      if (newer[0].id <= 1) dispatch({ t: "at-oldest", v: true });             // 加载到最早(id=1)
     } catch { /* best-effort */ } finally {
       loadingTopRef.current = false;
     }
-  }, [api, levelParam, mode, historyPrefix, liveLines]);
+  }, [api, levelParam, mode, state.historyPrefix, state.liveLines]);
 
   const onScroll = useCallback(() => {
     if (mode === "history") return;          // 历史页不自动跟进/加载
@@ -170,87 +300,78 @@ export function useLogViewer(api: LogApi | null, runKey: number | null) {
     if (!el) return;
     if (el.scrollTop <= TOP_THRESHOLD) loadMoreAbove();    // bug2:触顶 → 加载更早
     const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < STICKY_THRESHOLD;
-    setFollowing(atBottom);
-    if (atBottom) setNewCount(0);
+    dispatch({ t: "following", v: atBottom });
+    if (atBottom) dispatch({ t: "clear-new" });
   }, [mode, loadMoreAbove]);
 
   // 跳到 all[idx]:在当前窗口则滚动定位,否则翻页载入(target 为页底)再定位。
   const jumpToMatch = useCallback((all: number[], idx: number) => {
     if (!api || idx < 0 || idx >= all.length) return;
     const target = all[idx];
-    const inView = (historyPage ?? liveView).some((l) => l.id === target);
+    const inView = (state.historyPage ?? liveView).some((l) => l.id === target);
     if (inView) {
-      setScrollTargetId(target);
+      dispatch({ t: "scroll-target", id: target });
     } else {
       const gen = genRef.current;             // H1:重订阅后旧翻页不落新视图
       api.fetchPage(target + 1, WINDOW, levelParam)
         .then((page) => {
           if (genRef.current !== gen) return;
-          setHistoryPage(page); setScrollTargetId(target);
+          dispatch({ t: "history-page", page });
+          dispatch({ t: "scroll-target", id: target });
         })
         .catch(() => { /* best-effort */ });
     }
-  }, [api, levelParam, historyPage, liveView]);
+  }, [api, levelParam, state.historyPage, liveView]);
 
   const runSearch = useCallback(async (q: string) => {
     if (!api) return;
-    setHasSearched(true);                    // bug1:标记已执行搜索(无论 q 是否空)
-    if (!q.trim()) { setMatches([]); setMatchTotal(0); setMatchIdx(-1); return; }
-    setSearching(true);
+    dispatch({ t: "search-start" });                    // bug1:标记已执行搜索(无论 q 是否空)
+    if (!q.trim()) return;
+    dispatch({ t: "searching", v: true });
     const gen = genRef.current;              // H1:重订阅后旧搜索结果不落新视图
     try {
       const res = await api.search(q, levelParam);
       if (genRef.current !== gen) return;
-      setMatches(res.matches);
-      setMatchTotal(res.total);              // F9:真实总数;matches 可能被后端 500 截断
+      dispatch({ t: "search-done", matches: res.matches, total: res.total });
       const idx = res.matches.length ? 0 : -1;
-      setMatchIdx(idx);
       if (idx >= 0) jumpToMatch(res.matches, idx);
-    } finally { if (genRef.current === gen) setSearching(false); }
+    } finally { if (genRef.current === gen) dispatch({ t: "searching", v: false }); }
   }, [api, levelParam, jumpToMatch]);
 
   // bug1:用户改输入 → 更新输入框文本 + 清上次搜索结果 + hasSearched(回「未搜索」态,不显示「无匹配」)。
   // 若在 history 模式(搜索跳转过),回 live 起始。historyPrefix(向上加载的历史)保留。
   const onInput = useCallback((v: string) => {
     setInput(v);
-    setMatches([]);
-    setMatchTotal(0);
-    setMatchIdx(-1);
-    setHasSearched(false);
-    setScrollTargetId(null);
-    setHistoryPage(null);
+    dispatch({ t: "input" });
   }, []);
 
   const nextMatch = useCallback(() => {
-    if (!matches.length) return;
-    const ni = (matchIdx + 1) % matches.length;
-    setMatchIdx(ni);
-    jumpToMatch(matches, ni);
-  }, [matches, matchIdx, jumpToMatch]);
+    if (!state.matches.length) return;
+    const ni = (state.matchIdx + 1) % state.matches.length;
+    dispatch({ t: "match-idx", i: ni });
+    jumpToMatch(state.matches, ni);
+  }, [state.matches, state.matchIdx, jumpToMatch]);
 
   const prevMatch = useCallback(() => {
-    if (!matches.length) return;
-    const ni = (matchIdx - 1 + matches.length) % matches.length;
-    setMatchIdx(ni);
-    jumpToMatch(matches, ni);
-  }, [matches, matchIdx, jumpToMatch]);
+    if (!state.matches.length) return;
+    const ni = (state.matchIdx - 1 + state.matches.length) % state.matches.length;
+    dispatch({ t: "match-idx", i: ni });
+    jumpToMatch(state.matches, ni);
+  }, [state.matches, state.matchIdx, jumpToMatch]);
 
   const backToLive = useCallback(() => {
-    setHistoryPage(null);
-    setHistoryPrefix([]);          // 回最新 = 清顶部历史(纯实时尾)
-    setFollowing(true);
-    setNewCount(0);
-    setAtOldest(false);
+    dispatch({ t: "back-live" });
   }, []);
 
-  const matchSet = useMemo(() => new Set(matches), [matches]);
-  const currentMatch = matchIdx >= 0 ? (matches[matchIdx] ?? null) : null;
+  const matchSet = useMemo(() => new Set(state.matches), [state.matches]);
+  const currentMatch = state.matchIdx >= 0 ? (state.matches[state.matchIdx] ?? null) : null;
 
   return {
-    displayed, mode, newCount, scroller, onScroll,
-    matches, matchTotal, matchIdx, searching, hasSearched, matchSet, currentMatch,
+    displayed, mode, newCount: state.newCount, scroller, onScroll,
+    matches: state.matches, matchTotal: state.matchTotal, matchIdx: state.matchIdx,
+    searching: state.searching, hasSearched: state.hasSearched, matchSet, currentMatch,
     runSearch, onInput, nextMatch, prevMatch, backToLive,
-    atOldest,
+    atOldest: state.atOldest,
     level, setLevel, input,
   };
 }
