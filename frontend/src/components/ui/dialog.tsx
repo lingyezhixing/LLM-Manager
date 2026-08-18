@@ -8,6 +8,7 @@ import {
 import { createPortal } from "react-dom";
 import { Button } from "@/components/ui/button";
 import { ConfirmContext, type ConfirmFn, type ConfirmOptions } from "@/lib/confirm";
+import { usePresence } from "@/lib/hooks/use-presence";
 
 // ---------- 底层 Dialog:portal + Esc + 点遮罩关 + focus trap + 焦点还原 + aria ----------
 function Dialog({
@@ -19,6 +20,7 @@ function Dialog({
   labelledBy?: string;
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
+  const shown = usePresence(open, 120, panelRef);
 
   useEffect(() => {
     if (!open) return;
@@ -59,10 +61,10 @@ function Dialog({
     };
   }, [open, onClose]);
 
-  if (!open) return null;
+  if (!shown) return null;
   return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm"
+      className={`fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm ${open ? "animate-dialog-in" : "animate-dialog-out"}`}
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose();   // 仅点遮罩本体才关(面板内点击不关)
       }}
@@ -72,7 +74,7 @@ function Dialog({
     >
       <div
         ref={panelRef}
-        className="w-full max-w-sm rounded-xl border border-border bg-popover p-5 text-popover-foreground shadow-card"
+        className={`w-full max-w-sm rounded-xl border border-border bg-popover p-5 text-popover-foreground shadow-card ${open ? "animate-panel-in" : "animate-panel-out"}`}
       >
         {children}
       </div>

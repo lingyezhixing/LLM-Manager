@@ -215,6 +215,10 @@
   --motion-slow: 300ms;    /* 数据条宽度等长过渡 */
   --motion-ease: cubic-bezier(0.2, 0, 0.15, 1);
   --animate-page-in: page-in 150ms ease-out;
+  --animate-dialog-in: dialog-in var(--motion-enter) var(--motion-ease);
+  --animate-dialog-out: dialog-out var(--motion-fast) var(--motion-ease);
+  --animate-panel-in: panel-in var(--motion-enter) var(--motion-ease);
+  --animate-panel-out: panel-out var(--motion-fast) var(--motion-ease);
 }
 
 /* 页面进入:150ms 淡入 + 4px 上移(仅进入,无退出;CSS-only,无 framer-motion) */
@@ -222,6 +226,14 @@
   from { opacity: 0; transform: translateY(4px); }
   to   { opacity: 1; transform: none; }
 }
+
+/* Dialog 遮罩动画 */
+@keyframes dialog-in { from { opacity: 0 } }
+@keyframes dialog-out { to { opacity: 0 } }
+
+/* Dialog 面板动画:淡入+微缩放 */
+@keyframes panel-in { from { opacity: 0; transform: scale(.97) } }
+@keyframes panel-out { to { opacity: 0; transform: scale(.97) } }
 
 /* focus-visible:全站统一 2px 主色描边 + 2px 偏移(规范 §5) */
 :focus-visible {
