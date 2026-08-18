@@ -9,9 +9,12 @@ import {
 import { createPortal } from "react-dom";
 import { AlertCircle, CheckCircle2, Info, X } from "lucide-react";
 import { ToastContext, type ToastApi } from "@/lib/toast";
+import { usePresence } from "@/lib/hooks/use-presence";
 
 // ---------- 命令式 toast:portal 到 body,右下堆叠,自动消失 ----------
 // 与 ConfirmProvider 同范式(context + 单例队列 + portal)。
+// 动效即反馈:进场右滑、退场淡出(usePresence 驻留,播完才出队);
+// TTL 与手动关闭同走 dying 态(先动画后移除,堆叠不错位)。
 // 走语义 token(success/destructive),lucide 图标打包内联(离线安全)。
 type ToastType = "success" | "error" | "info";
 
@@ -35,19 +38,41 @@ const ICON_CLS: Record<ToastType, string> = {
   info: "text-foreground",
 };
 
-function ToastRow({ item, onClose }: { item: ToastItem; onClose: () => void }) {
+function ToastRow({ item, onGone }: { item: ToastItem; onGone: (id: number) => void }) {
   const Icon = ICONS[item.type];
+  const [dying, setDying] = useState(false);
+  const rowRef = useRef<HTMLDivElement>(null);
+
+  const shown = usePresence(!dying, 120, rowRef);
+
+  // TTL 自持:dying 前每行自武装,到期走与手动关闭相同的退场动画。
+  useEffect(() => {
+    if (dying) return;
+    const t = setTimeout(() => setDying(true), TTL[item.type]);
+    return () => clearTimeout(t);
+  }, [dying, item.type]);
+
+  // 退场驻留结束(presence 撤)→ 通知父级真正出队。
+  useEffect(() => {
+    if (!shown) onGone(item.id);
+  }, [shown, item.id, onGone]);
+
+  if (!shown) return null;
+
   return (
     <div
+      ref={rowRef}
       role={item.type === "error" ? "alert" : "status"}
       aria-live={item.type === "error" ? "assertive" : "polite"}
-      className="flex items-start gap-2 rounded-lg border border-border bg-popover p-3 text-sm text-popover-foreground shadow-card"
+      className={`flex items-start gap-2 rounded-lg border border-border bg-popover p-3 text-sm text-popover-foreground shadow-card ${
+        dying ? "animate-toast-out" : "animate-toast-in"
+      }`}
     >
       <Icon className={`mt-0.5 h-4 w-4 shrink-0 ${ICON_CLS[item.type]}`} />
       <span className="flex-1 break-words">{item.message}</span>
       <button
         type="button"
-        onClick={onClose}
+        onClick={() => setDying(true)}
         aria-label="关闭"
         className="shrink-0 text-muted-foreground hover:text-foreground"
       >
@@ -60,25 +85,10 @@ function ToastRow({ item, onClose }: { item: ToastItem; onClose: () => void }) {
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const nextId = useRef(0);
-  const timers = useRef(new Map<number, ReturnType<typeof setTimeout>>());
 
-  const dismiss = useCallback((id: number) => {
-    setToasts((cur) => cur.filter((t) => t.id !== id));
-    const handle = timers.current.get(id);
-    if (handle !== undefined) {
-      clearTimeout(handle);
-      timers.current.delete(id);
-    }
+  const push = useCallback((message: string, type: ToastType) => {
+    setToasts((cur) => [...cur, { id: ++nextId.current, type, message }]);
   }, []);
-
-  const push = useCallback(
-    (message: string, type: ToastType) => {
-      const id = ++nextId.current;
-      setToasts((cur) => [...cur, { id, type, message }]);
-      timers.current.set(id, setTimeout(() => dismiss(id), TTL[type]));
-    },
-    [dismiss],
-  );
 
   const api = useMemo<ToastApi>(
     () => ({
@@ -89,13 +99,8 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     [push],
   );
 
-  // 卸载时清掉所有未触发的定时器,防泄漏。
-  useEffect(() => {
-    const map = timers.current;
-    return () => {
-      map.forEach((h) => clearTimeout(h));
-      map.clear();
-    };
+  const handleGone = useCallback((id: number) => {
+    setToasts((cur) => cur.filter((t) => t.id !== id));
   }, []);
 
   return (
@@ -106,7 +111,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
         <div className="pointer-events-none fixed bottom-4 right-4 z-[60] flex w-80 max-w-[calc(100vw-2rem)] flex-col gap-2">
           {toasts.map((t) => (
             <div key={t.id} className="pointer-events-auto">
-              <ToastRow item={t} onClose={() => dismiss(t.id)} />
+              <ToastRow item={t} onGone={handleGone} />
             </div>
           ))}
         </div>,
