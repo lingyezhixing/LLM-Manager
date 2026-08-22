@@ -10,13 +10,14 @@ const ACTIVE_STATUSES = ["routing", "starting", "init_script", "health_check"];
  * 模型未运行(stopped/failed)时不展示历史日志(避免误以为仍在运行),显示空态。 */
 export function ModelLogPanel({ m }: { m: ModelInfo }) {
   const active = ACTIVE_STATUSES.includes(m.status);
+  const routing = m.status === "routing";
   const h = useModelLogs(m.alias, m.pid, active);   // pid 作 runKey:停止/重启时重连并清空
   const dotColor = active ? "var(--color-success)" : "var(--color-muted-foreground)";
   return (
     <LogPane
       header={
-        <span className="text-[12px] font-semibold text-foreground">
-          <span className="mr-1 inline-block size-[7px] rounded-full align-middle" style={{ background: dotColor }} />
+        <span className="text-card-title font-semibold text-foreground">
+          <span className={`mr-1 inline-block size-[7px] rounded-full align-middle ${routing ? "animate-dot-pulse" : ""}`} style={{ background: dotColor }} />
           {m.alias}
           <span className="ml-2 text-dense font-normal text-muted-foreground">
             {m.mode} · :{m.port} · pid {m.pid ?? "—"}
