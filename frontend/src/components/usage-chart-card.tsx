@@ -52,7 +52,7 @@ export function UsageChartCard({
               key={v}
               type="button"
               onClick={() => setView(v)}
-              className={`rounded-full px-2.5 py-0.5 text-ui transition-colors ${
+              className={`rounded-full px-2.5 py-0.5 text-ui transition-colors duration-(--motion-base) ${
                 view === v ? "bg-primary-accent/12 font-medium text-primary-accent" : "text-muted-foreground hover:text-foreground"
               }`}
             >

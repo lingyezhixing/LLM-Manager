@@ -9,7 +9,7 @@ export function LogViewer({ session }: { session: LogSession }) {
   return (
     <LogPane
       header={
-        <span className="text-[12px] font-semibold text-foreground">
+        <span className="text-card-title font-semibold text-foreground">
           {session.alias ?? "系统日志"}
           <span className="ml-2 text-dense font-normal text-muted-foreground">
             #{session.id} · {session.status === "running" ? "进行中" : "已结束"} · {session.line_count} 行

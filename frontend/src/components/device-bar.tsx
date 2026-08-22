@@ -63,7 +63,7 @@ function DeviceCard({
           type="button"
           onClick={onToggleUnit}
           title={`点击切换 ${unit === "MB" ? "GB" : "MB"}`}
-          className="cursor-pointer rounded font-mono tabular-nums transition-colors hover:text-foreground"
+          className="cursor-pointer rounded font-mono tabular-nums transition-colors duration-(--motion-base) hover:text-foreground"
         >
           {mem(d.used_memory_mb, unit)} / {mem(d.total_memory_mb, unit)}
         </button>

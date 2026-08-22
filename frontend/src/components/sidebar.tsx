@@ -58,7 +58,7 @@ export function Sidebar({ collapsed }: SidebarProps) {
             title={collapsed ? label : undefined}
             className={({ isActive }) =>
               [
-                "flex items-center rounded-md px-3 py-2 text-sm transition-[background-color,color,transform,padding] duration-150",
+                "flex items-center rounded-md px-3 py-2 text-sm transition-[background-color,color,transform,padding] duration-(--motion-base)",
                 // 折叠态 padding 居中,同 header 三禁令。公式:(aside 4rem - nav px-2 两侧 1rem - icon 0.875rem)/2
                 collapsed && "px-[1.0625rem]",
                 isActive

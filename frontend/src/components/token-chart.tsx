@@ -164,8 +164,7 @@ export function TokenChart({
         ))}
       </div>
 
-      {/* mx-auto+max-w:全宽卡内曲线居中且封顶高度(viewBox 760×192,超宽时按比例会过高) */}
-      <svg viewBox={`0 0 ${W} ${H}`} width="100%" className="mx-auto block max-w-[880px]" onMouseMove={onMove} onMouseLeave={onLeave}>
+      <svg viewBox={`0 0 ${W} ${H}`} width="100%" onMouseMove={onMove} onMouseLeave={onLeave}>
         {/* gridlines + y labels */}
         {yTicks.map((t, i) => (
           <g key={i}>

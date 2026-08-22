@@ -138,7 +138,7 @@ export function ModelDefPanel() {
                 aria-selected={selected}
                 onClick={() => selectModel(m.name)}
                 className={
-                  "rounded-md px-3 py-2 text-left text-sm transition-colors " +
+                  "rounded-md px-3 py-2 text-left text-sm transition-colors duration-(--motion-base) " +
                   (selected
                     ? "bg-primary-accent/12 font-medium text-primary-accent"
                     : "text-muted-foreground hover:bg-card-hover hover:text-foreground")

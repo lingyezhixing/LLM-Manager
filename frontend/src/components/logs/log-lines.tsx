@@ -109,7 +109,7 @@ export function LogLines({ h }: { h: LogLinesView }) {
       <div className="flex flex-wrap items-center gap-2 border-b border-border bg-muted/30 px-3.5 py-1.5 text-dense">
         {LOG_LEVEL_FILTERS.map((lv) => (
           <button key={lv} onClick={() => setLevel(lv)}
-            className={`rounded border px-2 py-0.5 transition-colors ${level === lv ? "border-transparent bg-primary-accent/12 font-medium text-primary-accent" : "border-border bg-card text-muted-foreground hover:text-foreground"}`}>
+            className={`rounded border px-2 py-0.5 transition-colors duration-(--motion-base) ${level === lv ? "border-transparent bg-primary-accent/12 font-medium text-primary-accent" : "border-border bg-card text-muted-foreground hover:text-foreground"}`}>
             {LOG_LEVEL_FILTER_LABEL[lv]}
           </button>
         ))}

@@ -20,7 +20,7 @@ export function PillBar({ collapsed, onToggleCollapse }: PillBarProps) {
         type="button"
         onClick={onToggleCollapse}
         aria-label={collapsed ? "展开侧栏" : "收起侧栏"}
-        className="rounded-full p-1.5 text-muted-foreground transition-colors hover:bg-card-hover hover:text-foreground"
+        className="rounded-full p-1.5 text-muted-foreground transition-colors duration-(--motion-base) hover:bg-card-hover hover:text-foreground"
       >
         <ToggleIcon className="size-4" />
       </button>

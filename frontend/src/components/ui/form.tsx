@@ -71,7 +71,7 @@ export function Switch({
       id={id}
       disabled={disabled}
       onClick={() => onChange(!checked)}
-      className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors disabled:opacity-50 ${
+      className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors duration-(--motion-base) disabled:opacity-50 ${
         checked ? "bg-primary" : "bg-muted"
       } ${className ?? ""}`}
     >

@@ -58,18 +58,16 @@ export function ModelCard({ m, selected, nowMs, onSelect, index = 0 }: {
         selected ? "border-primary-accent bg-primary-accent/12" : "border-border-subtle hover:bg-card-hover"}`}
       style={{ animationDelay: `${Math.min(index, 8) * 24}ms` }}>
       <div className="min-w-0 flex-1">
-        {/* 行1:名称 + 模式徽标 */}
-        <div className="flex items-center gap-1.5">
-          <span className="text-card-title font-semibold truncate text-foreground">{m.alias}</span>
-          <span className="shrink-0 rounded border border-border/60 px-1.5 py-px text-dense text-muted-foreground">{m.mode}</span>
-        </div>
-        {/* 行2:状态(点+文案)+ 空闲/在途请求 */}
-        <div className="mt-0.5 flex items-center gap-1.5 text-dense text-muted-foreground">
-          <span className={`shrink-0 inline-block size-[7px] rounded-full align-middle ${m.status === "routing" ? "animate-dot-pulse" : ""}`} style={{ background: DOT[m.status] ?? "var(--color-muted-foreground)" }} />
-          <span className="truncate">{statusText}</span>
-          <span className={`ml-auto shrink-0 ${m.pending > 0 ? "text-warning font-semibold" : ""}`}>
-            {m.pending > 0 ? `● ${pendingLabel(m.pending)}` : ""}
+        <div className="text-card-title font-semibold truncate text-foreground">{m.alias}</div>
+        <div className="mt-0.5 flex items-center gap-1.5 text-dense">
+          <span className="rounded border border-border/60 px-1.5 py-px text-muted-foreground">{m.mode}</span>
+          <span className={m.pending > 0 ? "text-warning font-semibold" : "text-muted-foreground"}>
+            {m.pending > 0 ? `● ${pendingLabel(m.pending)}` : "0 请求"}
           </span>
+        </div>
+        <div className="mt-0.5 text-dense text-muted-foreground">
+          <span className={`mr-1 inline-block size-[7px] rounded-full align-middle ${m.status === "routing" ? "animate-dot-pulse" : ""}`} style={{ background: DOT[m.status] ?? "var(--color-muted-foreground)" }} />
+          {statusText}
         </div>
       </div>
       <button onClick={(e) => { e.stopPropagation(); onAct(); }} disabled={acting}
