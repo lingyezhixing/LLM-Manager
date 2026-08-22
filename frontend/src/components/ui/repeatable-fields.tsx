@@ -73,15 +73,17 @@ export function KeyValueEditor({
   const pairs = Object.entries(entries);
 
   const setKey = (i: number, key: string) => {
-    const [oldKey, val] = pairs[i];
+    const [oldKey] = pairs[i];
     // 撞键守卫:目标键已是其它行的键(且非待填哨兵)→ 拒绝,防静默覆盖丢值。
     if (
       key !== "" && key !== oldKey && !isPendingKey(key)
       && pairs.some(([k], j) => j !== i && k === key)
     ) return;
-    const rest = { ...entries };
-    delete rest[oldKey];
-    rest[key] = val;
+    // 原位改名保持插入序:遍历原键序,oldKey 处换成新键(删除+重插会移到末尾,导致行跳动)。
+    const rest: Record<string, string | number> = {};
+    for (const [k, v] of Object.entries(entries)) {
+      rest[k === oldKey ? key : k] = v;
+    }
     onChange(rest);
   };
   const setValue = (i: number, val: string | number) =>
@@ -99,9 +101,16 @@ export function KeyValueEditor({
       {pairs.map(([k, v], i) => (
         <div key={i} className="flex items-center gap-2">
           {keyOptions ? (
-            <ComboboxInput value={k} options={keyOptions} onChange={(key) => setKey(i, key)} />
+            <ComboboxInput
+              value={isPendingKey(k) ? "" : k}
+              options={keyOptions}
+              onChange={(key) => setKey(i, key)}
+            />
           ) : (
-            <TextInput value={k} onChange={(e) => setKey(i, e.target.value)} />
+            <TextInput
+              value={isPendingKey(k) ? "" : k}
+              onChange={(e) => setKey(i, e.target.value)}
+            />
           )}
           {numeric ? (
             <div className="flex min-w-0 flex-1 items-center gap-1">
