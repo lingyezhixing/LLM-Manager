@@ -1,148 +1,204 @@
 # LLM-Manager
 
-**LLM-Manager** 是一个统一管理本地大型语言模型（LLM）的代理网关 + WebUI：按需启动 / 空闲回收本地模型进程（llama.cpp / lmdeploy / vLLM …），对外暴露 OpenAI / Anthropic / Responses 兼容 API，记录用量与计费，并提供系统配置、模型管理、用量统计、日志查看的完整前端。**完全离线运行**（无任何云端依赖）。
+本地多 LLM 模型管理工具：按需启动 / 空闲回收本地模型进程（llama.cpp / lmdeploy / vLLM 等），对外暴露 OpenAI / Anthropic / Responses 兼容 API，记录用量与计费，并提供 WebUI 完成配置、模型、统计、日志管理。完全离线运行，无任何云端依赖（唯一联网点是系统页的「自更新」，且仅在你手动点击时联网）。
 
-> **⚠️ 重要说明**：
-> 本项目为个人开发工具，适用于本地实验环境。
-> 不包含任何模型文件。模型启动命令在系统配置中定义（结构化命令，无需准备启动脚本）。
-> 使用前需具备 Python 和本地 LLM 部署的基础能力。
-
----
-
-## 功能特性
-
-### 1. 统一 API 接口
-提供 OpenAI / Anthropic / Responses 三种兼容格式，请求按 `model` 字段解析别名并自动路由至对应本地模型服务端口：
-- `/v1/chat/completions`、`/v1/completions`（OpenAI）
-- `/v1/embeddings`、`/v1/rerank`（Embedding / Reranker）
-- `/v1/messages`（Anthropic Claude API）
-- `/v1/responses`（OpenAI Responses API）
-- `/v1/models`
-
-### 2. 按需启动与智能调度
-- **按需启动**：请求到达时自动启动模型，空闲超时后自动关闭以释放显存。
-- **环境适配**：根据当前在线显卡型号自动选择匹配的启动方案（scheme），设备不满足时自动回退到下一个方案。
-- **并发安全**：单派发 Future 去重 + 全局 spawn 锁 + owner-token guard，高并发冷启动不串槽。
-- **健康探测**：纯函数 `probe_registry` 按模型模式（Chat / Embedding / Reranker）分派探测方式；设备监控覆盖 NVIDIA GPU（nvidia-smi，全平台）、Linux Intel iGPU（intel_gpu_top）/ AMD（amdgpu sysfs）、Windows AMD/Intel 核显（LibreHardwareMonitor）。
-
-### 3. 全量 Token 追踪
-- 按请求路径自动分派解析器（OpenAI / Anthropic / Responses 三种格式），流量自动纳入统计，无需白名单配置。
-- 适配 **llama.cpp** 与 **lmdeploy** 双后端（流式请求自动注入 `include_usage`，保障流式用量完整）。
-
-### 4. 计费与用量统计
-- **计费系统**：阶梯 token 计费 + 按时租赁，混合计费汇总（分级按量 / 按时计费）。
-- **分析看板**：成本趋势 / Token 趋势 / 单模型统计 / 使用量汇总（WebUI 用量统计页，实时 SSE 刷新）。
-
-### 5. 系统托盘
-- 一键打开 WebUI · 网络唤醒远程设备（如飞牛 NAS，未配置时隐藏）· Claude API 预设一键切换（子菜单显示当前配置）· 重启自启模型 / 卸载全部模型 · 优雅退出。
-- 无头环境（无桌面 / 无 pystray）自动降级为静默后台运行。
-
-### 6. 数据与日志管理
-- **日志全落库**（SQLite）：系统日志会话 + 模型日志，WebUI 双 Tab 日志页（会话列表 + 实时行详情，SSE 流式）。
-- **保留规则**：按时间 / 按条数自动清理，可配置。
-- **数据管理**：删除模型数据（级联 + VACUUM 回收）、孤立模型检测、存储统计。
-- **v3.1 起不再兼容 Round-2 时代旧库**：启动检测到旧结构（ts 列/model_pricing/model_scripts）会明确拒绝（LegacySchemaError），请备份后删库重建或留在 v3.0。
-
-### 7. WebUI 前端
-- React 19 + Vite + TypeScript + Tailwind v4 + TanStack Query，双主题（深 / 亮），实时监控。
-- 页面：**概览**（设备 / 模型 / 会话实时状态）· **模型管理**（启停 + 实时日志 + 定义 CRUD）· **用量统计** · **日志查看** · **系统配置**（程序 / 模型 / 计费 / WOL / Claude 预设 / 日志保留 / 数据管理）。
-- 配置修改即时生效或提示重启（需重启字段自动检测 + 一键自重启，退出码 81 契约）。
-- 日志查看支持**万行级平滑浏览**（行块虚拟化 + 实时 SSE 尾随 + 全文检索跳转）；列表/卡片渐次入场、运行态状态点脉冲等动效遵循「动效即反馈」原则（可随系统减弱动效设置自动降级）。
-
-### 8. 自更新（仅向前）
-- **版本即 git 标签**；更新目标两档：**稳定版**（最近发布标签）/ **最新提交**（origin/main 最新提交），严格 ff-only，不支持回退。
-- 系统页「更新」区一键检查并应用，更新后自动重启生效；程序启动时后台自动检测一次，**此后仅手动触发联网**（完全离线的唯一联网点）。
-- Docker 下 root 容器要求宿主仓库为 root 属主；镜像缺 openssh-client 时 SSH 远端自动回退 HTTPS 拉取（公开仓库免认证）。
+> 注意：
+> - 这是个人开发工具，面向本地实验环境，请自行评估稳定性。
+> - 不包含任何模型文件；模型启动命令在系统配置里填写。
+> - 使用前需要 Python 基础，以及本地 LLM 部署的经验。
 
 ---
+
+## 快速开始
+
+### 环境要求
+
+- Python 3.11+
+- SQLite3（一般随 Python 自带）
+- 建议使用 conda / venv 虚拟环境（Windows 下 `LLM-Manager.bat` 默认激活名为 `LLM-Manager` 的 conda 环境）
+
+### 安装
+
+```bash
+git clone https://github.com/lingyezhixing/LLM-Manager.git
+cd LLM-Manager
+pip install -e .
+# 可选能力（按需追加）:
+#   [monitoring]  显卡监控
+#   [tray]        系统托盘
+#   [dev]         开发测试工具
+```
+
+### 启动
+
+```bash
+python -m llm_manager
+# 打开 http://localhost:8080
+```
+
+Windows 可用 `LLM-Manager.bat` 静默后台启动。
+
+首次启动会在 `data/` 下创建数据库，写入默认配置：监听 `0.0.0.0:8080`、空闲回收 60 分钟、日志保留 30 天 / 10 条。
+
+### 添加第一个模型
+
+1. 打开 WebUI → 系统 → 模型配置 → 添加模型。
+2. 填写：
+   - **名称**：`qwen2.5-7b`
+   - **别名**：`qwen`（首个别名是对外服务名，客户端用它请求）
+   - **模式**：`Chat`
+   - **端口**：`8001`（模型进程实际监听的端口）
+   - **启动方案**：可执行文件 + 参数
+3. 保存。模型会在收到第一个请求时自动启动。
+
+启动方案示例（llama.cpp）：
+
+```
+exe:  llama-server
+args: -m E:/models/qwen2.5-7b-instruct.gguf --port {{port}}
+```
+
+- `{{port}}` 自动替换为上方填写的端口，`{{alias}}` 替换为首个别名；改端口 / 别名会同步传导到启动命令。
+- 参数逐项填写，带引号的参数（如 JSON）无需手工转义。
+- 可在「设备」里填 `required_devices`（如 `["rtx 4060"]`）与显存需求，按在线设备匹配启动方案；也可留空——留空则不按设备匹配，按在线即可启动。
+
+### 调用 API
+
+```bash
+curl http://localhost:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"model":"qwen","messages":[{"role":"user","content":"你好"}]}'
+```
+
+网关按 `model` 字段匹配别名，把请求转发到该模型对应的本地端口；模型未运行时会先自动启动。
+
+## API 接口
+
+| 接口 | 路径 |
+|---|---|
+| OpenAI | `/v1/chat/completions`、`/v1/completions`、`/v1/embeddings`、`/v1/rerank` |
+| Anthropic | `/v1/messages` |
+| OpenAI Responses | `/v1/responses` |
+| 模型列表 | `/v1/models` |
+
+Embedding / Reranker 模型同样走 OpenAI 路径。
+
+## 配置
+
+所有配置存放在 SQLite（`data/llm_manager.db`），通过 WebUI 修改，没有配置文件。
+
+### 系统配置（系统 → 系统配置）
+
+- 监听地址 / 端口：网关监听位置，改后需重启
+- 空闲检测（分钟）：模型空闲多久后自动关闭释放显存
+- 日志级别、日志保留（天数 / 条数）
+- 页面顶部：当前版本、启动时间、运行时长、自更新入口
+
+### 模型配置（系统 → 模型配置）
+
+每个模型包含：
+
+- 名称、别名（首个别名 = 对外服务名）、模式（Chat / Embedding / Reranker）、端口、自动启动
+- 多个启动方案（scheme）：按在线设备依次匹配，第一个满足的生效，不满足自动回退下一个
+- 计费：阶梯 token 计费或按小时租赁（可混合）
+
+支持改名 + 历史数据迁移（可选把旧用量 / 日志迁移到新名字，或删除旧日志）；删除模型定义会连带清理其日志（保留请求记录）。
+
+### 数据库管理（系统 → 数据库管理）
+
+查看各模型的数据量、删除模型数据（级联 + 空间回收）、清理孤立模型。
+
+### 环境变量
+
+启动时覆写并持久化到配置：
+
+- `LLM_MANAGER_HOST` / `LLM_MANAGER_PORT` / `LLM_MANAGER_ALIVE_TIME` / `LLM_MANAGER_LOG_LEVEL`
+
+数据库文件位置（不写入配置，仅决定 DB 路径）：`LLM_MANAGER_DB_PATH`
+
+### 重启规则
+
+改 host / port / log_level 等字段需要重启生效；WebUI 顶部会自动提示并一键重启。程序内置监督器拉起全新进程，正在服务的模型会中断，重启后自动恢复。
+
+## 设备监控
+
+监控 NVIDIA / AMD / Intel 三家的独显与核显，Windows / Linux 双平台：
+
+- NVIDIA：nvidia-smi（双平台）
+- AMD：Linux 走 amdgpu sysfs，Windows 走 LibreHardwareMonitor
+- Intel：Linux 走 i915 + intel_gpu_top，Windows 走 LibreHardwareMonitor
+- CPU：温度 / 频率 / 内存占用
+
+> 以上为理论覆盖，尚未在全部硬件组合上实测；个别指标读不到会显示为空，不影响设备匹配与启动。
+
+设备名在配置里按原样填写，匹配时自动归一化。
+
+## 日志与数据
+
+- 系统日志与模型日志都写入数据库，WebUI「日志查看」页实时查看、全文检索、按时间 / 条数自动清理
+- 模型日志可在「模型管理」页内联查看
+- 进程崩溃后残留会话自动收口为已结束（30s 心跳）
+
+## 自更新
+
+- 版本即 git 标签；更新目标两档：**稳定版**（最近发布标签）或 **最新提交**
+- 仅向前更新，不支持回退；本地未提交改动不预拒，仅在冲突时拒绝（不会覆盖）
+- 程序启动时自动检查一次，此后只有你点「检查更新」才联网
+- 需要以 git 克隆方式部署（非 git 目录自动隐藏更新功能）；Docker 下宿主仓库须为 root 属主
+
+## 系统托盘
+
+- 打开 WebUI、网络唤醒、Claude Code 预设一键切换、快速启停模型、优雅退出
+- 无桌面环境自动退化为静默后台运行
+
+## 工具箱（网络唤醒 / Claude Code 预设）
+
+- 网络唤醒：配置广播地址 + MAC，可对远程设备（如 NAS）发送魔术包唤醒
+- Claude Code 预设：在多个 Claude 配置之间切换（写入 settings.json），与托盘菜单互通
+
+## Docker 部署
+
+```bash
+cp Dockerfile.example Dockerfile
+cp docker-compose.yml.example docker-compose.yml
+docker compose up -d --build   # 首次构建 + 启动
+docker compose up -d           # 日常：改代码 / 配置后重启即可
+```
+
+- 整个代码库挂载进容器，改代码 / 前端即时生效，只有依赖变更需重建
+- `data/`、`logs/` 落在宿主机，天然持久化
+- 镜像预装 llama.cpp 编译 / 运行所需的系统库（Vulkan / OpenBLAS / cmake）
+- Intel iGPU 监控需容器 `SYS_ADMIN` + `seccomp=unconfined`（模板已含）
+
+## 升级注意
+
+- v3.x 之间：如无特别说明，任意 v3.x 均可无感升级到任意更高的 v3.x（不保证降级）
+- v2.x 用户：v2 的配置（config.yaml）与计费数据不会迁移，需在网页重新录入；v2 数据库请备份后删库重建。详见 v3.0.0 发布说明
+- 升级通过「自更新」或 `git pull` 完成
 
 ## 架构
 
 ```
-config   ── 纯数据 + 校验（DB → frozen dataclasses）
-state    ── 内存状态机 + 单派发 inflight Future
-supervisor ── 子进程管理（kill_tree + 单 wait 协程）
-runtime  ── 生命周期编排 / 纯函数资源调度 / 心跳 / 日志保留 / 自更新
-data     ── SQLite 持久化 + 日志 / 用量 / 配置存储
-gateway  ── 流式代理 + REST/SSE 端点 + 别名解析
-tray     ── 系统托盘（WOL / Claude 预设 / 快速启停）
+config → state → supervisor → runtime → data → gateway → tray
 ```
 
-- **单进程模型**：一个 Python 进程跑一个 app（FastAPI + uvicorn），模块级单例内存状态，SQLite 单连接 + `write_lock` 串行化。
-- **配置单一源**：全部配置存 SQLite（`data/llm_manager.db`），运行时只读 frozen 快照；环境变量仅在启动期覆写并持久化。
-- **自重启**：程序内置 parent 监督器（`python -m llm_manager`）spawn 并管理 worker；配置变更或自更新完成后 worker 以退出码 81 退出，parent 拉起全新 worker（每次全新进程，构造性干净）。`LLM-Manager.bat` 仅作 Windows 静默后台启动，不参与重启。
-
----
-
-## 安装与启动
-
-### 1. 环境要求
-- Python 3.11+
-- SQLite3（通常随系统或 Python 自动安装）
-- conda 或 venv 虚拟环境（[`LLM-Manager.bat`](LLM-Manager.bat) 默认激活名为 `LLM-Manager` 的 conda 环境）
-
-### 2. 安装
-```bash
-# 克隆仓库
-git clone https://github.com/lingyezhixing/LLM-Manager.git
-cd LLM-Manager
-
-# 安装依赖：核心 + AMD 780M 监控[monitoring] + 系统托盘[tray] + 开发测试[dev]
-pip install -e ".[monitoring,tray,dev]"
-# 仅运行（不含开发工具）：pip install -e ".[monitoring,tray]"
-```
-
-### 3. 启动服务
-```bash
-python -m llm_manager
-```
-
-启动后访问：`http://localhost:8080`（8080 端口同时 serve API 与前端构建产物 `frontend/dist`）
-
-### 4. Docker 部署（挂载模式）
-```bash
-# 从 example 模板复制出实际文件（实际文件已 gitignore，可随意修改，不影响 git 更新）
-cp Dockerfile.example Dockerfile
-cp docker-compose.yml.example docker-compose.yml
-
-docker compose up -d --build     # 首次构建 + 启动
-docker compose up -d             # 日常：改代码/配置后重启即可，无需重建
-```
-- 整个代码库挂载进容器（`.:/app`）：环境是环境、代码是代码，改代码/前端 dist 即时生效，只有依赖变更才需重建
-- `data/`、`logs/` 落在宿主机，天然持久化；配置全部走 WebUI（DB 化），无需进容器改文件
-- 容器内 `python -m llm_manager` 即 parent+worker 自重启；镜像预装 llama.cpp 编译/运行所需系统库（Vulkan/OpenBLAS/cmake 工具链），llama.cpp 编译脚本不归本仓库管理
-- Intel iGPU 监控需容器 `SYS_ADMIN` + `seccomp=unconfined`（compose example 已含，仅供 i915 PMU 监控）
-- **自更新**：root 容器下宿主仓库须为 root 属主（否则 git "dubious ownership" 拒绝，更新功能自动隐藏）；镜像缺 openssh-client 时 SSH 远端自动回退 HTTPS 拉取（公开仓库免认证，宿主推送仍走 SSH）
-
----
-
-## 系统配置（SQLite DB 化）
-
-全部配置存储在 SQLite 数据库（默认 `data/llm_manager.db`）中，通过 WebUI「系统配置」页或 `/api/config/*` 修改，无需编辑配置文件：
-
-- **程序配置**：监听地址 / 端口、日志级别、空闲回收间隔（分钟）、Claude settings 路径、WOL、Claude 预设、日志保留规则。
-- **模型定义**：名称、别名、模式、端口、自动启动、设备方案（scheme: required_devices / memory_mb / **结构化启动命令** exe + args + env + conda_env）、计费（阶梯 / 按时）。支持**改名 + 历史数据迁移**（可选删旧日志）、启动命令 `{{port}}` / `{{alias}}` 变量替换（改端口 / 别名自动传导）。
-- **设备管理**：设备名存储原样（匹配时归一化）；模型配置页按需发起**网络唤醒**（发送魔术包）唤醒远程设备。
-- **环境变量**（可选，启动时覆写并持久化）：`LLM_MANAGER_HOST` / `LLM_MANAGER_PORT` / `LLM_MANAGER_ALIVE_TIME` / `LLM_MANAGER_LOG_LEVEL` / `LLM_MANAGER_DB_PATH`。
-
-首次启动（空库）时自动 seed 默认程序配置（监听地址 / 端口 / 日志级别等），模型定义通过 WebUI「系统配置 → 模型配置」添加。**DB 为配置唯一来源，无 YAML 导入**（旧版 `config.yaml` 已移除）。
-
-> ✅ **说明**：设备不满足前一个 scheme 时自动回退到下一个（多 GPU 启动灵活性）。
-
----
+单进程 + 单事件循环；配置单一源（DB）；内置 parent+worker 自重启（退出码 81 契约）。详细分层、不变量与约定见 `AGENTS.md`。
 
 ## 开发
 
 后端（项目根，conda env `LLM-Manager`）：
+
 ```bash
-python -m pytest tests -q     # 全量测试（含 smoke）
-ruff format --check .         # 格式
-ruff check .                  # lint（全量规则集，依赖已 == 固定）
-pyright src/llm_manager       # 类型检查
+python -m pytest tests -q
+ruff format --check .
+ruff check .
+pyright src/llm_manager
 ```
 
 前端（`frontend/`）：
+
 ```bash
-npm run build        # = tsc -b && vite build；8080 端口 serve 的是 dist 构建产物，改前端后必跑
-npx oxlint src       # lint
+npm run build        # tsc -b && vite build；8080 serve 的是 dist 构建产物，改前端后必跑
+npx oxlint src
+npx tsc -b
 ```

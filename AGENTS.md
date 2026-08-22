@@ -2,7 +2,6 @@
 
 > 本地单一事实源:架构分层、不变量、命令、配置链路、退出码。代码注释里的
 > `spec §x / invariant N / guard D` 历史计划档案会随文档演进漂移,**以本文件为准**。
-> 第三轮审查 round3 已据此清理(见 `docs/2026-08-04-code-review-round3.md`)。
 
 ## 1. 它是什么
 
@@ -29,15 +28,21 @@ supervisor ── 子进程管理(_procs/_exit_cbs/_readers 三表 + kill_tree +
   ↓
 runtime  ── lifecycle(编排)/scheduling(纯函数资源决策)/background(心跳 30s + 日志保留 + 空闲回收 + 自启)/update(自更新:git 编排)
   ↓
-data     ── persistence(schema/迁移)+ logs(会话/行 SQL + 捕获/广播/flush)+ usage(计费 + 会话计数)+ config_store(DB 配置)
+data     ── persistence(schema + 旧库守护)/logs(会话/行 SQL + 捕获/广播/flush)/usage(计费 + 会话计数)/config_store(DB 配置)
   ↓
-gateway  ── proxy(流式代理 + 用量计量)+ api/*(REST/SSE 端点)+ aliases(别名解析)
+gateway  ── proxy(流式代理 + 用量计量)+ api/*(REST/SSE 端点,含 tools_api)+ aliases(别名解析)
   ↓
 tray     ── 系统托盘(自重启触发 / WOL / Claude 预设应用)
 ```
 
 **分层纪律**:上层依赖下层,绝不反向。`scheduling.py` 纯函数(决策与副作用分离,
 无 IO,单测无需 fake)。并发靠「单事件循环 + 临界段内无 await」保证(见不变量 2)。
+
+**被多方引用的 leaf 模块(不在主链上,依赖亦单向)**:
+- `devices/` —— 适配器协议化(DeviceAdapter + build_adapters 平台自动装配),被
+  app / realtime / gateway(devices API)/ runtime(scheduling)引用。
+- `tools/` —— WOL / Claude 预设纯逻辑,供 tray 与 gateway(tools_api)复用。
+- `runner.py` —— parent 监督器入口(见 §5)。
 
 ## 3. 不变量(改动时勿破坏)
 
@@ -53,10 +58,10 @@ tray     ── 系统托盘(自重启触发 / WOL / Claude 预设应用)
 5. **退出码 81 = 请求重启**(内部信号)。`POST /api/config/restart` 置 `restart_requested`;
    worker(`_run_worker`,=`--worker` 入口)据此 `sys.exit(81)`,**内置 parent 监督器
    (`_run_parent`)接住 81 拉起全新 worker**(见 §5)。dev(`--reload`)不经 main、绕过
-   parent;无 server 分支则 `os._exit(81)`(dev 进程一次性,可接受)。
+   parent;`trigger_restart` 无 server 分支则延迟 `os._exit(81)`(dev 进程一次性,可接受)。
 6. **运行中 = 内存 live 集,非 `end_time IS NULL`**。崩溃随进程消失,故残留会话/段天然
    落为 ended。心跳每 30s 把运行中项的 `end_time` 推到 now(只管时间,不管状态)。
-   → **绝不能用 `end_time is not None` 判运行中**(曾致日志页运行中消失 bug,194962b)。
+   → **绝不能用 `end_time is not None` 判运行中**(曾致日志页运行中消失 bug)。
    日志会话 status = `CASE WHEN id IN live_session_ids() THEN 'running' ELSE 'ended'`。
 7. **`aliases[0]` = 下游 served name**。模型 `aliases` 有序,首个即 lmdeploy `--model-name` /
    llama.cpp `-a` 的服务名;客户端请求按任意别名路由,但 served name 固定为 aliases[0]。
@@ -64,6 +69,10 @@ tray     ── 系统托盘(自重启触发 / WOL / Claude 预设应用)
    (`LLM_MANAGER_*`)在启动期写库(`apply_env_overrides`),不直接覆盖运行变量。
    **无 YAML 导入**:空库由 `initialize` seed 默认值(程序参数),模型经 WebUI CRUD
    添加——DB 完全接管。
+9. **DB 只向前演进,旧库守护只拒不迁**。启动检测 Round-2 时代旧结构(`model_pricing` /
+   `model_scripts` 表或 `model_requests.ts` 列)→ 明确报错(`LegacySchemaError`),不做任何
+   自动迁移;新库 schema 即终态。v3.x 内升级无感(见 §9 发布说明通用声明),schema 变更
+   必须向后兼容。
 
 ## 4. 配置写回路径
 
@@ -92,8 +101,9 @@ tray     ── 系统托盘(自重启触发 / WOL / Claude 预设应用)
 - **信号转发**:parent 收 Ctrl-C/SIGTERM → 转发 worker 进程组(Win `CTRL_BREAK_EVENT` /
   POSIX `killpg SIGTERM`)使其优雅关闭;`_SHUTDOWN_GRACE`(10s)超时强杀兜底。
 - dev(`uvicorn --factory --reload`):不经 main、绕过 parent,uvicorn 自管 reload;
-  `restart_app` 无 server 分支 `os._exit(81)`(dev 一次性)。
-- `POST /api/config/restart`(WebUI 顶部重启横幅)走 `restart_requested → worker exit 81 → parent 拉新`。
+  `trigger_restart` 无 server 分支 `os._exit(81)`(dev 一次性)。
+- `POST /api/config/restart`(WebUI 顶部重启横幅)走 `restart_requested → worker exit 81 → parent 拉新`;
+  `POST /api/update/apply` 共用同一路径。
 - `LLM-Manager.bat` 仅作 Windows 静默后台启动(VBS),不参与重启。
 
 ### 5.1 自更新(仅向前,双目标细粒度,严格 ff-only)
@@ -119,17 +129,16 @@ tray     ── 系统托盘(自重启触发 / WOL / Claude 预设应用)
   (这层拒绝是有意为之:root 写非 root 属主 bind-mount 会改宿主文件属主)。
 - **网络纪律**:唯一联网点——程序启动时自动检测一次(worker 启动后台 fetch 一次),
   此后无任何自动联网,仅用户显式按钮触发(系统页「更新」区)。
-- 测试:`tests/unit/runtime/test_update.py`(本地 bare origin,无网络)、
-  `tests/unit/gateway/test_api_update.py`(API 契约)。
 - 注意:更新后依赖若变,editable 安装不会自动重装(pip 层自理)。
 
 ## 6. 命令(验收用)
 
 后端(项目根,conda env `LLM-Manager`):
 ```bash
-python -m pytest tests -q          # 全量(含 smoke);~23s
-ruff format --check .             # 格式(2026-08-06 已全仓库格式化;改完须保持 format 干净)
-ruff check .                     # lint(规则集显式固定 E4/E7/E9/F,见 pyproject;单路径防多路径丢诊断竞态)
+python -m pytest tests -q          # 全量(含 smoke)
+ruff format --check .             # 格式(改完须保持 format 干净)
+ruff check .                     # lint(规则集 = ruff 0.16.1 默认全量,版本在 dev 依赖中 == 固定;
+                                  #   升级版本即引入新规则,需显式处理;见 pyproject [tool.ruff])
 pyright src/llm_manager            # 类型检查(0 errors 基线)
 ```
 前端(`frontend/`):
@@ -138,15 +147,16 @@ npm run build        # = tsc -b && vite build;改前端后必跑(8080 serve dist
 npx oxlint src       # lint(存量 2 warning:toast/dialog 的 only-export-components,已知)
 npx tsc -b           # 仅类型检查
 ```
+无 CI / pre-commit 自动化,验收命令一律本地手动执行。
 
 ## 7. 模块级单例(单进程前提 = 不变量 1)
 
 | 模块 | 单例 | 说明 |
 |---|---|---|
 | `state` | `_state` / `_inflight` | 模型状态机 + 单派发 Future |
-| `data.logs` | `_sessions` / `_alias_to_session` / `_pending` / `_db` / `_flush_chain` | 日志会话 live 集 + alias↔会话映射 + 待落库 + flush 串行链 |
-| `data.usage` | `_live_segments` / `_c` | 运行中计费段(崩溃随进程消失)+ 进程内用量计数器(重启清零,概览 session-stats 卡) |
-| `devices` | `_LHM_COMPUTER`(LibreHardwareMonitor) | 780M/Intel 核显传感器单例(Windows);Linux Intel iGPU 走 i915 识别 + intel_gpu_top 采样、AMD 走 amdgpu sysfs(均无单例) |
+| `data.logs` | `_db` / `_sessions` / `_alias_to_session` / `_pending`(live.py)+ `_flush_chain`(pipeline.py) | 日志会话 live 集 + alias↔会话映射 + 待落库 + flush 串行链 |
+| `data.usage` | `_live_segments`(record.py)/ `_c`(counters.py) | 运行中计费段(崩溃随进程消失)+ 进程内用量计数器(重启清零,概览 session-stats 卡) |
+| `devices` | `_LHM_COMPUTER`(LibreHardwareMonitor) | Windows GPU/CPU 传感器单例;Linux Intel iGPU 走 i915 + intel_gpu_top 采样、AMD 走 amdgpu sysfs(均无单例) |
 
 测试接缝:state 有 `_reset()`、logs 有 `reset()`、usage 有 `_reset_counters()`(session 计数);
 usage 的 `_live_segments` 由 `tests/unit/data/test_persistence.py` 的本地 fixture 直接清。
@@ -155,28 +165,54 @@ usage 的 `_live_segments` 由 `tests/unit/data/test_persistence.py` 的本地 f
 
 ## 8. 工作流约束
 
-- **本地仓库,严禁推 origin**(用户明确)。小任务直接在 `main`;较大特性开 feature 分支
-  (非 worktree)FF-merge + 删分支。commit message 末尾加 `Co-Authored-By: Claude <noreply@anthropic.com>`。
+- **提交与推送纪律**:不要擅自频繁提交细碎的 commit——同一任务的修改合并为一次(或少量)
+  提交,改一点就提交一点的习惯不要有;push 前必须征得用户许可,未经许可不推送。
+  小任务直接在 `main`;较大特性开 feature 分支(非 worktree)FF-merge + 删分支。
 - **完全离线**:图标(lucide 内联)、字体(系统字体)、资产严禁 CDN 引用。
-- **派 subagent 一律用最强模型**(fable),勿按成本降级。
+- **改后端响应模型须同步前端类型**:`frontend/src/lib/api/{usage,logs,models,config,data,tools,update}.ts`
+  的手写 interface 与后端 Pydantic 响应同形对齐(纯手写自律,无代码生成)。
+- **新表单一律用 `useSyncedForm`**:`frontend/src/lib/hooks/use-synced-form.ts`(服务端快照→
+  本地表单同步:external-follow 仅在未编辑时;baseline 仅 onSuccess 推进;alwaysDirty 支持创建态)。
 
-## 9. 已知遗留 / 已评估 DEFER(非阻塞,按节奏渐进)
+## 9. 发布说明规范(GitHub Release)
 
-- **S2 前后端类型生成(已建后回退,2026-08-04)**:曾引入 `scripts/gen_types.py` 从 FastAPI OpenAPI
-  生成 `schema.d.ts`(aef9887),评估后决定回退——单人开发 + 小类型面(~26 个手写 interface)+
-  低改动频率下收益不足;且渐进迁移停在中间态 = 同一后端模型两份 TS 定义(schema.d.ts 20 个类型
-  仅 6 个被消费,其余与手写版并存),双路径比纯手动更差。已删脚本/schema/npm script,usage.ts
-  恢复 aef9887^ 手写版(字节级还原)。**类型对齐回归纯手写自律**:改后端响应模型时记得同步
-  `frontend/src/lib/api/{usage,logs,models,config,data}.ts` 的同形 interface(round3 §5-S2
-  风险记录仍有效)。若未来进入「频繁改响应模型 × 多消费方」阶段再评估引入,届时一次推完、不留中间态。
-- **S3 CI / pre-commit**:`ruff format --check && ruff check && pyright && pytest -q` +
-  前端 `oxlint && tsc -b`。已 2026-08-06 一次性 `ruff format`(74/85 重排)并纳入
-  后端验收命令;CI/pre-commit 自动化仍未建(本地手动执行)。
-- **S5 `useSyncedForm<T>` 抽象(已落地,2026-08-13)**:general/wol/claude-path/model-def-form
-  四处手写「服务端快照→本地表单」同步已收敛为 `frontend/src/lib/hooks/use-synced-form.ts`
-  (external-follow 仅在未编辑时;baseline 仅 onSuccess 推进;alwaysDirty 支持创建态)。
-  单例语义/契约不变,后续新增表单一律用它。
-- **🔵1 create_task 任务集**:6 处 fire-and-forget 任务内部均已捕异常,实际未检索异常风险低;
-  跨模块引用集 helper 性价比不足。
-- **_migrate 迁移链退役(2026-08-14 已完成)**:Round-2 时代旧库检测即拒(LegacySchemaError),用户确认全部署为新库;历史折叠逻辑(ts 列删除/model_pricing 表迁移)整体删除,仅保留「检测旧结构→明确拒绝」守护。见 git 59e4465 后 `_migrate` 实现(152 行)。
-- 其它:双账本(内存计数 + DB 落库,语义注释已补于 data/usage/counters.py 2026-08-14)、前端 `useLogViewer` 改 useReducer + 虚拟化(v3.1 Phase 2 Task 15/16 执行中)、时长格式化函数收敛(已完成核实,收敛于 frontend/src/lib/format.ts 第 11-14 行注释明示)——均纯清理,不影响正确性。
+写发布说明的原则与结构(仿 v2.7.0 平铺式):
+
+**原则**
+- **实用且平衡**:普通用户看得懂、开发者用得上;拒绝华而不实——无 emoji 标题、无「质变/可维护性质变」类营销词。
+- **事实先核实**:每条变更必须能对应 git 提交;无法验证的修复/迁移/覆盖范围不写。跨大版本升级问题须对照真实 schema + 迁移链源码,必要时建库实测,写明「哪些能迁移、哪些不能、何时放弃旧代码/旧库」。
+- **版本定位一句话放开头**:Alpha 用 `>` 引用显式标注;正式/维护版不加 `>` 注释。
+
+**结构(仿 v2.7.0 平铺式)**
+- 全部分类同级平铺(`###` 标题),**不分级、无包裹标题**(不写「主要变化」「工程(给开发者的)」);内部细节需要时用子要点。汇总型大版本介绍(如 v3.0.0)可升级为 `##` 层级分组,增量小版本用 `###` 平铺。
+- 用户可见变更在前(每条写「对用户有什么用」),工程变更在后。
+- 工程分类细分且正式:`架构优化 / 代码优化 / 性能优化 / 工程化`。
+- **不写**:`测试` 小节(含测试数量/回归测试,全部不进说明)、`安装 / 运行`(README 的职责)。
+- 升级注意(`### 升级注意`):只写可操作项(备份、断链行为、需重建什么)。
+- **跨大版本的升级问题只在大版本首个正式版说明一次**(如 v2→v3 只在 v3.0.0 讲),后续版本不重复,并附通用兜底声明:
+  「如无特别说明,任意 v3.x 版本均可无感升级至任意更高的 v3.x 版本(不保证降级)」。
+- 设备/平台覆盖类描述用「理论覆盖 + 尚未全面实机验证」口径,不夸大实测范围。
+
+**发布动作**
+- 版本号 = git 标签(见 §5.1);Release 标题沿用 tag 名。
+- 正文直接 `gh release edit <tag> --notes-file <file>` 覆写(经 GitHub API,非 git push、不受
+  §8 推送许可限制;用户已确认允许)。
+- 重大发布(如 v3.0.0)可汇总自上一大版本以来全部变化,以正式版规范写成完整介绍;小版本只写本版增量。
+
+## 10. README 规范
+
+README 是面向用户的文档式操作手册(与 §9 的 release 平铺式不同,`##` + `###` 层级结构),原则与结构:
+
+**原则**
+- **实用诚实、非营销**:不用「功能特性」宣传列表,不堆 bold 标签与「万行级平滑浏览 / 动效即反馈」类包装词;每条写「怎么用」而非「我们有什么」。
+- **事实先核实**:与发布说明同律——页面分区、字段、默认值须对照源码;覆盖类描述用「理论覆盖 + 尚未全面实机验证」口径(如设备监控)。
+- **职责分工**:**安装 / 运行 + 操作手册是 README 的职责**(release 不写,见 §9);架构 / 开发只作简介并指向 `AGENTS.md`;升级注意简短、只给结论并指向对应发布说明。
+
+**结构(文档式,参考)**
+- **快速开始前置**:环境要求 → 安装(`pip install -e .` + 可选 `[monitoring]`/`[tray]`/`[dev]`)→ 启动 → 添加第一个模型(真实示例命令 + `{{port}}` / `{{alias}}` 变量说明)→ 调用示例(curl)。
+- 主体按操作手册组织:API 接口(表格)→ 配置(系统 / 模型 / 数据库分区 + 环境变量 + 重启规则)→ 设备监控 → 日志与数据 → 自更新 → 系统托盘 → 工具箱(WOL / Claude 预设)→ Docker 部署 → 升级注意 → 架构(简介)→ 开发(命令)。
+- 配置类章节写「在哪改、字段含义、改后是否重启」;页面分区须对应 WebUI 当前实现(如系统页 3 zone、工具箱 2 zone),不沿用过时描述。
+- 环境变量区分两类:`LLM_MANAGER_HOST/PORT/ALIVE_TIME/LOG_LEVEL` 覆写并持久化;`LLM_MANAGER_DB_PATH` 仅决定 DB 路径(不写入配置)。
+
+**维护**
+- 改 WebUI 页面结构、配置字段或默认值时,同步 README 相应小节;默认值须与 `PROGRAM_DEFAULTS` / `RETENTION_DEFAULTS` 一致(host `0.0.0.0:8080`、alive_time 60、日志保留 30 天 / 10 条)。
