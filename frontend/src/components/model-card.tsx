@@ -17,8 +17,9 @@ const STAGE_LABEL: Record<string, string> = {
   init_script: "启动中 · 启动脚本", health_check: "启动中 · 健康检查", routing: "运行中", failed: "失败",
 };
 
-export function ModelCard({ m, selected, nowMs, onSelect }: {
+export function ModelCard({ m, selected, nowMs, onSelect, index = 0 }: {
   m: ModelInfo; selected: boolean; nowMs: number; onSelect: () => void;
+  index?: number;  // 列表序号:入场 stagger 延迟(cap 8 防长列表拖尾)
 }) {
   const toast = useToast();
   const starting = ["starting", "init_script", "health_check"].includes(m.status);
@@ -43,8 +44,9 @@ export function ModelCard({ m, selected, nowMs, onSelect }: {
           onSelect();
         }
       }}
-      className={`flex items-center gap-2 rounded-lg border p-2.5 cursor-pointer transition-colors ${
-        selected ? "border-primary-accent bg-primary-accent/12" : "border-border-subtle hover:bg-card-hover"}`}>
+      className={`animate-card-in flex items-center gap-2 rounded-lg border p-2.5 cursor-pointer transition-colors duration-(--motion-base) ${
+        selected ? "border-primary-accent bg-primary-accent/12" : "border-border-subtle hover:bg-card-hover"}`}
+      style={{ animationDelay: `${Math.min(index, 8) * 24}ms` }}>
       <div className="min-w-0 flex-1">
         <div className="text-card-title font-semibold truncate text-foreground">{m.alias}</div>
         <div className="mt-0.5 flex items-center gap-1.5 text-dense">
@@ -54,7 +56,7 @@ export function ModelCard({ m, selected, nowMs, onSelect }: {
           </span>
         </div>
         <div className="mt-0.5 text-dense text-muted-foreground">
-          <span className="mr-1 inline-block size-[7px] rounded-full align-middle" style={{ background: DOT[m.status] ?? "var(--color-muted-foreground)" }} />
+          <span className={`mr-1 inline-block size-[7px] rounded-full align-middle ${m.status === "routing" ? "animate-dot-pulse" : ""}`} style={{ background: DOT[m.status] ?? "var(--color-muted-foreground)" }} />
           {statusText}
         </div>
       </div>

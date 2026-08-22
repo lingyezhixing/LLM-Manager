@@ -10,12 +10,12 @@ export function SessionList({
   }
   return (
     <div className="flex flex-col gap-1 p-2">
-      {sessions.map((s) => {
+      {sessions.map((s, i) => {
         const active = s.id === selectedId;
         const running = s.status === "running";
         return (
-          <button key={s.id} onClick={() => onSelect(s.id)}
-            className={`rounded-md border px-2.5 py-1.5 text-left transition-colors ${
+          <button key={s.id} onClick={() => onSelect(s.id)} style={{ animationDelay: `${Math.min(i, 8) * 24}ms` }}
+            className={`animate-card-in rounded-md border px-2.5 py-1.5 text-left transition-colors duration-(--motion-base) ${
               active ? "border-primary-accent bg-primary-accent/12" : "border-border-subtle bg-card-2 hover:bg-card-hover"
             }`}>
             <div className="flex items-center gap-1.5 text-ui font-medium text-foreground">

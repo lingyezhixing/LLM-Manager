@@ -1,8 +1,15 @@
 import type { ReactNode } from "react";
 
-/** 统一卡片壳:rounded-lg border bg-card p-4 shadow-card(各页面卡片共用,防样式漂移)。 */
-export function Card({ children, className = "" }: { children: ReactNode; className?: string }) {
-  return <div className={`rounded-lg border border-border bg-card p-4 shadow-card ${className}`}>{children}</div>;
+/** 统一卡片壳:rounded-lg border bg-card p-4 shadow-card(各页面卡片共用,防样式漂移)。
+ *  interactive=true 时启用 hover 提升(shadow-lift + 边框提亮)——用于可点/可交互卡片。 */
+export function Card({ children, className = "", interactive = false }: {
+  children: ReactNode; className?: string; interactive?: boolean;
+}) {
+  return (
+    <div className={`rounded-lg border border-border bg-card p-4 shadow-card ${
+      interactive ? "transition-[box-shadow,border-color] duration-(--motion-base) hover:shadow-lift hover:border-muted-foreground/30" : ""
+    } ${className}`}>{children}</div>
+  );
 }
 
 /** 加载占位:统一「加载中…」文案与字号。 */

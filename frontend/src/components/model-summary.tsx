@@ -55,7 +55,7 @@ export function ModelSummary() {
                 className="flex items-center justify-between rounded-md border border-border-subtle px-3 py-2 text-sm"
               >
                 <span className="flex items-center gap-2 truncate">
-                  <span className="size-1.5 shrink-0 rounded-full bg-success" />
+                  <span className="size-1.5 shrink-0 animate-dot-pulse rounded-full bg-success" />
                   <span className="truncate">{m.alias}</span>
                 </span>
                 <span className="font-mono text-xs text-muted-foreground">

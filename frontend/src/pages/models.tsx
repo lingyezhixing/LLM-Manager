@@ -41,8 +41,8 @@ export default function ModelsPage() {
                       </Link>
                     }
                   />
-                : models.map((m) => (
-              <ModelCard key={m.alias} m={m} nowMs={now}
+                : models.map((m, i) => (
+              <ModelCard key={m.alias} m={m} nowMs={now} index={i}
                 selected={selected?.alias === m.alias} onSelect={() => setSel(m.alias)} />
             ))}
         </div>
