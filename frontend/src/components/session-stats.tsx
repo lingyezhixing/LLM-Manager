@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { Card, Loading } from "@/components/ui/card";
+import { Card, Skeleton } from "@/components/ui/card";
 import { ErrorState } from "@/components/ui/error-state";
 import { InfoTile } from "@/components/ui/info-tile";
 import { fetchSessionUsage } from "@/lib/api";
@@ -18,7 +18,7 @@ export function SessionStats() {
   const now = useNowTick(1000);
 
   if (isError) return <ErrorState message={errMsg(error)} onRetry={() => refetch()} />;
-  if (isLoading || !data) return <Loading />;
+  if (isLoading || !data) return <Skeleton rows={6} />;
 
   const pct = Math.round(data.hit_rate * 1000) / 10;  // 1 decimal place
   const uptimeSec = Math.max(0, Math.floor((now - data.started_at * 1000) / 1000));

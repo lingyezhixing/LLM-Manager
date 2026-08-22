@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 
 import { LineChart } from "lucide-react";
 
-import { Card, Empty, Loading } from "@/components/ui/card";
+import { Card, Empty, Skeleton } from "@/components/ui/card";
 import { ErrorState } from "@/components/ui/error-state";
 import { TokenChart } from "@/components/token-chart";
 import { fetchUsageCostSeries, fetchUsageSeries, type UsageSeries, type UsageSeriesParams } from "@/lib/api";
@@ -68,7 +68,7 @@ export function UsageChartCard({
           </div>
         ) : costSeriesQ.isLoading || !costSeriesQ.data ? (
           <div className="flex h-[192px] items-center justify-center">
-            <Loading />
+            <Skeleton rows={5} />
           </div>
         ) : costSeriesQ.data.buckets.length === 0 ? (
           <Empty label={EMPTY_COST} className="h-[192px]" />
@@ -81,7 +81,7 @@ export function UsageChartCard({
         </div>
       ) : isLoading || !data ? (
         <div className="flex h-[192px] items-center justify-center">
-          <Loading />
+          <Skeleton rows={5} />
         </div>
       ) : data.buckets.length === 0 ? (
         <Empty label={EMPTY_REQUESTS} className="h-[192px]" />

@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 
+import { Card, Skeleton } from "@/components/ui/card";
 import { ErrorState } from "@/components/ui/error-state";
 import { InfoTile } from "@/components/ui/info-tile";
 import { fetchUsageCost, fetchUsageSummary, type UsageSeriesParams } from "@/lib/api";
@@ -24,16 +25,10 @@ export function UsageKpiRow({
     refetchInterval: refetch,
   });
   if (isError) {
-    return <ErrorState message={errMsg(error)} onRetry={() => refetchSummary()} />;
+    return <Card><ErrorState message={errMsg(error)} onRetry={() => refetchSummary()} /></Card>;
   }
   if (isLoading || !data) {
-    return (
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-7">
-        {Array.from({ length: 7 }).map((_, i) => (
-          <div key={i} className="h-[58px] rounded-lg border border-border-subtle bg-card-2" />
-        ))}
-      </div>
-    );
+    return <Card><Skeleton rows={3} /></Card>;
   }
   return (
     <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-7">

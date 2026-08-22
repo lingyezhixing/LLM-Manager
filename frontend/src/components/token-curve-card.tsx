@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { LineChart } from "lucide-react";
 
-import { Card, Empty, Loading } from "@/components/ui/card";
+import { Card, Empty, Skeleton } from "@/components/ui/card";
 import { ErrorState } from "@/components/ui/error-state";
 import { TokenChart } from "@/components/token-chart";
 import { UsageRangePicker } from "@/components/usage-range-picker";
@@ -38,7 +38,7 @@ export function TokenCurveCard() {
         </div>
       ) : isLoading || !data ? (
         <div className="flex h-[160px] items-center justify-center">
-          <Loading />
+          <Skeleton rows={5} />
         </div>
       ) : data.buckets.length === 0 ? (
         <Empty label={EMPTY_REQUESTS} className="h-[160px]" />

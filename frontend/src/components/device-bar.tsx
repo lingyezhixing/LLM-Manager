@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Cpu } from "lucide-react";
-import { Card, Empty, Loading } from "@/components/ui/card";
+import { Card, Empty, Skeleton } from "@/components/ui/card";
 import { streamErrorText } from "@/lib/format";
 import { useEventStream } from "@/lib/hooks/use-event-stream";
 import type { DevicesResponse } from "@/lib/api";
@@ -94,7 +94,7 @@ export function DeviceBar() {
       {error ? (
         <p className="text-sm text-muted-foreground">{streamErrorText("设备")}</p>
       ) : !data ? (
-        <Loading label="设备加载中…" />
+        <Skeleton rows={4} />
       ) : devices.length === 0 ? (
         <Empty label="未检测到设备" />
       ) : (

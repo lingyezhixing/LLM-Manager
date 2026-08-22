@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { Loading } from "@/components/ui/card";
+import { Link } from "react-router-dom";
+import { Empty, Skeleton } from "@/components/ui/card";
 import { useEventStream } from "@/lib/hooks/use-event-stream";
 import { useNowTick } from "@/lib/hooks/use-now-tick";
 import { ModelCard } from "@/components/model-card";
@@ -27,9 +28,19 @@ export default function ModelsPage() {
           {error
             ? <p className="text-sm text-muted-foreground">{streamErrorText("模型")}</p>
             : data === null
-              ? <Loading />
+              ? <Skeleton rows={6} />
               : models.length === 0
-                ? <p className="text-sm text-muted-foreground">暂无模型 — 到「系统配置 → 模型定义」添加</p>
+                ? <Empty
+                    label="暂无模型"
+                    action={
+                      <Link
+                        to="/system"
+                        className="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90"
+                      >
+                        去系统配置添加
+                      </Link>
+                    }
+                  />
                 : models.map((m) => (
               <ModelCard key={m.alias} m={m} nowMs={now}
                 selected={selected?.alias === m.alias} onSelect={() => setSel(m.alias)} />

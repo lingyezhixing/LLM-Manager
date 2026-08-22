@@ -2,7 +2,7 @@ import { useState } from "react";
 
 import { useQuery } from "@tanstack/react-query";
 
-import { Card, Empty, Loading } from "@/components/ui/card";
+import { Card, Empty, Skeleton } from "@/components/ui/card";
 import { ErrorState } from "@/components/ui/error-state";
 import { fetchUsageByModel, fetchUsageCost, type UsageSeriesParams } from "@/lib/api";
 import { errMsg, formatCost, formatCount, formatLatency, formatPercent, formatTokens } from "@/lib/format";
@@ -33,7 +33,7 @@ export function UsageByModelTable({
   const [desc, setDesc] = useState(true);
 
   if (isError) return <Card><ErrorState message={errMsg(error)} onRetry={() => refetchByModel()} /></Card>;
-  if (isLoading) return <Card><Loading /></Card>;
+  if (isLoading) return <Card><Skeleton rows={6} /></Card>;
   if (!data || data.length === 0) return <Card><Empty label={EMPTY_REQUESTS} /></Card>;
 
   const rows = [...data].sort((a, b) => {
