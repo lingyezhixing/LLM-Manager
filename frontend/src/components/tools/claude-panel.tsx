@@ -8,8 +8,8 @@ import { Field, TextArea, TextInput } from "@/components/ui/form";
 import { useConfirm } from "@/lib/hooks/use-confirm";
 import { useToast } from "@/lib/hooks/use-toast";
 import { errMsg } from "@/lib/format";
-import { type ConfigResponse } from "@/lib/api";
-import { useConfig, useUpdateProgram } from "@/lib/hooks/use-config";
+import { type ConfigResponse, type ConfigWriteResult, updateProgram as updateProgramApi } from "@/lib/api";
+import { useConfig, useRestartApp, useUpdateProgram } from "@/lib/hooks/use-config";
 import { useApplyClaudePreset, useClaudeCurrent, useUpdateClaudeConfigs } from "@/lib/hooks/use-tools";
 import { useSyncedForm } from "@/lib/hooks/use-synced-form";
 import { qk } from "@/lib/api/keys";
@@ -186,7 +186,10 @@ export function ClaudePanel() {
   const { data, isLoading, isError, error, refetch } = useConfig();
   const { data: currentData } = useClaudeCurrent();
   const updateProgram = useUpdateProgram();
+  const { triggerRestart } = useRestartApp();
+  const confirm = useConfirm();
   const toast = useToast();
+  const [confirming, setConfirming] = useState(false);
   // ── Claude settings 路径行(自通用页移入)──
   // useSyncedForm:外部刷新且未编辑(pathInput == baseline)时跟随,保存成功 commit 推进。
   const serverPath = data?.program.claude_settings_path ?? "";
@@ -201,17 +204,45 @@ export function ClaudePanel() {
   // 新建卡:nonce>0 时渲染一张;保存成功(onCreated)或取消后清零,期间禁新增。
   const [newNonce, setNewNonce] = useState(0);
 
-  const onSavePath = () => {
-    updateProgram.mutate(
-      { claude_settings_path: pathInput },
-      {
-        onSuccess: () => {
-          commitPath(pathInput);
-          toast.success("Claude settings 路径已保存");
+  const onSavePath = async () => {
+    if (updateProgram.isPending || confirming) return;  // 确认窗期间防连点
+    setConfirming(true);
+    try {
+      // claude_settings_path 是重启字段:先预检(不落库)→ 需重启则二选一,再落库+重启。
+      let preview: ConfigWriteResult;
+      try {
+        preview = await updateProgramApi({ claude_settings_path: pathInput }, true);
+      } catch (e) {
+        toast.error(errMsg(e));
+        return;
+      }
+      if (preview.restart_fields.length > 0) {
+        const ok = await confirm({
+          title: "保存将要求程序重启",
+          description:
+            `以下变更生效需重启:${preview.restart_fields.join("、")}` +
+            (preview.serving.length > 0
+              ? `。当前正在服务的模型(${preview.serving.join("、")})会被重启中断。`
+              : "。"),
+          confirmText: "保存并重启",
+          cancelText: "取消(不保存)",
+        });
+        if (!ok) return;
+      }
+      updateProgram.mutate(
+        { claude_settings_path: pathInput },
+        {
+          onSuccess: () => {
+            commitPath(pathInput);
+            toast.success("Claude settings 路径已保存");
+            if (preview.restart_fields.length > 0) triggerRestart();
+          },
+          onError: (e: unknown) => toast.error(errMsg(e)),
         },
-        onError: (e: unknown) => toast.error(errMsg(e)),
-      },
-    );
+      );
+    } finally {
+      setConfirming(false);
+    }
   };
 
   if (isError) {
@@ -223,7 +254,7 @@ export function ClaudePanel() {
 
   return (
     <div className="flex flex-col gap-3">
-      <Field label="Claude settings 路径" hint="改完需重启生效(顶部会提示)" htmlFor="csp-path">
+      <Field label="Claude settings 路径" hint="保存时若涉及需重启的变更,会先弹确认(保存并重启/取消不保存)" htmlFor="csp-path">
         <div className="flex items-center gap-2">
           <TextInput id="csp-path" value={pathInput} onChange={(e) => setPathInput(e.target.value)} className="flex-1" />
           <Button type="button" size="sm" onClick={onSavePath} disabled={!pathDirty || updateProgram.isPending}>

@@ -6,6 +6,7 @@ import {
   useState,
 } from "react";
 import { createPortal } from "react-dom";
+import { AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ConfirmContext, type ConfirmFn, type ConfirmOptions } from "@/lib/confirm";
 import { usePresence } from "@/lib/hooks/use-presence";
@@ -96,10 +97,15 @@ function ConfirmBody({ opts, onConfirm, onCancel }: {
 }) {
   return (
     <>
-      <h2 id="confirm-title" className="text-sm font-semibold text-foreground">{opts.title}</h2>
-      {opts.description && (
-        <p className="mt-2 text-sm text-muted-foreground">{opts.description}</p>
-      )}
+      <div className="flex items-start gap-2.5">
+        {opts.danger && <AlertTriangle aria-hidden className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />}
+        <div className="min-w-0">
+          <h2 id="confirm-title" className="text-sm font-semibold text-foreground">{opts.title}</h2>
+          {opts.description && (
+            <p className="mt-2 text-sm text-muted-foreground">{opts.description}</p>
+          )}
+        </div>
+      </div>
       <div className="mt-5 flex justify-end gap-2">
         <Button variant="ghost" size="sm" onClick={onCancel}>{opts.cancelText ?? "取消"}</Button>
         <Button variant={opts.danger ? "destructive" : "default"} size="sm" onClick={onConfirm}>

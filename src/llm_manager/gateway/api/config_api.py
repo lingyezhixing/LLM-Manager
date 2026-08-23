@@ -161,6 +161,15 @@ def register_config_routes(api: APIRouter) -> None:
                 "log_level": p.log_level,
                 "claude_settings_path": p.claude_settings_path,
             },
+            # 当前运行实例的 program(启动期捕获):「保存前预检」与「恢复运行值回退」的
+            # 依据(RESTART_FIELDS 比较以它为准,而非库值)。
+            "running_program": {
+                "host": boot.get("host", ""),
+                "port": int(boot.get("port", "0")),
+                "alive_time": p.alive_time,
+                "log_level": boot.get("log_level", "INFO"),
+                "claude_settings_path": boot.get("claude_settings_path", ""),
+            },
             "wol": (
                 {"broadcast_address": cfg.wol.broadcast_address, "mac_address": cfg.wol.mac_address}
                 if cfg.wol is not None
@@ -172,7 +181,10 @@ def register_config_routes(api: APIRouter) -> None:
         }
 
     @api.put("/config/program")
-    def put_program(request: Request, body: ProgramUpdate) -> dict:
+    def put_program(request: Request, body: ProgramUpdate, dry_run: bool = False) -> dict:
+        """dry_run=true:只算不写——以当前快照 + 请求体模拟保存后的 program,返回同形
+        config_write_result(restart_fields/serving),供前端「预检→确认→落库」流(先检测
+        冲突再落地,取消=零副作用);其余校验(Pydantic 422)与真实写一致。"""
         updates: dict[str, str] = {}
         for f in ("host", "log_level", "claude_settings_path"):
             v = getattr(body, f)
@@ -182,9 +194,16 @@ def register_config_routes(api: APIRouter) -> None:
             v = getattr(body, f)
             if v is not None:
                 updates[f] = str(v)
+        store = get_config_store(request)
+        if dry_run:
+            sim_kwargs: dict[str, str | int] = {}
+            for k, v in updates.items():
+                sim_kwargs[k] = int(v) if k in ("port", "alive_time") else v
+            sim = replace(store.snapshot(), program=replace(store.snapshot().program, **sim_kwargs))
+            return config_write_result(request, sim)
         if updates:
             set_settings(get_db(request), updates)
-        cfg = get_config_store(request).reload()
+        cfg = store.reload()
         return config_write_result(request, cfg)
 
     @api.put("/config/logs")
@@ -271,8 +290,14 @@ def register_config_routes(api: APIRouter) -> None:
 
     @api.put("/config/models/{name}")
     def put_model_def(
-        name: str, request: Request, body: ModelDefInput, migrate_data: bool = False
+        name: str,
+        request: Request,
+        body: ModelDefInput,
+        migrate_data: bool = False,
+        dry_run: bool = False,
     ) -> dict:
+        """dry_run=true:只算不写——相同校验存在性(404/409/422) + 模拟保存后的
+        affected_routing,供「预检→确认→落库」流;post_write/写库/reload 全部跳过。"""
         db = get_db(request)
         store = get_config_store(request)
         is_rename = body.name != name
@@ -313,7 +338,18 @@ def register_config_routes(api: APIRouter) -> None:
             else:
                 post = None
         try:
-            new_cfg = mutate_appconfig(db, lambda c: _update_model(c, name, body), post_write=post)
+            if dry_run:
+                # 预检:纯函数模拟 + validate(与 mutate_appconfig 同样的校验,不碰 DB)
+                new_cfg = _update_model(store.snapshot(), name, body)
+                from llm_manager.config import validate as _validate
+
+                errors = _validate(new_cfg)
+                if errors:
+                    raise ConfigValidationFailed(errors)
+            else:
+                new_cfg = mutate_appconfig(
+                    db, lambda c: _update_model(c, name, body), post_write=post
+                )
         except ModelNotFound:
             raise HTTPException(404, f"model '{name}' not found")
         except ModelExists:
@@ -322,6 +358,10 @@ def register_config_routes(api: APIRouter) -> None:
             raise HTTPException(422, detail=e.errors)
         except ValueError as e:
             raise HTTPException(422, detail=str(e))
+        if dry_run:
+            primary_for_hint = body.name if is_rename else name
+            affected = _routing_served(primary_for_hint, new_cfg)
+            return {"affected_routing": affected, "hint": "restart_model" if affected else None}
         store.reload()
         # 改名时模型已停(运行中拦截),affected 必为空;非改名维持原 _routing_served 语义
         primary_for_hint = body.name if is_rename else name

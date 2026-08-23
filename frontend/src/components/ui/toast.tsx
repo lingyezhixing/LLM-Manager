@@ -2,6 +2,7 @@ import {
   type ReactNode,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -62,6 +63,7 @@ function ToastRow({ item, onGone }: { item: ToastItem; onGone: (id: number) => v
   return (
     <div
       ref={rowRef}
+      data-toast-id={item.id}
       role={item.type === "error" ? "alert" : "status"}
       aria-live={item.type === "error" ? "assertive" : "polite"}
       className={`flex items-start gap-2 rounded-lg border border-border bg-popover p-3 text-sm text-popover-foreground shadow-card ${
@@ -82,9 +84,47 @@ function ToastRow({ item, onGone }: { item: ToastItem; onGone: (id: number) => v
   );
 }
 
+// FLIP:列表增删(新入场挤旧下行/移除上移)时,被移动的行以 transform 平滑过渡到新位置。
+// 新行自身不做位移(它的入场由 keyframes 负责),仅对「上一轮已存在且 offsetTop 变化」的行补位。
+function useFlipDeck(decks: unknown[], listRef: React.RefObject<HTMLDivElement | null>) {
+  const prevTops = useRef<Map<number, number>>(new Map());
+  useLayoutEffect(() => {
+    const el = listRef.current;
+    if (!el) return;
+    const tops = new Map<number, number>();
+    let moved = false;
+    for (const child of el.children) {
+      const elc = child as HTMLElement;
+      const id = Number(elc.dataset.toastId);
+      if (Number.isNaN(id)) continue;
+      const top = elc.offsetTop;
+      const prev = prevTops.current.get(id);
+      if (prev !== undefined && prev !== top) {
+        moved = true;
+        elc.style.transform = `translateY(${prev - top}px)`;
+        elc.style.transition = "none";
+      }
+      tops.set(id, top);
+    }
+    prevTops.current = tops;
+    if (moved) {
+      requestAnimationFrame(() => {
+        for (const child of el.children) {
+          const elc = child as HTMLElement;
+          if (elc.style.transform) {
+            elc.style.transition = "transform 240ms var(--motion-ease)";
+            elc.style.transform = "";
+          }
+        }
+      });
+    }
+  }, [decks, listRef]);
+}
+
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const nextId = useRef(0);
+  const deckRef = useRef<HTMLDivElement>(null);
 
   const push = useCallback((message: string, type: ToastType) => {
     setToasts((cur) => [...cur, { id: ++nextId.current, type, message }]);
@@ -103,12 +143,18 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     setToasts((cur) => cur.filter((t) => t.id !== id));
   }, []);
 
+  useFlipDeck(toasts, deckRef);
+
   return (
     <ToastContext.Provider value={api}>
       {children}
       {createPortal(
-        // 容器 pointer-events-none:不挡右下角空区;每条 toast 重新接管点击(关按钮)。
-        <div className="pointer-events-none fixed bottom-4 right-4 z-[60] flex w-80 max-w-[calc(100vw-2rem)] flex-col gap-2">
+        // 右上堆叠(flex-col-reverse:最新在顶,新入场把旧消息向下挤);
+        // pointer-events-none 容器不挡点击,每条 toast 重新接管(关闭按钮)。
+        <div
+          ref={deckRef}
+          className="pointer-events-none fixed right-4 top-24 z-[60] flex w-80 max-w-[calc(100vw-2rem)] flex-col-reverse gap-2"
+        >
           {toasts.map((t) => (
             <div key={t.id} className="pointer-events-auto">
               <ToastRow item={t} onGone={handleGone} />

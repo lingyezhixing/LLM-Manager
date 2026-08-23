@@ -144,11 +144,11 @@ export function CalendarRangePicker({
 
   return (
     <>
-      {/* click-outside backdrop */}
+      {/* click-outside backdrop(z-15:高于 sticky 保存栏 z-10,避免同层 DOM 顺序竞态) */}
       <button
         type="button"
         aria-label="关闭"
-        className="fixed inset-0 z-10 cursor-default"
+        className="fixed inset-0 z-15 cursor-default"
         onClick={onClose}
       />
       <div className="absolute right-0 top-full z-20 mt-1 flex gap-5 rounded-lg border border-border bg-card p-3 shadow-card">

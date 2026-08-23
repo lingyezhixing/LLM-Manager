@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Field, NumberInput, Select, Switch, TextInput } from "@/components/ui/form";
 import { numFromStr as num, portError } from "@/lib/format";
@@ -6,8 +6,10 @@ import { StringListEditor } from "@/components/ui/repeatable-fields";
 import { PricingEditor } from "@/components/system/pricing-editor";
 import { SchemeEditor } from "@/components/system/scheme-editor";
 import { useConfirm } from "@/lib/hooks/use-confirm";
-import { type ModelDef, type ModelWriteResult, type SchemeDef } from "@/lib/api";
-import { useCreateModelDef, useUpdateModelDef } from "@/lib/hooks/use-model-defs";
+import { useToast } from "@/lib/hooks/use-toast";
+import { errMsg } from "@/lib/format";
+import { type ModelDef, type ModelWriteResult, type SchemeDef, updateModelDef } from "@/lib/api";
+import { useCreateModelDef, useRestartModel, useUpdateModelDef } from "@/lib/hooks/use-model-defs";
 import { useSyncedForm } from "@/lib/hooks/use-synced-form";
 import { MODES, clientValid, cleanPayload, clone, deepEqual, emptyModel, emptyScheme } from "@/lib/model-def";
 
@@ -38,10 +40,13 @@ export function ModelDefForm({ model, onSaved, onDirtyChange, onDelete }: ModelD
   }, [dirty, onDirtyChange]);
 
   const confirm = useConfirm();
+  const toast = useToast();
+  const [confirming, setConfirming] = useState(false);
   const update = useUpdateModelDef(model?.name ?? "");
   const create = useCreateModelDef();
+  const restart = useRestartModel();
   const mutation = isCreate ? create : update;
-  const saving = mutation.isPending;
+  const saving = mutation.isPending || confirming;
   const errorMsg = mutation.error ? (mutation.error as Error).message : null;
 
   const portValid = portError(form.port) === null;
@@ -59,9 +64,29 @@ export function ModelDefForm({ model, onSaved, onDirtyChange, onDelete }: ModelD
       schemes: [...form.schemes, emptyScheme()],
     });
 
-  const doUpdate = (migrate: boolean) => {
+  const doUpdate = async (migrate: boolean) => {
     const payload = cleanPayload(form);
     setForm(payload);
+
+    // 先预检(不落库):目标模型运行中 → 必须二选一(确认=落库+重启;取消=零副作用)。
+    // 预检共用真实写的一切校验(如运行中改名 409)→ 异常直接反馈,不吞。
+    let preview: ModelWriteResult;
+    try {
+      preview = await updateModelDef(model!.name, payload, migrate, true);
+    } catch (e) {
+      toast.error(errMsg(e));
+      return;
+    }
+    if (preview.affected_routing.length > 0) {
+      const served = preview.affected_routing[0];
+      const ok = await confirm({
+        title: `保存后将重启模型 ${served}`,
+        description: `模型「${served}」正在运行,配置变更重启该模型后生效。`,
+        confirmText: "保存并重启",
+        cancelText: "取消(不保存)",
+      });
+      if (!ok) return;
+    }
     // F1:baseline 仅在保存成功后推进,失败时 dirty 不丢。
     update.mutate(
       { body: payload, migrate },
@@ -69,6 +94,12 @@ export function ModelDefForm({ model, onSaved, onDirtyChange, onDelete }: ModelD
         onSuccess: (result) => {
           commit(clone(payload));
           onSaved(result, payload.name);   // 传新名:改名后 panel 切到新名
+          if (preview.affected_routing.length > 0) {
+            restart.mutate(preview.affected_routing[0], {
+              onSuccess: () => toast.success(`已重启 ${preview.affected_routing[0]}`),
+              onError: (e: unknown) => toast.error(errMsg(e)),
+            });
+          }
         },
       },
     );
@@ -76,45 +107,39 @@ export function ModelDefForm({ model, onSaved, onDirtyChange, onDelete }: ModelD
 
   const onSave = async () => {
     if (saving) return;   // 防重复提交(保存按钮已 disable,此为函数级双保险)
-    if (isCreate) {
-      const payload = cleanPayload(form);
-      setForm(payload);
-      create.mutate(payload, {
-        onSuccess: () => {
-          commit(clone(payload));
-          onSaved({ affected_routing: [], hint: null }, payload.name);
-        },
-      });
-      return;
-    }
-    // 编辑态改名(精确比较,与后端 body.name != name 一致——单边 trim 会造成前后端判定不一致):
-    // 询问是否迁移历史数据(二元;false=不迁移但仍保存)
-    if (form.name !== model!.name) {
-      const migrate = await confirm({
-        title: "改名:是否迁移历史数据?",
-        description: "两种都会保存改名。迁移 → 用量/成本/日志归到新名,统计连续;不迁移 → 旧名变孤立模型、新名从零。",
-        confirmText: "迁移",
-        cancelText: "不迁移(保留旧名)",
-      });
-      doUpdate(migrate);
-    } else {
-      doUpdate(false);
+    setConfirming(true);
+    try {
+      if (isCreate) {
+        const payload = cleanPayload(form);
+        setForm(payload);
+        create.mutate(payload, {
+          onSuccess: () => {
+            commit(clone(payload));
+            onSaved({ affected_routing: [], hint: null }, payload.name);
+          },
+        });
+        return;
+      }
+      // 编辑态改名(精确比较,与后端 body.name != name 一致——单边 trim 会造成前后端判定不一致):
+      // 询问是否迁移历史数据(二元;false=不迁移但仍保存)
+      if (form.name !== model!.name) {
+        const migrate = await confirm({
+          title: "改名:是否迁移历史数据?",
+          description: "两种都会保存改名。迁移 → 用量/成本/日志归到新名,统计连续;不迁移 → 旧名变孤立模型、新名从零。",
+          confirmText: "迁移",
+          cancelText: "不迁移(保留旧名)",
+        });
+        await doUpdate(migrate);
+      } else {
+        await doUpdate(false);
+      }
+    } finally {
+      setConfirming(false);
     }
   };
 
   return (
     <div className="relative pb-6">
-      {/* 右上角提示浮层:保存失败 / 保存条件未满足(不与右下浮动按钮争空间) */}
-      {(errorMsg || !canSave) && (
-        <div className="absolute right-0 top-0 z-20 w-64 rounded-lg border border-border bg-card px-3 py-2 text-xs shadow-lg">
-          {errorMsg && <p className="text-destructive">{errorMsg}</p>}
-          {!canSave && (
-            <p className={errorMsg ? "mt-1 text-warning" : "text-warning"}>
-              需:名称、≥1 别名、≥1 方案(每方案:标识与命令行非空)、端口 1–65535
-            </p>
-          )}
-        </div>
-      )}
       <div className="mb-1 text-sm font-medium text-foreground">基本</div>
       {/* 名称行 4:2:2:1:1(名称/模式/端口/自启动/删除);创建态无删除,末格留白保比例。 */}
       <div className="grid grid-cols-1 gap-x-6 sm:grid-cols-10">
@@ -186,9 +211,17 @@ export function ModelDefForm({ model, onSaved, onDirtyChange, onDelete }: ModelD
       <div className="mb-1 mt-4 text-sm font-medium text-foreground">计费</div>
       <PricingEditor value={form.pricing} onChange={(pricing) => set("pricing", pricing)} />
 
-      {/* 右下角浮动保存/重置(仅 dirty/创建态显示):高频操作,滚动时始终可见。 */}
+      {/* 右下角浮动保存/重置(仅 dirty/创建态显示):高频操作,滚动时始终可见。
+          校验/保存失败提示行内展示于此栏(不再 overlay 名称行右上的删除按钮)。 */}
       {(dirty || isCreate) && (
         <div className="sticky bottom-4 z-10 mt-3 flex flex-col items-end gap-2">
+          {(errorMsg || !canSave) && (
+            <p className="max-w-80 text-right text-xs text-destructive">
+              {errorMsg
+                ? `保存失败:${errorMsg}`
+                : "需:名称、≥1 别名、≥1 方案(每方案:标识与命令行非空)、端口 1–65535"}
+            </p>
+          )}
           <Button type="button" variant="outline" onClick={() => reset()}>
             重置
           </Button>

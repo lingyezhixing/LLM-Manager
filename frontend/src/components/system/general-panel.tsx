@@ -1,15 +1,17 @@
-import { type ReactNode, useMemo } from "react";
+import { type ReactNode, useMemo, useState } from "react";
 import { ConfigSaveBar } from "@/components/config-save-bar";
 import { Loading } from "@/components/ui/card";
 import { ErrorState } from "@/components/ui/error-state";
 import { Field, NumberInput, Select, TextInput } from "@/components/ui/form";
 import { errMsg, numFromStr as num, portError } from "@/lib/format";
 import { useToast } from "@/lib/hooks/use-toast";
+import { useConfirm } from "@/lib/hooks/use-confirm";
 import { LogRetentionEditor } from "@/components/system/log-retention-editor";
 import { SystemOverview } from "@/components/system/system-overview";
-import { type LogRetention, type ProgramConfig } from "@/lib/api";
+import { type ConfigWriteResult, type LogRetention, type ProgramConfig, updateProgram } from "@/lib/api";
 import {
   useConfig,
+  useRestartApp,
   useUpdateLogRetention,
   useUpdateProgram,
 } from "@/lib/hooks/use-config";
@@ -52,10 +54,13 @@ function FieldGrid({ children }: { children: ReactNode }) {
 }
 
 export function GeneralPanel() {
+  const [confirming, setConfirming] = useState(false);
   const { data, isLoading, isError, error, refetch } = useConfig();
   const update = useUpdateProgram();
   const updateLogs = useUpdateLogRetention();
   const toast = useToast();
+  const confirm = useConfirm();
+  const { triggerRestart } = useRestartApp();
   const serverForm = useMemo<GeneralForm | null>(
     () => (data ? { program: data.program, logs: data.logs } : null),
     [data],
@@ -81,28 +86,63 @@ export function GeneralPanel() {
   const aliveValid = form.program.alive_time >= 0;
   const set = (p: ProgramConfig) => setForm({ ...form, program: p });
   const setLogs = (l: LogRetention) => setForm({ ...form, logs: l });
-  const saving = update.isPending || updateLogs.isPending;
+  const saving = update.isPending || updateLogs.isPending || confirming;
   const saveError = update.error ?? updateLogs.error;
 
-  const onSave = () => {
-    const pDirty = !sameProgram(form.program, baseline!.program);
-    const lDirty = !sameLogs(form.logs, baseline!.logs);
-    let toasted = false;
-    if (pDirty) {
-      update.mutate(form.program, {
-        onSuccess: () => {
-          advance((base) => ({ ...base!, program: form.program }));
-          if (!toasted) { toasted = true; toast.success("系统配置已保存"); }
-        },
-      });
-    }
-    if (lDirty) {
-      updateLogs.mutate(form.logs, {
-        onSuccess: () => {
-          advance((base) => ({ ...base!, logs: form.logs }));
-          if (!toasted) { toasted = true; toast.success("系统配置已保存"); }
-        },
-      });
+  const onSave = async () => {
+    if (saving) return;   // 确认窗期间禁止连点(防重复预检/确认排队)
+    setConfirming(true);
+    try {
+      const pDirty = !sameProgram(form.program, baseline!.program);
+      const lDirty = !sameLogs(form.logs, baseline!.logs);
+      let toasted = false;
+      const gotoSavedToast = () => {
+        if (!toasted) {
+          toasted = true;
+          toast.success("系统配置已保存");
+        }
+      };
+      if (pDirty) {
+        // 先预检(不落库):是否涉及重启字段 → 有则必须二选一(确认后落库+重启;取消=零副作用)。
+        let preview: ConfigWriteResult;
+        try {
+          preview = await updateProgram(form.program, true);
+        } catch (e) {
+          toast.error(errMsg(e));
+          return;
+        }
+        if (preview.restart_fields.length > 0) {
+          const ok = await confirm({
+            title: "保存将要求程序重启",
+            description:
+              `以下变更生效需重启:${preview.restart_fields.join("、")}` +
+              (preview.serving.length > 0
+                ? `。当前正在服务的模型(${preview.serving.join("、")})会被重启中断。`
+                : "。") +
+              "重启后继续服务,配置即刻生效。",
+            confirmText: "保存并重启",
+            cancelText: "取消(不保存)",
+          });
+          if (!ok) return;
+        }
+        update.mutate(form.program, {
+          onSuccess: () => {
+            advance((base) => ({ ...base!, program: form.program }));
+            gotoSavedToast();
+            if (preview.restart_fields.length > 0) triggerRestart();
+          },
+        });
+      }
+      if (lDirty) {
+        updateLogs.mutate(form.logs, {
+          onSuccess: () => {
+            advance((base) => ({ ...base!, logs: form.logs }));
+            gotoSavedToast();
+          },
+        });
+      }
+    } finally {
+      setConfirming(false);
     }
   };
 

@@ -124,19 +124,20 @@ export async function createModelDef(body: ModelDef): Promise<void> {
 }
 
 // migrate_data:仅改名(body.name≠路径 name)时生效——true=把历史用量/成本/日志迁到新名。
+// dryRun=true:只做校验+affected_routing 检测,不落库(「预检→确认→落库」流专用)。
 export async function updateModelDef(
   name: string,
   body: ModelDef,
   migrate_data = false,
+  dryRun = false,
 ): Promise<ModelWriteResult> {
-  return apiJson<ModelWriteResult>(
-    `/api/config/models/${encodeURIComponent(name)}?migrate_data=${migrate_data}`,
-    {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    },
-  );
+  const params = new URLSearchParams({ migrate_data: String(migrate_data) });
+  if (dryRun) params.set("dry_run", "true");
+  return apiJson<ModelWriteResult>(`/api/config/models/${encodeURIComponent(name)}?${params}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
 }
 
 export async function deleteModelDef(name: string): Promise<void> {

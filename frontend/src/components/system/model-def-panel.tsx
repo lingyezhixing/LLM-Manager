@@ -6,16 +6,17 @@ import { ErrorState } from "@/components/ui/error-state";
 import { byPort, errMsg } from "@/lib/format";
 import { useToast } from "@/lib/hooks/use-toast";
 import { ModelDefForm } from "@/components/system/model-def-form";
-import { useDeleteModelDef, useModelDef, useModelDefs, useRestartModel } from "@/lib/hooks/use-model-defs";
+import { useDeleteModelDef, useModelDef, useModelDefs } from "@/lib/hooks/use-model-defs";
 import type { ModelWriteResult } from "@/lib/api";
 
-// 模型定义 CRUD 面板:顶部选择带 + 下方详情(新建/编辑/删除)+ 编辑后按模型重启提示。
+// 模型定义 CRUD 面板:顶部选择带 + 下方详情(新建/编辑/删除)。
+// 「保存是否需重启模型」由 ModelDefForm 保存流内预检确认(先检测后落库),panel 只管
+// 列表与切换;编辑保存后若涉及重启,form 内链式发起 restart(状态经 SSE 回映)。
 // selected:undefined=未选(默认第一个);null=创建态;string=已选模型。
 export function ModelDefPanel() {
   const list = useModelDefs();
   const [selected, setSelected] = useState<string | null | undefined>(undefined);
   const [createNonce, setCreateNonce] = useState(0);
-  const [hint, setHint] = useState<{ name: string; served: string } | null>(null);
   const dirtyRef = useRef(false);
   const confirm = useConfirm();
   const toast = useToast();
@@ -24,7 +25,6 @@ export function ModelDefPanel() {
   const effSelected = selected === undefined ? (items[0]?.name ?? null) : selected;
   const detail = useModelDef(effSelected);
   const del = useDeleteModelDef();
-  const restart = useRestartModel();
 
   // 切换前 dirty 守卫(M9):dirty 则确认。
   const guard = async (): Promise<boolean> =>
@@ -40,13 +40,11 @@ export function ModelDefPanel() {
   const selectModel = async (name: string) => {
     if (name === effSelected) return;
     if (!(await guard())) return;
-    setHint(null);
     setSelected(name);
   };
   const startCreate = async () => {
     if (selected === null) return;
     if (!(await guard())) return;
-    setHint(null);
     setSelected(null);
     setCreateNonce((n) => n + 1);
   };
@@ -63,23 +61,16 @@ export function ModelDefPanel() {
     if (!ok) return;
     del.mutate(name, {
       onSuccess: () => {
-        setHint(null);
         setSelected(undefined);
         dirtyRef.current = false;
         toast.success(`已删除模型「${name}」`);
       },
     });
   };
-  const onSaved = (result: ModelWriteResult, name: string) => {
+  const onSaved = (_result: ModelWriteResult, name: string) => {
     dirtyRef.current = false;
-    const wasCreate = selected === null;
-    if (result.hint === "restart_model" && result.affected_routing.length > 0) {
-      setHint({ name, served: result.affected_routing[0] });
-    } else {
-      setHint(null);
-    }
     setSelected(name);   // 新建/改名 → 切到该名;普通保存 name=当前选中,setSelected 无副作用
-    toast.success(wasCreate ? `已创建模型「${name}」` : "已保存");
+    toast.success("已保存");
   };
 
   const formKey = typeof effSelected === "string" ? effSelected : `new-${createNonce}`;
@@ -161,38 +152,8 @@ export function ModelDefPanel() {
         </div>
       </div>
 
-      {/* 右栏:重启提示 + 详情表单(删除按钮在表单名称行内),随页面滚动 */}
+      {/* 右栏:详情表单(删除按钮在表单名称行内),随页面滚动;保存确认流在表单内 */}
       <div>
-        {hint && (
-          <div className="mb-4 flex flex-wrap items-center gap-3 rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-sm">
-            <span className="text-foreground">
-              配置已保存 · 运行中实例(<span className="font-medium">{hint.served}</span>)需重启生效
-            </span>
-            <Button
-              size="sm"
-              onClick={() =>
-                restart.mutate(hint.served, {
-                  onSuccess: () => {
-                    setHint(null);
-                    toast.success(`已重启 ${hint.served}`);
-                  },
-                  onError: (e: unknown) => toast.error(errMsg(e)),
-                })
-              }
-              disabled={restart.isPending}
-            >
-              {restart.isPending ? "重启中…" : "重启"}
-            </Button>
-            <button
-              type="button"
-              className="text-xs text-muted-foreground hover:text-foreground"
-              onClick={() => setHint(null)}
-            >
-              忽略
-            </button>
-          </div>
-        )}
-
         {formArea}
       </div>
     </div>

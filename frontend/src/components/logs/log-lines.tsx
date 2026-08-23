@@ -144,7 +144,7 @@ export function LogLines({ h }: { h: LogLinesView }) {
         {blocks}
         {showJump && (
           <button onClick={h.backToLive}
-            className="absolute bottom-3 right-3.5 rounded-full bg-primary px-3 py-1 text-dense font-medium text-primary-foreground shadow-card hover:opacity-90">
+            className="absolute bottom-2.5 right-2 z-20 rounded-full bg-primary px-3 py-1 text-dense font-medium text-primary-foreground shadow-card hover:opacity-90">
             {jumpLabel}
           </button>
         )}

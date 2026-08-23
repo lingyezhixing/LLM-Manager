@@ -5,7 +5,7 @@ import { GeneralPanel } from "@/components/system/general-panel";
 import { ModelDefPanel } from "@/components/system/model-def-panel";
 import { RestartBanner } from "@/components/system/restart-banner";
 import { ZoneNav } from "@/components/ui/nav-tabs";
-import { useRestartApp, useRestartStatus } from "@/lib/hooks/use-config";
+import { useConfig, useRestartApp, useRestartStatus, useUpdateProgram } from "@/lib/hooks/use-config";
 
 type SystemZone = "general" | "models" | "database";
 const ZONES: readonly { key: SystemZone; label: string }[] = [
@@ -17,22 +17,31 @@ const ZONES: readonly { key: SystemZone; label: string }[] = [
 export default function SystemPage() {
   const [zone, setZone] = useState<SystemZone>("general");
   const { data: rs } = useRestartStatus();
+  const { data: cfg } = useConfig();
   const { triggerRestart, restarting, pending, error: restartError } = useRestartApp();
-  const fieldsKey = rs?.restart_fields.join(",") ?? "";
-  const [dismissedKey, setDismissedKey] = useState<string | null>(null);
-  const showBanner = !!rs?.needs_restart && dismissedKey !== fieldsKey;
+  const restore = useUpdateProgram();
+
+  const onRestore = () => {
+    const rp = cfg?.running_program;
+    if (!rp) return;
+    restore.mutate({
+      host: rp.host,
+      port: rp.port,
+      log_level: rp.log_level,
+      claude_settings_path: rp.claude_settings_path,
+    });
+  };
 
   return (
     <>
-      {showBanner && rs && (
-        <RestartBanner
-          restartFields={rs.restart_fields}
-          serving={rs.serving}
-          onDismiss={() => setDismissedKey(fieldsKey)}
-          onRestart={triggerRestart}
-          restarting={restarting || pending}
-        />
-      )}
+      {rs?.needs_restart && <RestartBanner
+        restartFields={rs.restart_fields}
+        serving={rs.serving}
+        onRestart={triggerRestart}
+        onRestore={onRestore}
+        restarting={restarting || pending}
+        restoring={restore.isPending}
+      />}
       {restartError && (
         <div className="mb-4 flex flex-wrap items-center gap-3 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
           <span>{restartError}</span>

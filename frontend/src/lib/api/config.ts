@@ -25,6 +25,8 @@ export interface LogRetention {
 
 export interface ConfigResponse {
   program: ProgramConfig;
+  /** 当前运行实例的 program(启动期捕获):「保存前预检」与「恢复运行值」的依据。 */
+  running_program: ProgramConfig;
   wol: WolConfig | null;
   claude: Record<string, Record<string, string>>;
   logs: LogRetention;
@@ -72,10 +74,14 @@ export async function restartApp(): Promise<void> {
   await apiJson<void>("/api/config/restart", { method: "POST" });
 }
 
-export async function updateProgram(body: ProgramUpdate): Promise<ConfigWriteResult> {
-  return apiJson<ConfigWriteResult>("/api/config/program", {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
+// dryRun=true:只做冲突检测(restart_fields),不落库——「预检→确认→落库」流专用。
+export async function updateProgram(body: ProgramUpdate, dryRun = false): Promise<ConfigWriteResult> {
+  return apiJson<ConfigWriteResult>(
+    `/api/config/program${dryRun ? "?dry_run=true" : ""}`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    },
+  );
 }

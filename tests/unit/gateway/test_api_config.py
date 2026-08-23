@@ -71,12 +71,46 @@ def test_put_program_writes_and_reports_restart_on_port_change(tmp_path):
         assert c.get("/api/config").json()["program"]["port"] == 9000
 
 
-def test_put_program_hot_field_no_restart(tmp_path):
+def test_put_program_mains_hot_field_no_restart(tmp_path):
     with TestClient(_app(tmp_path)) as c:
         r = c.put("/api/config/program", json={"alive_time": 5})
     assert r.status_code == 200
     assert r.json()["needs_restart"] is False  # alive_time 热字段
     assert r.json()["restart_fields"] == []
+
+
+def test_put_program_dry_run_previews_without_writing(tmp_path):
+    """dry_run:与真实写同形的冲突检测(port → restart_fields),但不落库。"""
+    with TestClient(_app(tmp_path)) as c:
+        r = c.put(
+            "/api/config/program",
+            json={"port": 9000, "host": "127.0.0.1"},
+            params={"dry_run": "true"},
+        )
+        assert r.status_code == 200
+        j = r.json()
+        assert set(j["restart_fields"]) == {"port", "host"}
+        assert j["needs_restart"] is True
+        # 未写入:重启后仍是 8080/0.0.0.0
+        assert c.get("/api/config").json()["program"]["port"] == 8080
+        assert c.get("/api/config").json()["program"]["host"] == "0.0.0.0"
+
+
+def test_put_program_dry_run_empty_body_reports_current_diff(tmp_path):
+    """空 body 的 dry_run:不模拟任何变更,返回「当前库 vs 运行实例」的真实差异。"""
+    with TestClient(_app(tmp_path)) as c:
+        c.put("/api/config/program", json={"port": 9000})  # 先造已保存未生效(旧语义)
+        r = c.put("/api/config/program", json={}, params={"dry_run": "true"})
+    assert r.json()["restart_fields"] == ["port"]
+
+
+def test_get_config_includes_running_program(tmp_path):
+    """GET /config 返回 running_program(启动期捕获的运行值),供「恢复运行值」回退。"""
+    app = _app(tmp_path)
+    with TestClient(app) as c:
+        j = c.get("/api/config").json()
+    rp = j["running_program"]
+    assert rp["host"] == "0.0.0.0" and rp["port"] == 8080 and rp["log_level"] == "INFO"
 
 
 def test_put_program_rejects_bad_port(tmp_path):
@@ -581,6 +615,43 @@ def test_put_model_def_routing_returns_hint(tmp_path):
     j = r.json()
     assert j["affected_routing"] == ["m-served"]  # served name(aliases[0])
     assert j["hint"] == "restart_model"
+    state._reset()
+
+
+def test_put_model_def_dry_run_previews_without_writing(tmp_path):
+    """dry_run:运行中模型编辑 → affected_routing 同形返回,但与改名拦截/校验同语义,不落库。"""
+    from llm_manager import state
+    from llm_manager.state import ModelStatus
+
+    state._reset()
+    with TestClient(_app(tmp_path)) as c:
+        c.post("/api/config/models", json=_def_body("M", 8000, aliases=["m-served"]))
+        state.set_status("M", ModelStatus.ROUTING, force=True)
+        r = c.put(
+            "/api/config/models/M",
+            json=_def_body("M", 9000, aliases=["m-served"]),
+            params={"dry_run": "true"},
+        )
+        assert r.status_code == 200
+        j = r.json()
+        assert j["hint"] == "restart_model"
+        assert j["affected_routing"] == ["m-served"]
+        # 未写入:端口仍未变
+        assert c.get("/api/config/models/M").json()["port"] == 8000
+        # dry_run 不改名但模型运行中:改名拦截仍 409
+        r2 = c.put(
+            "/api/config/models/M",
+            json=_def_body("N", 8000, aliases=["m-served"]),
+            params={"dry_run": "true"},
+        )
+        assert r2.status_code == 409
+        # dry_run 校验仍跑(端口非法 → 422)
+        r3 = c.put(
+            "/api/config/models/M",
+            json=_def_body("M", 99999, aliases=["m-served"]),
+            params={"dry_run": "true"},
+        )
+        assert r3.status_code == 422
     state._reset()
 
 
