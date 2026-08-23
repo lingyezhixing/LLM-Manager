@@ -15,13 +15,17 @@ const LOG_LINE_LEVEL_COLOR: Record<string, string> = {
 
 type LogLinesView = ReturnType<typeof useLogViewer>;
 
-/** 单行渲染(memo 避免块级虚拟化重渲染) */
+/** 单行渲染(memo 避免块级虚拟化重渲染)。pre-wrap + break-all:超长行自动折行,
+ * 不允许页面向右膨胀(容器列 minmax(0,1fr) 已约束,双保险)。
+ * flex + 时间戳 shrink-0:换行后继续文本从时间戳右侧开始(悬挂缩进),行从属清晰。 */
 const LogRow = memo<{ l: { id: number; ts: number; text: string; level: string }; isMatch: boolean; isCurrent: boolean }>(
   ({ l, isMatch, isCurrent }) => (
     <div data-line-id={l.id}
-      className={`${LOG_LINE_LEVEL_COLOR[l.level]} -mx-1 whitespace-nowrap rounded px-1 ${isCurrent ? "bg-warning/30 ring-1 ring-warning" : isMatch ? "bg-warning/10" : ""}`}>
-      <span className="text-muted-foreground/50">{new Date(l.ts * 1000).toLocaleTimeString("zh-CN", { hour12: false })} </span>
-      {l.text}
+      className={`${LOG_LINE_LEVEL_COLOR[l.level]} -mx-1 flex gap-1.5 rounded px-1 ${isCurrent ? "bg-warning/30 ring-1 ring-warning" : isMatch ? "bg-warning/10" : ""}`}>
+      <span className="shrink-0 tabular-nums text-muted-foreground/50">
+        {new Date(l.ts * 1000).toLocaleTimeString("zh-CN", { hour12: false })}
+      </span>
+      <span className="min-w-0 flex-1 whitespace-pre-wrap break-all">{l.text}</span>
     </div>
   ),
 );

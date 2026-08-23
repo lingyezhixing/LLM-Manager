@@ -68,8 +68,9 @@ export default function LogsPage() {
           </select>
         )}
       </NavTabs>
-      {/* 主从 */}
-      <div className="grid min-h-0 flex-1 grid-cols-[260px_1fr] gap-3">
+      {/* 主从。右列 minmax(0,1fr):grid 1fr 轨道 min 为 auto,日志行再折行也会把
+          列撑宽导致页面横向膨胀;minmax(0,·) 强制轨道不缩于 0(行内折行/滚动)。 */}
+      <div className="grid min-h-0 flex-1 grid-cols-[260px_minmax(0,1fr)] gap-3">
         <div className="overflow-y-auto rounded-lg border border-border bg-card">
           {sessionsQ.isLoading ? <div className="p-4"><Loading /></div>
             : <SessionList sessions={sessions} selectedId={selectedId} onSelect={setSelectedId} />}

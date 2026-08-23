@@ -17,13 +17,17 @@ interface LogApi {
   streamUrl: (level?: string) => string;
   fetchPage: (before: number, limit: number, level?: string) => Promise<LogLine[]>;
   search: (q: string, level?: string) => Promise<LogSearch>;
+  /** 已知会话已结束(日志页列表 status=ended):跳过 SSE(避免对历史会话发
+   *  stream 请求的 404 噪音),直接在订阅初始化时回退页加载。 */
+  ended?: boolean;
 }
 
-function sessionLogApi(sessionId: number): LogApi {
+function sessionLogApi(sessionId: number, ended = false): LogApi {
   return {
     streamUrl: (level) => `/api/logs/sessions/${sessionId}/stream${level ? `?level=${level}` : ""}`,
     fetchPage: (before, limit, level) => fetchSessionLines(sessionId, before, limit, level),
     search: (q, level) => searchSessionLogs(sessionId, q, level),
+    ended,
   };
 }
 
@@ -226,6 +230,20 @@ export function useLogViewer(api: LogApi | null, runKey: number | null) {
     if (!api) return;   // 无会话(模型未启动 / 定位中):视图已重置,保持空态
     const gen = ++genRef.current;   // H1:代次递增——旧代次在途回调发现代次不符即丢弃
     let receivedAny = false;   // 本次订阅是否收到过行
+    // 已结束会话:跳过 SSE,回退页顶替(消除流端点 404 噪音)。onerror 回退逻辑复用
+    // fetchPage(MAX, WINDOW) 路径——两者同形,gen 守卫一致防代次错位。
+    const fallback = () => {
+      api.fetchPage(Number.MAX_SAFE_INTEGER, WINDOW, levelParam)
+        .then((page) => {
+          if (genRef.current !== gen) return;  // H1:代次已变(重订阅),丢弃旧回退页
+          dispatch({ t: "fallback", page });
+        })
+        .catch(() => { /* best-effort */ });
+    };
+    if (api.ended) {
+      fallback();
+      return () => undefined;   // 无 EventSource 需关闭;代次守卫由下一次订阅的 ++ 完成
+    }
     const es = new EventSource(api.streamUrl(levelParam));
     es.onmessage = (ev) => {
       try {
@@ -239,12 +257,7 @@ export function useLogViewer(api: LogApi | null, runKey: number | null) {
       if (receivedAny) return;          // 运行中会话的瞬时错误:EventSource 自行重连,不回退
       // 已结束会话:stream 端点 404 → error 且不会重连(规范:非 200 直接 fail)。
       // 运行中会话的首连瞬时错误:回退页先顶上,重连成功后的回填由 id 守卫去重,实时尾照常。
-      api.fetchPage(Number.MAX_SAFE_INTEGER, WINDOW, levelParam)
-        .then((page) => {
-          if (genRef.current !== gen) return;  // H1:代次已变(重订阅),丢弃旧回退页
-          dispatch({ t: "fallback", page });
-        })
-        .catch(() => { /* best-effort */ });
+      fallback();
     };
     return () => es.close();
   }, [api, levelParam, runKey]);
@@ -415,7 +428,7 @@ export function useModelLogs(alias: string, runKey: number | null, enabled = tru
 }
 
 /** 单会话日志(日志查看页)。runKey 恒 null——切会话由父级 key={sessionId} 重建组件。 */
-export function useSessionLogs(sessionId: number) {
-  const api = useMemo(() => sessionLogApi(sessionId), [sessionId]);
+export function useSessionLogs(sessionId: number, ended = false) {
+  const api = useMemo(() => sessionLogApi(sessionId, ended), [sessionId, ended]);
   return useLogViewer(api, null);
 }
