@@ -1,4 +1,4 @@
-import { useRef, useState, type MouseEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent } from "react";
 
 import type { UsageSeries } from "@/lib/api";
 import { formatTokens } from "@/lib/format";
@@ -14,6 +14,38 @@ const H = 192;   // 240 的 4/5:两页曲线图统一缩减高度(视觉平衡)
 const PAD = { l: 44, r: 16, t: 16, b: 28 };
 const PLOT_W = W - PAD.l - PAD.r;
 const PLOT_H = H - PAD.t - PAD.b;
+
+// 工具卡定位参数:与光标间距 / 容器留白 / 翻转滞回(防临界抖动)。
+const TIP_GAP = 14;
+const TIP_MARGIN = 8;
+const TIP_HYST = 20;
+
+type TipPlacement = { left: number; top: number; mode: "right" | "left" };
+
+/** 工具卡定位:优先放光标右侧,右侧放不下时翻转到光标左侧(带滞回,防临界抖动)。
+ *  宽度只来自测量值 size,与鼠标位置完全解耦——宽度随鼠标位置变化正是此前
+ *  "卡片随鼠标右移而越移越窄"bug 的根因,因此这里绝不按剩余空间约束宽度。 */
+function tipPlacement(
+  pos: { x: number; y: number },
+  size: { w: number; h: number },
+  cw: number,
+  ch: number,
+  prevMode: string | null,
+): TipPlacement {
+  const w = size.w > 0 ? size.w : 120;
+  const h = size.h > 0 ? size.h : 0;
+  let fitsRight = pos.x + TIP_GAP + w <= cw - TIP_MARGIN;
+  if (prevMode === "left") fitsRight = pos.x + TIP_GAP + w <= cw - TIP_MARGIN - TIP_HYST;
+  const mode: "right" | "left" = fitsRight ? "right" : "left";
+  const left = fitsRight ? pos.x + TIP_GAP : pos.x - w - TIP_GAP;
+  let top = pos.y + TIP_GAP;
+  if (h > 0 && top + h > ch - TIP_MARGIN) top = Math.max(TIP_MARGIN, ch - h - TIP_MARGIN);
+  return {
+    left: Math.max(TIP_MARGIN, Math.min(left, cw - w - TIP_MARGIN)),
+    top,
+    mode,
+  };
+}
 
 type Pt = [number, number];
 
@@ -96,13 +128,34 @@ export function TokenChart({
   formatY?: (n: number) => string;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const tooltipRef = useRef<HTMLDivElement>(null);
   const [hidden, setHidden] = useState<Set<string>>(new Set());
   const [hover, setHover] = useState<number | null>(null);
   const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
+  const [tipSize, setTipSize] = useState({ w: 0, h: 0 });
+  const prevModeRef = useRef<string | null>(null);
 
   const { buckets, total, models } = data;
   const modelNames = Object.keys(models);
   const n = buckets.length;
+
+  // 测量 tooltip 实际宽高(内容/可见模型变化后更新);setState 函数式 + 值未变返回原引用,
+  // 配合依赖列表不会产生更新循环。置于早期 return 之前保证无条件调用。
+  useLayoutEffect(() => {
+    const el = tooltipRef.current;
+    if (!el) return;
+    const w = el.offsetWidth;
+    const h = el.offsetHeight;
+    setTipSize((s) => (s.w === w && s.h === h ? s : { w, h }));
+  }, [hover, models, total, hidden]);
+
+  // 提交后记录当前放置侧(right/left),供下帧判定翻转(触发翻转动画)与滞回。
+  useEffect(() => {
+    if (hover === null || pos === null) return;
+    const cw = containerRef.current?.clientWidth ?? 0;
+    const ch = containerRef.current?.clientHeight ?? 0;
+    prevModeRef.current = tipPlacement(pos, tipSize, cw, ch, prevModeRef.current).mode;
+  }, [hover, pos, tipSize]);
 
   if (n === 0) {
     return <div className="flex h-[160px] items-center justify-center text-sm text-muted-foreground">暂无数据</div>;
@@ -152,6 +205,20 @@ export function TokenChart({
     setPos(null);
   };
 
+  // 工具卡跟随光标:右侧放不下时翻转到光标左侧。翻转(侧别变化)那一帧带位移过渡,
+  // 形成"滑动到鼠标另一侧"的动效;同侧内跟随无过渡(瞬贴)。宽度始终为自然测量值。
+  let tipLeft: number | null = null;
+  let tipTop: number | null = null;
+  let flipping = false;
+  if (hover !== null && pos !== null) {
+    const cw = containerRef.current?.clientWidth ?? 0;
+    const ch = containerRef.current?.clientHeight ?? 0;
+    const p = tipPlacement(pos, tipSize, cw, ch, prevModeRef.current);
+    flipping = prevModeRef.current !== null && prevModeRef.current !== p.mode;
+    tipLeft = p.left;
+    tipTop = p.top;
+  }
+
   return (
     <div ref={containerRef} className="relative text-muted-foreground">
       {/* legend */}
@@ -200,8 +267,16 @@ export function TokenChart({
       </svg>
 
       {/* cursor-following tooltip */}
-      {hover !== null && pos !== null && (
-        <div className="pointer-events-none absolute z-10 min-w-[120px] rounded-md border border-border bg-card px-2 py-1 text-xs shadow-sm" style={{ left: pos.x + 14, top: pos.y + 14 }}>
+      {hover !== null && pos !== null && tipLeft !== null && tipTop !== null && (
+        <div
+          ref={tooltipRef}
+          className="pointer-events-none absolute z-10 min-w-[120px] rounded-md border border-border bg-card px-2 py-1 text-xs shadow-sm"
+          style={{
+            left: tipLeft,
+            top: tipTop,
+            transition: flipping ? "left 150ms ease-out, top 150ms ease-out" : "none",
+          }}
+        >
           <div className="mb-0.5 text-foreground">{fmtTs(buckets[hover], preset)}</div>
           <div>
             总量 <span className="text-foreground">{formatY(total[hover])}</span>
