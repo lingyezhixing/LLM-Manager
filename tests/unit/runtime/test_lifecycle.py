@@ -368,6 +368,86 @@ async def test_eviction_executed_then_cold_start_reaches_routing_g5():
     assert state.get_status("m2") == ModelStatus.ROUTING
 
 
+def _multi_scheme(dev_a, mem_a, dev_b, mem_b, name="m1", exe_b="run_b.cmd"):
+    """构造两个方案的模型:方案 A(所需设备/显存)在前,方案 B 在后,启动命令可区分。"""
+    return ModelConfig(
+        aliases=(name,),
+        mode="Chat",
+        port=8000,
+        schemes={
+            "A": Scheme(
+                config_source="A",
+                required_devices=frozenset({dev_a}),
+                command=Command(exe="run_a.cmd"),
+                memory_mb={dev_a: mem_a} if dev_a else {},
+            ),
+            "B": Scheme(
+                config_source="B",
+                required_devices=frozenset({dev_b}),
+                command=Command(exe=exe_b),
+                memory_mb={dev_b: mem_b} if dev_b else {},
+            ),
+        },
+    )
+
+
+async def test_scheme_fallback_when_first_memory_infeasible():
+    """首个方案设备在线但显存不足(无可驱逐)→ 回退到显存足够的第二方案。"""
+    m = _multi_scheme(dev_a="rtx 4060", mem_a=8192, dev_b="rtx 4060", mem_b=512, exe_b="run_b.cmd")
+    dev = FakeDevices(online={"rtx 4060"}, snap={"rtx 4060": _dev("rtx 4060", 1024)})
+    life, sup, _, _ = _make(dev=dev, models=[m])
+    status = await life.ensure_running("m1")
+    assert status == ModelStatus.ROUTING
+    assert life._active_schemes["m1"].config_source == "B"
+    assert sup.spawned[0] == ["run_b.cmd"]
+
+
+async def test_scheme_fallback_exhausted_fails():
+    """方案 A 显存不足、方案 B 设备不在线 → 全部不适用,FAILED(不误启动)。"""
+    m = _multi_scheme(dev_a="rtx 4060", mem_a=8192, dev_b="offline", mem_b=512)
+    dev = FakeDevices(online={"rtx 4060"}, snap={"rtx 4060": _dev("rtx 4060", 1024)})
+    life, sup, _, _ = _make(dev=dev, models=[m])
+    status = await life.ensure_running("m1")
+    assert status == ModelStatus.FAILED
+    assert len(sup.spawned) == 0
+
+
+async def test_scheme_device_fallback_then_memory_ok():
+    """方案 A 设备不在线 → 回退到设备在线的方案 B,显存满足,spawn B。"""
+    m = _multi_scheme(dev_a="offline", mem_a=512, dev_b="rtx 4060", mem_b=512, exe_b="run_b.cmd")
+    dev = FakeDevices(online={"rtx 4060"}, snap={"rtx 4060": _dev("rtx 4060", 4096)})
+    life, sup, _, _ = _make(dev=dev, models=[m])
+    status = await life.ensure_running("m1")
+    assert status == ModelStatus.ROUTING
+    assert life._active_schemes["m1"].config_source == "B"
+    assert sup.spawned[0] == ["run_b.cmd"]
+
+
+async def test_scheme_fallback_with_eviction_for_second_scheme():
+    """方案 A 驱逐全部仍不足 → 回退方案 B;B 需驱逐空闲模型才满足 → 驱逐后 spawn B。"""
+    m = _multi_scheme(dev_a="d", mem_a=8192, dev_b="d", mem_b=4096, exe_b="run_b.cmd")
+    sup = FakeSupervisor()
+    dev = FakeDevices(online={"d"}, snap={"d": _dev("d", 2048)})
+    orig_kill = sup.kill_tree
+
+    async def kill_releases(pid, *a, **kw):
+        r = await orig_kill(pid, *a, **kw)
+        dev.freed_mb["d"] = dev.freed_mb.get("d", 0) + 2048
+        return r
+
+    sup.kill_tree = kill_releases
+    # r1 已在运行(占 d 2048,空闲),为 m1 的 B 方案腾显存
+    r1 = _model("r1", port=9000, dev="d", mem=2048)
+    life, _, _, _ = _make(sup=sup, dev=dev, models=[r1, m])
+    await life.ensure_running("r1")
+    r1_pid = state.get_pid("r1")
+    status = await life.ensure_running("m1")
+    assert status == ModelStatus.ROUTING
+    assert life._active_schemes["m1"].config_source == "B"
+    assert r1_pid in sup.killed  # B 方案驱逐了 r1
+    assert sup.spawned[-1] == ["run_b.cmd"]
+
+
 def test_illegal_transition_raises_value_error():
     # F2: 非法转移(不经 force)抛 ValueError
     state._reset()

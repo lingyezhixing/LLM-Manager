@@ -55,14 +55,18 @@ def check_and_free(
     snap: dict[str, DeviceInfo],
     runnable: dict[str, RunnableInfo],
     now: float,
-) -> list[str]:
+) -> list[str] | None:
     """Simulate eviction until deficit satisfied or no evictable candidate.
-    Returns model names to stop (in eviction order). Pure.
+    Returns model names to stop (in eviction order); [] when no eviction needed
+    (deficit empty from the start); None when the deficit cannot be satisfied
+    even after evicting all evictable candidates. Pure.
 
-    若驱逐所有可驱逐模型后 deficit 仍非空(资源根本不足),返回 []——lifecycle 随后
-    _deficit_satisfied 判 FAILED。这样不会「白停一批正在跑的模型后才失败」(B5)。
-    注:真实停模型后重快照可能因实际占用 ≠ 声明 memory_mb 而更乐观,但不应以此不确定性
-    赌注杀运行中模型;配置应保证 memory_mb 准确。"""
+    驱逐语义:仅「占用缺口设备 + 无 pending 请求」的模型可驱逐(有请求的不能动,
+    没占用缺口设备的驱逐也无效);加权 = idle_sec / mem_gb 降序,逐一下场。
+    返回 None(而非 [])让调用方区分「无需驱逐即满足」与「驱逐后仍欠」——后者可
+    回退到下一方案,而非白停一批模型后失败(B5)。注:真实停模型后重快照可能因
+    实际占用 ≠ 声明 memory_mb 而更乐观,但不应以此不确定性赌注杀运行中模型;
+    配置应保证 memory_mb 准确。"""
     working = _available(snap)
     deficit_devs = set(compute_deficit(required, working))
     stopped: list[str] = []
@@ -76,5 +80,5 @@ def check_and_free(
             working[dev] = working.get(dev, 0) + mb
         deficit_devs = set(compute_deficit(required, working))
     if deficit_devs:
-        return []  # 模拟无可满足:不返回部分驱逐名单(白停),交由 lifecycle 判 FAILED
+        return None  # 模拟无可满足:不返回部分驱逐名单(白停),交由调用方回退/判 FAILED
     return stopped

@@ -95,16 +95,23 @@ def test_check_and_free_stops_as_soon_as_satisfied():
 def test_check_and_free_never_evicts_pending():
     snap = {"d": _dev("d", 0)}
     runnable = {"a": RunnableInfo(mem_mb={"d": 4096}, pending=1, last_access=0.0)}
-    assert check_and_free({"d": 4096}, snap, runnable, now=0.0) == []
+    assert check_and_free({"d": 4096}, snap, runnable, now=0.0) is None
 
 
-def test_check_and_free_returns_empty_when_no_evictable():
+def test_check_and_free_returns_none_when_no_evictable():
     snap = {"d": _dev("d", 0)}
-    assert check_and_free({"d": 4096}, snap, {}, now=0.0) == []
+    assert check_and_free({"d": 4096}, snap, {}, now=0.0) is None
 
 
-def test_check_and_free_returns_empty_when_partial_eviction_cannot_satisfy():
-    # 可驱逐模型只能凑 2048,deficit 4096 仍欠 → 不应白停它(B5:返回 [] 交 lifecycle 判 FAILED)
+def test_check_and_free_returns_none_when_partial_eviction_cannot_satisfy():
+    # 可驱逐模型只能凑 2048,deficit 4096 仍欠 → 返回 None(不白停),调用方可回退下一方案
     snap = {"d": _dev("d", 0)}
     runnable = {"a": RunnableInfo(mem_mb={"d": 2048}, pending=0, last_access=0.0)}
-    assert check_and_free({"d": 4096}, snap, runnable, now=0.0) == []
+    assert check_and_free({"d": 4096}, snap, runnable, now=0.0) is None
+
+
+def test_check_and_free_ignores_models_off_deficit_devices():
+    # 占用别的设备的模型驱逐无效(腾不出缺口设备),且不应被列入
+    snap = {"d1": _dev("d1", 0)}
+    runnable = {"a": RunnableInfo(mem_mb={"d2": 2048}, pending=0, last_access=0.0)}
+    assert check_and_free({"d1": 4096}, snap, runnable, now=0.0) is None

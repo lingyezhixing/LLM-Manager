@@ -24,7 +24,6 @@ from llm_manager.config import (
     Scheme,
     required_devices,
     resolve_alias,
-    select_adaptive,
     substitute_vars,
 )
 from llm_manager.data import logs as _logs
@@ -46,7 +45,6 @@ class Lifecycle:
         supervisor,
         devices,
         probes: dict[str, Callable],
-        scheme_select=select_adaptive,
         startup_timeout: float = 60.0,
         db: Db | None = None,
     ) -> None:
@@ -54,7 +52,6 @@ class Lifecycle:
         self._supervisor = supervisor
         self._devices = devices
         self._probes = probes
-        self._scheme_select = scheme_select
         self.startup_timeout = startup_timeout
         self._db = db
         self._stop_events: dict[str, asyncio.Event] = {}
@@ -173,38 +170,68 @@ class Lifecycle:
             return ModelStatus.STOPPED
 
         online = self._devices.online_devices()
-        scheme = self._scheme_select(model, online)
-        if scheme is None:
-            # 消息带 required vs online 对比:可区分「设备真离线」与「required 名不匹配」
-            # (匹配=token 全子集,如 'rtx4060' 拆不成 {rtx,4060} 永远不匹配)
-            required = sorted(required_devices(model))
-            msg = f"no adaptive scheme (required {required}, online {sorted(online)})"
-            logger.warning("%s: %s", alias, msg)
-            state.record_failure(alias, msg)
-            return ModelStatus.FAILED
-        logger.info(
-            "cold start %s scheme=%s devices=%s",
-            alias,
-            scheme.config_source,
-            sorted(scheme.required_devices),
-        )
+        required = sorted(required_devices(model))
 
-        # === spawn 锁:check_and_free + spawn 串行,避免并发 spawn 显存超量 ===
+        # === 多方案回退:按序尝试每个「所需设备全在线」的方案;选中后做显存检查——
+        # 不足则按加权驱逐占用同设备且无请求的空闲模型,驱逐后仍不足则回退下一方案,
+        # 直到启动成功或方案用尽失败。 ===
         async with self._spawn_lock:
-            snap = self._devices.snapshot()
-            runnable = self._runnable(exclude=alias)
-            to_stop = scheduling.check_and_free(scheme.memory_mb, snap, runnable, time.monotonic())
-            if to_stop:
-                logger.info("evict %s to free mem for %s", list(to_stop), alias)
-                await asyncio.gather(*[self.stop(n) for n in to_stop], return_exceptions=True)
-                await asyncio.to_thread(self._devices.refresh)
-                snap = self._devices.snapshot()  # re-snapshot after eviction
-            if not self._deficit_satisfied(scheme.memory_mb, snap):
-                logger.warning("%s: insufficient resource after eviction", alias)
-                state.record_failure(alias, "insufficient resource after eviction")
+            chosen: Scheme | None = None
+            for scheme in model.schemes.values():
+                if ev.is_set():
+                    return ModelStatus.STOPPED
+                if not (scheme.required_devices <= online):
+                    logger.info(
+                        "%s: scheme %s skipped (devices offline)", alias, scheme.config_source
+                    )
+                    continue
+                snap = self._devices.snapshot()
+                runnable = self._runnable(exclude=alias)
+                to_stop = scheduling.check_and_free(
+                    scheme.memory_mb, snap, runnable, time.monotonic()
+                )
+                if to_stop is None:
+                    logger.info(
+                        "%s: scheme %s insufficient memory (all evictable exhausted), fallback",
+                        alias,
+                        scheme.config_source,
+                    )
+                    continue
+                if to_stop:
+                    logger.info(
+                        "evict %s to free mem for %s (scheme %s)",
+                        list(to_stop),
+                        alias,
+                        scheme.config_source,
+                    )
+                    await asyncio.gather(*[self.stop(n) for n in to_stop], return_exceptions=True)
+                    await asyncio.to_thread(self._devices.refresh)
+                    snap = self._devices.snapshot()  # re-snapshot after eviction
+                if not self._deficit_satisfied(scheme.memory_mb, snap):
+                    logger.info(
+                        "%s: scheme %s still insufficient after eviction (real occupancy), fallback",
+                        alias,
+                        scheme.config_source,
+                    )
+                    continue
+                chosen = scheme
+                break
+            if chosen is None:
+                # 消息带 required vs online 对比:可区分「设备真离线」与「required 名不匹配」
+                # (匹配=token 全子集,如 'rtx4060' 拆不成 {rtx,4060} 永远不匹配)
+                msg = f"no adaptive scheme (required {required}, online {sorted(online)})"
+                logger.warning("%s: %s", alias, msg)
+                state.record_failure(alias, msg)
                 return ModelStatus.FAILED
+            scheme = chosen
             if ev.is_set():
                 return ModelStatus.STOPPED
+            logger.info(
+                "cold start %s scheme=%s devices=%s",
+                alias,
+                scheme.config_source,
+                sorted(scheme.required_devices),
+            )
 
             c = scheme.command
             # 变量替换({{port}}/{{alias}}):顶部端口/别名修改自动传导到启动命令;无占位符原样。
