@@ -16,13 +16,15 @@ export function ConfigSaveBar({
   saveDisabled?: boolean;
 }) {
   return (
-    <div className="mt-2 flex items-center gap-3">
-      <Button size="sm" onClick={onSave} disabled={saving || saveDisabled}>
-        {saving ? "保存中…" : "保存"}
-      </Button>
-      <Button size="sm" variant="ghost" onClick={onReset} disabled={saving}>
-        重置
-      </Button>
+    <div className="mt-2 flex flex-col items-end gap-2">
+      <div className="flex items-center gap-3">
+        <Button size="sm" onClick={onSave} disabled={saving || saveDisabled}>
+          {saving ? "保存中…" : "保存"}
+        </Button>
+        <Button size="sm" variant="ghost" onClick={onReset} disabled={saving}>
+          重置
+        </Button>
+      </div>
       {error && <span className="text-xs text-destructive">{error}</span>}
     </div>
   );
