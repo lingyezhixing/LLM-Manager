@@ -140,7 +140,54 @@ class _StreamSample:
         return bytes(self._head) + bytes(self._tail)
 
 
-async def _stream_wrapper(resp, path, model, db, request_start):
+class _StreamGuard:
+    """流式 pending 收尾编排(幂等),双通道:
+
+    - 生成器 finally(「已启动」路径):同步 finish 最先(后续 aclose/record 的 await
+      抛异常也不丢),然后撤销断连监听。
+    - 断连监听(「从未启动」风险路径):客户端断连时 uvicorn 的 receive 恒返回
+      http.disconnect(无论响应是否已开始发送)。监听任务在请求存活期间可靠拿到
+      该消息并即时收尾。
+
+    因此收尾锚定在「事件循环任务」而非「对象生命周期」:asyncio 的 asyncgen
+    finalizer 会把从未关闭的生成器挂起到 loop 关闭(宿主进程运行期间不触发),
+    基于 GC()__del__ 的兜底在常驻服务中不可靠,故不使用。"""
+
+    def __init__(self, request: Request | None, model: str) -> None:
+        self._model = model
+        self._done = False
+        self._task: asyncio.Task | None = None
+        if request is not None:
+            self._task = asyncio.get_running_loop().create_task(self._watch(request))
+
+    async def _watch(self, request: Request) -> None:
+        try:
+            while True:
+                msg = await request.receive()
+                if msg is None:
+                    return
+                if msg.get("type") == "http.disconnect":
+                    self.finish()
+                    return
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001, S110
+            pass
+
+    def finish(self) -> None:
+        if self._done:
+            return
+        self._done = True
+        from llm_manager import state
+
+        state.end_request(self._model)
+
+    def cancel_watch(self) -> None:
+        if self._task is not None:
+            self._task.cancel()
+
+
+async def _stream_wrapper(resp, path, model, db, request_start, guard: _StreamGuard | None = None):
     from llm_manager import state
 
     sample = _StreamSample()
@@ -149,12 +196,25 @@ async def _stream_wrapper(resp, path, model, db, request_start):
             sample.feed(chunk)
             yield chunk
     finally:
-        await resp.aclose()
+        if guard is not None:
+            guard.finish()
+            guard.cancel_watch()
+        else:
+            state.end_request(model)
         await _record_usage(db, model, path, sample.sample(), request_start, time.time())
-        state.end_request(model)
+        await resp.aclose()
+
+
+def _reject_absolute_url_path(path: str) -> None:
+    """SSRF 守卫:catch-all {path:path} 剥前导 /,故请求 /http://evil.com/x 到达时
+    path 恰为绝对 URL,httpx build_request 对绝对 URL 原样外发(绕开 base_url)。
+    含 :// 的一律 400(相对子路径/空路径不含,照常转发)。"""
+    if "://" in path:
+        raise HTTPException(400, "absolute URLs not allowed in proxy path")
 
 
 async def forward(request: Request, path: str, lifecycle, cfg, db, client_pool) -> Response:
+    _reject_absolute_url_path(path)
     from llm_manager import state
     from llm_manager.state import ModelStatus
 
@@ -199,7 +259,9 @@ async def forward(request: Request, path: str, lifecycle, cfg, db, client_pool) 
             )
             streamed = True
             return StreamingResponse(
-                _stream_wrapper(resp, path, primary, db, request_start),
+                _stream_wrapper(
+                    resp, path, primary, db, request_start, guard=_StreamGuard(request, primary)
+                ),
                 status_code=resp.status_code,
                 headers=_strip_headers(resp.headers, extra=("connection", "content-encoding")),
             )

@@ -337,8 +337,10 @@ def register_config_routes(api: APIRouter) -> None:
         from llm_manager import state
         from llm_manager.state import ModelStatus
 
-        if state.get_status(name) == ModelStatus.ROUTING:
-            raise HTTPException(409, f"model '{name}' is routing; stop it before deleting")
+        if state.get_status(name) not in (ModelStatus.STOPPED, ModelStatus.FAILED):
+            raise HTTPException(
+                409, f"model '{name}' is {state.get_status(name).value}; stop it before deleting"
+            )
         aliases = cfg.models[name].aliases  # 快照仍在,先取别名(删日志匹配用)
         try:
             mutate_appconfig(get_db(request), lambda c: _delete_model(c, name))

@@ -44,6 +44,79 @@ def test_on_exit_callback_fires_when_process_exits():
     asyncio.run(main())
 
 
+def test_on_exit_late_registration_after_cleanup_is_noop():
+    """/#3 迟注册(进程已退出、表已清)不得重建《永清条目》:on_exit 幂等拒绝,否则
+    _exit_cbs 中有永不触发回调的键,且 kill_tree/_wait 的清表逻辑被绕开。"""
+
+    seen = []
+
+    async def main():
+        sup = Supervisor()
+        rec = await sup.spawn([sys.executable, "-c", "pass"])
+        for _ in range(100):  # 等自然退出 + 表清理
+            if rec.pid not in sup._procs:
+                break
+            await asyncio.sleep(0.02)
+        assert rec.pid not in sup._procs  # 已清理
+        sup.on_exit(rec.pid, lambda c: seen.append(c))
+        assert rec.pid not in sup._exit_cbs  # 迟到注册被拒绝
+
+    asyncio.run(main())
+    assert seen == []
+
+
+def test_kill_tree_blocking_sync_runs_in_thread():
+    """#5 kill_tree 的 psutil 同步段(枚举 + wait_procs ≤3s)必须在 asyncio.to_thread
+    执行:若直接跑在协程体内,阻塞期间事件循环冻结(心跳/idle/日志广播全部停滞)。"""
+
+    async def main():
+        import time as _t
+
+        from llm_manager import supervisor as _sup
+
+        class FakeProc:
+            def __init__(self, pid):
+                self._pid = pid
+
+            def children(self, recursive=True):
+                return []
+
+            def kill(self):
+                pass
+
+        def fake_wait_procs(procs, timeout=None):
+            for _ in range(60):  # 模拟 0.3s 阻塞(> 多个 tick 周期)
+                _t.sleep(0.005)
+            return [procs[0]], []
+
+        ticks = 0
+
+        async def ticker():
+            nonlocal ticks
+            while True:
+                ticks += 1
+                await asyncio.sleep(0.01)
+
+        orig_process, orig_wait = _sup.psutil.Process, _sup.psutil.wait_procs
+        try:
+            _sup.psutil.Process = FakeProc
+            _sup.psutil.wait_procs = fake_wait_procs
+            sup = Supervisor()
+            tick_task = asyncio.create_task(ticker())
+            await asyncio.sleep(0.05)
+            before = ticks
+            assert await sup.kill_tree(12345)
+            synced_ticks = ticks - before
+            tick_task.cancel()
+        finally:
+            _sup.psutil.Process = orig_process
+            _sup.psutil.wait_procs = orig_wait
+
+        assert synced_ticks >= 10  # 阻塞期间 loop 持续推进(修复前被冻结 ≈ 0)
+
+    asyncio.run(main())
+
+
 def test_kill_tree_clears_process_tables():
     """#5:kill_tree 后 _procs/_exit_cbs 清(_wait 自清 _wait_tasks),防 start/stop 循环累积 Popen 句柄/内存。"""
 

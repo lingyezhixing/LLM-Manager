@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import re
 import threading
@@ -200,9 +199,10 @@ def _enqueue(session_id: int, text: str, stream: str, level: str, ts: float) -> 
         trigger = len(_pending) >= BATCH_SIZE
     if trigger:
         try:
+            from llm_manager.bgtask import run as _bgtask_run
             from llm_manager.data.logs import pipeline as _pipeline
 
-            asyncio.get_running_loop().create_task(_pipeline.flush())
+            _bgtask_run(_pipeline.flush())
         except RuntimeError:
             pass  # 无运行 loop(测试/启动早期)→ 由 flush_loop 定时兜底
 

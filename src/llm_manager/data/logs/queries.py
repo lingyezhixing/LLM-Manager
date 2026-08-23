@@ -144,7 +144,10 @@ def log_sessions(
     before_id = id < before_id 的翻页。
 
     live_ids = 内存中仍在运行的会话 id(由调用方传入)。
-    """
+
+    #7 子查询先取页面会话再聚合:原「全表 GROUP BY → ORDER BY → LIMIT」在行数大时
+    (日志保 N 天积累)每次列表页全量聚合扫描;改后 LIMIT 先作用于 log_sessions
+    (主键 id 逆序,代价 O(页)),LEFT JOIN 仅聚合页面内会话。"""
     live = live_ids or set()
     status_args: list[int] = list(live)
     if live:
@@ -154,19 +157,20 @@ def log_sessions(
         status_sql = "'ended'"  # 无运行中会话(如刚启动)→ 全 ended
     sql = (
         "SELECT s.*, COUNT(l.id) AS line_count, " + status_sql + " AS status "
-        "FROM log_sessions s LEFT JOIN log_lines l ON l.session_id = s.id WHERE 1=1"
+        "FROM (SELECT * FROM log_sessions WHERE 1=1"
     )
     args: list = status_args  # SELECT 里的 IN 占位符在 SQL 中最先出现
     if type_ is not None:
-        sql += " AND s.type = ?"
+        sql += " AND type = ?"
         args.append(type_)
     if model_name is not None:
-        sql += " AND s.model_name = ?"
+        sql += " AND model_name = ?"
         args.append(model_name)
     if before_id is not None:
-        sql += " AND s.id < ?"
+        sql += " AND id < ?"
         args.append(before_id)
-    sql += " GROUP BY s.id ORDER BY s.id DESC LIMIT ?"
+    sql += " ORDER BY id DESC LIMIT ?)"
+    sql += " s LEFT JOIN log_lines l ON l.session_id = s.id GROUP BY s.id ORDER BY s.id DESC"
     args.append(max(1, min(limit, 500)))
     return db.conn.execute(sql, args).fetchall()
 

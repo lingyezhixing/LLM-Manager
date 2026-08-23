@@ -9,14 +9,13 @@ in frontend/src/lib/api/models.ts).
 
 from __future__ import annotations
 
-import asyncio
 from collections.abc import AsyncIterator
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 
-from llm_manager import config, state
+from llm_manager import bgtask, config, state
 from llm_manager.gateway.aliases import resolve_alias_checked
 from llm_manager.gateway.api.common import get_config_store, sse_frame
 from llm_manager.realtime import ModelFeed
@@ -93,7 +92,7 @@ def register_models_routes(router: APIRouter, lifecycle) -> None:
         primary = resolve_alias_checked(get_config_store(request).snapshot(), alias)
         if state.is_runnable(primary):
             raise HTTPException(409, f"model '{alias}' already routing")
-        asyncio.create_task(
+        bgtask.run(
             lifecycle.ensure_running(primary)
         )  # fire-and-forget;状态走 /api/models/stream SSE
         return Response(status_code=202)
@@ -101,11 +100,11 @@ def register_models_routes(router: APIRouter, lifecycle) -> None:
     @router.post("/models/{alias}/stop", status_code=202)
     async def stop_model(alias: str, request: Request) -> Response:
         primary = resolve_alias_checked(get_config_store(request).snapshot(), alias)
-        asyncio.create_task(lifecycle.stop(primary))  # 运行=停止 / 启动中=中断(协作 stop_event)
+        bgtask.run(lifecycle.stop(primary))  # 运行=停止 / 启动中=中断(协作 stop_event)
         return Response(status_code=202)
 
     @router.post("/models/{alias}/restart", status_code=202)
     async def restart_model(alias: str, request: Request) -> Response:
         primary = resolve_alias_checked(get_config_store(request).snapshot(), alias)
-        asyncio.create_task(_do_restart(lifecycle, primary))  # 读穿:lifecycle 取新配置;状态走 SSE
+        bgtask.run(_do_restart(lifecycle, primary))  # 读穿:lifecycle 取新配置;状态走 SSE
         return Response(status_code=202)

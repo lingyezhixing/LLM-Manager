@@ -157,6 +157,7 @@ npx tsc -b           # 仅类型检查
 | `data.logs` | `_db` / `_sessions` / `_alias_to_session` / `_pending`(live.py)+ `_flush_chain`(pipeline.py) | 日志会话 live 集 + alias↔会话映射 + 待落库 + flush 串行链 |
 | `data.usage` | `_live_segments`(record.py)/ `_c`(counters.py) | 运行中计费段(崩溃随进程消失)+ 进程内用量计数器(重启清零,概览 session-stats 卡) |
 | `devices` | `_LHM_COMPUTER`(LibreHardwareMonitor) | Windows GPU/CPU 传感器单例;Linux Intel iGPU 走 i915 + intel_gpu_top 采样、AMD 走 amdgpu sysfs(均无单例) |
+| `bgtask` | `_background` | fire-and-forget 任务强引用集合(asyncio 弱引用追踪有被 GC 理论风险);done 回调即时移除,不累积 |
 
 测试接缝:state 有 `_reset()`、logs 有 `reset()`、usage 有 `_reset_counters()`(session 计数);
 usage 的 `_live_segments` 由 `tests/unit/data/test_persistence.py` 的本地 fixture 直接清。

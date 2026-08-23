@@ -265,6 +265,10 @@ class Lifecycle:
             except Exception:
                 logger.warning("log session start failed for %s", alias, exc_info=True)
 
+            # === exit 回调立即注册:#3 probe 窗口内崩溃 → 回调兜到 FAILED,
+            # 而非死 pid 假成功进 ROUTING;亦无迟注册(表清后重建《永清条目》)。 ===
+            self._supervisor.on_exit(rec.pid, lambda code: self._on_crash(alias, code))
+
             # === post-spawn 无-await 临界段 ===
             state.record_pid(alias, rec.pid)
             orphan_pid = rec.pid if ev.is_set() else None
@@ -307,10 +311,18 @@ class Lifecycle:
             # === set-ROUTING 无-await 临界段 ===
             if ev.is_set():
                 return await self._abort_spawned(rec.pid)
+            if not self._supervisor.alive(rec.pid):
+                # #3 复查存活:probe 假成功(端口被占但进程已死)→ 不得置 ROUTING。
+                await self._supervisor.kill_tree(rec.pid)
+                self._log_end(alias)  # 与 cb 收口对称,幂等
+                if state.get_status(alias) != ModelStatus.FAILED:
+                    state.record_failure(
+                        alias, "process dead before routing (probe false positive)"
+                    )
+                return ModelStatus.FAILED
             state.set_status(alias, ModelStatus.ROUTING)
             state.touch_activity(alias)
             self._runtime_start(alias)
-            self._supervisor.on_exit(rec.pid, lambda code: self._on_crash(alias, code))
             logger.info("%s -> routing", alias)
             return ModelStatus.ROUTING
         except (Exception, asyncio.CancelledError):

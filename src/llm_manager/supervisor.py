@@ -136,6 +136,10 @@ class Supervisor:
         self._wait_tasks.pop(pid, None)
 
     def on_exit(self, pid: int, cb: Callable[[int], None]) -> None:
+        # 迟注册(进程已退出,wait/kill_tree 已清表)不得重建《永清条目》:表里没有
+        # 该 pid 就不会再有回调被执行,塞进去只会积累永不触发的键(见 #3)。
+        if pid not in self._procs:
+            return
         self._exit_cbs[pid] = cb
 
     def alive(self, pid: int) -> bool:
@@ -147,19 +151,25 @@ class Supervisor:
         except Exception:  # noqa: BLE001
             return False
 
+    def _kill_sync(self, pid: int) -> bool | None:
+        """同步段(to_thread 执行):枚举进程组 + kill + wait_procs(≤3s)。
+        返回 True = 进程组已清;None/异常 = 需要兜底(taskkill/killpg)。"""
+        parent = psutil.Process(pid)
+        children = parent.children(recursive=True)
+        for c in children:
+            try:
+                c.kill()
+            except psutil.NoSuchProcess:
+                pass
+        parent.kill()
+        _, alive = psutil.wait_procs([parent] + children, timeout=3)
+        return not alive
+
     async def kill_tree(self, pid: int) -> bool:
         try:
             try:
-                parent = psutil.Process(pid)
-                children = parent.children(recursive=True)
-                for c in children:
-                    try:
-                        c.kill()
-                    except psutil.NoSuchProcess:
-                        pass
-                parent.kill()
-                _, alive = psutil.wait_procs([parent] + children, timeout=3)
-                if not alive:
+                killed = await asyncio.to_thread(self._kill_sync, pid)
+                if killed:
                     return True
             except psutil.NoSuchProcess:
                 return True

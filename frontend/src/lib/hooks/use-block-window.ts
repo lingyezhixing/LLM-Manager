@@ -50,7 +50,10 @@ export function useBlockWindow(
     );
     root.querySelectorAll<HTMLElement>("[data-block]").forEach((el) => io.observe(el));
     return () => io.disconnect();
-  });
+    // #8 依赖 [visible](而非无依赖数组):块列表是「占位+真实行」全量渲染且 key 稳定,
+    // 无需随每帧渲染重建 observer;visible 变化时重连即捕获新挂载块(真实块替换占位块
+    // 复用同一 DOM 节点,搜索跳转 mount(b) 亦经 setVisible → 重连兜住)。
+  }, [visible, scrollRef]);
 
   const nBlocks = Math.ceil(total / BLOCK);
 

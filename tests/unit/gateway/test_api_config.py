@@ -584,6 +584,21 @@ def test_put_model_def_routing_returns_hint(tmp_path):
     state._reset()
 
 
+def test_delete_model_def_starting_409(tmp_path):
+    """/#4 启动中(STARTING,非 ROUTING)删除 → 409:孤儿进程(活着但无配置、无法手动
+    停)。与改名拦截口径一致:一切非 STOPPED/FAILED 活跃态都拒删。"""
+    from llm_manager import state
+    from llm_manager.state import ModelStatus
+
+    state._reset()
+    with TestClient(_app(tmp_path)) as c:
+        c.post("/api/config/models", json=_def_body("M"))
+        state.set_status("M", ModelStatus.STARTING, force=True)
+        r = c.delete("/api/config/models/M")
+        assert r.status_code == 409
+    state._reset()
+
+
 def test_delete_model_def_removes(tmp_path):
     with TestClient(_app(tmp_path)) as c:
         c.post("/api/config/models", json=_def_body("M"))

@@ -300,6 +300,102 @@ class FakeLifecycle:
         return self._status
 
 
+async def test_forward_rejects_absolute_url_in_path():
+    """#1 SSRF:catch-all 路由 {path:path} 剥前导 / 后,path 可为绝对 URL
+    (httpx build_request 对绝对 URL 原样外发,绕开 base_url)。入口必须 400 拒绝,
+    且拒绝发生在 begin_request 之前(pending 不被触碰)。"""
+    state._reset()
+    evil_sent = []
+
+    def handler(req):
+        evil_sent.append(str(req.url))
+        return httpx.Response(200)
+
+    client = httpx.AsyncClient(
+        base_url="http://127.0.0.1:8000", transport=httpx.MockTransport(handler)
+    )
+    db = open_db(Path(":memory:"))
+    req = _make_request("POST", "http://evil.com/x", {"model": "m1"})
+    with pytest.raises(HTTPException) as ei:
+        await proxy.forward(req, "http://evil.com/x", FakeLifecycle(), _cfg(), db, {8000: client})
+    assert ei.value.status_code == 400
+    assert evil_sent == []  # 从未外发
+    assert state.pending_count("m1") == 0
+    await client.aclose()
+
+
+async def test_forward_allows_relative_subpath():
+    """合法子路径(无 scheme)不被 400;转发照常。"""
+    state._reset()
+
+    def handler(req):
+        return httpx.Response(200, json={"ok": True})
+
+    client = httpx.AsyncClient(
+        base_url="http://127.0.0.1:8000", transport=httpx.MockTransport(handler)
+    )
+    db = open_db(Path(":memory:"))
+    req = _make_request("POST", "v1/messages", {"model": "m1", "stream": False})
+    resp = await proxy.forward(req, "v1/messages", FakeLifecycle(), _cfg(), db, {8000: client})
+    assert resp.status_code == 200
+    assert state.pending_count("m1") == 0
+    await client.aclose()
+
+
+async def test_stream_wrapper_never_started_guard_closes_on_disconnect():
+    """#2 客户端在首帧前断连:生成器从未被迭代 → finally 不可达 → pending 永久>0
+    (idle 回收失效)。guard 断连监听(receive → http.disconnect)必须即时收尾,
+    不依赖生成器启动/GC。"""
+    state._reset()
+    state.set_status("m1", ModelStatus.ROUTING, force=True)
+    state.begin_request("m1")
+
+    class FakeResp:
+        headers = {"content-type": "text/event-stream"}  # noqa: RUF012 — 测试桩,类属性只读
+
+        async def aiter_bytes(self):
+            while True:
+                await asyncio.sleep(60)
+                yield b"x"
+
+        async def aclose(self):
+            pass
+
+    class FakeRequest:
+        async def receive(self):
+            return {"type": "http.disconnect"}
+
+    db = open_db(Path(":memory:"))
+    guard = proxy._StreamGuard(FakeRequest(), "m1")
+    gen = proxy._stream_wrapper(FakeResp(), "v1/chat/completions", "m1", db, 1.0, guard=guard)
+    await asyncio.sleep(0)  # watch 任务跑到 receive → disconnect → finish
+    assert state.pending_count("m1") == 0
+    gen.aclose()
+    guard.cancel_watch()
+
+
+async def test_stream_wrapper_aclose_raises_still_ends_request():
+    """#2 收尾顺序:finally 中 await(aclose/record)任一个抛异常,不得连带丢掉
+    end_request——同步收尾必须最先。"""
+    state._reset()
+    state.set_status("m1", ModelStatus.ROUTING, force=True)
+    state.begin_request("m1")
+
+    class RaiseResp:
+        headers = {"content-type": "text/event-stream"}  # noqa: RUF012 — 测试桩,类属性只读
+
+        async def aiter_bytes(self):
+            yield b'data: {"usage":{"prompt_tokens":2,"completion_tokens":3}}\n\n'
+
+        async def aclose(self):
+            raise ConnectionError("upstream closed")
+
+    db = open_db(Path(":memory:"))
+    with pytest.raises(ConnectionError):
+        [c async for c in proxy._stream_wrapper(RaiseResp(), "v1/chat/completions", "m1", db, 1.0)]
+    assert state.pending_count("m1") == 0
+
+
 async def test_forward_non_stream_records_usage_and_ends_request():
     state._reset()
 

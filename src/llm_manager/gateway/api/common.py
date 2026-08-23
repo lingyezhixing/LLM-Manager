@@ -9,7 +9,7 @@ from pathlib import Path
 from fastapi import Request
 from pydantic import BaseModel
 
-from llm_manager import RESTART_EXIT_CODE
+from llm_manager import RESTART_EXIT_CODE, bgtask
 from llm_manager.config import AppConfig
 from llm_manager.data.config_store import ConfigStore
 from llm_manager.data.persistence import Db
@@ -78,11 +78,11 @@ def trigger_restart(request: Request) -> None:
             await asyncio.sleep(0.5)
             server.should_exit = True
 
-        asyncio.create_task(_delayed_exit())
+        bgtask.run(_delayed_exit())
     else:
 
         async def _dev_exit() -> None:
             await asyncio.sleep(0.5)
             os._exit(RESTART_EXIT_CODE)
 
-        asyncio.create_task(_dev_exit())
+        bgtask.run(_dev_exit())

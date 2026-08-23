@@ -296,6 +296,21 @@ async def test_insufficient_resource_marks_failed():
     assert status == ModelStatus.FAILED
 
 
+async def test_crash_during_probe_window_does_not_enter_routing():
+    """/#3 probe 窗口内进程崩溃 → exit 回调已在 spawn 后注册(现缺失:注册于 probe
+    成功之后,窗口内崩溃 → 死 pid 假成功进 ROUTING)。期望 FAILED。"""
+    sup = FakeSupervisor()
+
+    def killed_probe(alias, port, start_time=None, timeout=60):
+        sup.alive_pids.clear()  # 进程在 probe 窗口内崩溃(端口仍被占 → 探活假成功)
+        return ProbeResult(True, "ok")
+
+    life, sup, _, _ = _make(sup=sup, probes={"Chat": killed_probe})
+    status = await life.ensure_running("m1")
+    assert status == ModelStatus.FAILED
+    assert state.get_status("m1") == ModelStatus.FAILED
+
+
 async def test_probe_failure_marks_failed():
     def bad_probe(alias, port, start_time=None, timeout=60):
         return ProbeResult(False, "unhealthy")
