@@ -7,9 +7,11 @@
 
 本地多 LLM 模型的代理网关 + WebUI:按需启动/空闲回收本地模型进程(llama.cpp /
 lmdeploy / vLLM …),对外暴露 OpenAI / Anthropic / Responses 兼容 API,记录用量与计费,
-提供系统配置、模型管理、用量统计、日志查看的前端。**完全离线**(无云端依赖)。
-**唯一联网点 = 自更新**(系统页「更新」区,git fetch/merge 本项目仓库:程序启动时
+提供系统配置、模型管理、用量统计、日志查看的前端。**运行时完全离线**(无云端依赖)。
+**运行时唯一联网点 = 自更新**(系统页「更新」区,git fetch/merge 本项目仓库:程序启动时
 自动检测一次,此后仅用户显式点击检查/应用按钮才联网;见 §5.1)。
+注意:**开发基础设施**(GitHub Actions CI,见 §6)是仓库侧的联网点,与运行时互不干扰
+——「完全离线」一律指产品运行时。
 
 - 后端:Python 3 + FastAPI + uvicorn + SQLite(单连接 + `write_lock`)。`src/llm_manager/`
 - 前端:React 19 + Vite + TS + Tailwind v4 + TanStack Query。`frontend/`
@@ -146,8 +148,19 @@ pyright src/llm_manager            # 类型检查(0 errors 基线)
 npm run build        # = tsc -b && vite build;改前端后必跑(8080 serve dist)
 npx oxlint src       # lint(存量 2 warning:toast/dialog 的 only-export-components,已知)
 npx tsc -b           # 仅类型检查
+npm test             # vitest run(核心纯逻辑:日志 reducer 状态机/块划分;11 例基线)
 ```
-无 CI / pre-commit 自动化,验收命令一律本地手动执行。
+
+**CI(`.github/workflows/ci.yml`)**:push main / PR 触发,三 job 与上述命令同一套:
+- backend(pip `-e .[dev]` + ruff format --check + ruff check + pyright + pytest)**双平台矩阵**
+  ubuntu + windows——windows 侧真实覆盖 devices LHM 降级链与 runner 信号分支。
+- frontend(npm ci + oxlint + vitest + tsc -b + build)ubuntu。
+
+验收命令**本地也要跑一遍**(先本地后推送;CI 是兜底不是主力,别等 CI 才发现红)。
+后端测试在双平台跑:测试不得写成 Windows-only 形状(字符串 spawn / 依赖本机 GPU /
+直接引用 Windows 常量——2026-08-24 曾一次 12 红,全因测试假设了 Windows 环境)。
+前端测试文件命名 `*.test.ts`,由 `.gitignore` 白名单(`!frontend/**/*.test.ts`)显式放行
+——旧 `*test*` 规则会吞掉它们,新增测试文件前先确认白名单仍在。
 
 ## 7. 模块级单例(单进程前提 = 不变量 1)
 
@@ -169,6 +182,8 @@ usage 的 `_live_segments` 由 `tests/unit/data/test_persistence.py` 的本地 f
 - **提交与推送纪律**:不要擅自频繁提交细碎的 commit——同一任务的修改合并为一次(或少量)
   提交,改一点就提交一点的习惯不要有;push 前必须征得用户许可,未经许可不推送。
   小任务直接在 `main`;较大特性开 feature 分支(非 worktree)FF-merge + 删分支。
+- **CI 红灯不放行**:推送触发 CI(main);结果须全绿。红 = 已实锤回归,先修再推后续
+  (自更新吃 main,红码会传播给 tag/commit 目标用户)。
 - **完全离线**:图标(lucide 内联)、字体(系统字体)、资产严禁 CDN 引用。
 - **改后端响应模型须同步前端类型**:`frontend/src/lib/api/{usage,logs,models,config,data,tools,update}.ts`
   的手写 interface 与后端 Pydantic 响应同形对齐(纯手写自律,无代码生成)。
@@ -195,6 +210,8 @@ usage 的 `_live_segments` 由 `tests/unit/data/test_persistence.py` 的本地 f
 - 设备/平台覆盖类描述用「理论覆盖 + 尚未全面实机验证」口径,不夸大实测范围。
 
 **发布动作**
+- 前置:当前 main 的最新 CI run **全绿**才 bump(自更新吃 main,红码会传播给 tag/commit
+  目标用户)。
 - 版本号 = git 标签(见 §5.1);Release 标题沿用 tag 名。
 - 正文直接 `gh release edit <tag> --notes-file <file>` 覆写(经 GitHub API,非 git push、不受
   §8 推送许可限制;用户已确认允许)。
