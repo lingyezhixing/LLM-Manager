@@ -122,3 +122,7 @@ Dev-Backend.bat
 # 可随意修改不影响 git；example 模板本身入库追踪
 Dockerfile
 docker-compose.yml
+
+# 前端 vitest(config 与单测文件在 *test* 规则之后的显式白名单)
+!frontend/vitest.config.ts
+!frontend/**/*.test.ts

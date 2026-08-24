@@ -32,6 +32,15 @@ def _init_repo(path: Path) -> None:
     _git(path, "config", "user.name", "t")
 
 
+def _init_bare(path: Path) -> None:
+    """bare origin:git 版本间默认分支不一致(runner master/本机 main)会让后续
+    clone 落到 unborn 分支、`push origin main` 报 "src refspec main does not match
+    any"——显式把 HEAD 钉在 main,与默认分支解耦(2026-08-24 CI Ubuntu 全挂根因)。
+    注意 init cwd 是 path.parent(path 尚不存在),symbolic-ref 才在 path 内。"""
+    _git(path.parent, "init", "--bare", str(path))
+    _git(path, "symbolic-ref", "HEAD", "refs/heads/main")
+
+
 def _commit(path: Path, msg: str) -> str:
     (path / "file.txt").write_text(msg, encoding="utf-8")
     _git(path, "add", ".")
@@ -47,7 +56,7 @@ def repo(tmp_path: Path) -> Path:
     _commit(work, "c1")
     _git(work, "tag", "v1.0.0")
     origin = tmp_path / "origin.git"
-    _git(work, "init", "--bare", str(origin))
+    _init_bare(origin)
     _git(work, "remote", "add", "origin", str(origin))
     _git(work, "push", "origin", "main", "--tags")
     return work
@@ -230,7 +239,7 @@ def test_fetch_refreshes_force_moved_tag(tmp_path: Path) -> None:
     _commit(orig, "c1")
     _git(orig, "tag", "v1.0.0")
     origin = tmp_path / "origin.git"
-    _git(orig, "init", "--bare", str(origin))
+    _init_bare(origin)
     _git(orig, "remote", "add", "origin", str(origin))
     _git(orig, "push", "origin", "main", "--tags")
 
@@ -269,7 +278,7 @@ def test_no_tags_commit_target_only(tmp_path: Path) -> None:
     _init_repo(work)
     _commit(work, "c1")
     origin = tmp_path / "origin.git"
-    _git(work, "init", "--bare", str(origin))
+    _init_bare(origin)
     _git(work, "remote", "add", "origin", str(origin))
     _git(work, "push", "origin", "main")
     st = check_update(work)

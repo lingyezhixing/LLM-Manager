@@ -78,6 +78,9 @@ def test_is_tray_available_false_when_pystray_missing(monkeypatch):
 
 def test_is_tray_available_true_when_present(monkeypatch):
     monkeypatch.setattr(tray, "_PYSTRAY_AVAILABLE", True)
+    # POSIX 无头守卫(_is_headless_display)在 CI(runner 无 DISPLAY)命中 → 恒 False;
+    # 此测试聚焦「pystray 存在即可用」单条件,mock 掉守卫。
+    monkeypatch.setattr(tray, "_is_headless_display", lambda: False)
     assert tray.is_tray_available() is True
 
 

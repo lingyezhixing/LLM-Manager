@@ -36,6 +36,14 @@ _M1 = lambda: {
 def test_lifespan_starts_and_stops_background(tmp_path, monkeypatch):
     # enumerate_lhm_gpus 内部职责;mock devices.common.is_lhm_available=False → 等效隔离 LHM 慢调用,聚焦 lifespan+background。
     monkeypatch.setattr("llm_manager.devices.common.is_lhm_available", lambda: False)
+    # CI(runner)无 NVIDIA 卡/驱动:build_adapters 枚举不到 rtx 4060 → select_adaptive 静默跳过
+    # → 模型停在 STOPPED(Failed 断言永等不到)。钉住适配器枚举,与 Windows 本机行为对齐。
+    from llm_manager.devices import DeviceInfo
+
+    monkeypatch.setattr(
+        "llm_manager.devices.nvidia.NvidiaAdapter.enumerate",
+        lambda self: [DeviceInfo("NVIDIA GeForce RTX 4060", "GPU", "VRAM", 8192, 4096, 0, 0.0, 45.0)],
+    )
     # 探针秒失败(跳过真实 60s 重试循环):仍证明 auto_start 后台真起 + 失败容错(不抛)+ 不阻塞 /health。
     # 测试的真实契约是「后台任务起 + 失败路径走通 + /health 不阻塞」,「重试 60s」只是 startup_timeout 的副作用。
     from llm_manager.runtime.probes import ProbeResult, probe_registry
@@ -176,6 +184,9 @@ def test_spawn_kwargs_windows_uses_process_group(monkeypatch):
 
     import llm_manager.runner as appmod
 
+    # CREATE_NEW_PROCESS_GROUP 仅在 Windows 子进程模块中定义;POSIX 上测试
+    # monkeypatch os.name 骗过分支后引用该常量会 AttributeError —— 注入假常量。
+    monkeypatch.setattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x200, raising=False)
     monkeypatch.setattr(appmod.os, "name", "nt")
     kw = appmod._spawn_kwargs()
     assert kw["creationflags"] == subprocess.CREATE_NEW_PROCESS_GROUP
@@ -210,6 +221,8 @@ def test_send_shutdown_windows_sends_ctrl_break(monkeypatch):
 
     import llm_manager.runner as appmod
 
+    # CTRL_BREAK_EVENT 仅在 Windows 信号扩展中导出,POSIX 上引用即 AttributeError。
+    monkeypatch.setattr(_sig, "CTRL_BREAK_EVENT", 1, raising=False)
     monkeypatch.setattr(appmod.os, "name", "nt")
     sent = {}
 

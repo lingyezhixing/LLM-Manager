@@ -115,6 +115,9 @@ def test_run_smi_uses_noheader_nounits_format(monkeypatch):
         return _R()
 
     monkeypatch.setattr(ad.subprocess, "run", fake_run)
+    # CI(runner)无 nvidia-smi:shutil.which 命中则返回空串提前退出,subprocess.run
+    # 从未被调用 → captured["cmd"] KeyError。钉住 which 保证 mock 路径必执行。
+    monkeypatch.setattr(ad.shutil, "which", lambda _name: "nvidia-smi")
     ad._run_smi()
     assert "--format=csv,noheader,nounits" in captured["cmd"], captured["cmd"]
 
