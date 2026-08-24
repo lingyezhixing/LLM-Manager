@@ -147,8 +147,11 @@ def test_spawn_captures_stdout_and_stderr_via_on_output():
         # 用 chr(10) 生成换行,避免不同 shell (MSYS/Git Bash/POSIX) 对 \n 转义的解析差异。
         # cmd 必须是 list:Popen 在 POSIX 把字符串当「可执行文件路径」整体,
         # 只有 Windows CreateProcess 会按命令行解析(测试契约 = 产品 spawn 的 list 形态)。
-        cmd = [sys.executable, "-c",
-               "import sys; print('out-line'); sys.stderr.write('err-line' + chr(10)); sys.stderr.flush()"]
+        cmd = [
+            sys.executable,
+            "-c",
+            "import sys; print('out-line'); sys.stderr.write('err-line' + chr(10)); sys.stderr.flush()",
+        ]
         rec = await sup.spawn(cmd, on_output=on_output)
         await sup._wait_tasks[rec.pid]  # wait for process exit → reader EOF
         await asyncio.sleep(0.05)  # let call_soon_threadsafe callbacks land
