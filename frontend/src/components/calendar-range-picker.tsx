@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import type { DateRange } from "@/lib/usage-range";
 
@@ -64,6 +64,8 @@ function MonthGrid({
             <button
               key={i}
               type="button"
+              aria-label={`${d.getDate()}日`}
+              aria-current={isStart || isEnd ? "date" : undefined}
               onClick={() => onPick(d)}
               className={[
                 "h-6 rounded text-ui",
@@ -99,9 +101,9 @@ function MonthPanel({
   return (
     <div>
       <div className="mb-1 flex items-center justify-between text-xs font-medium">
-        <button type="button" className="px-1" onClick={() => onShift(-1)}>‹</button>
+        <button type="button" aria-label="上一月" className="px-1" onClick={() => onShift(-1)}>‹</button>
         <span>{monthLabel(view)}</span>
-        <button type="button" className="px-1" onClick={() => onShift(1)}>›</button>
+        <button type="button" aria-label="下一月" className="px-1" onClick={() => onShift(1)}>›</button>
       </div>
       <MonthGrid view={view} start={start} end={end} onPick={onPick} />
     </div>
@@ -123,6 +125,13 @@ export function CalendarRangePicker({
   );
   const [start, setStart] = useState<Date | null>(value?.from ?? null);
   const [end, setEnd] = useState<Date | null>(value?.to ?? null);
+
+  // Esc 关闭(打开时渲染,挂载即生效)。
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [onClose]);
 
   const onPick = (d: Date) => {
     if (!start || (start && end)) {
@@ -151,7 +160,7 @@ export function CalendarRangePicker({
         className="fixed inset-0 z-15 cursor-default"
         onClick={onClose}
       />
-      <div className="absolute right-0 top-full z-20 mt-1 flex gap-5 rounded-lg border border-border bg-card p-3 shadow-card">
+      <div role="dialog" aria-label="选择日期范围" className="absolute right-0 top-full z-20 mt-1 flex gap-5 rounded-lg border border-border bg-card p-3 shadow-card">
         <MonthPanel
           view={leftView}
           onShift={(d) => setLeftView((v) => addMonths(v, d))}

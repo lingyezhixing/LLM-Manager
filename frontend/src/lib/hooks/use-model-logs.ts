@@ -34,7 +34,7 @@ function sessionLogApi(sessionId: number, ended = false): LogApi {
 /**
  * Reducer 状态:视图态(表单态 level/input 留 useState,生命周期不同)。
  */
-interface ViewerState {
+export interface ViewerState {
   liveLines: LogLine[];
   historyPrefix: LogLine[];
   historyPage: LogLine[] | null;
@@ -85,7 +85,7 @@ type Action =
 /**
  * Reducer:视图态状态机。各分支 1:1 对应原 setState 逻辑(条件/守卫原样)。
  */
-function viewerReducer(state: ViewerState, action: Action): ViewerState {
+export function viewerReducer(state: ViewerState, action: Action): ViewerState {
   switch (action.t) {
     case "reset":
       return { ...initialState };

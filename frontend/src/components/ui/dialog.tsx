@@ -10,6 +10,7 @@ import { AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ConfirmContext, type ConfirmFn, type ConfirmOptions } from "@/lib/confirm";
 import { usePresence } from "@/lib/hooks/use-presence";
+import { APP_SCROLL_ROOT_ID } from "@/components/app-shell";
 
 // ---------- 底层 Dialog:portal + Esc + 点遮罩关 + focus trap + 焦点还原 + aria ----------
 function Dialog({
@@ -26,6 +27,10 @@ function Dialog({
   useEffect(() => {
     if (!open) return;
     const previouslyFocused = document.activeElement as HTMLElement | null;
+    // 背景滚动锁:body 不滚(壳层 h-screen overflow-hidden),真正滚动的是壳层内层容器;
+    // HTML 属性改名(overflow-y)须内联还原,否则与 Tailwind 类冲突(类在 style 后仍生效)。
+    const scroller = document.getElementById(APP_SCROLL_ROOT_ID);
+    if (scroller) scroller.style.overflowY = "hidden";
 
     const focusable = () =>
       panelRef.current?.querySelectorAll<HTMLElement>(
@@ -58,6 +63,7 @@ function Dialog({
     document.addEventListener("keydown", onKey);
     return () => {
       document.removeEventListener("keydown", onKey);
+      if (scroller) scroller.style.overflowY = "";
       previouslyFocused?.focus?.();
     };
   }, [open, onClose]);

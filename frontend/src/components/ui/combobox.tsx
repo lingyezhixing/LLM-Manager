@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { TextInput } from "@/components/ui/form";
 
 // 输入框 + 下拉建议:聚焦即展开全部选项(输入时按包含过滤),点击选项填入,也可自由输入。
@@ -30,12 +30,18 @@ export function ComboboxInput({
 
   const q = filter.trim().toLowerCase();
   const shown = q === "" ? options : options.filter((o) => o.toLowerCase().includes(q));
+  const listId = useId();
 
   return (
     <div ref={boxRef} className="relative min-w-0 flex-1">
       <TextInput
         value={value}
         placeholder={placeholder}
+        role="combobox"
+        aria-expanded={open}
+        aria-controls={open ? listId : undefined}
+        aria-autocomplete="list"
+        aria-haspopup="listbox"
         onFocus={() => { setFilter(""); setOpen(true); }}
         onChange={(e) => { setFilter(e.target.value); setOpen(true); onChange(e.target.value); }}
         onKeyDown={(e) => {
@@ -44,11 +50,13 @@ export function ComboboxInput({
         }}
       />
       {open && shown.length > 0 && (
-        <div className="absolute z-20 mt-1 max-h-48 w-full overflow-auto rounded-md border border-border bg-popover py-1 text-popover-foreground shadow-lg">
+        <div id={listId} role="listbox" className="absolute z-20 mt-1 max-h-48 w-full overflow-auto rounded-md border border-border bg-popover py-1 text-popover-foreground shadow-lg">
           {shown.map((o) => (
             <button
               key={o}
               type="button"
+              role="option"
+              aria-selected={o === value}
               onMouseDown={(e) => { e.preventDefault(); onChange(o); setOpen(false); }}
               className="block w-full px-3 py-1.5 text-left text-sm hover:bg-card-hover"
             >

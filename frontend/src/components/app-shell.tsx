@@ -10,6 +10,10 @@ const COLLAPSE_KEY = "lhm:nav-collapsed";
  * 控制台数据密集——内容区占满宽度(弃 NapCat 居中 1000px 列)。
  * 折叠状态 localStorage 持久化,键不变。页面切换经 key=pathname 触发 animate-page-in。
  */
+/** 壳层滚动容器的 DOM id:Dialog 打开时需对它加 overflow-hidden 锁定背景滚动
+ *  (body 本身 h-screen overflow-hidden 不滚,锁 body 无效——真正滚动的是这个容器)。 */
+export const APP_SCROLL_ROOT_ID = "lhm-app-scroll";
+
 function AppLayout() {
   const [collapsed, setCollapsed] = useState<boolean>(
     () => localStorage.getItem(COLLAPSE_KEY) === "1",
@@ -31,7 +35,7 @@ function AppLayout() {
   return (
     <div className="flex h-screen overflow-hidden bg-background text-foreground">
       <Sidebar collapsed={collapsed} />
-      <div ref={scrollRef} className="scrollbar-none flex flex-1 flex-col overflow-y-auto">
+      <div id={APP_SCROLL_ROOT_ID} ref={scrollRef} className="scrollbar-none flex flex-1 flex-col overflow-y-auto">
         <PillBar collapsed={collapsed} onToggleCollapse={toggle} />
         {/* min-h-0 是必须的:flex 子项默认 min-height:auto 会被内容撑高,长页面内容超高时
             总高超容器 → 触发 flex-shrink → main 的 flex-basis 0% 权重为 0,全部压缩落到

@@ -9,6 +9,7 @@ export function ThemeToggle({ collapsed = false }: { collapsed?: boolean }) {
     <button
       type="button"
       onClick={() => setTheme(isDark ? "light" : "dark")}
+      aria-pressed={isDark}
       aria-label={isDark ? "切换到浅色主题" : "切换到深色主题"}
       className={`flex w-full items-center rounded-full bg-primary-accent/12 px-3 py-1.5 text-xs font-medium text-primary-accent transition-[background-color,padding] hover:bg-primary-accent/20 ${
         // 同 sidebar:折叠态 padding 居中,禁 justify-content(瞬跳)/calc 百分比(驼峰)。

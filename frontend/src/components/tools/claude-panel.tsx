@@ -120,10 +120,18 @@ function ClaudePresetCard({
 
   return (
     <div className="rounded-lg border border-border p-3">
-      {/* 头部:折叠后也常驻(应用/删除/生效标记都在)。整条可点切换展开(新建卡除外,内部按钮 stopPropagation)。 */}
+      {/* 头部:折叠后也常驻(应用/删除/生效标记都在)。整条可点切换展开(新建卡除外,内部按钮 stopPropagation)。
+          role=button + tabIndex + Enter/Space:键盘可激活(内嵌两个 button,不能用 button 元素实现)。 */}
       <div
-        className={`flex select-none items-center gap-2 ${isNew ? "" : "cursor-pointer"}`}
+        role="button"
+        tabIndex={isNew ? -1 : 0}
+        aria-expanded={isNew ? undefined : expanded}
+        className={`flex select-none items-center gap-2 rounded focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring ${isNew ? "" : "cursor-pointer"}`}
         onClick={() => { if (!isNew) setExpanded(!expanded); }}
+        onKeyDown={(e) => {
+          if (isNew) return;
+          if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setExpanded(!expanded); }
+        }}
       >
         {!isNew && (
           <span className="text-muted-foreground" aria-hidden>

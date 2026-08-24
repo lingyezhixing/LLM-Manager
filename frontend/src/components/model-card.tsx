@@ -47,7 +47,7 @@ export function ModelCard({ m, selected, nowMs, onSelect, index = 0 }: {
   };
 
   return (
-    <div role="button" tabIndex={0} onClick={onSelect}
+    <div role="button" tabIndex={0} aria-pressed={selected} onClick={onSelect}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();

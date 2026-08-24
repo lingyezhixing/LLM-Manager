@@ -79,6 +79,19 @@ export function LogLines({ h }: { h: LogLinesView }) {
   // 渲染块列表
   const blocks = useMemo(() => {
     const result: React.ReactNode[] = [];
+    // 动态平均行高:折行后实际行高 > EST_ROW_H(20px),固定估算在长行会话里占位
+    // 高度严重偏低;已测块的真实高度/行数作全局均值,未测块按均值估(折行修正)。
+    let sumH = 0, sumN = 0;
+    for (let b = 0; b < nBlocks; b++) {
+      const start = b * BLOCK;
+      const end = Math.min(start + BLOCK, h.displayed.length);
+      const count = end - start;
+      if (count === 0) continue;
+      const measured = heights.current.get(b);
+      if (measured) { sumH += measured; sumN += count; }
+    }
+    const estRowH = sumN > 0 ? sumH / sumN : EST_ROW_H;
+
     for (let b = 0; b < nBlocks; b++) {
       const start = b * BLOCK;
       const end = Math.min(start + BLOCK, h.displayed.length);
@@ -98,8 +111,8 @@ export function LogLines({ h }: { h: LogLinesView }) {
           </div>
         );
       } else {
-        // 占位块:用已测高度或估算高度
-        const placeholderHeight = heights.current.get(b) ?? count * EST_ROW_H;
+        // 占位块:已测高度优先,否则按动态均值估
+        const placeholderHeight = heights.current.get(b) ?? count * estRowH;
         result.push(
           <div key={b} data-block={b} style={{ height: `${placeholderHeight}px` }} />
         );
@@ -112,7 +125,7 @@ export function LogLines({ h }: { h: LogLinesView }) {
     <>
       <div className="flex flex-wrap items-center gap-2 border-b border-border bg-muted/30 px-3.5 py-1.5 text-dense">
         {LOG_LEVEL_FILTERS.map((lv) => (
-          <button key={lv} onClick={() => setLevel(lv)}
+          <button key={lv} onClick={() => setLevel(lv)} aria-pressed={level === lv}
             className={`rounded border px-2 py-0.5 transition-colors duration-(--motion-base) ${level === lv ? "border-transparent bg-primary-accent/12 font-medium text-primary-accent" : "border-border bg-card text-muted-foreground hover:text-foreground"}`}>
             {LOG_LEVEL_FILTER_LABEL[lv]}
           </button>

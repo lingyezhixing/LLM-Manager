@@ -225,7 +225,7 @@ export function TokenChart({
       <div className="mb-2 flex flex-wrap gap-x-4 gap-y-1 text-xs">
         <LegendDot color="var(--color-primary-accent)" label="总量" />
         {modelNames.map((m) => (
-          <button key={m} type="button" onClick={() => toggle(m)} className={hidden.has(m) ? "opacity-40" : ""}>
+          <button key={m} type="button" aria-pressed={!hidden.has(m)} onClick={() => toggle(m)} className={hidden.has(m) ? "opacity-40" : ""}>
             <LegendDot color={colorOf(m)} label={m} />
           </button>
         ))}

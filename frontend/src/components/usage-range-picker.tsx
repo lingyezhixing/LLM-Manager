@@ -19,6 +19,7 @@ export function UsageRangePicker({
         <button
           key={p.key}
           type="button"
+          aria-pressed={value.preset === p.key}
           onClick={() => {
             onChange({ preset: p.key, custom: value.custom });
             setCalOpen(false);
@@ -33,6 +34,8 @@ export function UsageRangePicker({
       <button
         type="button"
         onClick={() => setCalOpen(true)}
+        aria-expanded={calOpen}
+        aria-haspopup="dialog"
         className={`rounded-full border border-border px-2.5 py-0.5 text-ui ${
           value.preset === "custom" ? "bg-primary-accent/12 font-medium text-primary-accent" : "text-muted-foreground hover:text-foreground"
         }`}

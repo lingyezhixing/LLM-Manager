@@ -61,6 +61,7 @@ function DeviceCard({
         <span>{isCpu ? "内存占用" : "显存占用"}</span>
         <button
           type="button"
+          aria-pressed={unit === "GB"}
           onClick={onToggleUnit}
           title={`点击切换 ${unit === "MB" ? "GB" : "MB"}`}
           className="cursor-pointer rounded font-mono tabular-nums transition-colors duration-(--motion-base) hover:text-foreground"

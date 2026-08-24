@@ -1,0 +1,49 @@
+name: CI
+
+# 开发基础设施,非运行时联网点:运行时仍是纯离线(GitHub Actions 仅作为质量门)
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: pip install -e ".[dev]"
+      - name: Ruff format
+        run: ruff format --check .
+      - name: Ruff lint
+        run: ruff check .
+      - name: Pyright
+        run: pyright src/llm_manager
+      - name: Pytest
+        run: python -m pytest tests -q
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install
+        run: npm ci
+      - name: Oxlint
+        run: npx oxlint src
+      - name: Vitest
+        run: npx vitest run
+      - name: Typecheck
+        run: npx tsc -b
+      - name: Build
+        run: npm run build
