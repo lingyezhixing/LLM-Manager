@@ -15,7 +15,6 @@ be exercised in isolation via the ``_run_coro_threadsafe`` seam.
 from __future__ import annotations
 
 import asyncio
-import io
 import logging
 import os
 import threading
@@ -104,23 +103,12 @@ class SystemTray:
 
     # ---------- icon + menu (need display; not unit-tested) ----------
     def _load_image(self):
-        """多尺寸 ICO:Windows 托盘按系统 DPI 选最接近帧渲染(16/24/32px),
-        单帧 256 会让系统硬缩 → 高 DPI 下模糊。sizes 生成的多帧文件经
-        pystray 二次保存仍保留全部帧(Pillow 从 image.info['sizes'] 继承)。"""
+        """多帧 ICO:Windows 托盘按系统 DPI 选最接近帧渲染(16/24/32px)。
+        assets/icon.ico 由 icon.svg 一次性生成(16/24/32/48/64/128/256 七帧),
+        直接打开即保留全部帧(Pillow 从 info['sizes'] 继承,pystray 序列化
+        ICO 时不丢帧);缺失时降级为空白图兜底。"""
         icon = Path(__file__).resolve().parents[0] / "assets" / "icon.ico"
-        src = (
-            Image.open(icon).convert("RGBA")
-            if icon.exists()
-            else Image.new("RGBA", (256, 256), (0, 0, 0, 0))
-        )
-        buf = io.BytesIO()
-        src.save(
-            buf,
-            "ICO",
-            sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)],
-        )
-        buf.seek(0)
-        return Image.open(buf)
+        return Image.open(icon) if icon.exists() else Image.new("RGBA", (256, 256), (0, 0, 0, 0))
 
     def _build_icon(self):
         cfg = self._get_cfg()

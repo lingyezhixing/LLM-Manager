@@ -5,6 +5,7 @@ and the built-frontend SPA host. See proxy.py, api/."""
 from __future__ import annotations
 
 import logging
+import mimetypes
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -54,6 +55,16 @@ def _register_catalog(app: FastAPI) -> None:
         return JSONResponse(status_code=204, content={}, headers=_CORS)
 
 
+def _media_type(path: str) -> str | None:
+    """Service-spawned file MIME。Windows 上 mimetypes 把 .svg 判为非注册类型
+    image/svg,标准 Chromium 对 favicon 会拒绝解码(favicon 不入库)——恒覆写为
+    image/svg+xml 消除平台分歧(见 docs/icon-assets-investigation.md §3.2)。"""
+    media_type = mimetypes.guess_type(path)[0]
+    if path.endswith(".svg"):
+        return "image/svg+xml"
+    return media_type
+
+
 def _register_spa(app: FastAPI) -> None:
     """Built-frontend SPA hosting: StaticFiles(/assets) + GET catch-all fallback to
     index.html. Registered LAST so it never shadows /health, /v1/models, /api/*,
@@ -82,7 +93,7 @@ def _register_spa(app: FastAPI) -> None:
         except ValueError:
             return JSONResponse(status_code=404, content={"detail": "not found"})
         if candidate.is_file():
-            return FileResponse(candidate)
+            return FileResponse(candidate, media_type=_media_type(candidate.name))
         index = base / "index.html"
         if index.is_file():
             return FileResponse(index)

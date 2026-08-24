@@ -23,6 +23,9 @@ dev = ["pytest==9.1.1", "pytest-asyncio==1.4.0", "ruff==0.16.1", "pyright==1.1.4
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+llm_manager = ["assets/*.ico", "assets/dll/*"]
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"

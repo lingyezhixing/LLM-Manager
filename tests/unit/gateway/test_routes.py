@@ -72,6 +72,29 @@ def test_v1_models_returns_catalog():
     assert r.status_code == 200 and "m1" in {m["id"] for m in r.json()["data"]}
 
 
+def test_favicon_svg_served_with_explicit_mime(tmp_path, monkeypatch):
+    """契约(fix):favoricon 图标随 public/ 拷入 dist,由 SPA 兜底 serve,但必须带
+    image/svg+xml——Windows 上 mimetypes 把 .svg 猜成 image/svg,标准 Chromium
+    会拒绝解码(见 docs/icon-assets-investigation.md §3.2)。"""
+    import llm_manager.gateway.routes as routes_mod
+
+    fake_dist = tmp_path / "dist"
+    (fake_dist / "assets").mkdir(parents=True)
+    (fake_dist / "favicon.svg").write_text(
+        "<svg xmlns='http://www.w3.org/2000/svg'></svg>", encoding="utf-8"
+    )
+    (fake_dist / "index.html").write_text("<html>SPA</html>", encoding="utf-8")
+    monkeypatch.setattr(routes_mod, "_FRONTEND_DIST", fake_dist)
+
+    app = FastAPI()
+    _register(app, _cfg())
+    with TestClient(app) as c:
+        r = c.get("/favicon.svg")
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "image/svg+xml"
+    assert b"<svg" in r.content
+
+
 def test_v1_models_lists_primary_alias_not_internal_key():
     """契约(fix):/v1/models 的 id 必须是 aliases[0](主别名 = 下游 served name = 客户端调用名),
     而非 primary_name(仅内部区分用的配置键,不应外露)。"""
