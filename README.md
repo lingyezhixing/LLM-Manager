@@ -186,7 +186,7 @@ config → state → supervisor → runtime → data → gateway → tray
 
 ## 开发
 
-后端（项目根，conda env `LLM-Manager`）：
+后端（项目根，开发用 conda env `LLM-Manager-Dev`）：
 
 ```bash
 python -m pytest tests -q

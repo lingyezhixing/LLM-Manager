@@ -1,5 +1,7 @@
 import time
+import tomllib
 import types
+from pathlib import Path
 
 from fastapi import APIRouter, FastAPI
 from fastapi.testclient import TestClient
@@ -7,6 +9,14 @@ from fastapi.testclient import TestClient
 from llm_manager.data.config_store import ConfigStore, is_initialized, seed_defaults
 from llm_manager.data.persistence import open_db
 from llm_manager.gateway.api.config_api import register_config_routes
+
+
+def _repo_root_pyproject_version() -> str:
+    """直接读仓库根 pyproject.toml 的 version,作动态期望值(升版本号无需同步)。"""
+    # tests/unit/gateway/test_api_config.py → parents[3] = 仓库根
+    root = Path(__file__).resolve().parents[3]
+    data = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
+    return data["project"]["version"]
 
 
 def _app(tmp_path):
@@ -36,9 +46,9 @@ def test_system_info_returns_version_uptime_db_size(tmp_path):
         r = c.get("/api/system/info")
     assert r.status_code == 200
     j = r.json()
-    # 锁住回归:version 必须从源码 pyproject 读到真实版本(3.1.1),不再滞后于
-    # 已安装元数据。升版本号时同步改此处。
-    assert j["version"] == "3.2.1"
+    # 锁住回归:version 必须从源码 pyproject 读到真实版本,不再滞后于
+    # 已安装元数据。动态读 pyproject 作期望值(与 test_version 同模式),升版本号无需改此。
+    assert j["version"] == _repo_root_pyproject_version()
     assert isinstance(j["started_at"], (int, float))
     assert "db_path" not in j and "log_dir" not in j  # 已移除:不再暴露路径
     assert isinstance(j["db_size_bytes"], int)  # 保留:实际库文件大小(fixture 挂了 resolved_db)

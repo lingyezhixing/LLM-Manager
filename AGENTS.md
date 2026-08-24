@@ -135,7 +135,7 @@ tray     ── 系统托盘(自重启触发 / WOL / Claude 预设应用)
 
 ## 6. 命令(验收用)
 
-后端(项目根,conda env `LLM-Manager`):
+后端(项目根,conda env 用开发环境 `LLM-Manager-Dev`):
 ```bash
 python -m pytest tests -q          # 全量(含 smoke)
 ruff format --check .             # 格式(改完须保持 format 干净)
@@ -143,6 +143,10 @@ ruff check .                     # lint(规则集 = ruff 0.16.1 默认全量,版
                                   #   升级版本即引入新规则,需显式处理;见 pyproject [tool.ruff])
 pyright src/llm_manager            # 类型检查(0 errors 基线)
 ```
+> **环境分工(本机)**:`LLM-Manager` env = 稳定版运行时,editable 安装指向部署目录
+> `D:\LLM\LLM-Manager`,由 `LLM-Manager.bat` 启动 `python -m llm_manager`,**不含开发依赖**
+> (无 pytest/ruff/pyright),勿用它跑上述命令。`LLM-Manager-Dev` env = 开发环境,editable 安装
+> 指向本仓库(项目根),由 `Dev-Backend.bat` 启动 `uvicorn --factory --reload`,跑上述验收命令。
 前端(`frontend/`):
 ```bash
 npm run build        # = tsc -b && vite build;改前端后必跑(8080 serve dist)
