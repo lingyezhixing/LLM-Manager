@@ -58,7 +58,7 @@ def _register_catalog(app: FastAPI) -> None:
 def _media_type(path: str) -> str | None:
     """Service-spawned file MIME。Windows 上 mimetypes 把 .svg 判为非注册类型
     image/svg,标准 Chromium 对 favicon 会拒绝解码(favicon 不入库)——恒覆写为
-    image/svg+xml 消除平台分歧(见 docs/icon-assets-investigation.md §3.2)。"""
+    image/svg+xml 消除平台分歧(favicon 因错误 MIME 无法入库为实测结论)。"""
     media_type = mimetypes.guess_type(path)[0]
     if path.endswith(".svg"):
         return "image/svg+xml"

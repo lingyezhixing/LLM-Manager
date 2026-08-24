@@ -73,9 +73,9 @@ def test_v1_models_returns_catalog():
 
 
 def test_favicon_svg_served_with_explicit_mime(tmp_path, monkeypatch):
-    """契约(fix):favoricon 图标随 public/ 拷入 dist,由 SPA 兜底 serve,但必须带
+    """契约(fix):favicon 图标随 public/ 拷入 dist,由 SPA 兜底 serve,但必须带
     image/svg+xml——Windows 上 mimetypes 把 .svg 猜成 image/svg,标准 Chromium
-    会拒绝解码(见 docs/icon-assets-investigation.md §3.2)。"""
+    会拒绝解码(favicon 不入库,实测结论)。"""
     import llm_manager.gateway.routes as routes_mod
 
     fake_dist = tmp_path / "dist"
