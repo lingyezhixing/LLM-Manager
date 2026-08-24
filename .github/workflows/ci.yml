@@ -8,7 +8,13 @@ on:
 
 jobs:
   backend:
-    runs-on: ubuntu-latest
+    strategy:
+      # Windows:平台特定分支(devices LHM 降级链、runner 信号转发)需真实 Windows 环境,
+      # 本地跑再多次也覆盖不了「全新机器」视角;frontend 侧 node 跨平台,无需矩阵。
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
