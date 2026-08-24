@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "llm-manager"
-version = "3.2.2"
+version = "3.2.3"
 requires-python = ">=3.11"
 # 依赖全部 == 精确锁定(2026-08-06 升级至最新版后固定;升级需显式改版本 + 全量验证)。
 dependencies = [
