@@ -1,9 +1,8 @@
-"""System log handler + root-logger setup(控制台 + 时间戳文件 + 清理)。app.py 组合根只做接线。
+"""系统日志 handler + root logger 配置(控制台 + 时间戳文件 + 清理)。app.py 组合根只做接线。
 
-SystemLogHandler forwards logging records into the logs capture queue without
-blocking the caller. Dropped records never affect the main program (the collector
-is O(1) append; batching/persistence happen in the data/logs.py flush task).
-To be wired by app.py lifespan (install/remove); tests and non-lifespan paths stay clean.
+SystemLogHandler 把 logging 记录转发进日志捕获队列,不阻塞调用方。被丢弃的记录
+绝不影响主程序(collector 为 O(1) append;批量与落库发生在 flush 任务)。
+由 app.py lifespan 接线(install/remove);测试与非 lifespan 路径保持干净。
 """
 
 from __future__ import annotations
@@ -59,8 +58,8 @@ def setup_logging(level: str = "INFO", log_dir: str = "logs") -> None:
 
 
 class SystemLogHandler(logging.Handler):
-    """Synchronous handler → collector callable (``logs.capture_system``).
-    Collector must be non-blocking (in-memory append)."""
+    """同步 handler → collector 可调用对象(``logs.capture_system``)。
+    Collector 必须非阻塞(内存 append)。"""
 
     def __init__(self, collector: Callable[[str, float, str], None]) -> None:
         super().__init__()

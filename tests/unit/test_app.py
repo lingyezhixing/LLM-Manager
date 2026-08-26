@@ -159,7 +159,7 @@ def test_exit_code_for_returns_sentinel_only_when_requested():
     assert exit_code_for(True) == RESTART_EXIT_CODE == 81
 
 
-# ---------- parent 监督器辅助(Task 1) ----------
+# ---------- parent 监督器辅助 ----------
 
 
 def test_should_respawn_only_on_restart_sentinel():
@@ -203,7 +203,7 @@ def test_spawn_kwargs_posix_uses_new_session(monkeypatch):
     assert "creationflags" not in kw
 
 
-# ---------- 信号转发辅助(Task 2) ----------
+# ---------- 信号转发辅助 ----------
 
 
 def test_forwardable_signals_per_os(monkeypatch):
@@ -309,7 +309,7 @@ def test_force_kill_noop_when_exited():
     appmod._force_kill(FakeProc())
 
 
-# ---------- 入口分派(Task 3) ----------
+# ---------- 入口分派 ----------
 
 
 def test_main_dispatches_to_worker_when_flag(monkeypatch):

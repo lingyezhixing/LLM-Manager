@@ -1,6 +1,6 @@
-// Theme context, hook, and constants. Separated from ThemeProvider so the provider's
-// file only exports a component (keeps React Fast Refresh happy — see oxlint
-// react/only-export-components). warm 主题 2026-08-04 退役(设计重做,只留暗/亮)。
+// Theme context、hook 与常量。与 ThemeProvider 分离,使 provider
+// 文件只导出组件(保持 React Fast Refresh 正常 — 见 oxlint
+// react/only-export-components)。只留暗/亮两主题。
 import { createContext, useContext } from "react";
 
 export type Theme = "dark" | "light";

@@ -208,7 +208,7 @@
   --container-sidebar: 13.125rem;
   /* 视口扣减常量:壳层 chrome(胶囊 40 + sticky 16 + main pt-8 32 + pb-4 16 = 104px) */
   --shell-chrome: 104px;
-  /* motion token(动效即反馈原则,spec §5):时长/缓动单源 */
+  /* motion token:时长/缓动单源 */
   --motion-fast: 120ms;    /* 退场/微反馈 */
   --motion-enter: 150ms;   /* 进场(dialog/toast) */
   --motion-base: 200ms;    /* hover/常规过渡 */
@@ -270,7 +270,7 @@
   from { opacity: 0; transform: translateY(4px); }
 }
 
-/* focus-visible:全站统一 2px 主色描边 + 2px 偏移(规范 §5) */
+/* focus-visible:全站统一 2px 主色描边 + 2px 偏移 */
 :focus-visible {
   outline: 2px solid var(--ring);
   outline-offset: 2px;

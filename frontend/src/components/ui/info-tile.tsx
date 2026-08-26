@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 
-/** StatTile(统一信息块):bg-card-2 底 + 等宽数值。value 为 ReactNode:
+/** 统一信息块:bg-card-2 底 + 等宽数值。value 为 ReactNode:
  *  用量页成本块把 ErrorState 嵌在 tile 值内(错误也带「成本」标签边框)。 */
 export function InfoTile({ label, value, valueClass = "", className = "" }: {
   label: string;

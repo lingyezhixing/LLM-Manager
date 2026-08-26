@@ -7,15 +7,15 @@ import { useEventStream } from "@/lib/hooks/use-event-stream";
 import { useNowTick } from "@/lib/hooks/use-now-tick";
 import type { ModelInfo, ModelsResponse } from "@/lib/api";
 
-/** Per-model trailing status line, with idle ticked locally from last_access. */
+/** 每个模型的尾部状态行,idle 由 last_access 本地 tick。 */
 function activityText(m: ModelInfo, nowMs: number): string {
   if (m.pending > 0) return pendingLabel(m.pending);
   return idleText(m.last_access, nowMs);
 }
 
 /**
- * Model status summary (概览). Subscribes to /api/models/stream (event-driven push) and
- * ticks idle locally — no polling. Card w/ icon header + 3 KPI tiles + running rows.
+ * 模型状态摘要(概览)。订阅 /api/models/stream(事件驱动推送),
+ * idle 本地 tick——无轮询。
  */
 export function ModelSummary() {
   const { data, error } = useEventStream<ModelsResponse>("/api/models/stream");

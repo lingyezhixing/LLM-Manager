@@ -17,8 +17,8 @@ export default function LogsPage() {
   const [selectedId, setSelectedId] = useState<number | null>(null);
 
   // 模型下拉选项:仅来自未过滤的 type=model 列表(无 model 参数),每次进入模型 Tab 刷新。
-  // 若取过滤后响应,选 "m1" 后选项会收缩成 ["m1"],选无会话的模型会清空 —— 违反
-  // §8"稳定历史派生列表"。含已删模型的残留 alias,后端按会话历史回退解析(不再 404)。
+  // 若取过滤后响应,选 "m1" 后选项会收缩成 ["m1"],选无会话的模型会清空。
+  // 含已删模型的残留 alias,后端按会话历史回退解析(不再 404)。
   const modelsQ = useQuery({
     queryKey: qk.sessionModelOptions,
     queryFn: () => fetchSessions({ type: "model", limit: 50 }),
@@ -40,7 +40,7 @@ export default function LogsPage() {
   });
   const sessions = useMemo(() => sessionsQ.data ?? [], [sessionsQ.data]);
 
-  // 选中会话维护:列表刷新后,原选中仍存在则保持,否则回落列表首项(与旧轮询实现一致)。
+  // 选中会话维护:列表刷新后,原选中仍存在则保持,否则回落列表首项。
   useEffect(() => {
     if (sessionsQ.isLoading) return;
     setSelectedId((prev) => {

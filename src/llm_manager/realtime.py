@@ -1,14 +1,12 @@
-"""Realtime push infrastructure: subscriber-gated fan-out + device refresh loop for SSE.
+"""实时推送基础设施:订阅者门控 fan-out + 设备刷新循环,供 SSE 使用。
 
-``Broadcaster`` is a generic many-listener event bus (each subscriber gets its own
-``asyncio.Queue``; ``publish()`` fans to all, drop-on-full for slow consumers).
-``DeviceFeed`` wraps a device monitor with a subscriber-gated refresh loop: one refresh
-task feeds every viewer (N viewers = 1 refresh / interval), and the loop only runs while
-someone is subscribed — so the expensive nvidia-smi / LHM sampling never runs unattended.
+``Broadcaster`` 是通用的多监听者事件总线(每个订阅者有独立 ``asyncio.Queue``;
+``publish()`` 全量扇出,慢消费者满队列即丢弃)。``DeviceFeed`` 用订阅者门控的
+刷新循环包住设备监控器:一个刷新任务喂给所有查看者(N 个查看者 = 每间隔 1 次
+刷新),且仅当有人订阅时循环才跑——昂贵的 nvidia-smi / LHM 采样不会无人值守
+空转。
 
-These are the codebase's first management-class streaming primitives; the request-monitor
-and live-log SSE endpoints will build on the same ``Broadcaster``. Loop-resident
-(asyncio single-thread) → no locks on the subscriber set.
+loop-resident(asyncio 单线程)→ 订阅者集合无需锁。
 """
 
 from __future__ import annotations
@@ -23,24 +21,24 @@ T = TypeVar("T")
 
 
 class Broadcaster(Generic[T]):
-    """Many-listener fan-out used by SSE push endpoints."""
+    """多监听者扇出,供 SSE 推送端点使用。"""
 
     def __init__(self, maxsize: int = 16) -> None:
         self._subs: set[asyncio.Queue[T]] = set()
         self._maxsize = maxsize
 
     def subscribe(self) -> asyncio.Queue[T]:
-        """Register a new subscriber; returns its dedicated queue."""
+        """注册新订阅者;返回其专属队列。"""
         q: asyncio.Queue[T] = asyncio.Queue(maxsize=self._maxsize)
         self._subs.add(q)
         return q
 
     def unsubscribe(self, q: asyncio.Queue[T]) -> None:
-        """Drop a subscriber; unknown queues are a safe no-op."""
+        """移除订阅者;未知队列为安全 no-op。"""
         self._subs.discard(q)
 
     def publish(self, item: T) -> None:
-        """Fan an item to every subscriber; full queues silently drop (slow consumer)."""
+        """把条目扇出给每个订阅者;满队列静默丢弃(慢消费者)。"""
         for q in list(self._subs):
             try:
                 q.put_nowait(item)
@@ -53,7 +51,7 @@ class Broadcaster(Generic[T]):
 
 
 class _SnapshotSource(Protocol):
-    """Minimal refresh+snapshot surface; DeviceMonitor satisfies it structurally."""
+    """最小 refresh+snapshot 接口;DeviceMonitor 结构性满足之。"""
 
     def refresh(self) -> None: ...
     def snapshot(self) -> dict[str, DeviceInfo]: ...
@@ -114,12 +112,11 @@ class _GatedFeed(Generic[T]):
 
 
 class DeviceFeed(_GatedFeed[dict[str, DeviceInfo]]):
-    """Subscriber-gated periodic device-snapshot feed for ``GET /api/devices/stream``.
+    """供 ``GET /api/devices/stream`` 使用的订阅者门控周期设备快照 feed。
 
-    First subscriber starts the refresh loop; last unsubscribe stops it. The loop
-    refreshes the monitor OFF the event loop (``asyncio.to_thread`` — nvidia-smi / LHM
-    are blocking) and publishes each snapshot to all subscribers, so N viewers share a
-    single refresh per interval.
+    首个订阅者启动刷新循环;末个退订停止之。循环在事件循环之外刷新监控器
+    (``asyncio.to_thread`` — nvidia-smi / LHM 均为阻塞),并把每个快照发布给
+    全部订阅者,故 N 个查看者共享每间隔一次刷新。
     """
 
     def __init__(self, monitor: _SnapshotSource, interval: float = 2.0) -> None:
@@ -141,14 +138,12 @@ class DeviceFeed(_GatedFeed[dict[str, DeviceInfo]]):
 
 
 class ModelFeed(_GatedFeed[T]):
-    """Subscriber-gated **change-detect** feed for value snapshots (e.g. model state).
+    """订阅者门控的 **变更检测** 值快照 feed(如模型状态)。
 
-    Polls ``snapshot()`` every ``interval`` and publishes ONLY when the value changes
-    (value-equality), coalescing bursts — so the model stream is event-driven rather than
-    a fixed cadence. The snapshot must exclude time-derived fields (idle/uptime) or it
-    would differ every tick; the frontend ticks those locally from timestamps in the
-    snapshot. First subscriber starts the loop; last unsubscribe stops it and resets the
-    last-seen value so a later resubscribe re-publishes.
+    每 ``interval`` 轮询 ``snapshot()``,仅当值变化时(值相等比较)才发布,合并突发
+    ——模型流是事件驱动的,而非固定节拍。快照必须排除时间衍生字段(idle/uptime),
+    否则每 tick 都不同;前端根据快照内时间戳在本地累加这些。首个订阅者启动循环;
+    末个退订停止之并复位 last-seen 值,使后续 resubscribe 重新发布。
     """
 
     def __init__(self, snapshot: Callable[[], T], interval: float = 0.5) -> None:
@@ -168,4 +163,4 @@ class ModelFeed(_GatedFeed[T]):
             self._bc.publish(snap)
 
     def _on_unsubscribed(self) -> None:
-        self._last = None  # resubscribe should re-publish the initial snapshot
+        self._last = None  # resubscribe 时应重新发布初始快照

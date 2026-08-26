@@ -1,4 +1,4 @@
-"""Entry point for ``python -m llm_manager`` (and the .bat launcher)."""
+"""``python -m llm_manager`` 的入口(以及 .bat 启动器)。"""
 
 from llm_manager.runner import main
 

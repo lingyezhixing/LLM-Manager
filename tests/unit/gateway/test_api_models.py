@@ -59,7 +59,7 @@ def _app(life=None):
 
 
 async def test_models_stream_yields_initial_then_on_change():
-    """Drive the SSE generator directly (TestClient hangs on infinite streams)."""
+    """直接驱动 SSE 生成器(TestClient 会卡死在无限流上)。"""
     state._reset()
     cfg = _cfg()
     feed = ModelFeed(lambda: build_models_response(cfg), interval=0.01)
@@ -70,11 +70,11 @@ async def test_models_stream_yields_initial_then_on_change():
     assert first.startswith("data:")
     assert "routing" in first
 
-    state.set_status("internal-qwen-key", ModelStatus.STOPPED, force=True)  # change → push
+    state.set_status("internal-qwen-key", ModelStatus.STOPPED, force=True)  # 变更 → push
     second = await asyncio.wait_for(gen.__anext__(), timeout=2)
     assert "stopped" in second
 
-    await gen.aclose()  # finally → unsubscribe → loop stops
+    await gen.aclose()  # finally → 退订 → 循环停止
     assert feed.subscriber_count == 0
     state._reset()
 
@@ -91,9 +91,9 @@ def test_start_unknown_alias_404():
 def test_start_when_routing_409():
     state._reset()
     app = _app()
-    state.set_status("internal-qwen-key", ModelStatus.ROUTING, force=True)  # keyed by primary_name
+    state.set_status("internal-qwen-key", ModelStatus.ROUTING, force=True)  # 按 primary_name 为键
     with TestClient(app) as c:
-        r = c.post("/api/models/qwen2.5-32b/start")  # URL uses alias
+        r = c.post("/api/models/qwen2.5-32b/start")  # URL 用别名
     assert r.status_code == 409
     state._reset()
 

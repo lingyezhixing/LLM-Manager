@@ -87,7 +87,7 @@ export function ModelDefForm({ model, onSaved, onDirtyChange, onDelete }: ModelD
       });
       if (!ok) return;
     }
-    // F1:baseline 仅在保存成功后推进,失败时 dirty 不丢。
+    // baseline 仅在保存成功后推进,失败时 dirty 不丢。
     update.mutate(
       { body: payload, migrate },
       {

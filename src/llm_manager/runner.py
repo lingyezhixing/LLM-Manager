@@ -1,18 +1,16 @@
-"""Entrypoint / parent supervisor (class NapCat).
+"""入口 / parent 监督器(类 NapCat)。
 
-``python -m llm_manager`` = parent supervisor (resident, touches no DB, holds no
-app state): spawns ``python -m llm_manager --worker`` (= worker, runs create_app
-+ server.run). Worker exit 81 → parent spawns a fresh worker (each run is a new
-process → OS reclaims everything); 0 → parent exits; other (crash) → parent also
-exits, no self-heal (visible failure). Strict ordering: parent waits for the worker
-rc before spawning the next → no dual workers, no port contention.
+``python -m llm_manager`` = parent 监督器(常驻,不碰 DB、不持 app 状态):
+spawn ``python -m llm_manager --worker``(= worker,跑 create_app + server.run)。
+worker 退出码 81 → parent 拉全新 worker(每次运行都是新进程 → OS 回收一切);
+0 → parent 退出;其他(崩溃)→ parent 也退出,不自愈(可见失败)。严格顺序:
+parent 等 worker rc 到手才 spawn 下一个 → 无双 worker 并存、无端口竞争。
 
-Signal forwarding: parent receives Ctrl-C/SIGTERM → forwards to the worker process
-group (Win CTRL_BREAK_EVENT / POSIX killpg SIGTERM) for graceful shutdown;
-``_SHUTDOWN_GRACE`` timeout then force-kills as a backstop.
+信号转发:parent 收 Ctrl-C/SIGTERM → 转发给 worker 进程组(Win CTRL_BREAK_EVENT /
+POSIX killpg SIGTERM)使其优雅关闭;``_SHUTDOWN_GRACE`` 超时后强杀兜底。
 
-dev (``uvicorn --factory --reload``) bypasses main entirely; the restart endpoint's
-no-server branch os._exit(81) directly (dev is one-shot)."""
+dev(``uvicorn --factory --reload``)完全绕过 main;restart 端点的 no-server 分支
+直接 os._exit(81)(dev 一次性)。"""
 
 from __future__ import annotations
 

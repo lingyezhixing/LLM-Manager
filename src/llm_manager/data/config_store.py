@@ -1,4 +1,4 @@
-"""DB-backed config store. 单一源 = 数据库(spec D4)。本模块:settings KV → 模型世界读写
+"""基于 DB 的配置存储。单一源 = 数据库。本模块:settings KV → 模型世界读写
 → ConfigStore → bootstrap(空库 seed 默认 + env 写库)。无 YAML 导入。"""
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 
 def _upsert_locked(db: Db, key: str, value: str) -> None:
-    """caller MUST hold db.write_lock(threading.Lock 不可重入)。"""
+    """调用方必须持有 db.write_lock(threading.Lock 不可重入)。"""
     db.conn.execute(
         "INSERT INTO system_settings (key, value) VALUES (?, ?) "
         "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP",
@@ -94,7 +94,7 @@ def _delete_model_world_locked(db: Db) -> None:
 
 
 def _write_appconfig_locked(db: Db, cfg: AppConfig) -> None:
-    """caller MUST hold db.write_lock。全量替换模型世界 + upsert program/wol/claude。
+    """调用方必须持有 db.write_lock。全量替换模型世界 + upsert program/wol/claude。
     失败 rollback——共享写连接上未回滚的 partial 会被后续无关 commit 冲刷为脏数据。
     **本函数不 commit,由 caller 在同事务内追加操作后统一 commit**(支持 `mutate_appconfig` 的 `post_write`)。"""
     try:
@@ -182,7 +182,7 @@ def write_appconfig(db: Db, cfg: AppConfig) -> None:
 
 
 def _read_appconfig_locked(db: Db) -> AppConfig:
-    """caller MUST hold db.write_lock(与 _write_appconfig_locked 共用一把锁 → 多 SELECT 天然一致)。"""
+    """调用方必须持有 db.write_lock(与 _write_appconfig_locked 共用一把锁 → 多 SELECT 天然一致)。"""
     s = get_all_settings(db)
     program = ProgramConfig(
         host=s.get("host", PROGRAM_DEFAULTS["host"]),
@@ -324,7 +324,7 @@ def read_appconfig(db: Db) -> AppConfig:
 
 class ConfigStore:
     """DB-backed config holder。frozen snapshot() 是消费方接口(缓存,不每次读库);
-    reload() 重读 DB(P1 写回后调用)。"""
+    reload() 重读 DB(配置写回后调用)。"""
 
     def __init__(self, db: Db) -> None:
         self._db = db

@@ -1,14 +1,14 @@
-"""GET /api/usage/* — token + cost aggregates over a time window.
+"""GET /api/usage/* — 时间窗口内的 token + 成本聚合。
 
-``session``      = since-start totals (module-level, proxy-fed), polled every 3s by the 概览 card.
-``series``       = bucketed token series (total + per-model), clock-aligned buckets.
-``summary``      = window totals (input/output/cache/hit-rate/request count).
-``by-model``     = per-model window stats (tokens, share, latency).
-``cost``         = window cost: tier 模型按请求公式,按时模型按运行重叠。
-``cost-series``  = bucketed cost series (元/桶), clock-aligned like ``series``.
+``session``      = 自启动以来的总计(模块级,由代理喂入),概览卡片每 3s 轮询。
+``series``       = 分桶 token 序列(总量 + 按模型),时钟对齐的桶。
+``summary``      = 窗口总计(输入/输出/缓存/命中率/请求数)。
+``by-model``     = 按模型的窗口统计(token、占比、延迟)。
+``cost``         = 窗口成本:tier 模型按请求公式,按时模型按运行重叠。
+``cost-series``  = 分桶成本序列(元/桶),与 ``series`` 一样时钟对齐。
 
-The frontend ticks uptime locally from ``started_at``; series buckets carry wall-clock
-epochs so the chart's x-axis is displayable.
+前端本地从 ``started_at`` 起算运行时长;series 桶携带墙上时钟 epoch,
+图表 x 轴可直接展示。
 """
 
 from __future__ import annotations
@@ -46,9 +46,9 @@ class SessionUsageResponse(BaseModel):
 
 
 class UsageSeriesResponse(BaseModel):
-    buckets: list[float]  # bucket-start wall-clock epochs (chart x-axis)
-    total: list[float]  # value per bucket, summed across models (tokens 或 元)
-    models: dict[str, list[float]]  # model name → value per bucket
+    buckets: list[float]  # 桶起始的墙上时钟 epoch(图表 x 轴)
+    total: list[float]  # 每桶的值,跨模型合计(token 或 元)
+    models: dict[str, list[float]]  # 模型名 → 每桶的值
 
 
 class UsageSummaryResponse(BaseModel):
@@ -83,7 +83,7 @@ class CostSummaryResponse(BaseModel):
 
 
 def _bucket_for_span(span: float) -> int:
-    """Auto bucket size for a custom window, chosen by span (matches preset granularities)."""
+    """自定义窗口的自动桶大小,按 span 选择(与预设粒度对齐)。"""
     if span <= 3600:
         return 10  # ≤1h → 10s
     if span <= 86_400:
@@ -94,26 +94,25 @@ def _bucket_for_span(span: float) -> int:
 
 
 def _resolve_range(preset: str, start: float | None, end: float | None) -> tuple[float, float, int]:
-    """Map a preset or custom (start, end) to (start_ts, end_ts, bucket_seconds).
-    Buckets align to local clock boundaries (see usage_series TZ offset)."""
+    """将预设或自定义 (start, end) 映射为 (start_ts, end_ts, bucket_seconds)。
+    桶与本地时钟边界对齐(见 usage_series 的 TZ offset)。"""
     now = time.time()
     if start is not None and end is not None:
         return start, end, _bucket_for_span(end - start)
     if preset == "10m":
-        return now - 600, now, 10  # last 10 min, 10s buckets
+        return now - 600, now, 10  # 最近 10 分钟,10s 桶
     if preset == "today":
         midnight = (
             datetime.datetime.now().replace(hour=0, minute=0, second=0, microsecond=0).timestamp()  # noqa: DTZ005 — 本地午夜边界(与 _bucket_axis 的本地 TZ 对齐一致)
         )
-        return midnight, now, 600  # since local midnight, 10min buckets
+        return midnight, now, 600  # 本地午夜起,10min 桶
     if preset == "30d":
-        return now - 2_592_000, now, 86_400  # last 30 days, 1-day buckets
-    return now - 604_800, now, 3_600  # default + "7d": last 7 days, 1h buckets
+        return now - 2_592_000, now, 86_400  # 最近 30 天,1 天桶
+    return now - 604_800, now, 3_600  # 默认 + "7d":最近 7 天,1h 桶
 
 
 def _resolve_window(preset: str, start: float | None, end: float | None) -> tuple[float, float]:
-    """[start_ts, end_ts) for the non-bucketed endpoints — reuses _resolve_range and
-    discards the bucket size."""
+    """非分桶端点的 [start_ts, end_ts) —— 复用 _resolve_range 并丢弃桶大小。"""
     start_ts, end_ts, _ = _resolve_range(preset, start, end)
     return start_ts, end_ts
 

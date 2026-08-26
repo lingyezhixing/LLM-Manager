@@ -1,4 +1,4 @@
-"""Management API (/api/*). One sub-router per resource group."""
+"""管理 API(/api/*)。每个资源组一个子 router。"""
 
 from __future__ import annotations
 

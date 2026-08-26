@@ -13,7 +13,7 @@ def test_lifespan_opens_db_and_monitor_then_cleans_up(tmp_path):
         assert (tmp_path / "t.db").exists()
         resp = client.get("/health")
         assert resp.status_code == 200
-    # after shutdown the db connection is closed; reopening works (no lock leftover)
+    # shutdown 后 DB 连接已关闭;可重新打开(无锁残留)
     assert (tmp_path / "t.db").exists()
 
 

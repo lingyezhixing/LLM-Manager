@@ -1,6 +1,5 @@
-"""Gateway HTTP layer composition root. Wires the management API (/api/*), catalog
-(/health, /v1/models, OPTIONS preflight), the OpenAI-compatible proxy catch-all,
-and the built-frontend SPA host. See proxy.py, api/."""
+"""Gateway HTTP 层组合根:装配管理 API(/api/*)、catalog(/health、/v1/models、
+OPTIONS 预检)、OpenAI 兼容代理 catch-all 与前端构建产物 SPA 宿主。见 proxy.py、api/。"""
 
 from __future__ import annotations
 
@@ -66,9 +65,8 @@ def _media_type(path: str) -> str | None:
 
 
 def _register_spa(app: FastAPI) -> None:
-    """Built-frontend SPA hosting: StaticFiles(/assets) + GET catch-all fallback to
-    index.html. Registered LAST so it never shadows /health, /v1/models, /api/*,
-    the proxy catch-alls, or FastAPI built-ins."""
+    """前端构建产物 SPA 托管:StaticFiles(/assets) + GET catch-all 回退到 index.html。
+    最后注册,绝不遮蔽 /health、/v1/models、/api/*、代理 catch-all 或 FastAPI 内建路由。"""
     if not _FRONTEND_DIST.is_dir():
         logger.warning(
             "frontend/dist not found at %s; SPA not mounted (run `npm run build` in frontend/)",

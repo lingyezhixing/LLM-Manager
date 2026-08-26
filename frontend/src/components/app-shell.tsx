@@ -6,8 +6,8 @@ import { Sidebar } from "@/components/sidebar";
 const COLLAPSE_KEY = "lhm:nav-collapsed";
 
 /**
- * App shell (NapCat 克制演绎):左玻璃侧栏 + 右滚动列(悬浮胶囊条 + 全宽内容)。
- * 控制台数据密集——内容区占满宽度(弃 NapCat 居中 1000px 列)。
+ * App shell:左玻璃侧栏 + 右滚动列(悬浮胶囊条 + 全宽内容)。
+ * 控制台数据密集——内容区占满宽度。
  * 折叠状态 localStorage 持久化,键不变。页面切换经 key=pathname 触发 animate-page-in。
  */
 /** 壳层滚动容器的 DOM id:Dialog 打开时需对它加 overflow-hidden 锁定背景滚动

@@ -41,7 +41,7 @@ export function WolPanel() {
   }
 
   const macOk = form.mac_address.trim() !== "";
-  const bcastOk = form.broadcast_address.trim() !== "";   // B8:后端两字段均 min_length=1,前端同步门控
+  const bcastOk = form.broadcast_address.trim() !== "";   // 后端两字段均 min_length=1,前端同步门控
   const set = (k: keyof WolConfig, v: string) => setForm({ ...form, [k]: v });
 
   const onClear = async () => {

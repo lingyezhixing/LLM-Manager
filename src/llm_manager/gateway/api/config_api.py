@@ -1,4 +1,4 @@
-"""System config write-back API: GET/PUT /api/config*, /api/system/info, restart 检测.
+"""系统配置写回 API:GET/PUT /api/config*、/api/system/info、restart 检测。
 
 校验层 = Pydantic 请求模型(FastAPI 自动 422)。写经 set_settings(多键原子)→ store.reload()。
 restart 检测:对比 snapshot.program 的 host/port/claude_settings_path/log_level 与 app.state.boot_program(启动期捕获)。

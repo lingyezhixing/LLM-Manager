@@ -2,9 +2,9 @@ import { useEffect, useState } from "react";
 
 import type { DateRange } from "@/lib/usage-range";
 
-/** Hand-rolled two-month range picker (no lib — offline, matches the locked mockup).
- *  Each month navigates independently, so a range can span more than two months.
- *  Click a start day, then an end day; the range commits and the popover closes. */
+/** 手写双月范围选择器(无第三方库——离线)。
+ *  各月独立导航,因此范围可跨两个月以上。
+ *  先点开始日,再点结束日;范围提交后弹出层关闭。 */
 
 const WEEKDAYS = ["一", "二", "三", "四", "五", "六", "日"];
 
@@ -42,7 +42,7 @@ function MonthGrid({
   const y = view.getFullYear();
   const m = view.getMonth();
   const dim = daysInMonth(y, m);
-  const lead = (new Date(y, m, 1).getDay() + 6) % 7; // Mon-start offset
+  const lead = (new Date(y, m, 1).getDay() + 6) % 7; // 周一起始偏移
   const cells: (Date | null)[] = [
     ...Array<null>(lead).fill(null),
     ...Array.from({ length: dim }, (_, i) => new Date(y, m, i + 1)),
@@ -144,7 +144,7 @@ export function CalendarRangePicker({
       setEnd(null);
       return;
     }
-    // F4:to 取所选日 23:59:59.999。后端时间窗右开 [start,end),若用 00:00 会漏掉结束日全天。
+    // to 取所选日 23:59:59.999。后端时间窗右开 [start,end),若用 00:00 会漏掉结束日全天。
     const endOfDay = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999);
     setEnd(endOfDay);
     onChange({ from: start, to: endOfDay });

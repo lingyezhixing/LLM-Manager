@@ -62,4 +62,3 @@ export function useBlockWindow(
 
   return { visible, blockOf, mount, nBlocks, BLOCK, heights, EST_ROW_H };
 }
-// blockOf 已提升为模块级导出(见上)

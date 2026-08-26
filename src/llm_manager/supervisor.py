@@ -1,7 +1,6 @@
-"""Cross-platform process supervisor. Process-group/session isolation is an
-INTERNAL invariant (Win CREATE_NEW_PROCESS_GROUP, POSIX start_new_session).
-One asyncio wait-task per process replaces the legacy 5s poller. Blocking ops
-(Popen, psutil.wait, killpg) run via asyncio.to_thread."""
+"""跨平台进程监督器。进程组/会话隔离是内部不变量(Win CREATE_NEW_PROCESS_GROUP、
+POSIX start_new_session)。每进程一个 asyncio wait-task。
+阻塞操作(Popen、psutil.wait、killpg)经 asyncio.to_thread 执行。"""
 
 from __future__ import annotations
 
@@ -136,8 +135,8 @@ class Supervisor:
         self._wait_tasks.pop(pid, None)
 
     def on_exit(self, pid: int, cb: Callable[[int], None]) -> None:
-        # 迟注册(进程已退出,wait/kill_tree 已清表)不得重建《永清条目》:表里没有
-        # 该 pid 就不会再有回调被执行,塞进去只会积累永不触发的键(见 #3)。
+        # 迟注册(进程已退出,wait/kill_tree 已清表):表里没有该 pid 就不会再有
+        # 回调被执行,塞进去只会积累永不触发的键。
         if pid not in self._procs:
             return
         self._exit_cbs[pid] = cb

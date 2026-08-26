@@ -1,15 +1,14 @@
-"""System tray host: pystray thin shell holding app.state collaborators.
+"""系统托盘宿主:pystray 薄壳,持有 app.state 的协作者。
 
-pystray runs on its own daemon thread. Sync actions (WOL UDP send, Claude
-settings write) run directly on that thread; async actions (restart auto-start
-models, unload all) marshal to the uvicorn loop via ``run_coroutine_threadsafe``.
-``exit_app`` flips ``server.should_exit`` on the loop so uvicorn shuts down
-gracefully and the lifespan finally-block runs (unload_all + close clients/db).
+pystray 跑在自己的 daemon 线程上。同步动作(WOL UDP 发送、Claude settings
+写入)直接在该线程执行;异步动作(重启自启模型、卸载全部)经
+``run_coroutine_threadsafe`` 编组到 uvicorn 事件循环。``exit_app`` 在循环上
+翻转 ``server.should_exit``,使 uvicorn 优雅关闭,lifespan 的 finally 块得以
+执行(unload_all + 关闭客户端/DB)。
 
-Headless environments (no pystray/Pillow, or Linux without DISPLAY) degrade to
-silent operation — ``is_tray_available`` gates ``start``. The Icon/run() loop is
-not unit-testable; action methods are kept free of pystray objects so they can
-be exercised in isolation via the ``_run_coro_threadsafe`` seam.
+无头环境(无 pystray/Pillow,或 Linux 无 DISPLAY)降级为静默运行——
+``is_tray_available`` 把关 ``start``。Icon/run() 循环不可单测;动作方法
+不持 pystray 对象,可经 ``_run_coro_threadsafe`` 接缝单独演练。
 """
 
 from __future__ import annotations
@@ -50,7 +49,7 @@ def _is_headless_display() -> bool:
 
 
 def is_tray_available() -> bool:
-    """True only when pystray/Pillow import OK and a display is present."""
+    """仅当 pystray/Pillow 导入成功且存在显示环境时为真。"""
     if not _PYSTRAY_AVAILABLE:
         return False
     return not _is_headless_display()
@@ -80,7 +79,7 @@ class SystemTray:
         self._icon = None
         self._thread: threading.Thread | None = None
 
-    # ---------- lifecycle ----------
+    # ---------- 生命周期 ----------
     def start(self) -> None:
         if not is_tray_available():
             logger.info("无头模式:系统托盘未启动(后台静默运行)")
@@ -102,7 +101,7 @@ class SystemTray:
             except Exception as e:  # noqa: BLE001
                 logger.warning("托盘停止异常: %s", e)
 
-    # ---------- icon + menu (need display; not unit-tested) ----------
+    # ---------- 图标与菜单(需显示环境;不经单测) ----------
     def _load_image(self):
         """多帧 ICO:Windows 托盘按系统 DPI 选最接近帧渲染(16/24/32px)。
         assets/icon.ico 由 frontend/public/favicon.svg 一次性生成
@@ -163,7 +162,7 @@ class SystemTray:
             self._settings_path, dict(self._get_cfg().claude_configs)
         )
 
-    # ---------- actions (unit-testable; no pystray objects) ----------
+    # ---------- 动作(可单测;不持 pystray 对象) ----------
     def open_webui(self, icon=None, item=None) -> None:
         cfg = self._get_cfg()
         host = "localhost" if cfg.program.host == "0.0.0.0" else cfg.program.host
@@ -201,13 +200,13 @@ class SystemTray:
         self._run_coro_threadsafe(self._lifecycle.unload_all())
 
     def exit_app(self, icon=None, item=None) -> None:
-        # graceful: flip server.should_exit on the loop → uvicorn shuts down →
-        # lifespan finally runs (unload_all + close clients/db).
+        # 优雅关闭:在循环上翻转 server.should_exit → uvicorn 关闭 →
+        # lifespan 的 finally 执行(unload_all + 关闭客户端/DB)。
         self._loop.call_soon_threadsafe(setattr, self._server, "should_exit", True)
         if self._icon is not None:
             self._icon.stop()
 
-    # ---------- async marshal seam ----------
+    # ---------- 异步编组接缝 ----------
     def _run_coro_threadsafe(self, coro) -> None:
         if self._loop.is_closed():
             logger.warning("事件循环已关闭,操作取消")

@@ -1,8 +1,7 @@
-"""Device detection: backends enumerate all present hardware (NVIDIA via nvidia-smi,
-Intel GPU via i915+intel_gpu_top/LHM, AMD GPU via amdgpu/LHM, CPU via psutil/LHM) →
-DeviceMonitor fuzzy-matches config device names to detected hardware (token-subset)
-and atomically rebinds a config-keyed cache (+ unmatched devices keyed by raw name
-for display). 每个适配器文件内按平台分割路径,每次仅激活一条;频率/温度字段为
+"""设备检测:后端枚举全部现存硬件(NVIDIA 经 nvidia-smi、Intel GPU 经
+i915+intel_gpu_top/LHM、AMD GPU 经 amdgpu/LHM、CPU 经 psutil/LHM)→
+DeviceMonitor 把配置设备名与检测到的硬件模糊匹配(token 子集),并原子 rebind
+config 键控缓存(+ 未匹配设备按原始名键控用于展示)。每个适配器文件内按平台分割路径,每次仅激活一条;频率/温度字段为
 可空增量(读不到 → None/0),全链路不新增进程、不新增调用。"""
 
 from __future__ import annotations

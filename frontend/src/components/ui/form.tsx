@@ -1,6 +1,6 @@
 import type { InputHTMLAttributes, ReactNode, SelectHTMLAttributes, TextareaHTMLAttributes } from "react";
 
-// 项目首套表单原子。语义 token + --ring focus,二主题自适应。后续 wol/claude/logs/model-def 复用。
+// 语义 token + --ring focus,二主题自适应。
 // 共享框样式(不含高度):input 原子加 h-9,TextArea 加 min-h + py。
 const fieldBase =
   "w-full bg-input border border-border rounded-md px-3 text-sm text-foreground placeholder:text-muted-foreground disabled:opacity-50";

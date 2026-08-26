@@ -10,9 +10,9 @@ from llm_manager.data.persistence import Db
 
 @dataclass(frozen=True, slots=True)
 class UsageSeries:
-    buckets: list[float]  # bucket-start wall-clock epochs (the time axis)
-    models: dict[str, list[float]]  # model → value per bucket (tokens 或 元,0-filled)
-    total: list[float]  # value per bucket summed across models
+    buckets: list[float]  # 桶起点 wall-clock epoch(时间轴)
+    models: dict[str, list[float]]  # 模型 → 每桶数值(tokens 或 元,缺桶补 0)
+    total: list[float]  # 每桶跨模型求和
 
 
 def _clock_offset(bucket_seconds: int) -> int:
@@ -23,10 +23,9 @@ def _clock_offset(bucket_seconds: int) -> int:
 def _bucket_axis(start_ts: float, end_ts: float, bucket_seconds: int) -> tuple[float, list[float]]:
     """时钟对齐桶轴:(first_bucket_start, [buckets])。空窗/非正桶 → (0.0, []).
 
-    Buckets are **absolute** (clock-aligned to multiples of ``bucket_seconds``), not
-    relative to the window start — so a request's bucket is fixed and a sliding live
-    window scrolls the chart instead of reshaping it. Alignment to LOCAL boundaries
-    (e.g. local midnight for daily) via the TZ offset.
+    桶是**绝对**的(时钟对齐到 ``bucket_seconds`` 的倍数),而非相对窗口起点——
+    故请求的桶固定,滑动 live 窗口滚动图表而不是重塑它。经 TZ 偏移对齐本地边界
+    (如日窗口对齐本地零点)。
     """
     if end_ts <= start_ts or bucket_seconds <= 0:
         return 0.0, []
@@ -37,13 +36,12 @@ def _bucket_axis(start_ts: float, end_ts: float, bucket_seconds: int) -> tuple[f
 
 
 def usage_series(db: Db, *, start_ts: float, end_ts: float, bucket_seconds: int) -> UsageSeries:
-    """Aggregate token consumption (input + output) per model + total, bucketed by wall-clock
-    end_time (the request's completion timestamp — when usage is recorded).
+    """按模型 + 总计聚合 token 消耗(input + output),按墙钟 end_time(请求完成
+    时刻——用量记录时点)分桶。
 
-    Buckets are **absolute** (clock-aligned to multiples of ``bucket_seconds``), not relative
-    to the window start — so a request's bucket is fixed and a sliding live window scrolls
-    the chart instead of reshaping it. Returns the full bucket axis 0-filled for continuity.
-    ``tokens = input + output``.
+    桶是**绝对**的(时钟对齐到 ``bucket_seconds`` 的倍数),而非相对窗口起点——
+    故请求的桶固定,滑动 live 窗口滚动图表而不是重塑它。返回完整桶轴,缺桶补 0
+    保证连续性。``tokens = input + output``。
     """
     first, buckets = _bucket_axis(start_ts, end_ts, bucket_seconds)
     n = len(buckets)
@@ -88,8 +86,8 @@ class UsageSummary:
 
 
 def usage_summary(db: Db, *, start_ts: float, end_ts: float) -> UsageSummary:
-    """Aggregate token usage over the half-open window [start_ts, end_ts) by wall-clock
-    end_time. Empty window → zeros (hit_rate 0.0)."""
+    """半开窗口 [start_ts, end_ts) 内的 token 用量聚合,按墙钟 end_time 归窗。
+    空窗口 → 全零(hit_rate 0.0)。"""
     row = db.conn.execute(
         """SELECT COALESCE(SUM(input_tokens), 0) AS s_in,
                   COALESCE(SUM(output_tokens), 0) AS s_out,
@@ -125,9 +123,8 @@ class ByModelRow:
 
 
 def usage_by_model(db: Db, *, start_ts: float, end_ts: float) -> list[ByModelRow]:
-    """Per-model aggregates over [start_ts, end_ts), ordered by input_tokens desc.
-    share = model input / total input (0.0 when no input). latency_ms = mean wall-clock
-    request duration in ms."""
+    """[start_ts, end_ts) 内的按模型聚合,按 input_tokens 降序。
+    share = 模型输入 / 总输入(无输入时 0.0)。latency_ms = 平均墙钟请求时长(ms)。"""
     rows = db.conn.execute(
         """SELECT m.original_name AS model,
                   SUM(r.input_tokens) AS s_in,

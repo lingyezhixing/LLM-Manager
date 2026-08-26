@@ -1,10 +1,9 @@
-"""GET /api/logs/* — persistent session logs (system + model) over SQLite.
+"""GET /api/logs/* — SQLite 上的持久会话日志(系统 + 模型)。
 
-Sessions list (with line counts), per-session line paging (backfill/before),
-SSE live stream (DB backfill then broadcaster tail), and cross-session text
-search. ``model`` query param accepts alias (resolved to primary_name via
-config.resolve_alias, falling back to session history for deleted-model
-residuals); logs API reads ``get_db(request)``.
+会话列表(含行数)、按会话分页取行(backfill/before)、SSE 实时流(先 DB 回填再
+broadcaster 尾部追加)与跨会话文本搜索。``model`` 查询参数接受别名(经
+config.resolve_alias 解析为 primary_name,对已删模型的残留会话回退到会话历史);
+logs API 读取 ``get_db(request)``。
 """
 
 from __future__ import annotations
@@ -63,8 +62,8 @@ def _to_line(r) -> LogLineResponse:
 
 def _to_session(r) -> LogSessionResponse:
     """SQL 层的 status 由内存 live_session_ids 计算(运行中=直播会话,end_time 只管时间,
-    心跳会把它推到 now)——响应必须透传该字段,不能再按 end_time 判运行中(7279319 解耦
-    语义;否则心跳一写 end_time,日志页「运行中」就消失)。"""
+    心跳会把它推到 now)——响应必须透传该字段,不能再按 end_time 判运行中(
+    否则心跳一写 end_time,日志页「运行中」就消失)。"""
     status = r["status"]
     return LogSessionResponse(
         id=r["id"],
@@ -88,7 +87,7 @@ def _resolve_model(request: Request, model: str | None) -> str | None:
     """model 参数接受 alias → resolve 到 primary_name;未配置 → 404。
 
     配置解析失败时回退到会话历史(已删模型的残留会话仍可按其 alias/原名
-    过滤查看,见 §8 下拉选项来源);配置与会话历史都无 → 404。"""
+    过滤查看);配置与会话历史都无 → 404。"""
     if model is None:
         return None
     cfg = get_config_store(request).snapshot()
@@ -108,7 +107,7 @@ async def _session_stream(session_id: int, level: str | None, db, q) -> AsyncIte
     q 由端点先 subscribe(存在性校验,None → 404——生成器内 raise HTTPException
     不会转成 404,响应头已发)。finally 里 unsubscribe 与端点 subscribe 对称。"""
     try:
-        # 🔵3:回填 2048 行的同步 SQL 移出事件循环线程,避免长订阅首帧阻塞其它请求。
+        # 回填 2048 行的同步 SQL 移出事件循环线程,避免长订阅首帧阻塞其它请求。
         backfill = await asyncio.to_thread(
             _logs.log_lines_backfill, db, session_id, limit=2048, level=level
         )
@@ -186,7 +185,7 @@ def register_logs_routes(api: APIRouter) -> None:
         if not q.strip():
             return LogSearchResponse(
                 total=0, matches=[]
-            )  # 🔵5:空查询无意义,拒空串避免 LIKE '%%' 全表扫描
+            )  # 空查询无意义,拒空串避免 LIKE '%%' 全表扫描
         m = _resolve_model(request, model)
         total, rows = _logs.log_search(
             get_db(request),

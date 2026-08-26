@@ -38,7 +38,7 @@ export function useRestartStatus() {
   return useQuery({ queryKey: qk.restartStatus, queryFn: fetchRestartStatus });
 }
 
-// 项目首个 useMutation:写后失效 config + restart-status,横幅按新状态刷新。
+// 写后失效 config + restart-status,横幅按新状态刷新。
 export function useUpdateProgram() {
   const qc = useQueryClient();
   return useMutation({

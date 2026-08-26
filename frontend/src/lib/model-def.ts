@@ -1,4 +1,4 @@
-// 模型定义表单纯逻辑:空草稿/深拷贝/深相等/客户端门控/载荷清理(自 model-def-form 拆出)。
+// 模型定义表单纯逻辑:空草稿/深拷贝/深相等/客户端门控/载荷清理。
 
 import { isPendingKey } from "@/lib/pending-keys";
 import { type ModelDef, type SchemeDef } from "@/lib/api";
@@ -35,7 +35,7 @@ export const clone = <T,>(x: T): T => JSON.parse(JSON.stringify(x)) as T;
 // 故用 JSON.stringify 比较 —— 与 clone 的序列化机制一致,语义统一。
 export const deepEqual = (a: ModelDef, b: ModelDef): boolean => JSON.stringify(a) === JSON.stringify(b);
 
-// 客户端门控:明显空缺则禁用保存(M6)。
+// 客户端门控:明显空缺则禁用保存。
 export function clientValid(form: ModelDef): boolean {
   if (!form.name.trim()) return false;
   if (form.aliases.length === 0 || form.aliases.some((a) => !a.trim())) return false;

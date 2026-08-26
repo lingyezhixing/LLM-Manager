@@ -1,9 +1,8 @@
-"""SystemTray host unit tests.
+"""SystemTray 宿主单元测试。
 
-The pystray Icon/run() loop needs a real display and is not exercised here; only
-the import-guard + action methods are tested. The async-marshal seam is
-``_run_coro_threadsafe`` (overridden on the instance to capture + run the coro
-on the test loop); the exit seam is the loop/server pair.
+pystray 的 Icon/run() 循环需要真实显示环境,此处不涉及;只测
+import 守卫 + 动作方法。异步 marshal 接缝是 ``_run_coro_threadsafe``
+(在实例上覆写,在测试循环上捕获并运行 coro);退出接缝是 loop/server 对。
 """
 
 import asyncio
@@ -70,7 +69,7 @@ def _make_tray(**over):
     return tray.SystemTray(**base)
 
 
-# ---------- availability ----------
+# ---------- 可用性 ----------
 def test_is_tray_available_false_when_pystray_missing(monkeypatch):
     monkeypatch.setattr(tray, "_PYSTRAY_AVAILABLE", False)
     assert tray.is_tray_available() is False
@@ -92,7 +91,7 @@ def test_is_headless_display_posix_without_display(monkeypatch):
     assert tray._is_headless_display() is False
 
 
-# ---------- Claude preset ----------
+# ---------- Claude 预设 ----------
 def test_apply_claude_delegates_to_apply_preset(monkeypatch, tmp_path):
     settings = tmp_path / "settings.json"
     tray_host = _make_tray(
@@ -116,7 +115,7 @@ def test_apply_claude_unknown_preset_noop(monkeypatch, tmp_path):
 
 
 def test_apply_claude_empty_settings_path_is_noop(monkeypatch):
-    # claude_settings_path 可空(托盘启动门槛已移除):空路径不得写库(Path("") 会落到 cwd)
+    # claude_settings_path 可空:空路径不得写库(Path("") 会落到 cwd)
     tray_host = _make_tray(settings_path="")
     called = []
     monkeypatch.setattr(tray.claude, "apply_preset", lambda *a: called.append(a))
@@ -125,7 +124,7 @@ def test_apply_claude_empty_settings_path_is_noop(monkeypatch):
 
 
 def test_apply_claude_none_settings_path_is_noop(monkeypatch):
-    # 空库首次启动:claude_settings_path 为 None——Path(None) 曾致启动崩溃(ddfffe1 修复的回归)
+    # 空库首次启动:claude_settings_path 为 None——Path(None) 曾致启动崩溃
     tray_host = _make_tray(settings_path=None)
     called = []
     monkeypatch.setattr(tray.claude, "apply_preset", lambda *a: called.append(a))
@@ -133,7 +132,7 @@ def test_apply_claude_none_settings_path_is_noop(monkeypatch):
     assert called == []
 
 
-# ---------- async marshal ----------
+# ---------- 异步 marshal ----------
 async def test_unload_all_marshals_lifecycle_unload_all():
     life = _FakeLife()
     tray_host = _make_tray(lifecycle=life)
@@ -155,7 +154,7 @@ async def test_unload_all_marshals_lifecycle_unload_all():
 
 async def test_restart_auto_start_unloads_then_autostarts(monkeypatch):
     life = _FakeLife()
-    tray_host = _make_tray(lifecycle=life, get_cfg=lambda: _cfg())  # models empty → auto_models []
+    tray_host = _make_tray(lifecycle=life, get_cfg=lambda: _cfg())  # 模型为空 → auto_models []
     captured = []
 
     def fake_schedule(coro):
@@ -176,10 +175,10 @@ async def test_restart_auto_start_unloads_then_autostarts(monkeypatch):
     assert len(captured) == 1
     await captured[0]
     assert life.unload_called is True
-    assert autostart_calls == [([], 90.0)]  # startup_timeout 60 + margin 30
+    assert autostart_calls == [([], 90.0)]  # startup_timeout(60)+ margin(30)
 
 
-# ---------- exit ----------
+# ---------- 退出 ----------
 def test_exit_app_sets_server_should_exit():
     server = _FakeServer()
     loop = _FakeLoop()
@@ -187,7 +186,7 @@ def test_exit_app_sets_server_should_exit():
     tray_host.exit_app()
     assert len(loop.scheduled) == 1
     cb, args = loop.scheduled[0]
-    cb(*args)  # execute setattr(server, "should_exit", True)
+    cb(*args)  # 执行 setattr(server, "should_exit", True)
     assert server.should_exit is True
 
 
@@ -198,7 +197,7 @@ def test_run_coro_threadsafe_closes_coro_when_loop_closed():
     async def never_run():
         pytest.fail("coroutine should not run on a closed loop")
 
-    tray_host._run_coro_threadsafe(never_run())  # must not raise; coro closed cleanly
+    tray_host._run_coro_threadsafe(never_run())  # 不得抛异常;coro 被干净关闭
 
 
 def test_send_wol_uses_fresh_wol_from_store(monkeypatch, tmp_path):

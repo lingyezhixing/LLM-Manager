@@ -1,4 +1,4 @@
-"""Test-wide fixtures.
+"""测试级 fixtures。
 
 create_app() 调用 setup_logging(),它每次启动挂一个时间戳文件
 logs/llm-manager_{ts}.log(保留最近 10 个)到 root logger。不加隔离:

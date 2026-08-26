@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 
 import { THEME_DEFAULT, THEME_STORE_KEY, THEME_VALUES, ThemeContext, type Theme } from "@/lib/theme-context";
 
-/** Applies the active theme to <html data-theme> and persists it to localStorage. */
+/** 将当前主题应用到 <html data-theme> 并持久化到 localStorage。 */
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setTheme] = useState<Theme>(() => {
     const saved = localStorage.getItem(THEME_STORE_KEY);

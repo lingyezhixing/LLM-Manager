@@ -105,7 +105,7 @@ def test_update_apply_rejects_bad_target(tmp_path):
 
 
 def test_startup_check_generation_guard(monkeypatch, tmp_path) -> None:
-    """手动 check 把 gen 递增后,迟到的启动检测结果不得覆盖手动结果(M2);gen 仍为
+    """手动 check 把 gen 递增后,迟到的启动检测结果不得覆盖手动结果;gen 仍为
     0(无人手动 check)时启动结果正常落缓存。"""
     import asyncio
     import types

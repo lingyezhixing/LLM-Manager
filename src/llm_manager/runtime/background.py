@@ -1,4 +1,4 @@
-"""Background loops: idle reclamation + auto-start + 30s heartbeat + log retention."""
+"""后台循环:空闲回收 + 自启动 + 30s 心跳 + 日志保留。"""
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 AUTO_START_MARGIN: float = 30.0
-HEARTBEAT_INTERVAL = 30.0  # 秒:老项目同款节奏,崩溃最多丢最后 30s
+HEARTBEAT_INTERVAL = 30.0  # 秒:崩溃最多丢最后 30s
 
 
 def _plan_batches(models_schemes: list) -> tuple[list[str], list[str]]:
@@ -50,7 +50,7 @@ def select_idle_candidates(alive_sec: float, now: float) -> list[str]:
 async def idle_reclamation_loop(
     lifecycle, get_cfg, stop_event: asyncio.Event, *, period: float = 30.0
 ) -> None:
-    """每轮从 get_cfg() 取 fresh alive_time(P1 写回后即时生效)。alive_time<=0 禁用。
+    """每轮从 get_cfg() 取 fresh alive_time(配置写回后即时生效)。alive_time<=0 禁用。
     单轮异常记日志继续(与 log_retention_loop 同款兜底)。"""
 
     async def _tick() -> None:

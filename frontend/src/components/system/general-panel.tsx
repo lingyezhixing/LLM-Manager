@@ -78,7 +78,7 @@ export function GeneralPanel() {
     return <Loading />;
   }
 
-  // M7:form 非空 ⇒ data 已就绪(form 只在 data 就绪后填充);此处兜底防 data 中途变 undefined
+  // form 非空 ⇒ data 已就绪(form 只在 data 就绪后填充);此处兜底防 data 中途变 undefined
   const initial: GeneralForm = data
     ? { program: data.program, logs: data.logs }
     : { program: form.program, logs: form.logs };

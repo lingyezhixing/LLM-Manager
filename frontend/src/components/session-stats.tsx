@@ -7,8 +7,8 @@ import { errMsg, formatCost, formatTokens, formatUptime } from "@/lib/format";
 import { useNowTick } from "@/lib/hooks/use-now-tick";
 import { qk } from "@/lib/api/keys";
 
-/** Session stats (since gateway start). Totals refetch every 10s——token 是内存读、成本是
- *  DB 查询,3s 过频;uptime ticks locally. */
+/** 会话统计(自网关启动起)。总额每 10s 重新拉取——token 是内存读、成本是
+ *  DB 查询,3s 过频;uptime 本地 tick。 */
 export function SessionStats() {
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: qk.sessionUsage,
@@ -20,7 +20,7 @@ export function SessionStats() {
   if (isError) return <ErrorState message={errMsg(error)} onRetry={() => refetch()} />;
   if (isLoading || !data) return <Skeleton rows={6} />;
 
-  const pct = Math.round(data.hit_rate * 1000) / 10;  // 1 decimal place
+  const pct = Math.round(data.hit_rate * 1000) / 10;  // 保留 1 位小数
   const uptimeSec = Math.max(0, Math.floor((now - data.started_at * 1000) / 1000));
 
   return (

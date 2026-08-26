@@ -1,5 +1,5 @@
-"""Health probes by model mode. 2-phase (shallow /v1/models + deep per-mode),
-shared start_time/timeout budget. httpx (no openai SDK). Never raises:未知 mode
+"""按模型 mode 的健康探测。两阶段(浅层 /v1/models + 每 mode 深层检查),
+共享 start_time/timeout 预算。httpx(无 openai SDK)。绝不抛异常:未知 mode
 返回失败结果(不抛),所有路径产出 ProbeResult。预算用 time.monotonic()(墙钟跳变
 如 NTP 校时不扭曲超时预算)。"""
 
@@ -23,7 +23,7 @@ def _make_client(port: int) -> httpx.Client:
 
 
 def _deep_request(mode: str) -> tuple[str, dict] | None:
-    """Pure: (path, json_body_template_without_model) relative to base /v1。
+    """纯函数:(path, 不含 model 的 json body 模板),相对 base /v1。
     未知 mode 返回 None(_probe 转失败结果,不抛——契约 Never raises)。"""
     if mode == "Chat":
         return "/chat/completions", {

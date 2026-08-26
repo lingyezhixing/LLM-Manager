@@ -1,4 +1,4 @@
-"""config 写路径的请求模型 + Pydantic→ModelConfig 转换(自 config_api 拆出,2026-08-14)。"""
+"""config 写路径的请求模型 + Pydantic→ModelConfig 转换。"""
 
 from __future__ import annotations
 
@@ -70,7 +70,7 @@ class ModelDefInput(BaseModel):
 
 def _to_model_config(body: ModelDefInput) -> ModelConfig:
     """Pydantic 输入 → frozen ModelConfig。设备名存储原样(所见即所存),匹配时由
-    DeviceMonitor._tokens 归一化比对(与 YAML 导入一致)。重复 config_source → ValueError(→ 422)。"""
+    DeviceMonitor._tokens 归一化比对。重复 config_source → ValueError(→ 422)。"""
     schemes: dict[str, Scheme] = {}
     for s in body.schemes:
         if s.config_source in schemes:

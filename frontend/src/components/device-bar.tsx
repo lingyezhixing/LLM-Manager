@@ -7,7 +7,7 @@ import type { DevicesResponse } from "@/lib/api";
 
 type MemUnit = "GB" | "MB";
 
-/** Real-time device bar (概览 top). Subscribes to /api/devices/stream (2s push).
+/** 实时设备栏(概览 top)。订阅 /api/devices/stream(2s 推送)。
  *  利用率 + 显存/内存占用双条形;点击内存读数切换单位(全部卡片联动)。
  *  默认 MB(用户偏好),点击切 GB。 */
 function mem(mb: number, unit: MemUnit): string {
@@ -81,7 +81,7 @@ function DeviceCard({
 
 export function DeviceBar() {
   const { data, error } = useEventStream<DevicesResponse>("/api/devices/stream");
-  const [unit, setUnit] = useState<MemUnit>("MB");   // 默认 MB,点击读数切 GB
+  const [unit, setUnit] = useState<MemUnit>("MB");
 
   const toggle = () => setUnit((u) => (u === "GB" ? "MB" : "GB"));
   const devices = data?.data ?? [];

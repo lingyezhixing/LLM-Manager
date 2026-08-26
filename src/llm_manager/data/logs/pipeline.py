@@ -1,4 +1,4 @@
-"""日志 flush 管道:pending 串行落库 + 行广播(自 logs 单文件拆出,2026-08-14)。
+"""日志 flush 管道:pending 串行落库 + 行广播。
 依赖 live 模块的状态(_pending/_sessions/_db/_forget_session);通过局部 import 避免循环依赖。"""
 
 from __future__ import annotations
@@ -35,7 +35,7 @@ async def flush() -> None:
                 return
             if (
                 _live._db is None
-            ):  # 🔵2:未接线(测试/启动早期无库可写)→ 清空 pending 安全丢弃,避免无界增长
+            ):  # 未接线(测试/启动早期无库可写)→ 清空 pending 安全丢弃,避免无界增长
                 _live._pending.clear()
                 return
             batch = _live._pending[:]
@@ -79,6 +79,6 @@ async def flush_loop(stop_event: asyncio.Event) -> None:
             pass
         except asyncio.CancelledError:
             break
-        except Exception:  # 🔵2:兜底防未料异常静默杀掉日志管线(flush 内部已捕 insert 异常)
+        except Exception:  # 兜底防未料异常静默杀掉日志管线(flush 内部已捕 insert 异常)
             logger.exception("flush_loop iteration failed; continuing")
     await flush()

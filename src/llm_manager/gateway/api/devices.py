@@ -1,9 +1,8 @@
-"""GET /api/devices/stream (SSE live push) for the device bar.
+"""GET /api/devices/stream (SSE 实时推送),供设备栏使用。
 
-On connect it sends the current snapshot immediately, then each refresh from the
-subscriber-gated ``DeviceFeed`` (2s). Pydantic schemas → OpenAPI (types hand-mirrored
-in ``frontend/src/lib/api/models.ts``). The SSE generator is extracted (``_device_stream``)
-so it can be unit-tested directly without the HTTP stack.
+连接时立即发送当前快照,之后由订阅者门控的 ``DeviceFeed``(2s)每次刷新推送。
+Pydantic schema → OpenAPI(类型手写镜像于 ``frontend/src/lib/api/models.ts``)。
+SSE 生成器单独抽出(``_device_stream``),可在不经过 HTTP 栈的情况下直接单测。
 """
 
 from __future__ import annotations
@@ -43,11 +42,11 @@ def _to_schema(d: DeviceInfo) -> DeviceInfoResponse:
 
 
 async def _device_stream(feed: DeviceFeed) -> AsyncIterator[str]:
-    """Infinite SSE generator: initial current snapshot, then each refresh."""
+    """无限 SSE 生成器:先发当前快照,之后每次刷新各发一帧。"""
     q = feed.subscribe()
     try:
         snap = feed.current_snapshot()
-        # immediate, so the list isn't empty
+        # 立即发一帧,列表不至于为空
         yield sse_frame(DevicesResponse(data=[_to_schema(d) for d in snap.values()]))
         while True:
             snap = await q.get()

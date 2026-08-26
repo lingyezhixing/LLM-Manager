@@ -1,4 +1,4 @@
-"""Config: 纯数据 + validate(DB 读取 → frozen dataclasses;设备名存储原样,匹配时归一化)。"""
+"""配置:纯数据 + validate(DB 读取 → frozen dataclasses;设备名存储原样,匹配时归一化)。"""
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ RETENTION_DEFAULTS: dict[str, str] = {
 
 
 class ModelMode(str, Enum):
-    """Probe selector; string values are config/registry keys."""
+    """探针选择器;字符串值即配置/注册表键。"""
 
     CHAT = "Chat"
     EMBEDDING = "Embedding"
@@ -74,8 +74,8 @@ class Scheme:
 @dataclass(frozen=True, slots=True)
 class PricingTier:
     tier_index: int
-    min_input: int | None = 0  # None/negative treated as 0 (closed lower bound)
-    max_input: int | None = None  # None/negative = unbounded (legacy -1)
+    min_input: int | None = 0  # None/负值按 0 处理(闭下界)
+    max_input: int | None = None  # None/负值 = 无上界
     min_output: int | None = 0
     max_output: int | None = None
     input_price: float = 0.0

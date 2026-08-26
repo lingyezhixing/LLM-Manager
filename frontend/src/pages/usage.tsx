@@ -6,7 +6,7 @@ import { UsageKpiRow } from "@/components/usage-kpi-row";
 import { UsageRangePicker } from "@/components/usage-range-picker";
 import { USAGE_REFETCH, paramsForState, type UsageRangeState } from "@/lib/usage-range";
 
-/** 用量统计 — token analytics (KPI + time-series + per-model). */
+/** 用量统计 — token 用量分析(KPI + 时间序列 + 按模型)。 */
 export default function UsagePage() {
   const [range, setRange] = useState<UsageRangeState>({ preset: "7d", custom: null });
   const params = paramsForState(range);

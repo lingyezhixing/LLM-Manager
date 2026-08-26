@@ -1,4 +1,4 @@
-"""日志会话/行的纯 SQL 存储层(自 logs 单文件拆出,2026-08-14)。无模块级可变状态。"""
+"""日志会话/行的纯 SQL 存储层。无模块级可变状态。"""
 
 from __future__ import annotations
 
@@ -145,7 +145,7 @@ def log_sessions(
 
     live_ids = 内存中仍在运行的会话 id(由调用方传入)。
 
-    #7 子查询先取页面会话再聚合:原「全表 GROUP BY → ORDER BY → LIMIT」在行数大时
+    子查询先取页面会话再聚合:原「全表 GROUP BY → ORDER BY → LIMIT」在行数大时
     (日志保 N 天积累)每次列表页全量聚合扫描;改后 LIMIT 先作用于 log_sessions
     (主键 id 逆序,代价 O(页)),LEFT JOIN 仅聚合页面内会话。"""
     live = live_ids or set()

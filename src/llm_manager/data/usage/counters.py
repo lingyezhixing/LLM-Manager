@@ -1,11 +1,11 @@
 """进程内会话计数器(重启清零,概览 session-stats 卡)。
 
-Fed by the proxy's ``_record_usage`` path (same token parse as the persisted rows, see
-``data/metering``). Module-level singleton (like ``state.py``) — asyncio single-thread →
-increments need no lock. ``started_at`` is the process-start wall-clock epoch, passed in
-by the caller; the frontend fetches it and ticks uptime locally. Metering semantics (all
-parsers): ``cache_tokens`` = hit, ``prompt_tokens`` = miss, ``input_tokens`` = cache + prompt
-→ hit_rate = cache_hit / (cache_hit + cache_miss).
+由 proxy 的 ``_record_usage`` 路径喂入(与落库行的 token 解析相同,见
+``data/metering``)。模块级单例(同 ``state.py``)— asyncio 单线程 →
+自增无需锁。``started_at`` 为进程启动时刻的 wall-clock epoch,由调用方传入;
+前端获取后本地走 uptime 计时。计量语义(所有解析器):``cache_tokens`` = 命中,
+``prompt_tokens`` = 未命中,``input_tokens`` = cache + prompt
+→ hit_rate = cache_hit / (cache_hit + cache_miss)。
 
 双账本语义:本模块=内存侧(进程生命周期,重启清零,概览 session-stats 卡);
 model_requests/model_runtime 落库侧=持久历史(用量/成本页)。两账本口径独立,
@@ -19,7 +19,7 @@ from llm_manager.data.metering import hit_rate
 
 @dataclass(frozen=True, slots=True)
 class SessionTotals:
-    started_at: float  # process start (wall-clock epoch seconds)
+    started_at: float  # 进程启动时刻(wall-clock epoch 秒)
     input_tokens: int
     output_tokens: int
     cache_hit: int
@@ -31,15 +31,15 @@ class SessionTotals:
 class _Counters:
     input_tokens: int = 0
     output_tokens: int = 0
-    cache_tokens: int = 0  # hits
-    prompt_tokens: int = 0  # misses
+    cache_tokens: int = 0  # 命中
+    prompt_tokens: int = 0  # 未命中
 
 
 _c: _Counters = _Counters()
 
 
 def _reset_counters() -> None:
-    """Test helper: clear counters (production resets only via process restart)."""
+    """测试辅助:清空计数器(生产环境仅经进程重启清零)。"""
     global _c
     _c = _Counters()
 

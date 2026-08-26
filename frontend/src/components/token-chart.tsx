@@ -3,14 +3,13 @@ import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent } from "r
 import type { UsageSeries } from "@/lib/api";
 import { formatTokens } from "@/lib/format";
 
-/** Hand-rolled token chart (no lib). Smooth (monotone-cubic) curves. Overlays a total
- *  area+line (primary) with thin per-model lines; legend toggles series. Theme-aware via
- *  currentColor; cursor-following tooltip. */
+/** 手写 token 曲线图(无第三方库)。平滑(monotone-cubic)曲线。经 currentColor
+ *  随主题变色;tooltip 跟随光标。 */
 
 const MODEL_COLORS = ["#f97316", "#a855f7", "#22c55e", "#eab308", "#ec4899", "#06b6d4", "#3b82f6", "#ef4444"];
 
 const W = 760;
-const H = 192;   // 240 的 4/5:两页曲线图统一缩减高度(视觉平衡)
+const H = 192;   // 两页曲线图统一缩减高度(视觉平衡)
 const PAD = { l: 44, r: 16, t: 16, b: 28 };
 const PLOT_W = W - PAD.l - PAD.r;
 const PLOT_H = H - PAD.t - PAD.b;
@@ -60,9 +59,8 @@ function fmtTs(ts: number, preset: string): string {
   return md;
 }
 
-/** Monotone cubic (Fritsch-Carlson) → cubic bezier segments (no leading M).
- *  Monotone interpolation never overshoots the data, so a non-negative series stays
- *  non-negative and stacked-area bands never cross. */
+/** 单调三次插值(Fritsch-Carlson)→ cubic bezier 段(无前导 M)。
+ *  单调插值永不过冲数据,故非负序列保持非负、堆叠面积带永不相交。 */
 function smoothSegments(pts: Pt[]): string {
   const n = pts.length;
   if (n < 2) return "";
@@ -162,7 +160,7 @@ export function TokenChart({
   }
 
   const visibleNames = modelNames.filter((m) => !hidden.has(m));
-  const max = Math.max(1, ...total); // total ≥ any single model, so it's the ceiling
+  const max = Math.max(1, ...total); // 总量 ≥ 任意单模型,因此取它为上限
   const colorOf = (m: string) => MODEL_COLORS[modelNames.indexOf(m) % MODEL_COLORS.length];
 
   const xAt = (i: number) => (n === 1 ? PAD.l + PLOT_W / 2 : PAD.l + (i / (n - 1)) * PLOT_W);
@@ -221,7 +219,7 @@ export function TokenChart({
 
   return (
     <div ref={containerRef} className="relative text-muted-foreground">
-      {/* legend */}
+      {/* 图例 */}
       <div className="mb-2 flex flex-wrap gap-x-4 gap-y-1 text-xs">
         <LegendDot color="var(--color-primary-accent)" label="总量" />
         {modelNames.map((m) => (
@@ -232,7 +230,7 @@ export function TokenChart({
       </div>
 
       <svg viewBox={`0 0 ${W} ${H}`} width="100%" onMouseMove={onMove} onMouseLeave={onLeave}>
-        {/* gridlines + y labels */}
+        {/* 网格线 + y 轴标签 */}
         {yTicks.map((t, i) => (
           <g key={i}>
             <line x1={PAD.l} y1={t.y} x2={W - PAD.r} y2={t.y} stroke="currentColor" strokeOpacity={i === 4 ? 0.3 : 0.12} />
@@ -247,17 +245,17 @@ export function TokenChart({
             fontSize="10" fill="currentColor">{fmtTs(buckets[i], preset)}</text>
         ))}
 
-        {/* total area + line (primary) */}
+        {/* 总量区域 + 折线(主色) */}
         <g className="text-primary-accent">
           <path d={`${smoothPath(pts(total))} L${xAt(n - 1).toFixed(1)},${yAt(0).toFixed(1)} L${xAt(0).toFixed(1)},${yAt(0).toFixed(1)} Z`} fill="currentColor" fillOpacity={0.08} />
           <path d={smoothPath(pts(total))} fill="none" stroke="currentColor" strokeWidth={1.5} vectorEffect="non-scaling-stroke" strokeLinejoin="round" strokeLinecap="round" />
         </g>
-        {/* per-model lines */}
+        {/* 各模型折线 */}
         {visibleNames.map((m) => (
           <path key={m} d={smoothPath(pts(models[m]))} fill="none" stroke={colorOf(m)} strokeWidth={1.25} vectorEffect="non-scaling-stroke" strokeLinejoin="round" strokeLinecap="round" />
         ))}
 
-        {/* hover guide + total point */}
+        {/* hover 参考线 + 总量点 */}
         {hover !== null && (
           <>
             <line x1={xAt(hover)} y1={PAD.t} x2={xAt(hover)} y2={PAD.t + PLOT_H} stroke="currentColor" strokeOpacity={0.35} strokeDasharray="3 3" />
@@ -266,7 +264,7 @@ export function TokenChart({
         )}
       </svg>
 
-      {/* cursor-following tooltip */}
+      {/* 跟随光标的 tooltip */}
       {hover !== null && pos !== null && tipLeft !== null && tipTop !== null && (
         <div
           ref={tooltipRef}

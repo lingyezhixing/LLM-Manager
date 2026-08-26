@@ -11,7 +11,7 @@ from llm_manager.gateway.api.tools_api import register_tools_routes
 
 
 def _app(tmp_path):
-    # 工具路由迁移后仍需 config 路由:测试经 /api/config/program 设 claude_settings_path,
+    # 测试经 /api/config/program 设 claude_settings_path,
     # 经 /api/config 读回 wol/claude 快照(只读投影仍在 config)。
     db = open_db(tmp_path / "t.db")
     if not is_initialized(db):  # warm-start(已初始化)跳过 seed

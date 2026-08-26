@@ -1,8 +1,8 @@
-"""Composition root: setup_logging + load/validate config + FastAPI app with lifespan.
+"""组合根:setup_logging + 加载/校验配置 + 带 lifespan 的 FastAPI app。
 
-lifespan opens the DB, DeviceMonitor (initial refresh), and an httpx-client pool;
-closes them on shutdown. Plan 3 fills the proxy + lifecycle wiring. The parent/worker
-supervisor lives in runner.py (``python -m llm_manager`` entrypoint)."""
+lifespan 打开 DB、DeviceMonitor(初始刷新)与 httpx 客户端池;关闭时逐一收口。
+parent/worker 监督器在 runner.py
+(``python -m llm_manager`` 入口)。"""
 
 from __future__ import annotations
 
@@ -66,7 +66,7 @@ def create_app(db_path: Path | None = None) -> FastAPI:
     except Exception:
         db.conn.close()
         raise
-    setup_logging(level=cfg.program.log_level)  # log_level 接线(此前硬编码 INFO,该参数从未生效)
+    setup_logging(level=cfg.program.log_level)  # log_level 接线
     logger.info(
         "config loaded (DB %s): %d models, %s:%d, alive %dmin",
         resolved_db,
@@ -192,6 +192,6 @@ def create_app(db_path: Path | None = None) -> FastAPI:
 
 
 def create_dev_app() -> FastAPI:
-    """No-arg factory for ``uvicorn --factory --reload`` (development mode)."""
+    """``uvicorn --factory --reload`` 的无参工厂(开发模式)。"""
     app = create_app()
     return app

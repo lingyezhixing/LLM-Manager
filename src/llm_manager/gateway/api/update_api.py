@@ -1,4 +1,4 @@
-"""Self-update API: GET /api/update/status + POST /api/update/check + POST /api/update/apply。
+"""自更新 API:GET /api/update/status + POST /api/update/check + POST /api/update/apply。
 
 检测语义:程序(worker)启动时后台检测一次(check_update,见 app.py 的
 _startup_update_check),结果缓存到 app.state.update_status。此后**无任何自动检测**:

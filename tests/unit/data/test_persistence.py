@@ -121,14 +121,14 @@ def test_concurrent_writes_serialized_by_lock(tmp_path):
 
 def test_usage_series_buckets_per_model_and_total(tmp_path):
     db = open_db(tmp_path / "t.db")
-    # bucket=60, range [0,120) → buckets [0, 60]; the time key is end_time
+    # bucket=60,区间 [0,120) → 桶 [0, 60];时间键为 end_time
     record_usage(db, "m1", start=9, end=10, input_tokens=5, output_tokens=5, cache_n=0, prompt_n=5)
     record_usage(db, "m1", start=69, end=70, input_tokens=3, output_tokens=3, cache_n=0, prompt_n=3)
     record_usage(db, "m2", start=19, end=20, input_tokens=2, output_tokens=2, cache_n=0, prompt_n=2)
     result = usage_series(db, start_ts=0, end_ts=120, bucket_seconds=60)
     assert result.buckets == [0, 60]
-    assert result.models["m1"] == [10, 6]  # 5+5 in bucket 0, 3+3 in bucket 1
-    assert result.models["m2"] == [4, 0]  # 2+2 in bucket 0, none → 0-filled
+    assert result.models["m1"] == [10, 6]  # 5+5 在桶 0,3+3 在桶 1
+    assert result.models["m2"] == [4, 0]  # 2+2 在桶 0,无 → 补 0
     assert result.total == [14, 6]
 
 
@@ -140,15 +140,15 @@ def test_usage_series_empty_range_returns_no_buckets(tmp_path):
 
 
 def test_usage_series_buckets_are_clock_aligned_not_start_relative(tmp_path):
-    """Buckets align to the clock (multiples of bucket_seconds), independent of the window
-    start — so a sliding window scrolls the chart rather than reshuffling each request."""
+    """桶与时钟对齐(bucket_seconds 的整数倍),与窗口起点无关——
+    滑动窗口滚动图表而非重排每个请求。"""
     db = open_db(tmp_path / "t.db")
     record_usage(
         db, "m1", start=69, end=70, input_tokens=1, output_tokens=1, cache_n=0, prompt_n=0
-    )  # end=70 → absolute bucket 60
-    result = usage_series(db, start_ts=10, end_ts=130, bucket_seconds=60)  # unaligned start
-    assert result.buckets == [0, 60, 120]  # first = floor(10/60)*60 = 0
-    assert result.models["m1"] == [0, 2, 0]  # end=70 → bucket 60 → idx 1
+    )  # end=70 → 绝对桶 60
+    result = usage_series(db, start_ts=10, end_ts=130, bucket_seconds=60)  # 非对齐起点
+    assert result.buckets == [0, 60, 120]  # 首个 = floor(10/60)*60 = 0
+    assert result.models["m1"] == [0, 2, 0]  # end=70 → 桶 60 → 下标 1
 
 
 def test_usage_summary_aggregates_half_open_range(tmp_path):
@@ -162,7 +162,7 @@ def test_usage_summary_aggregates_half_open_range(tmp_path):
     record_usage(
         db, "m2", start=25.0, end=30.0, input_tokens=10, output_tokens=5, cache_n=10, prompt_n=0
     )
-    # half-open [0, 25): includes end=10,20; excludes end=30
+    # 左闭右开 [0, 25):含 end=10,20;不含 end=30
     s = usage_summary(db, start_ts=0.0, end_ts=25.0)
     assert s.request_count == 2
     assert s.input_tokens == 150
@@ -185,15 +185,15 @@ def test_usage_by_model_groups_orders_shares_and_latency(tmp_path):
     db = open_db(tmp_path / "t.db")
     record_usage(
         db, "m1", start=5.0, end=10.0, input_tokens=60, output_tokens=20, cache_n=40, prompt_n=20
-    )  # lat 5s
+    )  # 延迟 5s
     record_usage(
         db, "m1", start=12.0, end=15.0, input_tokens=40, output_tokens=10, cache_n=20, prompt_n=20
-    )  # lat 3s
+    )  # 延迟 3s
     record_usage(
         db, "m2", start=15.0, end=18.0, input_tokens=50, output_tokens=10, cache_n=0, prompt_n=50
-    )  # lat 3s
+    )  # 延迟 3s
     rows = usage_by_model(db, start_ts=0.0, end_ts=25.0)
-    assert [r.model for r in rows] == ["m1", "m2"]  # ordered by input desc
+    assert [r.model for r in rows] == ["m1", "m2"]  # 按 input 降序
     assert rows[0].input_tokens == 100
     assert rows[0].request_count == 2
     assert rows[0].cache_n == 60
@@ -295,7 +295,7 @@ def test_open_db_has_no_last_active_column(tmp_path):
 def test_tier_cost_no_cache_matches_and_divides_by_million(tmp_path):
     from llm_manager.config import Pricing, PricingTier
 
-    db = open_db(tmp_path / "t.db")  # unused but keeps style consistent  # noqa: F841
+    db = open_db(tmp_path / "t.db")  # 未使用但保持风格一致  # noqa: F841
     pricing = Pricing(
         tiers=(
             PricingTier(
@@ -361,7 +361,7 @@ def test_tier_cost_no_match_returns_zero(tmp_path):
             ),
         )
     )
-    assert tier_cost(pricing, 9999, 0, 0, 0) == 0.0  # outside the tier window
+    assert tier_cost(pricing, 9999, 0, 0, 0) == 0.0  # 阶梯窗口之外
 
 
 def test_tier_cost_min_zero_closed_min_nonzero_open(tmp_path):
@@ -374,7 +374,7 @@ def test_tier_cost_min_zero_closed_min_nonzero_open(tmp_path):
             ),
         )
     )
-    assert tier_cost(pricing, 100, 0, 0, 0) == 0.0  # min=100 (nonzero) → open → 100 not included
+    assert tier_cost(pricing, 100, 0, 0, 0) == 0.0  # min=100(非零)→ 开区间 → 100 不包含
     assert tier_cost(pricing, 101, 0, 0, 0) == 101 * 1.0 / 1_000_000
 
 
@@ -427,9 +427,9 @@ def test_usage_cost_hourly_model_uses_runtime_overlap(tmp_path):
 
     db = open_db(tmp_path / "t.db")
     seg = record_runtime_start(db, "m1", start=0.0)
-    record_runtime_end(db, seg, end=7200.0)  # 2 hours loaded
+    record_runtime_end(db, seg, end=7200.0)  # 运行 2 小时
     cfg = _cfg_with(Pricing(pricing_type="hourly", hourly_price=10.0))
-    s = usage_cost(db, cfg, start_ts=0.0, end_ts=3600.0, now=9999.0)  # window = 1 hour
+    s = usage_cost(db, cfg, start_ts=0.0, end_ts=3600.0, now=9999.0)  # 窗口 = 1 小时
     assert s.total_cost == 10.0  # 1h × 10/h
     assert s.by_model[0].pricing_type == "hourly"
 
@@ -438,9 +438,9 @@ def test_usage_cost_open_session_uses_now(tmp_path):
     from llm_manager.config import Pricing
 
     db = open_db(tmp_path / "t.db")
-    record_runtime_start(db, "m1", start=0.0)  # never closed
+    record_runtime_start(db, "m1", start=0.0)  # 永不关闭
     cfg = _cfg_with(Pricing(pricing_type="hourly", hourly_price=10.0))
-    s = usage_cost(db, cfg, start_ts=0.0, end_ts=3600.0, now=3600.0)  # now caps the session at 1h
+    s = usage_cost(db, cfg, start_ts=0.0, end_ts=3600.0, now=3600.0)  # now 将会话截断到 1h
     assert s.total_cost == 10.0
 
 
@@ -489,8 +489,8 @@ def test_usage_cost_series_buckets_tier_cost_by_end_time(tmp_path):
     cfg = _cfg_with(Pricing(tiers=(PricingTier(tier_index=1, input_price=3.0, output_price=0.0),)))
     res = usage_cost_series(db, cfg, start_ts=0, end_ts=120, bucket_seconds=60)
     assert res.buckets == [0, 60]
-    assert res.models["m1"][0] == 1000 * 3.0 / 1_000_000  # end=10 → bucket 0
-    assert res.models["m1"][1] == 2000 * 3.0 / 1_000_000  # end=70 → bucket 60
+    assert res.models["m1"][0] == 1000 * 3.0 / 1_000_000  # end=10 → 桶 0
+    assert res.models["m1"][1] == 2000 * 3.0 / 1_000_000  # end=70 → 桶 60
     assert res.total[0] == res.models["m1"][0]
     assert res.total[1] == res.models["m1"][1]
 
@@ -504,7 +504,7 @@ def test_usage_cost_series_hourly_spreads_across_buckets(tmp_path):
     cfg = _cfg_with(Pricing(pricing_type="hourly", hourly_price=3600.0))  # 1 元/s
     res = usage_cost_series(db, cfg, start_ts=0, end_ts=120, bucket_seconds=60, now=9999.0)
     assert res.buckets == [0, 60]
-    assert res.total == [60.0, 60.0]  # 60s each × 1 元/s
+    assert res.total == [60.0, 60.0]  # 每桶各 60s × 1 元/s
 
 
 def test_usage_cost_series_hourly_join_by_model_id(tmp_path):
@@ -601,7 +601,7 @@ def test_delete_model_data_in_memory_db_no_crash():
 
 
 def test_open_db_rejects_legacy_schema(tmp_path):
-    """v3.1 起迁移链退役:Round-2 时代旧库(ts 列/model_pricing 表)明确拒绝,
+    """v3.1 起迁移链退役:v2 旧库结构(ts 列/model_pricing 表)明确拒绝,
     不再静默折叠——给清晰诊断而非半迁移状态。"""
     p = tmp_path / "legacy.db"
     conn = sqlite3.connect(p)
@@ -617,7 +617,7 @@ def test_open_db_rejects_legacy_schema(tmp_path):
         assert "v3.1" in str(e)
 
 
-# ---- 代码优化(2026-08-03):model_scripts/model_pricing 并入父表 ----
+# ---- 新库表结构(计费列并入父表)----
 
 
 def test_open_db_creates_flat_config_tables(tmp_path):

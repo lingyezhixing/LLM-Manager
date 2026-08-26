@@ -7,9 +7,9 @@ interface SidebarProps {
 }
 
 /**
- * Left navigation sidebar (NapCat 克制演绎). Expanded w-(--container-sidebar) / collapsed w-16 icon rail;
- * glass surface (blur 只在壳层). Active item: primary-accent 12% bg + accent text +
- * right dot. Bottom: theme toggle pill.
+ * 左侧导航侧栏。展开 w-(--container-sidebar) / 折叠 w-16 图标轨;
+ * 玻璃表面(blur 只在壳层)。激活项:primary-accent 12% 背景 + accent 文字 +
+ * 右侧圆点。底部:主题切换胶囊。
  *
  * 折叠动画统一 200ms,三条铁律:① 文字不条件渲染,grid-template-columns 1fr→0fr 收缩 +
  * overflow-hidden 裁剪(条件渲染 = 宽度过渡前文字瞬间消失);② 禁用 justify-content 切换

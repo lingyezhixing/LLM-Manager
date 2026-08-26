@@ -43,8 +43,8 @@ def _tier_cost_row(models, row) -> float:
 
 
 def _tier_matches(t: PricingTier, inp: int, out: int) -> bool:
-    """First-tier-wins window match (legacy semantics): min=0 closed, else open;
-    max None/negative = unbounded."""
+    """首个匹配档位生效的窗口匹配(legacy 语义):min=0 闭区间,否则开区间;
+    max 为 None/负数 = 无上界。"""
     lo_i = 0 if (t.min_input is None or t.min_input < 0) else t.min_input
     hi_i = math.inf if (t.max_input is None or t.max_input < 0) else t.max_input
     i_ok = (inp >= lo_i) if lo_i == 0 else (inp > lo_i)
@@ -55,8 +55,8 @@ def _tier_matches(t: PricingTier, inp: int, out: int) -> bool:
 
 
 def tier_cost(pricing: Pricing, input_t: int, output_t: int, cache_n: int, prompt_n: int) -> float:
-    """Per-request tier cost in yuan. First matching tier wins; no match → 0.
-    Cache formula (legacy): cache_n×read + prompt_n×(input+write) + output×output.
+    """单请求 tier 费用(元)。首个匹配档位生效;无匹配 → 0。
+    缓存公式(legacy):cache_n×read + prompt_n×(input+write) + output×output。
     support_cache 是模型级开关(pricing.support_cache),控制缓存计费是否生效。"""
     if pricing.pricing_type != "tier" or not pricing.tiers:
         return 0.0
@@ -96,7 +96,7 @@ def usage_cost(
     end_ts: float,
     now: float | None = None,
 ) -> CostSummary:
-    """Aggregate cost (yuan) over [start_ts, end_ts). tier 模型逐请求 tier_cost;
+    """[start_ts, end_ts) 区间的总费用(元)。tier 模型逐请求 tier_cost;
     hourly 模型按 model_runtime 与窗口重叠秒 × hourly_price/3600。免费/无数据模型省略。
 
     两套独立数据源:tier 走 model_requests(按 end_time 落窗);hourly 走
@@ -144,7 +144,7 @@ def usage_cost(
     by_model = [
         CostByModel(
             model=n, pricing_type=ptype.get(n, "tier"), cost=round(c, 6)
-        )  # 🔵7:与 total 同精度 round(6),显示一致
+        )  # 与 total 同精度 round(6),显示一致
         for n, c in acc.items()
         if c > 0
     ]
@@ -161,7 +161,7 @@ def usage_cost_series(
     bucket_seconds: int,
     now: float | None = None,
 ) -> UsageSeries:
-    """Bucketed cost series (元/桶),时钟对齐分桶(同 usage_series)。tier 成本按请求
+    """分桶成本序列(元/桶),时钟对齐分桶(同 usage_series)。tier 成本按请求
     end_time 落桶;hourly 成本按运行段与各桶的重叠时长摊到桶。返回 UsageSeries 形
     (total/models 的值是元,非 token)。"""
     first, buckets = _bucket_axis(start_ts, end_ts, bucket_seconds)

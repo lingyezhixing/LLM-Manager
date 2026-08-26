@@ -1,5 +1,5 @@
-"""Reverse proxy: alias resolve → lifecycle ensure_running → httpx forward →
-SSE/non-SSE branch → token record. No facade Protocol — calls lifecycle + state.
+"""反向代理:别名解析 → lifecycle ensure_running → httpx 转发 → SSE/非 SSE 分支 →
+token 记录。无 facade Protocol —— 直接调用 lifecycle + state。
 
 非流式路径 end_request 由 forward 的 finally 统一收口(streamed 标记区分流式路径,
 后者由 _stream_wrapper finally 负责);_record_usage best-effort(写库失败不污染透传)。

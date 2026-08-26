@@ -1,8 +1,8 @@
-"""Broadcaster + DeviceFeed + ModelFeed: subscriber-gated fan-out + loops for SSE push.
+"""Broadcaster + DeviceFeed + ModelFeed:按订阅者门控的 fan-out + 循环,用于 SSE 推送。
 
-Broadcaster is reused by all streams. DeviceFeed = periodic refresh loop (N viewers = 1
-refresh). ModelFeed = change-detect loop (publishes only when the snapshot value changes,
-coalescing bursts) — drives the event-driven model stream."""
+Broadcaster 被所有 stream 复用。DeviceFeed = 周期刷新循环(N 个查看者 = 1 次
+refresh)。ModelFeed = 变更检测循环(仅当 snapshot 值变化时才发布,
+合并突发)— 驱动事件驱动的模型 stream。"""
 
 from __future__ import annotations
 
@@ -42,23 +42,23 @@ async def test_unsubscribe_stops_delivery_and_decrements() -> None:
 async def test_publish_drops_when_full_without_raising() -> None:
     bc = Broadcaster(maxsize=1)
     q = bc.subscribe()
-    bc.publish("a")  # fills the 1-slot queue
-    bc.publish("b")  # over capacity → silently dropped, no raise
+    bc.publish("a")  # 填满 1 槽队列
+    bc.publish("b")  # 超容量 → 静默丢弃,不抛异常
     assert await asyncio.wait_for(q.get(), timeout=1) == "a"
-    assert q.empty()  # "b" was dropped
+    assert q.empty()  # "b" 已被丢弃
 
 
 async def test_unsubscribe_unknown_queue_is_safe() -> None:
     bc = Broadcaster()
-    bc.unsubscribe(asyncio.Queue())  # never subscribed → no-op, no raise
+    bc.unsubscribe(asyncio.Queue())  # 从未订阅 → 无操作,不抛异常
     assert bc.subscriber_count == 0
 
 
 # --------------------------------------------------------------------------- #
-# DeviceFeed (periodic refresh loop)
+# DeviceFeed (周期刷新循环)
 # --------------------------------------------------------------------------- #
 class _FakeMonitor:
-    """Structurally matches the refresh+snapshot surface DeviceFeed needs."""
+    """在结构上匹配 DeviceFeed 所需的 refresh + snapshot 接口。"""
 
     def __init__(self) -> None:
         self.refresh_calls = 0
@@ -83,11 +83,11 @@ async def test_devicefeed_second_subscriber_receives_subsequent_tick() -> None:
     mon = _FakeMonitor()
     feed = DeviceFeed(mon, interval=0.01)
     q1 = feed.subscribe()
-    await asyncio.wait_for(q1.get(), timeout=1)  # first tick (refresh #1)
+    await asyncio.wait_for(q1.get(), timeout=1)  # 首个 tick(refresh #1)
     q2 = feed.subscribe()
-    snap2 = await asyncio.wait_for(q2.get(), timeout=1)  # q2 gets next tick
+    snap2 = await asyncio.wait_for(q2.get(), timeout=1)  # q2 拿到下一个 tick
     assert "GPU0" in snap2
-    snap1b = await asyncio.wait_for(q1.get(), timeout=1)  # q1 also gets that tick
+    snap1b = await asyncio.wait_for(q1.get(), timeout=1)  # q1 也拿到该 tick
     assert "GPU0" in snap1b
 
 
@@ -115,10 +115,10 @@ async def test_devicefeed_resubscribe_restarts_loop() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# ModelFeed (change-detect loop)
+# ModelFeed (变更检测循环)
 # --------------------------------------------------------------------------- #
 class _ChangingSnap:
-    """Returns a fresh dict each call so value-equality diff survives in-place mutation."""
+    """每次调用返回新 dict,使值相等性 diff 在就地修改后仍成立。"""
 
     def __init__(self) -> None:
         self.v = 0
@@ -142,8 +142,8 @@ async def test_modelfeed_silent_when_unchanged() -> None:
     snap = _ChangingSnap()
     feed = ModelFeed(snap, interval=0.01)
     q = feed.subscribe()
-    await asyncio.wait_for(q.get(), timeout=1)  # initial
-    await asyncio.sleep(0.06)  # several ticks, no change
+    await asyncio.wait_for(q.get(), timeout=1)  # 初始
+    await asyncio.sleep(0.06)  # 多个 tick,无变化
     assert q.empty()
 
 
@@ -172,4 +172,4 @@ async def test_modelfeed_loop_stops_when_last_subscriber_leaves() -> None:
     await asyncio.sleep(0.06)
     mid = calls["n"]
     await asyncio.sleep(0.06)
-    assert calls["n"] == mid  # snapshot fn no longer called → loop stopped
+    assert calls["n"] == mid  # snapshot 函数不再被调用 → 循环已停止
