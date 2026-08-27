@@ -22,6 +22,10 @@ export function SessionStats() {
 
   const pct = Math.round(data.hit_rate * 1000) / 10;  // 保留 1 位小数
   const uptimeSec = Math.max(0, Math.floor((now - data.started_at * 1000) / 1000));
+  // 消耗占比条:总额为分母(0 时两项恒 0,只剩轨道)
+  const totalCost = Math.max(0, data.total_cost);
+  const localPct = totalCost > 0 ? (Math.max(0, data.local_cost) / totalCost) * 100 : 0;
+  const cloudPct = totalCost > 0 ? (Math.max(0, data.cloud_cost) / totalCost) * 100 : 0;
 
   return (
     <Card>
@@ -45,17 +49,39 @@ export function SessionStats() {
           <div className="h-full bg-success transition-[width] duration-(--motion-slow)" style={{ width: `${pct}%` }} />
         </div>
       </div>
-      {/* 本次启动消耗:独立小卡(与命中率同款式)——后端 compute-on-read 窗口 [started_at, now) */}
+      {/* 本次启动消耗:独立小卡(与命中率同款式)——后端 compute-on-read 窗口 [started_at, now)。
+          总额为主数;本地/云端拆分用同色异透明度占比条 + 对齐图例(圆点色与条段一一对应)。 */}
       <div className="mt-2 rounded-lg border border-border-subtle bg-card-2 px-3 py-2">
         <div className="flex items-baseline justify-between">
           <span className="text-xs text-muted-foreground">本次启动消耗</span>
-          <span className="font-semibold text-primary-accent">{formatCost(data.total_cost)}</span>
+          <span className="font-mono text-base font-semibold tabular-nums text-primary-accent">
+            {formatCost(data.total_cost)}
+          </span>
         </div>
-        <div className="mt-1 flex items-baseline justify-between text-xs">
-          <span className="text-muted-foreground">本地</span>
-          <span className="font-mono tabular-nums">{formatCost(data.local_cost)}</span>
-          <span className="ml-3 text-muted-foreground">云端</span>
-          <span className="font-mono tabular-nums">{formatCost(data.cloud_cost)}</span>
+        {/* 占比条按金额份额分两段;总额为 0 时两段宽度 0 → 只剩轨道 */}
+        <div className="mt-2 flex h-1.5 overflow-hidden rounded-full bg-muted">
+          <div
+            className="h-full bg-primary-accent transition-[width] duration-(--motion-slow)"
+            style={{ width: `${localPct}%` }}
+            title={`本地 ${formatCost(data.local_cost)}`}
+          />
+          <div
+            className="h-full bg-primary-accent/35 transition-[width] duration-(--motion-slow)"
+            style={{ width: `${cloudPct}%` }}
+            title={`云端 ${formatCost(data.cloud_cost)}`}
+          />
+        </div>
+        <div className="mt-1.5 flex items-center justify-between text-xs">
+          <span className="flex min-w-0 items-center gap-1.5">
+            <span className="size-1.5 shrink-0 rounded-full bg-primary-accent" />
+            <span className="text-muted-foreground">本地</span>
+            <span className="truncate font-mono tabular-nums">{formatCost(data.local_cost)}</span>
+          </span>
+          <span className="flex min-w-0 items-center gap-1.5">
+            <span className="size-1.5 shrink-0 rounded-full bg-primary-accent/35" />
+            <span className="text-muted-foreground">云端</span>
+            <span className="truncate font-mono tabular-nums">{formatCost(data.cloud_cost)}</span>
+          </span>
         </div>
       </div>
     </Card>

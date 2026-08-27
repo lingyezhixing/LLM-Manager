@@ -193,54 +193,73 @@ export function ProviderDefForm({ provider, onSaved, onDirtyChange }: ProviderDe
       </div>
       <div className="flex flex-col gap-3">
         {form.models.map((m, i) => (
-          <div key={i} className="rounded-md border border-border px-3 py-2">
-            <div className="flex items-center gap-2">
-              <Field label="模型名" className="flex-1">
-                <TextInput value={m.model_name} onChange={(e) => setModel(i, { ...m, model_name: e.target.value })} />
+          <div key={i} className="overflow-hidden rounded-md border border-border">
+            {/* 身份行:编号并入名称 label(模型 1/2…),开关带状态文字,删除收进行尾;下缘细线与计费体分隔 */}
+            <div className="flex flex-wrap items-end gap-x-3 gap-y-2 border-b border-border-subtle px-3 pb-1 pt-2">
+              <Field label={`模型 ${i + 1}`} className="min-w-44 flex-1">
+                <TextInput value={m.model_name} placeholder="如 deepseek-chat"
+                  onChange={(e) => setModel(i, { ...m, model_name: e.target.value })} />
               </Field>
               <Field label="支持缓存">
-                <div className="flex h-9 items-center">
+                <div className="flex h-9 items-center gap-2">
                   <Switch checked={m.support_cache} onChange={(v) => setModel(i, { ...m, support_cache: v })} />
+                  <span className="text-xs text-muted-foreground">{m.support_cache ? "开" : "关"}</span>
                 </div>
               </Field>
               <Field label="峰谷双价">
                 <div className="flex h-9 items-center gap-2">
                   <Switch checked={m.dual_pricing} onChange={(v) => setModel(i, { ...m, dual_pricing: v })} />
-                  {m.dual_pricing && <span className="text-xs text-primary-accent">峰谷双价</span>}
+                  {m.dual_pricing
+                    ? <span className="text-xs text-primary-accent">峰价启用</span>
+                    : <span className="text-xs text-muted-foreground">关</span>}
                 </div>
               </Field>
-              <button type="button" className="h-9 shrink-0 px-2 text-xs text-muted-foreground hover:text-destructive"
+              <button type="button" aria-label={`删除模型 ${i + 1}`}
+                className="mb-4 h-9 shrink-0 px-2 text-xs text-muted-foreground hover:text-destructive"
                 onClick={() => removeModel(i)}>✕</button>
             </div>
-            <div className="mt-2 text-xs text-muted-foreground">阶梯价格(基础/谷价,元/百万 token)</div>
-            <TierEditor tiers={m.tiers_base} supportCache={m.support_cache}
-              onChange={(next) => setModel(i, { ...m, tiers_base: next })} />
+
+            {/* 基础阶梯:峰谷双价关闭时的唯一计价口径(即基础/谷价) */}
+            <div className="px-3 pb-2 pt-1">
+              <div className="text-xs text-muted-foreground">基础阶梯价格(即基础/谷价;元/百万 token)</div>
+              <TierEditor tiers={m.tiers_base} supportCache={m.support_cache}
+                onChange={(next) => setModel(i, { ...m, tiers_base: next })} />
+            </div>
+
             {m.dual_pricing && (
-              <>
-                <div className="mt-3 flex items-center justify-between">
+              /* 峰谷子面板:浅底内嵌区紧随其开关之下,收纳峰时段与峰价,与基础区隔开 */
+              <div className="border-t border-dashed border-border-subtle bg-card-2 px-3 pb-2 pt-1">
+                <div className="flex items-center justify-between">
                   <span className="text-xs text-muted-foreground">峰时段(服务器本地时间;须在同一天内,起 &lt; 止)</span>
                   <Button type="button" size="sm" variant="ghost" onClick={() => addWindow(i)}>+ 添加时段</Button>
                 </div>
-                <div className="flex flex-col gap-2">
+                <div className="flex flex-col gap-1">
                   {m.peak_windows.map((w, wi) => (
-                    <div key={wi} className="flex flex-wrap items-end gap-x-3 gap-y-2 rounded-md border border-border px-3 py-2">
-                      <Field label="开始(HH:MM)" className="w-32">
+                    <div key={wi} className="flex items-end gap-x-3">
+                      <Field label="开始(HH:MM)" className="w-28">
                         <TextInput value={minutesToHhmm(w.start_min) ?? ""} placeholder="08:00"
                           onChange={(e) => setWindow(i, wi, "start_min", e.target.value)} />
                       </Field>
-                      <Field label="结束(HH:MM)" className="w-32">
+                      <span aria-hidden className="mb-4 flex h-9 items-center text-muted-foreground">–</span>
+                      <Field label="结束(HH:MM)" className="w-28">
                         <TextInput value={minutesToHhmm(w.end_min) ?? ""} placeholder="22:00"
                           onChange={(e) => setWindow(i, wi, "end_min", e.target.value)} />
                       </Field>
-                      <button type="button" className="mb-1 h-9 shrink-0 px-2 text-xs text-muted-foreground hover:text-destructive"
+                      <button type="button" aria-label={`删除时段 ${wi + 1}`}
+                        className="mb-4 h-9 shrink-0 px-2 text-xs text-muted-foreground hover:text-destructive"
                         onClick={() => removeWindow(i, wi)}>✕</button>
                     </div>
                   ))}
+                  {m.peak_windows.length === 0 && (
+                    <p className="text-micro leading-relaxed text-muted-foreground">
+                      尚未添加峰时段——保存校验要求至少一段;未命中峰时段的请求按基础阶梯计价。
+                    </p>
+                  )}
                 </div>
-                <div className="mt-2 text-xs text-muted-foreground">峰价阶梯(元/百万 token;请求完成时刻落在任一峰时段按此计价,整单判定;跨零点需求请拆成相邻两段)</div>
+                <div className="text-xs text-muted-foreground">峰价阶梯(元/百万 token;请求完成时刻落在任一峰时段按此计价,整单判定)</div>
                 <TierEditor tiers={m.tiers_peak} supportCache={m.support_cache}
                   onChange={(next) => setModel(i, { ...m, tiers_peak: next })} />
-              </>
+              </div>
             )}
           </div>
         ))}
