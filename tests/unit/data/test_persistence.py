@@ -15,6 +15,7 @@ from llm_manager.data.persistence import (
     storage_stats,
 )
 from llm_manager.data.usage import (
+    pricing_for,
     record_runtime_end,
     record_runtime_start,
     record_usage,
@@ -713,3 +714,128 @@ def test_usage_by_model_source_field(tmp_path):
     assert by["ds/x"].source == "cloud"
     rows_cloud = usage_by_model(db, start_ts=0, end_ts=100, source="cloud")
     assert [r.model for r in rows_cloud] == ["ds/x"]
+
+
+# ---- 成本:pricing_for 云端合成 + source 过滤 + local/cloud 拆分 ----
+
+
+def test_pricing_for_cloud_and_local_and_none(tmp_path):
+    from llm_manager.config import AppConfig, CloudModel, CloudProvider, Pricing, PricingTier
+
+    cfg = _cfg_with(Pricing())
+    cfg = AppConfig(
+        program=cfg.program,
+        models=cfg.models,
+        wol=None,
+        claude_configs={},
+        cloud_providers={
+            "ds": CloudProvider(
+                name="ds",
+                models=(
+                    CloudModel(
+                        model_name="x", tiers_base=(PricingTier(tier_index=1, input_price=1.0),)
+                    ),
+                ),
+            )
+        },
+    )
+    assert pricing_for(cfg, "m1").pricing_type == "tier"
+    p = pricing_for(cfg, "ds/x")
+    assert p is not None and p.tiers[0].input_price == 1.0
+    assert pricing_for(cfg, "ds/nope") is None
+    assert pricing_for(cfg, "nope") is None
+
+
+def test_usage_cost_cloud_split_and_source(tmp_path):
+    from llm_manager.config import (
+        AppConfig,
+        CloudModel,
+        CloudProvider,
+        Command,
+        ModelConfig,
+        Pricing,
+        PricingTier,
+        ProgramConfig,
+        Scheme,
+    )
+
+    db = open_db(tmp_path / "t.db")
+    record_usage(db, "m1", 5, 10, 1000, 500, 0, 1000)  # 本地 tier
+    record_usage(db, "ds/x", 5, 10, 2000, 0, 0, 2000, source="cloud")  # 云端 tier
+    cfg = AppConfig(
+        program=ProgramConfig("0.0.0.0", 8080, 60, "INFO"),
+        models={
+            "m1": ModelConfig(
+                aliases=("m1",),
+                mode="Chat",
+                port=1,
+                schemes={"s": Scheme("s", frozenset({"gpu"}), Command(exe="x"), {"gpu": 1})},
+                pricing=Pricing(
+                    tiers=(PricingTier(tier_index=1, input_price=3.0, output_price=9.0),)
+                ),
+            )
+        },
+        wol=None,
+        claude_configs={},
+        cloud_providers={
+            "ds": CloudProvider(
+                name="ds",
+                models=(
+                    CloudModel(
+                        model_name="x", tiers_base=(PricingTier(tier_index=1, input_price=1.0),)
+                    ),
+                ),
+            )
+        },
+    )
+    s = usage_cost(db, cfg, start_ts=0, end_ts=100)
+    local = sum(c.cost for c in s.by_model if c.source == "local")
+    cloud = sum(c.cost for c in s.by_model if c.source == "cloud")
+    assert abs(local - (1000 * 3.0 + 500 * 9.0) / 1_000_000) < 1e-9
+    assert abs(cloud - 2000 * 1.0 / 1_000_000) < 1e-9
+    assert abs(s.total_cost - (local + cloud)) < 1e-9
+    s_cloud = usage_cost(db, cfg, start_ts=0, end_ts=100, source="cloud")
+    assert abs(s_cloud.total_cost - cloud) < 1e-9
+    assert all(b.source == "cloud" for b in s_cloud.by_model)
+
+
+def test_usage_cost_cloud_skips_hourly(tmp_path):
+    """source='cloud' 时 hourly 分支整体跳过(云端不写运行段)。"""
+    from llm_manager.config import Pricing
+
+    db = open_db(tmp_path / "t.db")
+    seg = record_runtime_start(db, "m1", start=0.0)
+    record_runtime_end(db, seg, end=3600.0)
+    cfg = _cfg_with(Pricing(pricing_type="hourly", hourly_price=10.0))
+    assert usage_cost(db, cfg, start_ts=0, end_ts=3600).total_cost == 10.0
+    assert usage_cost(db, cfg, start_ts=0, end_ts=3600, source="cloud").total_cost == 0.0
+
+
+def test_usage_cost_series_cloud(tmp_path):
+    from llm_manager.config import AppConfig, CloudModel, CloudProvider, Pricing, PricingTier
+
+    db = open_db(tmp_path / "t.db")
+    record_usage(db, "ds/x", 9, 10, 1000, 0, 0, 1000, source="cloud")
+    cfg = _cfg_with(pricing=Pricing())
+    cfg = AppConfig(
+        program=cfg.program,
+        models={},
+        wol=None,
+        claude_configs={},
+        cloud_providers={
+            "ds": CloudProvider(
+                name="ds",
+                models=(
+                    CloudModel(
+                        model_name="x", tiers_base=(PricingTier(tier_index=1, input_price=2.0),)
+                    ),
+                ),
+            )
+        },
+    )
+    res = usage_cost_series(db, cfg, start_ts=0, end_ts=120, bucket_seconds=60)
+    assert abs(res.models["ds/x"][0] - 1000 * 2.0 / 1_000_000) < 1e-9
+    res_cloud = usage_cost_series(
+        db, cfg, start_ts=0, end_ts=120, bucket_seconds=60, source="cloud"
+    )
+    assert res_cloud.total[0] == res.total[0]

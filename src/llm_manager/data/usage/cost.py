@@ -10,7 +10,7 @@ import math
 import time
 from dataclasses import dataclass
 
-from llm_manager.config import AppConfig, Pricing, PricingTier
+from llm_manager.config import AppConfig, Pricing, PricingTier, parse_cloud_id
 from llm_manager.data.persistence import Db
 from llm_manager.data.usage.aggregate import UsageSeries, _bucket_axis
 
@@ -28,13 +28,33 @@ def _hourly_cost(
     return _overlap(win_start, win_end, seg_start, seg_end) * hourly_price / 3600.0
 
 
-def _tier_cost_row(models, row) -> float:
-    """逐请求 tier_cost(usage_cost 与 usage_cost_series 共用)。非 tier/未配置 → 0.0。"""
-    mc = models.get(row["model"])
-    if mc is None or mc.pricing.pricing_type != "tier":
+def pricing_for(cfg: AppConfig, name: str) -> Pricing | None:
+    """本地模型 → 云端目录(合成 base 槽 Pricing)→ None(成本 0)。"""
+    mc = cfg.models.get(name)
+    if mc is not None:
+        return mc.pricing
+    parsed = parse_cloud_id(name)
+    if parsed is not None:
+        provider_name, model_name = parsed
+        p = cfg.cloud_providers.get(provider_name)
+        if p is not None:
+            for cm in p.models:
+                if cm.model_name == model_name:
+                    # v3.3.0 恒 base 槽(峰谷延后 v3.4+,见 spec §14)
+                    return Pricing(
+                        pricing_type="tier", support_cache=cm.support_cache, tiers=cm.tiers_base
+                    )
+    return None
+
+
+def _tier_cost_row(cfg, row) -> float:
+    """逐请求 tier_cost(usage_cost 与 usage_cost_series 共用)。非 tier/未配置 → 0.0。
+    本地模型直取 pricing;云端模型经 pricing_for 合成 base 槽。"""
+    pricing = pricing_for(cfg, row["model"])
+    if pricing is None or pricing.pricing_type != "tier":
         return 0.0
     return tier_cost(
-        mc.pricing,
+        pricing,
         int(row["input_tokens"]),
         int(row["output_tokens"]),
         int(row["cache_n"]),
@@ -80,6 +100,7 @@ class CostByModel:
     model: str
     pricing_type: str
     cost: float
+    source: str = "local"  # "local" | "cloud"(计费来源,tier 按请求 source、hourly 恒 local)
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,28 +116,40 @@ def usage_cost(
     start_ts: float,
     end_ts: float,
     now: float | None = None,
+    source: str = "all",
 ) -> CostSummary:
     """[start_ts, end_ts) 区间的总费用(元)。tier 模型逐请求 tier_cost;
     hourly 模型按 model_runtime 与窗口重叠秒 × hourly_price/3600。免费/无数据模型省略。
 
     两套独立数据源:tier 走 model_requests(按 end_time 落窗);hourly 走
-    model_runtime(按与窗口的重叠时长)。end_time IS NULL 的运行段用 now 收口。"""
+    model_runtime(按与窗口的重叠时长)。end_time IS NULL 的运行段用 now 收口。
+    source 过滤:tier 按 SQL source 列;'cloud' 整体跳过 hourly 分支
+    (model_runtime 无 source 列,天然仅本地)。"""
     now_ts = now if now is not None else time.time()
     acc: dict[str, float] = {}
+    acc_src: dict[str, str] = {}
 
-    # tier:逐请求计费,按 end_time 落入窗口
+    # tier:逐请求计费,按 end_time 落入窗口(本地 tier 名 ∪ 云端全名)
     tier_names = {n for n, m in cfg.models.items() if m.pricing.pricing_type == "tier"}
+    tier_names |= {
+        f"{pname}/{cm.model_name}" for pname, p in cfg.cloud_providers.items() for cm in p.models
+    }
     if tier_names:
-        rows = db.conn.execute(
-            "SELECT m.original_name AS model, r.input_tokens, r.output_tokens, r.cache_n, r.prompt_n "
-            "FROM model_requests r JOIN models m ON r.model_id=m.id "
-            "WHERE r.end_time>=? AND r.end_time<?",
-            (start_ts, end_ts),
-        ).fetchall()
+        sql = (
+            "SELECT m.original_name AS model, r.source AS source, r.input_tokens, r.output_tokens, "
+            "r.cache_n, r.prompt_n FROM model_requests r JOIN models m ON r.model_id=m.id "
+            "WHERE r.end_time>=? AND r.end_time<?"
+        )
+        args: list = [start_ts, end_ts]
+        if source != "all":
+            sql += " AND r.source=?"
+            args.append(source)
+        rows = db.conn.execute(sql, args).fetchall()
         for row in rows:
-            c = _tier_cost_row(cfg.models, row)
+            c = _tier_cost_row(cfg, row)
             if c:
                 acc[row["model"]] = acc.get(row["model"], 0.0) + c
+                acc_src[row["model"]] = row["source"]
 
     # hourly:运行段与窗口的重叠时长 × 单价/3600
     hourly = {
@@ -124,7 +157,7 @@ def usage_cost(
         for n, m in cfg.models.items()
         if m.pricing.pricing_type == "hourly" and m.pricing.hourly_price > 0
     }
-    if hourly:
+    if source != "cloud" and hourly:
         rows = db.conn.execute(
             "SELECT m.original_name AS model, r.start_time, r.end_time "
             "FROM model_runtime r JOIN models m ON r.model_id=m.id "
@@ -139,11 +172,15 @@ def usage_cost(
             c = _hourly_cost(row["start_time"], sess_end, rate, start_ts, end_ts)
             if c > 0:
                 acc[row["model"]] = acc.get(row["model"], 0.0) + c
+                acc_src[row["model"]] = "local"
 
     ptype = {n: m.pricing.pricing_type for n, m in cfg.models.items()}
     by_model = [
         CostByModel(
-            model=n, pricing_type=ptype.get(n, "tier"), cost=round(c, 6)
+            model=n,
+            pricing_type=ptype.get(n, "tier"),
+            cost=round(c, 6),
+            source=acc_src.get(n, "local"),
         )  # 与 total 同精度 round(6),显示一致
         for n, c in acc.items()
         if c > 0
@@ -160,10 +197,11 @@ def usage_cost_series(
     end_ts: float,
     bucket_seconds: int,
     now: float | None = None,
+    source: str = "all",
 ) -> UsageSeries:
     """分桶成本序列(元/桶),时钟对齐分桶(同 usage_series)。tier 成本按请求
     end_time 落桶;hourly 成本按运行段与各桶的重叠时长摊到桶。返回 UsageSeries 形
-    (total/models 的值是元,非 token)。"""
+    (total/models 的值是元,非 token)。source 过滤同 usage_cost:'cloud' 跳过 hourly。"""
     first, buckets = _bucket_axis(start_ts, end_ts, bucket_seconds)
     n = len(buckets)
     if not buckets:
@@ -172,20 +210,28 @@ def usage_cost_series(
     models: dict[str, list[float]] = {}
     total = [0.0] * n
 
-    # tier:单次批量查询所有 tier 模型的请求,逐行 tier_cost + 按 end_time 落桶(原 O(N) 查询 → 1 次)。
-    # 镜像同文件 usage_cost 的批量模式;original_name 与 cfg 模型键同源,行为不变。
+    # tier:单次批量查询所有 tier + 云模型的请求,逐行 tier_cost + 按 end_time 落桶
+    # (原 O(N) 查询 → 1 次)。镜像同文件 usage_cost 的批量模式;original_name 与
+    # cfg 模型键/云端全名同源,行为不变。
     tier_models = {n: m for n, m in cfg.models.items() if m.pricing.pricing_type == "tier"}
-    if tier_models:
-        names = list(tier_models)
+    cloud_ids = [
+        f"{pname}/{cm.model_name}" for pname, p in cfg.cloud_providers.items() for cm in p.models
+    ]
+    if tier_models or cloud_ids:
+        names = list(tier_models) + cloud_ids
         placeholders = ",".join("?" * len(names))
-        rows = db.conn.execute(
+        sql = (
             f"SELECT mm.original_name AS model, r.end_time, r.input_tokens, r.output_tokens, r.cache_n, r.prompt_n "
             f"FROM model_requests r JOIN models mm ON r.model_id=mm.id "
-            f"WHERE mm.original_name IN ({placeholders}) AND r.end_time>=? AND r.end_time<?",
-            (*names, start_ts, end_ts),
-        ).fetchall()
+            f"WHERE mm.original_name IN ({placeholders}) AND r.end_time>=? AND r.end_time<?"
+        )
+        args: list = [*names, start_ts, end_ts]
+        if source != "all":
+            sql += " AND r.source=?"
+            args.append(source)
+        rows = db.conn.execute(sql, args).fetchall()
         for row in rows:
-            c = _tier_cost_row(tier_models, row)
+            c = _tier_cost_row(cfg, row)
             if c <= 0:
                 continue
             idx = int((row["end_time"] - first) // bucket_seconds)
@@ -199,7 +245,7 @@ def usage_cost_series(
         for n, m in cfg.models.items()
         if m.pricing.pricing_type == "hourly" and m.pricing.hourly_price > 0
     }
-    if hourly_rates:
+    if source != "cloud" and hourly_rates:
         names = list(hourly_rates)
         placeholders = ",".join("?" * len(names))
         rows = db.conn.execute(

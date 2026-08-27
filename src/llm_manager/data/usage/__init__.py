@@ -14,6 +14,7 @@ from llm_manager.data.usage.aggregate import (
 from llm_manager.data.usage.cost import (
     CostByModel,
     CostSummary,
+    pricing_for,
     tier_cost,
     usage_cost,
     usage_cost_series,
@@ -44,6 +45,7 @@ __all__ = [
     "_live_segments",
     "_reset_counters",
     "live_segment_ids",
+    "pricing_for",
     "record_runtime_end",
     "record_runtime_start",
     "record_usage",
