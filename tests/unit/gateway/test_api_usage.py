@@ -353,6 +353,57 @@ def test_usage_session_cost_split(tmp_path):
     assert abs(j["local_cost"] + j["cloud_cost"] - j["total_cost"]) < 1e-9
 
 
+def test_usage_session_source_param(tmp_path):
+    """spec §6.3:session 端点亦属 /api/usage/* 全系 source 参数;过滤后三拆恒等。"""
+    import time
+
+    from llm_manager.config import (
+        AppConfig,
+        CloudModel,
+        CloudProvider,
+        Command,
+        ModelConfig,
+        Pricing,
+        PricingTier,
+        ProgramConfig,
+        Scheme,
+    )
+
+    db = open_db(tmp_path / "t.db")
+    record_usage(db, "m1", 123.0, time.time(), 1000, 0, 0, 1000)
+    record_usage(db, "ds/x", 123.0, time.time(), 2000, 0, 0, 2000, source="cloud")
+    cfg = AppConfig(
+        program=ProgramConfig("0.0.0.0", 8080, 60, "INFO"),
+        models={
+            "m1": ModelConfig(
+                aliases=("m1",),
+                mode="Chat",
+                port=1,
+                schemes={"s": Scheme("s", frozenset({"gpu"}), Command(exe="x"), {"gpu": 1})},
+                pricing=Pricing(tiers=(PricingTier(tier_index=1, input_price=3.0),)),
+            )
+        },
+        wol=None,
+        claude_configs={},
+        cloud_providers={
+            "ds": CloudProvider(
+                name="ds",
+                models=(
+                    CloudModel(
+                        model_name="x", tiers_base=(PricingTier(tier_index=1, input_price=1.0),)
+                    ),
+                ),
+            )
+        },
+    )
+    with TestClient(_app(db, cfg)) as c:
+        jc = c.get("/api/usage/session?source=cloud").json()
+        assert jc["local_cost"] == 0.0 and jc["cloud_cost"] == jc["total_cost"]
+        jl = c.get("/api/usage/session?source=local").json()
+        assert jl["cloud_cost"] == 0.0 and jl["local_cost"] == jl["total_cost"]
+        assert c.get("/api/usage/session?source=bogus").status_code == 422
+
+
 def test_usage_cost_endpoint_source_param(tmp_path):
     from llm_manager.config import (
         AppConfig,

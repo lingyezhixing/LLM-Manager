@@ -126,7 +126,10 @@ def _resolve_window(preset: str, start: float | None, end: float | None) -> tupl
 
 def register_usage_routes(router: APIRouter) -> None:
     @router.get("/usage/session", response_model=SessionUsageResponse)
-    def session_usage_endpoint(request: Request) -> SessionUsageResponse:
+    def session_usage_endpoint(
+        request: Request,
+        source: Literal["all", "local", "cloud"] = "all",
+    ) -> SessionUsageResponse:
         started = getattr(request.app.state, "started_at", None) or time.time()
         s = session_snapshot(started)
         total_cost = 0.0
@@ -139,10 +142,15 @@ def register_usage_routes(router: APIRouter) -> None:
                 # 上一进程的请求/段 end_time < started_at 自然落在窗外)。best-effort:
                 # 计费计算失败仅降级为 0,不影响 token 面板。
                 cs = usage_cost(
-                    get_db(request), store.snapshot(), start_ts=started, end_ts=time.time()
+                    get_db(request),
+                    store.snapshot(),
+                    start_ts=started,
+                    end_ts=time.time(),
+                    source=source,
                 )
                 total_cost = cs.total_cost
                 # 三拆:local/cloud 由 by_model 的 source 推导,总账 = local + cloud 恒等
+                # (source 过滤后仅含单侧行,另一侧自然为 0,spec §6.3)
                 local_cost = sum(c.cost for c in cs.by_model if c.source == "local")
                 cloud_cost = sum(c.cost for c in cs.by_model if c.source == "cloud")
             except Exception:
