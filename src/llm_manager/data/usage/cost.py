@@ -28,8 +28,28 @@ def _hourly_cost(
     return _overlap(win_start, win_end, seg_start, seg_end) * hourly_price / 3600.0
 
 
-def pricing_for(cfg: AppConfig, name: str) -> Pricing | None:
-    """本地模型 → 云端目录(合成 base 槽 Pricing)→ None(成本 0)。"""
+def _in_offpeak_windows(windows, ts: float) -> bool:
+    """timestamp 是否落在任一谷时段窗口内(服务器本地时刻,当日分钟判断)。
+    [start_min, end_min) 左闭右开;start > end = 跨午夜(t ≥ start 或 t < end);
+    多窗口并集语义,start == end 校验已禁、运行时防御恒 False。"""
+    lt = time.localtime(ts)
+    m = lt.tm_hour * 60 + lt.tm_min
+    for w in windows:
+        if w.start_min == w.end_min:
+            continue
+        if w.start_min < w.end_min:
+            if w.start_min <= m < w.end_min:
+                return True
+        elif m >= w.start_min or m < w.end_min:
+            return True
+    return False
+
+
+def pricing_for(cfg: AppConfig, name: str, *, end_time: float | None = None) -> Pricing | None:
+    """本地模型 → 云端目录(合成阶梯 Pricing)→ None(成本 0)。
+    云端峰谷:dual_pricing 开且 end_time 落在谷窗口 → offpeak 阶梯,否则 base;
+    end_time=None 恒 base(无时刻上下文的调用方);dual 开但谷表空防御回退 base
+    (validate 会拦此配置)。整单判定:每条请求按自身完成时刻选槽,不分摊。"""
     mc = cfg.models.get(name)
     if mc is not None:
         return mc.pricing
@@ -40,17 +60,21 @@ def pricing_for(cfg: AppConfig, name: str) -> Pricing | None:
         if p is not None:
             for cm in p.models:
                 if cm.model_name == model_name:
-                    # 峰谷双定价延后实现:当前恒用 base 槽(offpeak 槽数据已入库但不消费)
-                    return Pricing(
-                        pricing_type="tier", support_cache=cm.support_cache, tiers=cm.tiers_base
+                    use_offpeak = (
+                        cm.dual_pricing
+                        and cm.tiers_offpeak
+                        and end_time is not None
+                        and _in_offpeak_windows(cm.offpeak_windows, end_time)
                     )
+                    tiers = cm.tiers_offpeak if use_offpeak else cm.tiers_base
+                    return Pricing(pricing_type="tier", support_cache=cm.support_cache, tiers=tiers)
     return None
 
 
 def _tier_cost_row(cfg, row) -> float:
     """逐请求 tier_cost(usage_cost 与 usage_cost_series 共用)。非 tier/未配置 → 0.0。
-    本地模型直取 pricing;云端模型经 pricing_for 合成 base 槽。"""
-    pricing = pricing_for(cfg, row["model"])
+    本地模型直取 pricing;云端模型经 pricing_for 合成阶梯(带 end_time 逐单判峰谷槽)。"""
+    pricing = pricing_for(cfg, row["model"], end_time=row["end_time"])
     if pricing is None or pricing.pricing_type != "tier":
         return 0.0
     return tier_cost(
@@ -136,8 +160,9 @@ def usage_cost(
     }
     if tier_names:
         sql = (
-            "SELECT m.original_name AS model, r.source AS source, r.input_tokens, r.output_tokens, "
-            "r.cache_n, r.prompt_n FROM model_requests r JOIN models m ON r.model_id=m.id "
+            "SELECT m.original_name AS model, r.source AS source, r.end_time, "
+            "r.input_tokens, r.output_tokens, r.cache_n, r.prompt_n "
+            "FROM model_requests r JOIN models m ON r.model_id=m.id "
             "WHERE r.end_time>=? AND r.end_time<?"
         )
         args: list = [start_ts, end_ts]

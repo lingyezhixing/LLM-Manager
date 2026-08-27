@@ -839,3 +839,126 @@ def test_usage_cost_series_cloud(tmp_path):
         db, cfg, start_ts=0, end_ts=120, bucket_seconds=60, source="cloud"
     )
     assert res_cloud.total[0] == res.total[0]
+
+
+# ---------- 峰谷双定价(offpeak slot) ----------
+
+
+def _local_ts(h: int, m: int) -> float:
+    """构造本地区域某日 h:m 的 timestamp(往返 localtime 折回同一分钟,平台无关)。"""
+    import time as _time
+
+    return _time.mktime((2026, 1, 15, h, m, 0, 0, 0, -1))
+
+
+def test_in_offpeak_windows_match_rules():
+    from llm_manager.config import TimeWindow
+    from llm_manager.data.usage.cost import _in_offpeak_windows
+
+    day = TimeWindow(300, 1200)  # 05:00–20:00
+    assert _in_offpeak_windows((day,), _local_ts(5, 0)) is True  # 左闭
+    assert _in_offpeak_windows((day,), _local_ts(19, 59)) is True
+    assert _in_offpeak_windows((day,), _local_ts(20, 0)) is False  # 右开
+    night = TimeWindow(1380, 300)  # 23:00–05:00 跨午夜(start > end)
+    assert _in_offpeak_windows((night,), _local_ts(23, 0)) is True
+    assert _in_offpeak_windows((night,), _local_ts(2, 0)) is True
+    assert _in_offpeak_windows((night,), _local_ts(12, 0)) is False
+    # 多窗口并集:任一命中即谷
+    assert _in_offpeak_windows((day, night), _local_ts(1, 0)) is True
+    assert _in_offpeak_windows((), _local_ts(2, 0)) is False
+    degenerate = TimeWindow(360, 360)  # start==end 校验已禁;运行时防御恒 False
+    assert _in_offpeak_windows((degenerate,), _local_ts(6, 0)) is False
+
+
+def test_pricing_for_offpeak_slot_selection():
+    from dataclasses import replace
+
+    from llm_manager.config import (
+        AppConfig,
+        CloudModel,
+        CloudProvider,
+        PricingTier,
+        ProgramConfig,
+        TimeWindow,
+    )
+
+    base = PricingTier(tier_index=1, input_price=3.0)
+    off = PricingTier(tier_index=1, input_price=1.0)
+    cm_on = CloudModel(
+        model_name="x",
+        dual_pricing=True,
+        offpeak_windows=(TimeWindow(1380, 300),),
+        tiers_base=(base,),
+        tiers_offpeak=(off,),
+    )
+    cfg = AppConfig(
+        program=ProgramConfig("0.0.0.0", 8080, 60, "INFO"),
+        models={},
+        wol=None,
+        claude_configs={},
+        cloud_providers={"ds": CloudProvider(name="ds", models=(cm_on,))},
+    )
+    noon = _local_ts(12, 0)
+    night = _local_ts(23, 30)
+    assert pricing_for(cfg, "ds/x", end_time=noon).tiers[0].input_price == 3.0  # 窗外 → base
+    assert pricing_for(cfg, "ds/x", end_time=night).tiers[0].input_price == 1.0  # 窗内 → offpeak
+    assert pricing_for(cfg, "ds/x").tiers[0].input_price == 3.0  # 未给时刻 → base(向后兼容)
+    # dual 关:残留窗口/谷表数据不消费
+    cm_off = replace(cm_on, dual_pricing=False)
+    cfg_off = AppConfig(
+        program=cfg.program,
+        models={},
+        wol=None,
+        claude_configs={},
+        cloud_providers={"ds": CloudProvider(name="ds", models=(cm_off,))},
+    )
+    assert pricing_for(cfg_off, "ds/x", end_time=night).tiers[0].input_price == 3.0
+    # dual 开但谷表空 → 防御回退 base(validate 会拦此配置,运行时仍不崩)
+    cm_empty = replace(cm_on, tiers_offpeak=())
+    cfg_empty = AppConfig(
+        program=cfg.program,
+        models={},
+        wol=None,
+        claude_configs={},
+        cloud_providers={"ds": CloudProvider(name="ds", models=(cm_empty,))},
+    )
+    assert pricing_for(cfg_empty, "ds/x", end_time=night).tiers[0].input_price == 3.0
+
+
+def test_usage_cost_applies_offpeak_per_request(tmp_path):
+    """峰谷按每条请求自身 end_time 选槽(compute-on-read 回溯重算同一规则):
+    谷段请求按谷价、其余按 base 价,整单判定不分摊。"""
+    from llm_manager.config import (
+        AppConfig,
+        CloudModel,
+        CloudProvider,
+        PricingTier,
+        ProgramConfig,
+        TimeWindow,
+    )
+
+    db = open_db(tmp_path / "t.db")
+    import time
+
+    # 跨午夜窗口 (1380, 300):次日 02:00 属谷段(晚于当日正午的峰段请求,两桶都落查询窗内)
+    valley = time.mktime((2026, 1, 16, 2, 0, 0, 0, 0, -1))
+    noon = _local_ts(12, 0)
+    record_usage(db, "ds/x", valley, valley + 10, 1000, 0, 0, 1000, source="cloud")  # 谷价 1.0
+    record_usage(db, "ds/x", noon, noon + 10, 1000, 0, 0, 1000, source="cloud")  # 峰价 3.0
+    cm = CloudModel(
+        model_name="x",
+        dual_pricing=True,
+        offpeak_windows=(TimeWindow(1380, 300),),
+        tiers_base=(PricingTier(tier_index=1, input_price=3.0),),
+        tiers_offpeak=(PricingTier(tier_index=1, input_price=1.0),),
+    )
+    cfg = AppConfig(
+        program=ProgramConfig("0.0.0.0", 8080, 60, "INFO"),
+        models={},
+        wol=None,
+        claude_configs={},
+        cloud_providers={"ds": CloudProvider(name="ds", models=(cm,))},
+    )
+    s = usage_cost(db, cfg, start_ts=0, end_ts=valley + 60)
+    expected = (1000 * 1.0 + 1000 * 3.0) / 1_000_000
+    assert abs(s.total_cost - expected) < 1e-9

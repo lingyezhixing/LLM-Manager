@@ -356,6 +356,31 @@ def validate(cfg: AppConfig) -> list[str]:
                             errors.append(
                                 f"Provider '{pname}' model '{cm.model_name}' has negative price {pn}"
                             )
+            # 峰谷规则仅在开关开启时校验;dual 关 = 读取侧恒忽略,残留数据宽进不拦
+            if cm.dual_pricing:
+                if not cm.tiers_offpeak:
+                    errors.append(
+                        f"Provider '{pname}' model '{cm.model_name}' dual_pricing on but tiers_offpeak is empty"
+                    )
+                if not cm.offpeak_windows:
+                    errors.append(
+                        f"Provider '{pname}' model '{cm.model_name}' dual_pricing on but offpeak_windows is empty"
+                    )
+                for w in cm.offpeak_windows:
+                    if not 0 <= w.start_min <= 1439:
+                        errors.append(
+                            f"Provider '{pname}' model '{cm.model_name}' offpeak start_min "
+                            f"{w.start_min} must be within 0-1439"
+                        )
+                    if not 0 <= w.end_min <= 1439:
+                        errors.append(
+                            f"Provider '{pname}' model '{cm.model_name}' offpeak end_min "
+                            f"{w.end_min} must be within 0-1439"
+                        )
+                    if w.start_min == w.end_min:
+                        errors.append(
+                            f"Provider '{pname}' model '{cm.model_name}' offpeak window requires start != end"
+                        )
         for mp in p.mappings:
             if not mp.local_path or not mp.local_path.strip():
                 errors.append(f"Provider '{pname}' has empty mapping local_path")

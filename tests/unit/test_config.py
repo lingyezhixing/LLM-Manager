@@ -378,3 +378,45 @@ def test_validate_local_name_conflicts_with_provider():
         cloud_providers={"ds": _cloud_provider()},
     )
     assert all("must not equal a cloud provider name" not in e for e in validate(clean))
+
+
+def test_validate_offpeak_rules():
+    """峰谷校验:dual 开 → 谷表非空且至少 1 个时段窗口,分钟 ∈[0,1439],start≠end;
+    dual 关不校验(残留数据宽进,读取侧恒忽略)。"""
+    from llm_manager.config import PricingTier, TimeWindow
+
+    prog = ProgramConfig(host="0.0.0.0", port=8080, alive_time=60, log_level="INFO")
+    base = (PricingTier(tier_index=1, input_price=3.0),)
+    off = (PricingTier(tier_index=1, input_price=1.0),)
+
+    def _cfg(cm):
+        return AppConfig(
+            program=prog,
+            models={},
+            wol=None,
+            claude_configs={},
+            cloud_providers={"ds": CloudProvider(name="ds", models=(cm,))},
+        )
+
+    def _cm(windows=(), tiers_offpeak=None, dual=True):
+        return CloudModel(
+            model_name="x",
+            dual_pricing=dual,
+            offpeak_windows=windows,
+            tiers_base=base,
+            tiers_offpeak=tiers_offpeak if tiers_offpeak is not None else off,
+        )
+
+    assert any("offpeak_windows" in e for e in validate(_cfg(_cm())))  # 无窗口
+    no_tiers = _cfg(_cm(windows=(TimeWindow(1380, 300),), tiers_offpeak=()))
+    assert any("tiers_offpeak" in e for e in validate(no_tiers))  # 无谷表
+    assert any("start_min" in e for e in validate(_cfg(_cm(windows=(TimeWindow(1440, 300),)))))
+    assert any("end_min" in e for e in validate(_cfg(_cm(windows=(TimeWindow(100, -1),)))))
+    assert any(
+        "start_min == end_min" in e or "start != end" in e
+        for e in validate(_cfg(_cm(windows=(TimeWindow(360, 360),))))
+    )  # 起止相同
+    ok_cross = _cfg(_cm(windows=(TimeWindow(1380, 300),)))  # 跨午夜合法
+    assert all("offpeak" not in e and "window" not in e.lower() for e in validate(ok_cross))
+    ok_dual_off = _cfg(_cm(windows=(TimeWindow(9999, 9999),), dual=False))
+    assert all("must be within" not in e for e in validate(ok_dual_off))  # dual 关:越界数据不校验
