@@ -1,10 +1,14 @@
 from llm_manager.config import (
     AppConfig,
+    CloudMapping,
+    CloudModel,
+    CloudProvider,
     Command,
     ModelConfig,
     ModelMode,
     ProgramConfig,
     Scheme,
+    parse_cloud_id,
     resolve_alias,
     select_adaptive,
     substitute_vars,
@@ -262,3 +266,81 @@ def test_substitute_vars_does_not_touch_single_brace_json():
 def test_substitute_vars_empty_aliases_yields_empty_alias():
     m = _model(aliases=())
     assert substitute_vars("-a {{alias}}", m) == "-a "
+
+
+# ---------- 云端:parse_cloud_id + validate 云块 ----------
+
+
+def test_parse_cloud_id_basic():
+    assert parse_cloud_id("deepseek/deepseek-chat") == ("deepseek", "deepseek-chat")
+    assert parse_cloud_id("local-model") is None  # 无 '/'
+    assert parse_cloud_id("a/b/c") is None  # 多斜杠 → 404 语义
+    assert parse_cloud_id("") is None
+    assert parse_cloud_id("/x") is None  # provider 空
+    assert parse_cloud_id("x/") is None  # model 空
+
+
+def _cloud_provider(**kw) -> CloudProvider:
+    return CloudProvider(**{"name": "deepseek", **kw})
+
+
+def test_validate_cloud_provider_name_and_bases():
+    cfg = AppConfig(
+        program=_prog(),
+        models={},
+        wol=None,
+        claude_configs={},
+        cloud_providers={"a/b": _cloud_provider()},
+    )
+    assert any("must not contain '/'" in e for e in validate(cfg))
+    cfg2 = AppConfig(
+        program=_prog(),
+        models={},
+        wol=None,
+        claude_configs={},
+        cloud_providers={"ds": _cloud_provider(openai_base="ftp://x")},
+    )
+    assert any("openai_base" in e for e in validate(cfg2))
+
+
+def test_validate_cloud_model_rules():
+    p = _cloud_provider(models=(CloudModel(model_name="m/x"),))
+    cfg = AppConfig(
+        program=_prog(), models={}, wol=None, claude_configs={}, cloud_providers={"ds": p}
+    )
+    assert any("model 'm/x'" in e for e in validate(cfg))
+
+
+def test_validate_cloud_mapping_global_unique_and_reserved():
+    p1 = _cloud_provider(
+        name="a", mappings=(CloudMapping(local_path="v1/x", target_url="https://a/x"),)
+    )
+    p2 = _cloud_provider(
+        name="b", mappings=(CloudMapping(local_path="v1/x", target_url="https://b/x"),)
+    )
+    cfg = AppConfig(
+        program=_prog(),
+        models={},
+        wol=None,
+        claude_configs={},
+        cloud_providers={"a": p1, "b": p2},
+    )
+    assert any("shared by providers" in e for e in validate(cfg))
+    cfg2 = AppConfig(
+        program=_prog(),
+        models={},
+        wol=None,
+        claude_configs={},
+        cloud_providers={
+            "a": _cloud_provider(
+                mappings=(CloudMapping(local_path="health", target_url="https://h"),)
+            )
+        },
+    )
+    assert any("reserved route" in e for e in validate(cfg2))
+
+
+def test_validate_local_name_forbids_slash():
+    m = ModelConfig(aliases=("m/x",), mode="Chat", port=1)
+    cfg = AppConfig(program=_prog(), models={"m": m}, wol=None, claude_configs={})
+    assert any("must not contain '/'" in e for e in validate(cfg))

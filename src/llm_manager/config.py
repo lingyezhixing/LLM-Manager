@@ -137,6 +137,42 @@ class Pricing:
 
 
 @dataclass(frozen=True, slots=True)
+class TimeWindow:
+    start_min: int  # 当日分钟 0–1439(跨午夜窗口 start > end 合法,延后 v3.4+ 消费)
+    end_min: int
+
+
+@dataclass(frozen=True, slots=True)
+class CloudMapping:
+    local_path: str
+    target_url: str
+    auth_style: str = "bearer"  # 'bearer' | 'x-api-key' | 'none'
+
+
+@dataclass(frozen=True, slots=True)
+class CloudModel:
+    model_name: str
+    support_cache: bool = False
+    dual_pricing: bool = False  # v3.3.0 惰性:恒 False,延后 v3.4+ 消费
+    offpeak_windows: tuple[TimeWindow, ...] = ()  # v3.3.0 惰性:恒 (),延后 v3.4+ 消费
+    tiers_base: tuple[PricingTier, ...] = ()
+    tiers_offpeak: tuple[PricingTier, ...] = ()  # v3.3.0 惰性:恒 (),延后 v3.4+ 消费
+
+
+@dataclass(frozen=True, slots=True)
+class CloudProvider:
+    name: str
+    api_key: str = ""
+    enabled: bool = True
+    openai_base: str = ""  # ''=不支持
+    responses_base: str = ""  # ''=不支持
+    claude_base: str = ""  # ''=不支持
+    extra_headers: tuple[tuple[str, str], ...] = ()
+    models: tuple[CloudModel, ...] = ()
+    mappings: tuple[CloudMapping, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class ModelConfig:
     aliases: tuple[
         str, ...
@@ -187,6 +223,17 @@ class AppConfig:
     models: dict[str, ModelConfig]
     wol: WakeOnLanConfig | None
     claude_configs: dict[str, dict[str, str]]
+    cloud_providers: dict[str, CloudProvider] = field(default_factory=dict)
+
+
+def parse_cloud_id(name: str) -> tuple[str, str] | None:
+    """'{provider}/{model}' → (provider, model);无 '/'、模型段含 '/'、任一段空 → None(多斜杠必然 404)。"""
+    if "/" not in name:
+        return None
+    provider, model = name.split("/", 1)
+    if not provider or not model or "/" in model:
+        return None
+    return provider, model
 
 
 def validate(cfg: AppConfig) -> list[str]:
@@ -198,6 +245,10 @@ def validate(cfg: AppConfig) -> list[str]:
     seen_aliases: dict[str, str] = {}
     valid_modes = {m.value for m in ModelMode}
     for name, m in cfg.models.items():
+        if "/" in name:
+            errors.append(
+                f"Model name '{name}' must not contain '/' (reserved for cloud providers)"
+            )
         if not name or not name.strip():  # 空模型名
             errors.append("Model name is empty/blank")
         if not 1 <= m.port <= 65535:  # 模型端口范围
@@ -209,6 +260,10 @@ def validate(cfg: AppConfig) -> list[str]:
         if not m.aliases:
             errors.append(f"Model '{name}' has no aliases")  # aliases[0]=下游 served name 必须
         for a in m.aliases:
+            if "/" in a:
+                errors.append(
+                    f"Model '{name}' alias '{a}' must not contain '/' (reserved for cloud providers)"
+                )
             if not a or not a.strip():  # 空串别名
                 errors.append(f"Model '{name}' has empty alias")
                 continue
@@ -246,6 +301,81 @@ def validate(cfg: AppConfig) -> list[str]:
                     errors.append(f"Model '{name}' has negative price {pname}")
         if m.pricing.hourly_price < 0:
             errors.append(f"Model '{name}' has negative price hourly_price")
+    # 云端:provider 名/三族 base/extra_headers、模型名与计价、映射全局唯一与保留路由
+    seen_provider: set[str] = set()
+    mapping_owners: dict[str, str] = {}
+    for pname, p in cfg.cloud_providers.items():
+        if not pname or not pname.strip():
+            errors.append("Cloud provider name is empty/blank")
+        if "/" in pname:
+            errors.append(f"Cloud provider name '{pname}' must not contain '/'")
+        if pname in seen_provider:
+            errors.append(f"Duplicate cloud provider name '{pname}'")
+        seen_provider.add(pname)
+        for base_name in ("openai_base", "responses_base", "claude_base"):
+            v = getattr(p, base_name)
+            if v and not v.startswith(("http://", "https://")):
+                errors.append(f"Provider '{pname}' {base_name} must start with http(s)://")
+        for hk, _hv in p.extra_headers:
+            if not hk:
+                errors.append(f"Provider '{pname}' has empty extra_headers key")
+        seen_models: set[str] = set()
+        for cm in p.models:
+            if not cm.model_name or not cm.model_name.strip():
+                errors.append(f"Provider '{pname}' has empty model name")
+            if "/" in cm.model_name:
+                errors.append(f"Provider '{pname}' model '{cm.model_name}' must not contain '/'")
+            if cm.model_name in seen_models:
+                errors.append(f"Provider '{pname}' has duplicate model '{cm.model_name}'")
+            seen_models.add(cm.model_name)
+            for slot, tiers in (("base", cm.tiers_base), ("offpeak", cm.tiers_offpeak)):
+                seen_tiers: set[int] = set()
+                for t in tiers:
+                    if t.tier_index in seen_tiers:
+                        errors.append(
+                            f"Provider '{pname}' model '{cm.model_name}' {slot} duplicate tier_index {t.tier_index}"
+                        )
+                    seen_tiers.add(t.tier_index)
+                for t in tiers:
+                    for pn, pv in (
+                        ("input_price", t.input_price),
+                        ("output_price", t.output_price),
+                        ("cache_write_price", t.cache_write_price),
+                        ("cache_read_price", t.cache_read_price),
+                    ):
+                        if pv < 0:
+                            errors.append(
+                                f"Provider '{pname}' model '{cm.model_name}' has negative price {pn}"
+                            )
+        for mp in p.mappings:
+            if not mp.local_path or not mp.local_path.strip():
+                errors.append(f"Provider '{pname}' has empty mapping local_path")
+                continue
+            if "://" in mp.local_path:
+                errors.append(
+                    f"Provider '{pname}' mapping local_path '{mp.local_path}' must not contain '://'"
+                )
+            if mp.local_path.startswith("api/"):
+                errors.append(
+                    f"Provider '{pname}' mapping local_path '{mp.local_path}' must not start with 'api/'"
+                )
+            if mp.local_path in ("health", "v1/models"):
+                errors.append(
+                    f"Provider '{pname}' mapping local_path '{mp.local_path}' is a reserved route"
+                )
+            if mp.local_path in mapping_owners:
+                errors.append(
+                    f"Mapping local_path '{mp.local_path}' shared by providers '{mapping_owners[mp.local_path]}' and '{pname}'"
+                )
+            mapping_owners[mp.local_path] = pname
+            if not mp.target_url.startswith(("http://", "https://")):
+                errors.append(
+                    f"Provider '{pname}' mapping '{mp.local_path}' target_url must start with http(s)://"
+                )
+            if mp.auth_style not in ("bearer", "x-api-key", "none"):
+                errors.append(
+                    f"Provider '{pname}' mapping '{mp.local_path}' invalid auth_style '{mp.auth_style}'"
+                )
     return errors
 
 
