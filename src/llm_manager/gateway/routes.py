@@ -45,8 +45,14 @@ def _register_catalog(app: FastAPI) -> None:
     def list_models(request: Request) -> dict:
         # id = aliases[0](主别名 = 下游 served name = 客户端调用名);模型名仅为内部键,不外露。
         # validate() 保证每个模型至少 1 个别名,故 aliases[0] 恒安全。读穿:每请求取 fresh 快照。
+        # 云端合并:启用服务商的每个云模型以 {provider}/{model} 对外暴露,禁用服务商不暴露。
         cfg = request.app.state.config_store.snapshot()
         data = [{"id": m.aliases[0], "object": "model"} for m in cfg.models.values()]
+        for p in cfg.cloud_providers.values():
+            if not p.enabled:
+                continue
+            for cm in p.models:
+                data.append({"id": f"{p.name}/{cm.model_name}", "object": "model"})
         return {"object": "list", "data": data}
 
     @app.options("/{path:path}")

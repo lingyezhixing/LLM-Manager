@@ -91,6 +91,27 @@ def test_orphaned_returns_diff() -> None:
     assert j == {"orphaned_models": ["gone"], "count": 1}
 
 
+def test_orphaned_excludes_active_cloud_anchors(tmp_path):
+    """云目录全名 + 服务商名不进孤儿(活跃锚点);本地孤立仍报。"""
+    from llm_manager.config import CloudModel, CloudProvider
+
+    db = open_db(tmp_path / "t.db")
+    record_usage(db, "deepseek/deepseek-chat", 1, 2, 1, 1, 0, 1)  # 云模型锚点
+    record_usage(db, "deepseek", 1, 2, 1, 1, 0, 1)  # 服务商级锚点
+    record_usage(db, "gone", 1, 2, 1, 1, 0, 1)  # 本地孤立
+    cfg = SimpleNamespace(
+        models={},
+        cloud_providers={
+            "deepseek": CloudProvider(
+                name="deepseek", models=(CloudModel(model_name="deepseek-chat"),)
+            )
+        },
+    )
+    with TestClient(_app(db, cfg)) as c:
+        r = c.get("/api/data/models/orphaned")
+    assert r.json()["orphaned_models"] == ["gone"]
+
+
 def test_delete_orphaned_model() -> None:
     db = open_db(Path(":memory:"))
     record_usage(db, "gone", 1, 2, input_tokens=1, output_tokens=1, cache_n=0, prompt_n=0)

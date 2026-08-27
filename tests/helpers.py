@@ -46,10 +46,12 @@ def cfg(
     program: dict | None = None,
     wol=None,
     claude_configs: dict[str, dict[str, str]] | None = None,
+    cloud_providers: dict | None = None,
 ) -> AppConfig:
     return AppConfig(
         program=ProgramConfig(**{**_PROG_DEFAULTS, **(program or {})}),
         models=models or {},
         wol=wol,
         claude_configs=claude_configs or {},
+        cloud_providers=cloud_providers or {},
     )

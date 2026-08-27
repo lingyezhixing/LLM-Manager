@@ -43,6 +43,44 @@ def _cfg_distinct() -> config.AppConfig:
     )
 
 
+def _cloud_cfg() -> config.AppConfig:
+    from llm_manager.config import CloudModel, CloudProvider
+
+    return build_cfg(
+        models={
+            "m1": build_model(
+                ("m1",), 8000, schemes={"s": build_scheme(devices=("rtx 4060",), memory_mb={})}
+            )
+        },
+        cloud_providers={
+            "deepseek": CloudProvider(
+                name="deepseek",
+                api_key="sk",
+                enabled=True,
+                openai_base="https://api.deepseek.com",
+                models=(CloudModel(model_name="deepseek-chat"),),
+            ),
+            "disabled": CloudProvider(
+                name="disabled",
+                api_key="",
+                enabled=False,
+                models=(CloudModel(model_name="off"),),
+            ),
+        },
+    )
+
+
+def test_v1_models_includes_enabled_cloud_and_excludes_disabled():
+    app = FastAPI()
+    _register(app, _cloud_cfg())
+    with TestClient(app) as c:
+        r = c.get("/v1/models")
+    ids = {m["id"] for m in r.json()["data"]}
+    assert "m1" in ids
+    assert "deepseek/deepseek-chat" in ids
+    assert "disabled/off" not in ids
+
+
 class _FakeLife:
     async def ensure_running(self, alias, *, inc_pending=False):
         return ModelStatus.ROUTING
