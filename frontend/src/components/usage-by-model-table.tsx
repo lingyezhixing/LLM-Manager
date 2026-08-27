@@ -4,7 +4,8 @@ import { useQuery } from "@tanstack/react-query";
 
 import { Card, Empty, Skeleton } from "@/components/ui/card";
 import { ErrorState } from "@/components/ui/error-state";
-import { fetchUsageByModel, fetchUsageCost, type UsageSeriesParams } from "@/lib/api";
+import { SourcePills } from "@/components/source-pills";
+import { fetchUsageByModel, fetchUsageCost, type UsageSource, type UsageSeriesParams } from "@/lib/api";
 import { errMsg, formatCost, formatCount, formatLatency, formatPercent, formatTokens } from "@/lib/format";
 import { EMPTY_REQUESTS } from "@/lib/usage-range";
 import { qk } from "@/lib/api/keys";
@@ -18,19 +19,22 @@ export function UsageByModelTable({
   params: UsageSeriesParams;
   refetch: number | false;
 }) {
+  const [sortKey, setSortKey] = useState<SortKey>("input_tokens");
+  const [desc, setDesc] = useState(true);
+  const [source, setSource] = useState<UsageSource>("all");
+  // 归属过滤在服务端完成(by-model 行 / cost by_model 均带 source)
+  const filteredParams: UsageSeriesParams = { ...params, source };
   const { data, isLoading, isError, error, refetch: refetchByModel } = useQuery({
-    queryKey: qk.usageByModel(params),
-    queryFn: () => fetchUsageByModel(params),
+    queryKey: qk.usageByModel(filteredParams),
+    queryFn: () => fetchUsageByModel(filteredParams),
     refetchInterval: refetch,
   });
   const costQ = useQuery({
-    queryKey: qk.usageCost(params),
-    queryFn: () => fetchUsageCost(params),
+    queryKey: qk.usageCost(filteredParams),
+    queryFn: () => fetchUsageCost(filteredParams),
     refetchInterval: refetch,
   });
   const costOf = new Map((costQ.data?.by_model ?? []).map((r) => [r.model, r.cost]));
-  const [sortKey, setSortKey] = useState<SortKey>("input_tokens");
-  const [desc, setDesc] = useState(true);
 
   if (isError) return <Card><ErrorState message={errMsg(error)} onRetry={() => refetchByModel()} /></Card>;
   if (isLoading) return <Card><Skeleton rows={6} /></Card>;
@@ -57,10 +61,13 @@ export function UsageByModelTable({
       {costQ.isError && (
         <ErrorState className="mb-3" prefix="成本加载失败" message={errMsg(costQ.error)} onRetry={() => costQ.refetch()} />
       )}
+      <div className="mb-3 flex justify-end">
+        <SourcePills value={source} onChange={setSource} />
+      </div>
       <table className="w-full text-sm">
         <thead>
           <tr>
-            <Th label="模型" />
+            <Th label="模型 / 归属" />
             <ThNum label="输入" k="input_tokens" sortKey={sortKey} desc={desc} onSort={onSort} />
             <ThNum label="输出" k="output_tokens" sortKey={sortKey} desc={desc} onSort={onSort} />
             <ThNum label="缓存命中" k="cache_n" sortKey={sortKey} desc={desc} onSort={onSort} />
@@ -74,7 +81,12 @@ export function UsageByModelTable({
         <tbody>
           {rows.map((r) => (
             <tr key={r.model} className="border-t border-border">
-              <td className="p-2">{r.model}</td>
+              <td className="p-2">
+                <div className="flex items-center gap-2">
+                  {r.model}
+                  <SourceBadge source={r.source} />
+                </div>
+              </td>
               <td className="p-2 text-right font-mono tabular-nums">{formatTokens(r.input_tokens)}</td>
               <td className="p-2 text-right font-mono tabular-nums">{formatTokens(r.output_tokens)}</td>
               <td className="p-2 text-right font-mono tabular-nums text-success">{formatTokens(r.cache_n)}</td>
@@ -100,6 +112,20 @@ export function UsageByModelTable({
 
 function Th({ label }: { label: string }) {
   return <th className="p-2 text-left text-xs font-medium text-muted-foreground">{label}</th>;
+}
+
+/** 归属徽标:模型名按命名空间归属,徽标即行 source——本地→灰、云端→primary。 */
+function SourceBadge({ source }: { source: string }) {
+  const cloud = source === "cloud";
+  return (
+    <span
+      className={`rounded px-1.5 py-0.5 text-xs ${
+        cloud ? "bg-primary-accent/12 text-primary-accent" : "bg-muted text-muted-foreground"
+      }`}
+    >
+      {cloud ? "云端" : "本地"}
+    </span>
+  );
 }
 
 function ThNum({

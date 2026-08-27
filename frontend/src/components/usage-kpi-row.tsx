@@ -31,26 +31,17 @@ export function UsageKpiRow({
     return <Card><Skeleton rows={3} /></Card>;
   }
   return (
-    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-7">
+    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-9">
       <InfoTile label="输入" value={formatTokens(data.input_tokens)} valueClass="text-primary-accent" />
       <InfoTile label="输出" value={formatTokens(data.output_tokens)} />
       <InfoTile label="缓存命中" value={formatTokens(data.cache_hit)} valueClass="text-success" />
       <InfoTile label="未命中" value={formatTokens(data.cache_miss)} valueClass="text-destructive" />
       <InfoTile label="命中率" value={formatPercent(data.hit_rate, 1)} valueClass="text-primary-accent" />
       <InfoTile label="请求数" value={formatCount(data.request_count)} />
-      <InfoTile
-        label="成本"
-        valueClass="text-primary-accent"
-        value={
-          costQ.isError ? (
-            <ErrorState onRetry={() => costQ.refetch()} />
-          ) : costQ.data ? (
-            formatCost(costQ.data.total_cost)
-          ) : (
-            "—"
-          )
-        }
-      />
+      <InfoTile label="总成本" valueClass="text-primary-accent"
+        value={costQ.data ? formatCost(costQ.data.total_cost) : "—"} />
+      <InfoTile label="本地成本" value={costQ.data ? formatCost(costQ.data.local_cost) : "—"} />
+      <InfoTile label="云端成本" value={costQ.data ? formatCost(costQ.data.cloud_cost) : "—"} />
     </div>
   );
 }

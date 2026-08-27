@@ -6,8 +6,9 @@ import { LineChart } from "lucide-react";
 
 import { Card, Empty, Skeleton } from "@/components/ui/card";
 import { ErrorState } from "@/components/ui/error-state";
+import { SourcePills } from "@/components/source-pills";
 import { TokenChart } from "@/components/token-chart";
-import { fetchUsageCostSeries, fetchUsageSeries, type UsageSeries, type UsageSeriesParams } from "@/lib/api";
+import { fetchUsageCostSeries, fetchUsageSeries, type UsageSource, type UsageSeries, type UsageSeriesParams } from "@/lib/api";
 import { errMsg, formatCost } from "@/lib/format";
 import { chartPresetFor, EMPTY_COST, EMPTY_REQUESTS, type DateRange, type UsagePreset } from "@/lib/usage-range";
 import { qk } from "@/lib/api/keys";
@@ -26,15 +27,18 @@ export function UsageChartCard({
   refetch: number | false;
 }) {
   const [view, setView] = useState<View>("models");
+  const [source, setSource] = useState<UsageSource>("all");
+  // 「按模型」视图不过滤(模型名即归属);总量/成本视图并入 source 过滤
+  const filteredParams = view === "models" ? params : { ...params, source };
   const { data, isLoading, isError, error, refetch: refetchSeries } = useQuery({
-    queryKey: qk.usageSeries(params),
-    queryFn: () => fetchUsageSeries(params),
+    queryKey: qk.usageSeries(filteredParams),
+    queryFn: () => fetchUsageSeries(filteredParams),
     refetchInterval: refetch,
     enabled: view !== "cost",   // 成本视图不轮询 token 序列(与 cost-series 对称)
   });
   const costSeriesQ = useQuery({
-    queryKey: qk.usageCostSeries(params),
-    queryFn: () => fetchUsageCostSeries(params),
+    queryKey: qk.usageCostSeries(filteredParams),
+    queryFn: () => fetchUsageCostSeries(filteredParams),
     refetchInterval: refetch,
     enabled: view === "cost",
   });
@@ -46,20 +50,28 @@ export function UsageChartCard({
           <LineChart className="size-4 text-primary-accent" />
           {view === "cost" ? "成本曲线" : "Token 消耗曲线"}
         </span>
-        <div className="flex items-center gap-1">
-          {(["total", "models", "cost"] as const).map((v) => (
-            <button
-              key={v}
-              type="button"
-              aria-pressed={view === v}
-              onClick={() => setView(v)}
-              className={`rounded-full px-2.5 py-0.5 text-ui transition-colors duration-(--motion-base) ${
-                view === v ? "bg-primary-accent/12 font-medium text-primary-accent" : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              {v === "total" ? "总量" : v === "models" ? "按模型" : "成本"}
-            </button>
-          ))}
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1">
+            {(["total", "models", "cost"] as const).map((v) => (
+              <button
+                key={v}
+                type="button"
+                aria-pressed={view === v}
+                onClick={() => setView(v)}
+                className={`rounded-full px-2.5 py-0.5 text-ui transition-colors duration-(--motion-base) ${
+                  view === v ? "bg-primary-accent/12 font-medium text-primary-accent" : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {v === "total" ? "总量" : v === "models" ? "按模型" : "成本"}
+              </button>
+            ))}
+          </div>
+          {view !== "models" && (
+            <>
+              <span className="h-4 w-px bg-border" />
+              <SourcePills value={source} onChange={setSource} />
+            </>
+          )}
         </div>
       </div>
       {view === "cost" ? (
