@@ -18,7 +18,17 @@ import httpx
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import Response, StreamingResponse
 
+from llm_manager.config import parse_cloud_id
 from llm_manager.gateway.aliases import resolve_alias_checked
+from llm_manager.gateway.cloud import (
+    apply_extra_headers,
+    build_auth_headers,
+    classify_path,
+    join_url,
+    mapping_for,
+    resolve_cloud_model,
+    resolve_global_mapping,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -78,9 +88,10 @@ def _inject_include_usage(body: dict, path: str) -> dict:
     return body
 
 
-async def _record_usage(db, model, path, body_bytes, start, end) -> None:
+async def _record_usage(db, model, path, body_bytes, start, end, source: str = "local") -> None:
     """Best-effort:metering 写库失败不污染透传(非 stream 不改 status/body;stream 不截断)
-    也不短路 end_request。吞所有异常 + log。同时累加进程内 session 统计(概览用)。"""
+    也不短路 end_request。吞所有异常 + log。同时累加进程内 session 统计(概览用)。
+    source 透传 record_usage('local'/'cloud'),云端流调用方传 'cloud'。"""
     from llm_manager.data import metering
     from llm_manager.data import usage as _u
 
@@ -103,6 +114,7 @@ async def _record_usage(db, model, path, body_bytes, start, end) -> None:
             usage.output_tokens,
             usage.cache_tokens,
             usage.prompt_tokens,
+            source,
         )
     except Exception:
         logger.exception("record_usage failed for model=%s path=%s", model, path)
@@ -205,6 +217,133 @@ async def _stream_wrapper(resp, path, model, db, request_start, guard: _StreamGu
         await resp.aclose()
 
 
+async def _cloud_stream_wrapper(resp, path, db, anchor, request_start):
+    """云端流式:仅头尾采样 + _record_usage(source='cloud') + aclose。state-free。"""
+    sample = _StreamSample()
+    try:
+        async for chunk in resp.aiter_bytes():
+            sample.feed(chunk)
+            yield chunk
+    finally:
+        await _record_usage(
+            db, anchor, path, sample.sample(), request_start, time.time(), source="cloud"
+        )
+        await resp.aclose()
+
+
+async def forward_cloud(
+    request,
+    path,
+    cfg,
+    db,
+    cloud_client,
+    provider_name,
+    provider,
+    cm,
+    body,
+) -> Response:
+    """云端流(标准/自定义映射共用):state-free——不 ensure_running/begin/end_request。
+
+    cm: CloudModel | None。None=model 缺失路径(全局映射回退)→ 归因 {provider}。
+    """
+    from llm_manager import state  # noqa: F401 — 仅标记:本函数严禁触碰 state
+
+    if not provider.enabled:
+        raise HTTPException(503, f"provider '{provider_name}' is disabled")
+    if cloud_client is None:
+        raise HTTPException(500, "cloud client not initialized")
+
+    mapping = mapping_for(provider, path)
+    if mapping is not None:
+        url = mapping.target_url
+        family = None
+        auth_style = mapping.auth_style
+    else:
+        family = classify_path(path)
+        if family is None:
+            raise HTTPException(
+                404, f"provider '{provider_name}' has no endpoint for path '/{path}'"
+            )
+        base = getattr(provider, f"{family}_base")
+        if not base:
+            raise HTTPException(
+                404, f"provider '{provider_name}' does not configure the {family} interface"
+            )
+        url = join_url(base, path, family)
+        auth_style = "bearer"
+
+    model_anchor = provider_name
+    if isinstance(body, dict):
+        if cm is not None:
+            body["model"] = cm.model_name
+            model_anchor = f"{provider_name}/{cm.model_name}"
+        else:
+            bmodel = body.get("model")
+            if isinstance(bmodel, str):
+                parsed = parse_cloud_id(bmodel)
+                if parsed is not None and parsed[0] == provider_name:
+                    for m in provider.models:
+                        if m.model_name == parsed[1]:
+                            body["model"] = m.model_name
+                            model_anchor = bmodel
+                            break
+        if _is_stream(body):
+            body = _inject_include_usage(body, path)
+        request_data = _reserialize(body)
+    else:
+        request_data = body if isinstance(body, bytes) else b""
+
+    request_start = time.time()
+    headers = _strip_headers(request.headers, extra=("host",))
+    headers.pop("authorization", None)
+    headers.pop("x-api-key", None)
+    headers.update(build_auth_headers(provider, family, auth_style))
+    apply_extra_headers(headers, provider)
+
+    logger.info("CLOUD REQ %s %s provider=%s", request.method, url, provider_name)
+    resp = None
+    try:
+        resp = await cloud_client.send(
+            cloud_client.build_request(
+                request.method,
+                url,
+                headers=headers,
+                content=request_data,
+                params=request.query_params,
+            ),
+            stream=True,
+        )
+        if _detect_sse(resp):
+            return StreamingResponse(
+                _cloud_stream_wrapper(resp, path, db, model_anchor, request_start),
+                status_code=resp.status_code,
+                headers=_strip_headers(resp.headers, extra=("connection", "content-encoding")),
+            )
+        try:
+            content = await resp.aread()
+        finally:
+            await resp.aclose()
+        status_code = resp.status_code
+        resp_headers = _strip_headers(resp.headers, extra=("connection", "content-encoding"))
+        resp = None
+        await _record_usage(
+            db, model_anchor, path, content, request_start, time.time(), source="cloud"
+        )
+        return Response(content=content, status_code=status_code, headers=resp_headers)
+    except HTTPException:
+        raise
+    except httpx.HTTPError as e:
+        if resp is not None:
+            await resp.aclose()
+        logger.warning("cloud upstream error provider=%s: %s", provider_name, e)
+        raise HTTPException(502, f"upstream error: {e}")
+    except Exception as e:  # noqa: BLE001
+        if resp is not None:
+            await resp.aclose()
+        logger.warning("cloud internal provider=%s: %s", provider_name, e)
+        raise HTTPException(500, f"internal: {e}")
+
+
 def _reject_absolute_url_path(path: str) -> None:
     """SSRF 守卫:catch-all {path:path} 剥前导 /,故请求 /http://evil.com/x 到达时
     path 恰为绝对 URL,httpx build_request 对绝对 URL 原样外发(绕开 base_url)。
@@ -213,7 +352,15 @@ def _reject_absolute_url_path(path: str) -> None:
         raise HTTPException(400, "absolute URLs not allowed in proxy path")
 
 
-async def forward(request: Request, path: str, lifecycle, cfg, db, client_pool) -> Response:
+async def forward(
+    request: Request,
+    path: str,
+    lifecycle,
+    cfg,
+    db,
+    client_pool,
+    cloud_client: httpx.AsyncClient | None = None,
+) -> Response:
     _reject_absolute_url_path(path)
     from llm_manager import state
     from llm_manager.state import ModelStatus
@@ -221,6 +368,30 @@ async def forward(request: Request, path: str, lifecycle, cfg, db, client_pool) 
     t0 = time.monotonic()
     body = await _read_body(request)
     alias = _extract_model_alias(body)
+
+    # ---- 二段分派:云端优先(model 先行)----
+    if alias:
+        cloud_hit = resolve_cloud_model(cfg, alias)
+        if cloud_hit is not None:
+            return await forward_cloud(
+                request, path, cfg, db, cloud_client, cloud_hit[0], cloud_hit[1], cloud_hit[2], body
+            )
+        parsed = parse_cloud_id(alias)
+        if parsed is not None:
+            p = cfg.cloud_providers.get(parsed[0])
+            if p is not None and not p.enabled:
+                # 已知服务商被禁用:目录外模型名也归云端流 → 503(forward_cloud 首检)
+                return await forward_cloud(
+                    request, path, cfg, db, cloud_client, parsed[0], p, None, body
+                )
+    else:
+        mapping = resolve_global_mapping(cfg, path)
+        if mapping is not None:
+            return await forward_cloud(
+                request, path, cfg, db, cloud_client, mapping[0].name, mapping[0], None, body
+            )
+
+    # ---- 本地分支(现状零改动)----
     primary = resolve_alias_checked(cfg, alias)
     logger.info("REQ %s /%s model=%s", request.method, path, primary)
     served = cfg.models[primary].aliases[0]  # aliases[0]=主别名=下游 served name

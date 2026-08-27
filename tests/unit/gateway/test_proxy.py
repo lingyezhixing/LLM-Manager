@@ -7,7 +7,16 @@ import pytest
 from fastapi import HTTPException
 
 from llm_manager import state
-from llm_manager.config import AppConfig, Command, ModelConfig, ProgramConfig, Scheme
+from llm_manager.config import (
+    AppConfig,
+    CloudMapping,
+    CloudModel,
+    CloudProvider,
+    Command,
+    ModelConfig,
+    ProgramConfig,
+    Scheme,
+)
 from llm_manager.data.persistence import open_db
 from llm_manager.gateway import proxy
 from llm_manager.gateway.aliases import resolve_alias_checked
@@ -553,4 +562,209 @@ async def test_forward_record_usage_failure_does_not_pollute_passthrough(monkeyp
     )
     assert resp.status_code == 200  # 透传,非 500
     assert state.pending_count("m1") == 0
+    await client.aclose()
+
+
+# ---------- 云端二段分派 ----------
+def _cloud_cfg():
+    return AppConfig(
+        program=ProgramConfig(host="127.0.0.1", port=8080, alive_time=60, log_level="INFO"),
+        models={"m1": ModelConfig(aliases=("m1",), mode="Chat", port=8000, schemes={})},
+        wol=None,
+        claude_configs={},
+        cloud_providers={
+            "ds": CloudProvider(
+                name="ds",
+                api_key="SK",
+                enabled=True,
+                openai_base="https://api.deepseek.com",
+                models=(CloudModel(model_name="deepseek-chat", support_cache=True),),
+                mappings=(
+                    CloudMapping(
+                        local_path="v1/custom",
+                        target_url="https://api.deepseek.com/v2/chat",
+                        auth_style="none",
+                    ),
+                ),
+            ),
+            "off": CloudProvider(name="off", api_key="", enabled=False, openai_base="https://x"),
+        },
+    )
+
+
+def _cloud_client(handler):
+    return httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+
+async def test_cloud_forward_non_stream_rewrites_model_and_records_cloud():
+    state._reset()
+    seen = {}
+
+    def handler(req):
+        seen["url"] = str(req.url)
+        seen["authorization"] = req.headers.get("authorization")
+        seen["body"] = json.loads(req.content or b"{}")
+        return httpx.Response(
+            200,
+            json={"usage": {"prompt_tokens": 5, "completion_tokens": 10}},
+            headers={"content-type": "application/json"},
+        )
+
+    client = _cloud_client(handler)
+    db = open_db(Path(":memory:"))
+    req = _make_request(
+        "POST", "v1/chat/completions", {"model": "ds/deepseek-chat", "stream": False}
+    )
+    resp = await proxy.forward(
+        req, "v1/chat/completions", FakeLifecycle(), _cloud_cfg(), db, {}, cloud_client=client
+    )
+    assert resp.status_code == 200
+    assert seen["url"] == "https://api.deepseek.com/chat/completions"  # 剥 v1/
+    assert seen["authorization"] == "Bearer SK"
+    assert seen["body"]["model"] == "deepseek-chat"  # 上游真实模型名
+    row = db.conn.execute(
+        "SELECT r.source, m.original_name FROM model_requests r JOIN models m ON r.model_id=m.id"
+    ).fetchone()
+    assert row["source"] == "cloud" and row["original_name"] == "ds/deepseek-chat"
+    # state 隔离:未产生 state 记录 / pending 不变
+    assert state.get_status("ds/deepseek-chat") == ModelStatus.STOPPED
+    assert state.pending_count("ds/deepseek-chat") == 0
+    await client.aclose()
+
+
+async def test_cloud_forward_stream_state_free():
+    state._reset()
+    sse = b'data: {"usage":{"prompt_tokens":2,"completion_tokens":3}}\n\n'
+    seen = {}
+
+    def handler(req):
+        seen["url"] = str(req.url)
+        return httpx.Response(200, content=sse, headers={"content-type": "text/event-stream"})
+
+    client = _cloud_client(handler)
+    db = open_db(Path(":memory:"))
+    req = _make_request(
+        "POST", "v1/chat/completions", {"model": "ds/deepseek-chat", "stream": True}
+    )
+    resp = await proxy.forward(
+        req, "v1/chat/completions", FakeLifecycle(), _cloud_cfg(), db, {}, cloud_client=client
+    )
+    assert resp.status_code == 200
+    consumed = b"".join([chunk async for chunk in resp.body_iterator])
+    assert b"usage" in consumed
+    row = db.conn.execute(
+        "SELECT r.source, r.input_tokens, r.output_tokens FROM model_requests r"
+    ).fetchone()
+    assert row["source"] == "cloud" and row["input_tokens"] == 2
+    assert state.pending_count("ds/deepseek-chat") == 0
+    assert state.get_status("ds/deepseek-chat") == ModelStatus.STOPPED
+    await client.aclose()
+
+
+async def test_cloud_forward_disabled_provider_503():
+    state._reset()
+    client = _cloud_client(lambda r: httpx.Response(200))
+    db = open_db(Path(":memory:"))
+    req = _make_request("POST", "v1/chat/completions", {"model": "off/x"})
+    with pytest.raises(HTTPException) as ei:
+        await proxy.forward(
+            req, "v1/chat/completions", FakeLifecycle(), _cloud_cfg(), db, {}, cloud_client=client
+        )
+    assert ei.value.status_code == 503
+    assert state.pending_count("off/x") == 0
+    await client.aclose()
+
+
+async def test_cloud_forward_missing_family_base_404():
+    """模型携带请求命中族规则但该族 base 留空 → 404「未配置该接口」。"""
+    cfg = _cloud_cfg()
+    cfg = AppConfig(
+        program=cfg.program,
+        models=cfg.models,
+        wol=None,
+        claude_configs={},
+        cloud_providers={
+            "ds": CloudProvider(name="ds", api_key="SK", enabled=True, responses_base="")
+        },
+    )
+    client = _cloud_client(lambda r: httpx.Response(200))
+    db = open_db(Path(":memory:"))
+    req = _make_request("POST", "v1/responses", {"model": "ds/deepseek-chat"})
+    with pytest.raises(HTTPException) as ei:
+        await proxy.forward(req, "v1/responses", FakeLifecycle(), cfg, db, {}, cloud_client=client)
+    assert ei.value.status_code == 404
+    await client.aclose()
+
+
+async def test_cloud_mapping_model_flow_uses_mapping_url():
+    """模型携带路径:服务商映射精确命中 → 用 target_url + auth_style,不走族规则。"""
+    state._reset()
+    seen = {}
+
+    def handler(req):
+        seen["url"] = str(req.url)
+        seen["authorization"] = req.headers.get("authorization")
+        seen["body"] = json.loads(req.content or b"{}")
+        return httpx.Response(200, json={}, headers={"content-type": "application/json"})
+
+    client = _cloud_client(handler)
+    db = open_db(Path(":memory:"))
+    req = _make_request("POST", "v1/custom", {"model": "ds/deepseek-chat"})
+    resp = await proxy.forward(
+        req, "v1/custom", FakeLifecycle(), _cloud_cfg(), db, {}, cloud_client=client
+    )
+    assert resp.status_code == 200
+    assert seen["url"] == "https://api.deepseek.com/v2/chat"
+    assert seen["authorization"] is None  # auth_style=none → 不注入
+    assert seen["body"]["model"] == "deepseek-chat"
+    await client.aclose()
+
+
+async def test_cloud_mapping_model_missing_flow_anchors_provider():
+    """model 缺失:全局映射按路径命中 → 云端流;body.model 可解析则改写,否则原样 + 归因 {provider}。"""
+    state._reset()
+    seen = {}
+
+    def handler(req):
+        seen["body"] = json.loads(req.content or b"{}")
+        return httpx.Response(
+            200,
+            json={"usage": {"input_tokens": 4, "output_tokens": 2}},
+            headers={"content-type": "application/json"},
+        )
+
+    client = _cloud_client(handler)
+    db = open_db(Path(":memory:"))
+    req = _make_request("POST", "v1/custom", {"text": "hi"})  # 无 model
+    resp = await proxy.forward(
+        req, "v1/custom", FakeLifecycle(), _cloud_cfg(), db, {}, cloud_client=client
+    )
+    assert resp.status_code == 200
+    assert "model" not in seen["body"]
+    row = db.conn.execute(
+        "SELECT r.source, m.original_name FROM model_requests r JOIN models m ON r.model_id=m.id"
+    ).fetchone()
+    assert row["source"] == "cloud" and row["original_name"] == "ds"
+    await client.aclose()
+
+
+async def test_cloud_forward_unknown_provider_404_via_local_resolve():
+    """model='ds/nope'(provider 存在但模型不在目录)与未知 provider → 404(本地 resolve 兜底)。"""
+    state._reset()
+    client = _cloud_client(lambda r: httpx.Response(200))
+    db = open_db(Path(":memory:"))
+    for model in ("ds/nope", "nope/x"):
+        req = _make_request("POST", "v1/chat/completions", {"model": model})
+        with pytest.raises(HTTPException) as ei:
+            await proxy.forward(
+                req,
+                "v1/chat/completions",
+                FakeLifecycle(),
+                _cloud_cfg(),
+                db,
+                {},
+                cloud_client=client,
+            )
+        assert ei.value.status_code == 404
+        state._reset()
     await client.aclose()
