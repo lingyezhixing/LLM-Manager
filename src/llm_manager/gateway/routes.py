@@ -11,6 +11,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
+from llm_manager.gateway import proxy
 from llm_manager.gateway.api import build_api_router
 from llm_manager.gateway.proxy import register_proxy_routes
 
@@ -72,7 +73,7 @@ def _media_type(path: str) -> str | None:
 
 def _register_spa(app: FastAPI) -> None:
     """前端构建产物 SPA 托管:StaticFiles(/assets) + GET catch-all 回退到 index.html。
-    最后注册,绝不遮蔽 /health、/v1/models、/api/*、代理 catch-all 或 FastAPI 内建路由。"""
+    云端 GET 映射穿透 handler 注册于 SPA 之前(命中映射 → 云端转发;未命中 → 委托 SPA)。"""
     if not _FRONTEND_DIST.is_dir():
         logger.warning(
             "frontend/dist not found at %s; SPA not mounted (run `npm run build` in frontend/)",
@@ -84,8 +85,7 @@ def _register_spa(app: FastAPI) -> None:
     if assets_dir.is_dir():  # dist 存在但缺 assets/ 时不应让整个网关启动崩溃
         app.mount("/assets", StaticFiles(directory=assets_dir), name="frontend-assets")
 
-    @app.get("/{path:path}")
-    def spa(path: str) -> Response:
+    def _spa_response(path: str) -> Response:
         # 不接管 API/代理前缀:未知 /api/*、/v1/* GET 返回 JSON 404,不被 SPA HTML 掩盖
         if path.startswith(("api/", "v1/")):
             return JSONResponse(status_code=404, content={"detail": "Not Found"})
@@ -102,3 +102,27 @@ def _register_spa(app: FastAPI) -> None:
         if index.is_file():
             return FileResponse(index)
         return JSONResponse(status_code=404, content={"detail": "frontend not built"})
+
+    @app.get("/{path:path}", operation_id="catch_all__path__get_cloud")
+    async def catch_all_get_cloud(path: str, request: Request) -> Response:
+        cfg = request.app.state.config_store.snapshot()
+        mapping = proxy.resolve_global_mapping(cfg, path)
+        if mapping is None:
+            return _spa_response(path)
+        provider, _cmap = mapping
+        cloud_client = getattr(request.app.state, "cloud_client", None)
+        return await proxy.forward_cloud(
+            request,
+            path,
+            cfg,
+            request.app.state.db,
+            cloud_client,
+            provider.name,
+            provider,
+            None,
+            None,
+        )
+
+    @app.get("/{path:path}", operation_id="catch_all__path__get_spa")
+    async def spa(path: str) -> Response:
+        return _spa_response(path)

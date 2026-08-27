@@ -83,12 +83,16 @@ def create_app(db_path: Path | None = None) -> FastAPI:
         get_cfg=store.snapshot, supervisor=supervisor, devices=monitor, probes=probe_registry, db=db
     )
     clients: dict[int, httpx.AsyncClient] = {}
+    cloud_client = httpx.AsyncClient(
+        timeout=httpx.Timeout(30.0, read=600.0, connect=30.0, write=30.0)
+    )
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         app.state.db = db
         app.state.monitor = monitor
         app.state.clients = clients
+        app.state.cloud_client = cloud_client
         app.state.lifecycle = lifecycle
         app.state.loop = asyncio.get_running_loop()
         # === 系统日志会话:handler 任意线程 emit → capture_system → flush_loop 落库 ===
@@ -175,6 +179,7 @@ def create_app(db_path: Path | None = None) -> FastAPI:
                 _logs.end_system_session()
             for client in clients.values():
                 await client.aclose()
+            await cloud_client.aclose()
             db.conn.close()
 
     app = FastAPI(title="LLM-Manager", lifespan=lifespan)

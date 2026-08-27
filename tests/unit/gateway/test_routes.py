@@ -93,6 +93,7 @@ def _register(app, cfg, client_pool=None):
     register_routes(app, _FakeLife(), db, client_pool or {})
     app.state.config_store = store
     app.state.db = db
+    app.state.cloud_client = None
 
 
 def test_health_returns_200():
@@ -247,3 +248,52 @@ def test_v1_models_reflects_store_reload():
         r = c.get("/v1/models")
     ids = {m["id"] for m in r.json()["data"]}
     assert "m1" in ids and "m2" in ids
+
+
+def test_get_mapping_forwards_cloud(tmp_path, monkeypatch):
+    """GET 命中映射 → 云端转发;未命中 → SPA 兜底(行为零变化)。"""
+    import llm_manager.gateway.routes as routes_mod
+
+    fake_dist = tmp_path / "dist"
+    (fake_dist / "assets").mkdir(parents=True)
+    (fake_dist / "index.html").write_text("<html>SPA</html>", encoding="utf-8")
+    monkeypatch.setattr(routes_mod, "_FRONTEND_DIST", fake_dist)
+
+    from llm_manager.config import CloudMapping, CloudProvider
+
+    cfg = build_cfg(
+        models={},
+        cloud_providers={
+            "ds": CloudProvider(
+                name="ds",
+                api_key="SK",
+                enabled=True,
+                mappings=(CloudMapping(local_path="v1/ge", target_url="https://api.ds/ge"),),
+            ),
+            "off": CloudProvider(
+                name="off",
+                api_key="",
+                enabled=False,
+                mappings=(CloudMapping(local_path="v1/off", target_url="https://off/x"),),
+            ),
+        },
+    )
+    seen = {}
+
+    def handler(req):
+        seen["url"] = str(req.url)
+        return httpx.Response(200, json={"ok": True})
+
+    cloud_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    app = FastAPI()
+    _register(app, cfg)
+    app.state.cloud_client = cloud_client
+    with TestClient(app) as c:
+        r = c.get("/v1/ge")
+        assert r.status_code == 200
+        assert seen["url"] == "https://api.ds/ge"
+        r2 = c.get("/v1/off")
+        assert r2.status_code == 503  # 禁用 → 503
+        r3 = c.get("/some/spa/route")
+        assert r3.status_code == 200 and "SPA" in r3.text  # 未命中 → SPA 兜底
+    cloud_client.aclose()
