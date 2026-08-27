@@ -28,28 +28,26 @@ def _hourly_cost(
     return _overlap(win_start, win_end, seg_start, seg_end) * hourly_price / 3600.0
 
 
-def _in_offpeak_windows(windows, ts: float) -> bool:
-    """timestamp 是否落在任一谷时段窗口内(服务器本地时刻,当日分钟判断)。
-    [start_min, end_min) 左闭右开;start > end = 跨午夜(t ≥ start 或 t < end);
+def _in_peak_windows(windows, ts: float) -> bool:
+    """timestamp 是否落在任一峰时段窗口内(服务器本地时刻,当日分钟判断)。
+    [start_min, end_min) 左闭右开;校验强制 start < end(禁跨午夜,跨零点拆相邻两段);
     多窗口并集语义,start == end 校验已禁、运行时防御恒 False。"""
     lt = time.localtime(ts)
     m = lt.tm_hour * 60 + lt.tm_min
     for w in windows:
-        if w.start_min == w.end_min:
+        if w.start_min == w.end_min or w.start_min > w.end_min:
             continue
-        if w.start_min < w.end_min:
-            if w.start_min <= m < w.end_min:
-                return True
-        elif m >= w.start_min or m < w.end_min:
+        if w.start_min <= m < w.end_min:
             return True
     return False
 
 
 def pricing_for(cfg: AppConfig, name: str, *, end_time: float | None = None) -> Pricing | None:
     """本地模型 → 云端目录(合成阶梯 Pricing)→ None(成本 0)。
-    云端峰谷:dual_pricing 开且 end_time 落在谷窗口 → offpeak 阶梯,否则 base;
-    end_time=None 恒 base(无时刻上下文的调用方);dual 开但谷表空防御回退 base
-    (validate 会拦此配置)。整单判定:每条请求按自身完成时刻选槽,不分摊。"""
+    云端峰谷极性:base 阶梯=基础/谷价;dual_pricing 开且 end_time 落在峰时段窗口 →
+    peak 阶梯加价,否则 base。end_time=None 恒 base(无时刻上下文的调用方);
+    dual 开但峰表空防御回退 base(validate 会拦此配置)。整单判定:每条请求按自身
+    完成时刻选槽,不分摊。"""
     mc = cfg.models.get(name)
     if mc is not None:
         return mc.pricing
@@ -60,13 +58,13 @@ def pricing_for(cfg: AppConfig, name: str, *, end_time: float | None = None) -> 
         if p is not None:
             for cm in p.models:
                 if cm.model_name == model_name:
-                    use_offpeak = (
+                    use_peak = (
                         cm.dual_pricing
-                        and cm.tiers_offpeak
+                        and cm.tiers_peak
                         and end_time is not None
-                        and _in_offpeak_windows(cm.offpeak_windows, end_time)
+                        and _in_peak_windows(cm.peak_windows, end_time)
                     )
-                    tiers = cm.tiers_offpeak if use_offpeak else cm.tiers_base
+                    tiers = cm.tiers_peak if use_peak else cm.tiers_base
                     return Pricing(pricing_type="tier", support_cache=cm.support_cache, tiers=tiers)
     return None
 

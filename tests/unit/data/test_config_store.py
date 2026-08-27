@@ -553,7 +553,7 @@ def test_cloud_world_round_trips_through_config_store(tmp_path):
     assert p.models[0].model_name == "deepseek-chat"
     assert p.models[0].support_cache is True
     assert p.models[0].tiers_base[0].input_price == 1.0
-    assert p.models[0].tiers_offpeak == ()
+    assert p.models[0].tiers_peak == ()
     assert p.mappings[0].local_path == "v1/x" and p.mappings[0].auth_style == "none"
 
 

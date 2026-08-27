@@ -27,7 +27,7 @@ describe("emptyCloudModel", () => {
   it("峰谷结构初始为空(开关关、无窗口、双阶梯空)", () => {
     const m = emptyCloudModel();
     expect(m.dual_pricing).toBe(false);
-    expect(m.offpeak_windows).toEqual([]);
-    expect(m.tiers_offpeak).toEqual([]);
+    expect(m.peak_windows).toEqual([]);
+    expect(m.tiers_peak).toEqual([]);
   });
 });

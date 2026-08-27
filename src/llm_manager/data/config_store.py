@@ -194,7 +194,7 @@ def _write_appconfig_locked(db: Db, cfg: AppConfig) -> None:
             for m_ord, cm in enumerate(p.models):
                 ccur = db.conn.execute(
                     "INSERT INTO cloud_models (provider_id, model_name, support_cache, dual_pricing, "
-                    "offpeak_windows, ord) VALUES (?,?,?,?,?,?)",
+                    "peak_windows, ord) VALUES (?,?,?,?,?,?)",
                     (
                         pid,
                         cm.model_name,
@@ -203,7 +203,7 @@ def _write_appconfig_locked(db: Db, cfg: AppConfig) -> None:
                         json.dumps(
                             [
                                 {"start_min": w.start_min, "end_min": w.end_min}
-                                for w in cm.offpeak_windows
+                                for w in cm.peak_windows
                             ]
                         ),
                         m_ord,
@@ -211,7 +211,7 @@ def _write_appconfig_locked(db: Db, cfg: AppConfig) -> None:
                 )
                 cmid = ccur.lastrowid
                 assert cmid is not None
-                for slot, tiers in (("base", cm.tiers_base), ("offpeak", cm.tiers_offpeak)):
+                for slot, tiers in (("base", cm.tiers_base), ("peak", cm.tiers_peak)):
                     for t in tiers:
                         db.conn.execute(
                             "INSERT INTO cloud_price_tiers (model_id, slot, tier_index, min_input, "
@@ -367,12 +367,12 @@ def _read_appconfig_locked(db: Db) -> AppConfig:
                     model_name=mrow["model_name"],
                     support_cache=bool(mrow["support_cache"]),
                     dual_pricing=bool(mrow["dual_pricing"]),
-                    offpeak_windows=tuple(
+                    peak_windows=tuple(
                         TimeWindow(w["start_min"], w["end_min"])
-                        for w in json.loads(mrow["offpeak_windows"] or "[]")
+                        for w in json.loads(mrow["peak_windows"] or "[]")
                     ),
                     tiers_base=_read_cloud_tiers(db, mrow["id"], "base"),
-                    tiers_offpeak=_read_cloud_tiers(db, mrow["id"], "offpeak"),
+                    tiers_peak=_read_cloud_tiers(db, mrow["id"], "peak"),
                 )
             )
         mapping_list: list[CloudMapping] = []

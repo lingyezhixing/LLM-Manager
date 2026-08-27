@@ -138,7 +138,7 @@ class Pricing:
 
 @dataclass(frozen=True, slots=True)
 class TimeWindow:
-    start_min: int  # 当日分钟 0–1439;start > end 表示跨午夜窗口
+    start_min: int  # 当日分钟 0–1439;必须 start < end(禁跨午夜,跨零点需求拆相邻两段)
     end_min: int
 
 
@@ -153,10 +153,10 @@ class CloudMapping:
 class CloudModel:
     model_name: str
     support_cache: bool = False
-    dual_pricing: bool = False  # 峰谷双定价开关(峰谷计价未实现,读取方忽略)
-    offpeak_windows: tuple[TimeWindow, ...] = ()  # 谷时段窗口(峰谷计价未实现,读取方忽略)
+    dual_pricing: bool = False  # 峰谷双定价开关:base 阶梯=基础/谷价,peak 窗口内按 peak 阶梯加价
+    peak_windows: tuple[TimeWindow, ...] = ()  # 峰时段窗口(dual 关时不消费)
     tiers_base: tuple[PricingTier, ...] = ()
-    tiers_offpeak: tuple[PricingTier, ...] = ()  # 谷时段阶梯(峰谷计价未实现,计费恒用 base)
+    tiers_peak: tuple[PricingTier, ...] = ()  # 峰时段阶梯(dual 关或不在峰窗时恒用 base)
 
 
 @dataclass(frozen=True, slots=True)
@@ -337,7 +337,7 @@ def validate(cfg: AppConfig) -> list[str]:
             if cm.model_name in seen_models:
                 errors.append(f"Provider '{pname}' has duplicate model '{cm.model_name}'")
             seen_models.add(cm.model_name)
-            for slot, tiers in (("base", cm.tiers_base), ("offpeak", cm.tiers_offpeak)):
+            for slot, tiers in (("base", cm.tiers_base), ("peak", cm.tiers_peak)):
                 seen_tiers: set[int] = set()
                 for t in tiers:
                     if t.tier_index in seen_tiers:
@@ -358,28 +358,34 @@ def validate(cfg: AppConfig) -> list[str]:
                             )
             # 峰谷规则仅在开关开启时校验;dual 关 = 读取侧恒忽略,残留数据宽进不拦
             if cm.dual_pricing:
-                if not cm.tiers_offpeak:
+                if not cm.tiers_peak:
                     errors.append(
-                        f"Provider '{pname}' model '{cm.model_name}' dual_pricing on but tiers_offpeak is empty"
+                        f"Provider '{pname}' model '{cm.model_name}' dual_pricing on but tiers_peak is empty"
                     )
-                if not cm.offpeak_windows:
+                if not cm.peak_windows:
                     errors.append(
-                        f"Provider '{pname}' model '{cm.model_name}' dual_pricing on but offpeak_windows is empty"
+                        f"Provider '{pname}' model '{cm.model_name}' dual_pricing on but peak_windows is empty"
                     )
-                for w in cm.offpeak_windows:
+                for w in cm.peak_windows:
                     if not 0 <= w.start_min <= 1439:
                         errors.append(
-                            f"Provider '{pname}' model '{cm.model_name}' offpeak start_min "
+                            f"Provider '{pname}' model '{cm.model_name}' peak start_min "
                             f"{w.start_min} must be within 0-1439"
                         )
                     if not 0 <= w.end_min <= 1439:
                         errors.append(
-                            f"Provider '{pname}' model '{cm.model_name}' offpeak end_min "
+                            f"Provider '{pname}' model '{cm.model_name}' peak end_min "
                             f"{w.end_min} must be within 0-1439"
                         )
                     if w.start_min == w.end_min:
                         errors.append(
-                            f"Provider '{pname}' model '{cm.model_name}' offpeak window requires start != end"
+                            f"Provider '{pname}' model '{cm.model_name}' peak window requires start != end"
+                        )
+                    elif w.start_min > w.end_min:
+                        errors.append(
+                            f"Provider '{pname}' model '{cm.model_name}' peak window "
+                            f"{w.start_min}-{w.end_min} must not cross midnight "
+                            "(split into two adjacent windows instead)"
                         )
         for mp in p.mappings:
             if not mp.local_path or not mp.local_path.strip():

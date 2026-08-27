@@ -17,7 +17,7 @@ export interface CloudTier {
   cache_read_price: number;
 }
 
-// 峰谷时段:start_min/end_min 为当天分钟数(0-1439),start > end 表示跨午夜窗口。
+// 峰谷时段:start_min/end_min 为当天分钟数(0-1439);必须 start < end(禁跨午夜)。
 export interface CloudTimeWindow {
   start_min: number;
   end_min: number;
@@ -26,10 +26,10 @@ export interface CloudTimeWindow {
 export interface CloudModel {
   model_name: string;
   support_cache: boolean;   // 是否支持 prompt 缓存(缓存计费开关)
-  dual_pricing: boolean;    // 峰谷双价(峰=base,谷=offpeak)
-  offpeak_windows: CloudTimeWindow[];
-  tiers_base: CloudTier[];         // 峰/常价阶梯
-  tiers_offpeak: CloudTier[];      // 谷价阶梯(dual_pricing=false 时忽略)
+  dual_pricing: boolean;    // 峰谷双价(base=基础/谷价,peak 窗口内按 tiers_peak 加价)
+  peak_windows: CloudTimeWindow[];
+  tiers_base: CloudTier[];         // 基础/谷价阶梯
+  tiers_peak: CloudTier[];         // 峰价阶梯(dual_pricing=false 或不在峰窗时忽略)
 }
 
 export interface CloudMapping {

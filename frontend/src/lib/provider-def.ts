@@ -7,9 +7,9 @@ export function emptyCloudModel(): CloudModel {
     model_name: "",
     support_cache: false,
     dual_pricing: false,
-    offpeak_windows: [],
+    peak_windows: [],
     tiers_base: [],
-    tiers_offpeak: [],
+    tiers_peak: [],
   };
 }
 

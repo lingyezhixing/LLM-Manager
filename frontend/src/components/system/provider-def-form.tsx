@@ -55,15 +55,15 @@ export function ProviderDefForm({ provider, onSaved, onDirtyChange }: ProviderDe
     const min = hhmmToMinutes(raw);
     if (min === null) return;
     const m = form.models[i];
-    setModel(i, { ...m, offpeak_windows: m.offpeak_windows.map((w, idx) => (idx === wi ? ({ ...w, [k]: min } as CloudTimeWindow) : w)) });
+    setModel(i, { ...m, peak_windows: m.peak_windows.map((w, idx) => (idx === wi ? ({ ...w, [k]: min } as CloudTimeWindow) : w)) });
   };
   const addWindow = (i: number) => {
     const m = form.models[i];
-    setModel(i, { ...m, offpeak_windows: [...m.offpeak_windows, { start_min: 1320, end_min: 420 }] });
+    setModel(i, { ...m, peak_windows: [...m.peak_windows, { start_min: 480, end_min: 1320 }] });
   };
   const removeWindow = (i: number, wi: number) => {
     const m = form.models[i];
-    setModel(i, { ...m, offpeak_windows: m.offpeak_windows.filter((_, idx) => idx !== wi) });
+    setModel(i, { ...m, peak_windows: m.peak_windows.filter((_, idx) => idx !== wi) });
   };
   const setMapping = (i: number, next: CloudMapping) => setForm({ ...form, mappings: form.mappings.map((m, idx) => idx === i ? next : m) });
   const removeMapping = (i: number) => setForm({ ...form, mappings: [...form.mappings.slice(0, i), ...form.mappings.slice(i + 1)] });
@@ -212,37 +212,34 @@ export function ProviderDefForm({ provider, onSaved, onDirtyChange }: ProviderDe
               <button type="button" className="h-9 shrink-0 px-2 text-xs text-muted-foreground hover:text-destructive"
                 onClick={() => removeModel(i)}>✕</button>
             </div>
-            <div className="mt-2 text-xs text-muted-foreground">阶梯价格 / 峰价(元/百万 token)</div>
+            <div className="mt-2 text-xs text-muted-foreground">阶梯价格(基础/谷价,元/百万 token)</div>
             <TierEditor tiers={m.tiers_base} supportCache={m.support_cache}
               onChange={(next) => setModel(i, { ...m, tiers_base: next })} />
             {m.dual_pricing && (
               <>
                 <div className="mt-3 flex items-center justify-between">
-                  <span className="text-xs text-muted-foreground">谷时段(服务器本地时间;开始 &gt; 结束 = 跨午夜)</span>
+                  <span className="text-xs text-muted-foreground">峰时段(服务器本地时间;须在同一天内,起 &lt; 止)</span>
                   <Button type="button" size="sm" variant="ghost" onClick={() => addWindow(i)}>+ 添加时段</Button>
                 </div>
                 <div className="flex flex-col gap-2">
-                  {m.offpeak_windows.map((w, wi) => (
+                  {m.peak_windows.map((w, wi) => (
                     <div key={wi} className="flex flex-wrap items-end gap-x-3 gap-y-2 rounded-md border border-border px-3 py-2">
                       <Field label="开始(HH:MM)" className="w-32">
-                        <TextInput value={minutesToHhmm(w.start_min) ?? ""} placeholder="23:00"
+                        <TextInput value={minutesToHhmm(w.start_min) ?? ""} placeholder="08:00"
                           onChange={(e) => setWindow(i, wi, "start_min", e.target.value)} />
                       </Field>
                       <Field label="结束(HH:MM)" className="w-32">
-                        <TextInput value={minutesToHhmm(w.end_min) ?? ""} placeholder="05:00"
+                        <TextInput value={minutesToHhmm(w.end_min) ?? ""} placeholder="22:00"
                           onChange={(e) => setWindow(i, wi, "end_min", e.target.value)} />
                       </Field>
-                      {w.start_min > w.end_min && (
-                        <span className="mb-2 text-xs text-primary-accent">跨午夜(结束时刻在次日)</span>
-                      )}
                       <button type="button" className="mb-1 h-9 shrink-0 px-2 text-xs text-muted-foreground hover:text-destructive"
                         onClick={() => removeWindow(i, wi)}>✕</button>
                     </div>
                   ))}
                 </div>
-                <div className="mt-2 text-xs text-muted-foreground">谷价阶梯(元/百万 token;请求完成时刻落在任一时段内按此计价,整单判定)</div>
-                <TierEditor tiers={m.tiers_offpeak} supportCache={m.support_cache}
-                  onChange={(next) => setModel(i, { ...m, tiers_offpeak: next })} />
+                <div className="mt-2 text-xs text-muted-foreground">峰价阶梯(元/百万 token;请求完成时刻落在任一峰时段按此计价,整单判定;跨零点需求请拆成相邻两段)</div>
+                <TierEditor tiers={m.tiers_peak} supportCache={m.support_cache}
+                  onChange={(next) => setModel(i, { ...m, tiers_peak: next })} />
               </>
             )}
           </div>

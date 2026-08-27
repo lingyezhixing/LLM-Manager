@@ -164,7 +164,7 @@ def open_db(path: Path) -> Db:
             model_name TEXT NOT NULL,
             support_cache INTEGER NOT NULL DEFAULT 0,
             dual_pricing INTEGER NOT NULL DEFAULT 0,
-            offpeak_windows TEXT NOT NULL DEFAULT '[]',
+            peak_windows TEXT NOT NULL DEFAULT '[]',
             ord INTEGER NOT NULL DEFAULT 0,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             UNIQUE(provider_id, model_name)

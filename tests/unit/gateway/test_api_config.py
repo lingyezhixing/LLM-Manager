@@ -903,9 +903,9 @@ def _provider_body(name="deepseek", **kw):
                 "model_name": "deepseek-chat",
                 "support_cache": True,
                 "dual_pricing": False,
-                "offpeak_windows": [],
+                "peak_windows": [],
                 "tiers_base": [{"tier_index": 1, "input_price": 1.0, "output_price": 2.0}],
-                "tiers_offpeak": [],
+                "tiers_peak": [],
             }
         ],
         "mappings": [{"local_path": "v1/x", "target_url": "https://x/api", "auth_style": "none"}],

@@ -116,9 +116,9 @@ class CloudModelInput(BaseModel):
     model_name: str
     support_cache: bool = False
     dual_pricing: bool = False
-    offpeak_windows: list[CloudTimeWindowInput] = []
+    peak_windows: list[CloudTimeWindowInput] = []
     tiers_base: list[CloudTierInput] = []
-    tiers_offpeak: list[CloudTierInput] = []
+    tiers_peak: list[CloudTierInput] = []
 
 
 class CloudMappingInput(BaseModel):
@@ -153,11 +153,9 @@ def _to_cloud_provider(body: ProviderInput) -> CloudProvider:
                 model_name=m.model_name,
                 support_cache=m.support_cache,
                 dual_pricing=m.dual_pricing,
-                offpeak_windows=tuple(
-                    TimeWindow(w.start_min, w.end_min) for w in m.offpeak_windows
-                ),
+                peak_windows=tuple(TimeWindow(w.start_min, w.end_min) for w in m.peak_windows),
                 tiers_base=tuple(PricingTier.from_dict(t.model_dump()) for t in m.tiers_base),
-                tiers_offpeak=tuple(PricingTier.from_dict(t.model_dump()) for t in m.tiers_offpeak),
+                tiers_peak=tuple(PricingTier.from_dict(t.model_dump()) for t in m.tiers_peak),
             )
             for m in body.models
         ),
@@ -181,11 +179,11 @@ def cloud_provider_to_dict(p: CloudProvider) -> dict:
                 "model_name": m.model_name,
                 "support_cache": m.support_cache,
                 "dual_pricing": m.dual_pricing,
-                "offpeak_windows": [
-                    {"start_min": w.start_min, "end_min": w.end_min} for w in m.offpeak_windows
+                "peak_windows": [
+                    {"start_min": w.start_min, "end_min": w.end_min} for w in m.peak_windows
                 ],
                 "tiers_base": [t.to_dict() for t in m.tiers_base],
-                "tiers_offpeak": [t.to_dict() for t in m.tiers_offpeak],
+                "tiers_peak": [t.to_dict() for t in m.tiers_peak],
             }
             for m in p.models
         ],
