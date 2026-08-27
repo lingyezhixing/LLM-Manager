@@ -35,9 +35,12 @@ def _bucket_axis(start_ts: float, end_ts: float, bucket_seconds: int) -> tuple[f
     return first, [first + i * bucket_seconds for i in range(n)]
 
 
-def usage_series(db: Db, *, start_ts: float, end_ts: float, bucket_seconds: int) -> UsageSeries:
+def usage_series(
+    db: Db, *, start_ts: float, end_ts: float, bucket_seconds: int, source: str = "all"
+) -> UsageSeries:
     """按模型 + 总计聚合 token 消耗(input + output),按墙钟 end_time(请求完成
-    时刻——用量记录时点)分桶。
+    时刻——用量记录时点)分桶。source='all' 不过滤,否则按 r.source 过滤
+    ('local'/'cloud';见 spec §6.3)。
 
     桶是**绝对**的(时钟对齐到 ``bucket_seconds`` 的倍数),而非相对窗口起点——
     故请求的桶固定,滑动 live 窗口滚动图表而不是重塑它。返回完整桶轴,缺桶补 0
@@ -49,19 +52,24 @@ def usage_series(db: Db, *, start_ts: float, end_ts: float, bucket_seconds: int)
         return UsageSeries(buckets=[], models={}, total=[])
 
     offset = _clock_offset(bucket_seconds)
+    source_clause = ""
+    params: dict[str, float | int | str] = {
+        "start": start_ts,
+        "end": end_ts,
+        "bucket": bucket_seconds,
+        "offset": offset,
+    }
+    if source != "all":
+        source_clause = " AND r.source = :source"
+        params["source"] = source
     rows = db.conn.execute(
-        """SELECT m.original_name AS model,
+        f"""SELECT m.original_name AS model,
                   CAST((r.end_time - :offset) / :bucket AS INTEGER) * :bucket + :offset AS bucket,
                   SUM(r.input_tokens + r.output_tokens) AS tokens
            FROM model_requests r JOIN models m ON r.model_id = m.id
-           WHERE r.end_time >= :start AND r.end_time < :end
+           WHERE r.end_time >= :start AND r.end_time < :end{source_clause}
            GROUP BY m.original_name, bucket""",
-        {
-            "start": start_ts,
-            "end": end_ts,
-            "bucket": bucket_seconds,
-            "offset": offset,
-        },
+        params,
     ).fetchall()
 
     models: dict[str, list[float]] = {}
@@ -85,18 +93,23 @@ class UsageSummary:
     request_count: int
 
 
-def usage_summary(db: Db, *, start_ts: float, end_ts: float) -> UsageSummary:
+def usage_summary(db: Db, *, start_ts: float, end_ts: float, source: str = "all") -> UsageSummary:
     """半开窗口 [start_ts, end_ts) 内的 token 用量聚合,按墙钟 end_time 归窗。
-    空窗口 → 全零(hit_rate 0.0)。"""
+    source='all' 不过滤,否则按 r.source 过滤('local'/'cloud')。空窗口 → 全零(hit_rate 0.0)。"""
+    source_clause = ""
+    params: tuple[float | str, ...] = (start_ts, end_ts)
+    if source != "all":
+        source_clause = " AND r.source = ?"
+        params = (start_ts, end_ts, source)
     row = db.conn.execute(
-        """SELECT COALESCE(SUM(input_tokens), 0) AS s_in,
-                  COALESCE(SUM(output_tokens), 0) AS s_out,
-                  COALESCE(SUM(cache_n), 0) AS s_cache,
-                  COALESCE(SUM(prompt_n), 0) AS s_miss,
+        f"""SELECT COALESCE(SUM(r.input_tokens), 0) AS s_in,
+                  COALESCE(SUM(r.output_tokens), 0) AS s_out,
+                  COALESCE(SUM(r.cache_n), 0) AS s_cache,
+                  COALESCE(SUM(r.prompt_n), 0) AS s_miss,
                   COUNT(*) AS n
-           FROM model_requests
-           WHERE end_time >= ? AND end_time < ?""",
-        (start_ts, end_ts),
+           FROM model_requests r
+           WHERE r.end_time >= ? AND r.end_time < ?{source_clause}""",
+        params,
     ).fetchone()
     cache_hit = int(row["s_cache"])
     cache_miss = int(row["s_miss"])
@@ -120,13 +133,23 @@ class ByModelRow:
     hit_rate: float
     share: float
     latency_ms: float  # AVG(end_time - start_time) * 1000
+    source: str = "local"
 
 
-def usage_by_model(db: Db, *, start_ts: float, end_ts: float) -> list[ByModelRow]:
+def usage_by_model(
+    db: Db, *, start_ts: float, end_ts: float, source: str = "all"
+) -> list[ByModelRow]:
     """[start_ts, end_ts) 内的按模型聚合,按 input_tokens 降序。
+    source='all' 不过滤,否则按 r.source 过滤('local'/'cloud');返回行携带 source。
     share = 模型输入 / 总输入(无输入时 0.0)。latency_ms = 平均墙钟请求时长(ms)。"""
+    source_clause = ""
+    params: tuple[float | str, ...] = (start_ts, end_ts)
+    if source != "all":
+        source_clause = " AND r.source = ?"
+        params = (start_ts, end_ts, source)
     rows = db.conn.execute(
-        """SELECT m.original_name AS model,
+        f"""SELECT m.original_name AS model,
+                  r.source AS source,
                   SUM(r.input_tokens) AS s_in,
                   SUM(r.output_tokens) AS s_out,
                   SUM(r.cache_n) AS s_cache,
@@ -134,10 +157,10 @@ def usage_by_model(db: Db, *, start_ts: float, end_ts: float) -> list[ByModelRow
                   COUNT(*) AS n,
                   AVG(r.end_time - r.start_time) AS s_lat
            FROM model_requests r JOIN models m ON r.model_id = m.id
-           WHERE r.end_time >= ? AND r.end_time < ?
-           GROUP BY m.original_name
+           WHERE r.end_time >= ? AND r.end_time < ?{source_clause}
+           GROUP BY m.original_name, r.source
            ORDER BY s_in DESC""",
-        (start_ts, end_ts),
+        params,
     ).fetchall()
     total_in = sum(int(r["s_in"]) for r in rows)
     out: list[ByModelRow] = []
@@ -154,6 +177,7 @@ def usage_by_model(db: Db, *, start_ts: float, end_ts: float) -> list[ByModelRow
                 hit_rate=hit_rate(cache_hit, cache_miss),
                 share=int(r["s_in"]) / total_in if total_in else 0.0,
                 latency_ms=float(r["s_lat"] or 0) * 1000,
+                source=r["source"],
             )
         )
     return out

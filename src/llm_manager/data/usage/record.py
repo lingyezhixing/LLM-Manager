@@ -37,12 +37,13 @@ def record_usage(
     output_tokens: int,
     cache_n: int,
     prompt_n: int,
+    source: str = "local",
 ) -> None:
     with db.write_lock:
         mid = _resolve_model_id_locked(db, model_name)
         db.conn.execute(
-            "INSERT INTO model_requests (model_id, start_time, end_time, input_tokens, output_tokens, cache_n, prompt_n) VALUES (?,?,?,?,?,?,?)",
-            (mid, start, end, input_tokens, output_tokens, cache_n, prompt_n),
+            "INSERT INTO model_requests (model_id, start_time, end_time, input_tokens, output_tokens, cache_n, prompt_n, source) VALUES (?,?,?,?,?,?,?,?)",
+            (mid, start, end, input_tokens, output_tokens, cache_n, prompt_n, source),
         )
         db.conn.commit()
 

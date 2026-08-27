@@ -671,3 +671,45 @@ def test_open_db_ensures_source_column_on_old_db(tmp_path):
     )
     db.conn.commit()
     assert db.conn.execute("SELECT source FROM model_requests").fetchone()["source"] == "local"
+
+
+# ---- 计量 source(record_usage 写入 + 聚合过滤)----
+
+
+def test_record_usage_writes_source(tmp_path):
+    db = open_db(tmp_path / "t.db")
+    record_usage(db, "ds/x", 1, 2, 5, 5, 0, 5, source="cloud")
+    assert db.conn.execute("SELECT source FROM model_requests").fetchone()["source"] == "cloud"
+
+
+def test_usage_series_source_filter(tmp_path):
+    db = open_db(tmp_path / "t.db")
+    record_usage(db, "m1", 9, 10, 5, 5, 0, 5)
+    record_usage(db, "ds/x", 69, 70, 3, 3, 0, 3, source="cloud")
+    all_res = usage_series(db, start_ts=0, end_ts=120, bucket_seconds=60)
+    assert all_res.total == [10, 6]
+    loc = usage_series(db, start_ts=0, end_ts=120, bucket_seconds=60, source="local")
+    assert loc.total == [10, 0]
+    clo = usage_series(db, start_ts=0, end_ts=120, bucket_seconds=60, source="cloud")
+    assert clo.total == [0, 6]
+
+
+def test_usage_summary_source_filter(tmp_path):
+    db = open_db(tmp_path / "t.db")
+    record_usage(db, "m1", 5, 10, 100, 20, 60, 40)
+    record_usage(db, "ds/x", 5, 10, 50, 10, 0, 50, source="cloud")
+    assert usage_summary(db, start_ts=0, end_ts=100).request_count == 2
+    assert usage_summary(db, start_ts=0, end_ts=100, source="cloud").request_count == 1
+    assert usage_summary(db, start_ts=0, end_ts=100, source="cloud").input_tokens == 50
+
+
+def test_usage_by_model_source_field(tmp_path):
+    db = open_db(tmp_path / "t.db")
+    record_usage(db, "m1", 5, 10, 60, 20, 40, 20)
+    record_usage(db, "ds/x", 5, 10, 30, 10, 0, 30, source="cloud")
+    rows = usage_by_model(db, start_ts=0, end_ts=100)
+    by = {r.model: r for r in rows}
+    assert by["m1"].source == "local"
+    assert by["ds/x"].source == "cloud"
+    rows_cloud = usage_by_model(db, start_ts=0, end_ts=100, source="cloud")
+    assert [r.model for r in rows_cloud] == ["ds/x"]
