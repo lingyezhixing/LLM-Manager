@@ -684,7 +684,13 @@ async def test_cloud_forward_missing_family_base_404():
         wol=None,
         claude_configs={},
         cloud_providers={
-            "ds": CloudProvider(name="ds", api_key="SK", enabled=True, responses_base="")
+            "ds": CloudProvider(
+                name="ds",
+                api_key="SK",
+                enabled=True,
+                responses_base="",
+                models=(CloudModel(model_name="deepseek-chat", support_cache=True),),
+            )
         },
     )
     client = _cloud_client(lambda r: httpx.Response(200))
@@ -693,6 +699,9 @@ async def test_cloud_forward_missing_family_base_404():
     with pytest.raises(HTTPException) as ei:
         await proxy.forward(req, "v1/responses", FakeLifecycle(), cfg, db, {}, cloud_client=client)
     assert ei.value.status_code == 404
+    assert (
+        "未配置该接口" in ei.value.detail
+    )  # 命中 forward_cloud 族 base 留空分支,而非本地 404 兜底
     await client.aclose()
 
 

@@ -266,9 +266,7 @@ async def forward_cloud(
             )
         base = getattr(provider, f"{family}_base")
         if not base:
-            raise HTTPException(
-                404, f"provider '{provider_name}' does not configure the {family} interface"
-            )
+            raise HTTPException(404, f"provider '{provider_name}' 未配置该接口")
         url = join_url(base, path, family)
         auth_style = "bearer"
 
