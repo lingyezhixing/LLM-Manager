@@ -510,3 +510,86 @@ def test_mutate_appconfig_post_write_failure_rolls_back(tmp_path):
             post_write=boom,
         )
     assert read_appconfig(db).program.port == before  # 回滚:port 未变
+
+
+def _sample_cloud_cfg() -> AppConfig:
+    from llm_manager.config import CloudMapping, CloudModel, CloudProvider, PricingTier
+
+    return AppConfig(
+        program=ProgramConfig("0.0.0.0", 8080, 60, "INFO"),
+        models={},
+        wol=None,
+        claude_configs={},
+        cloud_providers={
+            "deepseek": CloudProvider(
+                name="deepseek",
+                api_key="sk-ds",
+                enabled=True,
+                openai_base="https://api.deepseek.com",
+                claude_base="https://api.deepseek.com/anthropic",
+                extra_headers=(("HTTP-Referer", "{key}"),),
+                models=(
+                    CloudModel(
+                        model_name="deepseek-chat",
+                        support_cache=True,
+                        tiers_base=(PricingTier(tier_index=1, input_price=1.0, output_price=2.0),),
+                    ),
+                ),
+                mappings=(
+                    CloudMapping(local_path="v1/x", target_url="https://x/api", auth_style="none"),
+                ),
+            )
+        },
+    )
+
+
+def test_cloud_world_round_trips_through_config_store(tmp_path):
+    db = open_db(tmp_path / "t.db")
+    write_appconfig(db, _sample_cloud_cfg())
+    out = read_appconfig(db)
+    p = out.cloud_providers["deepseek"]
+    assert p.api_key == "sk-ds" and p.openai_base == "https://api.deepseek.com"
+    assert p.extra_headers == (("HTTP-Referer", "{key}"),)
+    assert p.models[0].model_name == "deepseek-chat"
+    assert p.models[0].support_cache is True
+    assert p.models[0].tiers_base[0].input_price == 1.0
+    assert p.models[0].tiers_offpeak == ()
+    assert p.mappings[0].local_path == "v1/x" and p.mappings[0].auth_style == "none"
+
+
+def test_cloud_world_survives_model_world_rewrite(tmp_path):
+    """镜像 CASCADE 陷阱测试:重写模型世界不得抹掉云世界。"""
+    db = open_db(tmp_path / "t.db")
+    write_appconfig(db, _sample_cloud_cfg())
+    from dataclasses import replace
+
+    cur = read_appconfig(db)
+    # 加一个本地模型(触发模型世界 delete+reinsert)
+    local = ModelConfig(
+        aliases=("m1",),
+        mode="Chat",
+        port=7000,
+        schemes={"s": Scheme("s", frozenset({"gpu"}), Command(exe="x"), {})},
+    )
+    write_appconfig(db, replace(cur, models={**cur.models, "m1": local}))
+    out = read_appconfig(db)
+    assert "deepseek" in out.cloud_providers
+    assert out.cloud_providers["deepseek"].models[0].tiers_base[0].input_price == 1.0
+
+
+def test_model_world_survives_cloud_world_rewrite(tmp_path):
+    db = open_db(tmp_path / "t.db")
+    write_appconfig(db, _sample_cloud_cfg())
+    # 全量替换模型世界 + 云世界
+    from dataclasses import replace
+
+    cur = read_appconfig(db)
+    local = ModelConfig(
+        aliases=("m1",),
+        mode="Chat",
+        port=7000,
+        schemes={"s": Scheme("s", frozenset({"gpu"}), Command(exe="x"), {})},
+    )
+    write_appconfig(db, replace(cur, models={"m1": local}, cloud_providers={}))
+    out = read_appconfig(db)
+    assert "m1" in out.models and out.cloud_providers == {}

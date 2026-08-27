@@ -13,11 +13,15 @@ from llm_manager.config import (
     PROGRAM_DEFAULTS,
     RETENTION_DEFAULTS,
     AppConfig,
+    CloudMapping,
+    CloudModel,
+    CloudProvider,
     ModelConfig,
     Pricing,
     PricingTier,
     ProgramConfig,
     Scheme,
+    TimeWindow,
     WakeOnLanConfig,
 )
 from llm_manager.data.persistence import Db
@@ -168,6 +172,71 @@ def _write_appconfig_locked(db: Db, cfg: AppConfig) -> None:
                         t.cache_read_price,
                     ),
                 )
+
+        db.conn.execute("DELETE FROM cloud_providers")  # CASCADE 清 cloud_models/tiers/mappings
+        for p_ord, (pname, p) in enumerate(cfg.cloud_providers.items()):
+            cur = db.conn.execute(
+                "INSERT INTO cloud_providers (name, api_key, enabled, openai_base, responses_base, "
+                "claude_base, extra_headers, ord) VALUES (?,?,?,?,?,?,?,?)",
+                (
+                    pname,
+                    p.api_key,
+                    int(p.enabled),
+                    p.openai_base,
+                    p.responses_base,
+                    p.claude_base,
+                    json.dumps(dict(p.extra_headers)),
+                    p_ord,
+                ),
+            )
+            pid = cur.lastrowid
+            assert pid is not None
+            for m_ord, cm in enumerate(p.models):
+                ccur = db.conn.execute(
+                    "INSERT INTO cloud_models (provider_id, model_name, support_cache, dual_pricing, "
+                    "offpeak_windows, ord) VALUES (?,?,?,?,?,?)",
+                    (
+                        pid,
+                        cm.model_name,
+                        int(cm.support_cache),
+                        int(cm.dual_pricing),
+                        json.dumps(
+                            [
+                                {"start_min": w.start_min, "end_min": w.end_min}
+                                for w in cm.offpeak_windows
+                            ]
+                        ),
+                        m_ord,
+                    ),
+                )
+                cmid = ccur.lastrowid
+                assert cmid is not None
+                for slot, tiers in (("base", cm.tiers_base), ("offpeak", cm.tiers_offpeak)):
+                    for t in tiers:
+                        db.conn.execute(
+                            "INSERT INTO cloud_price_tiers (model_id, slot, tier_index, min_input, "
+                            "max_input, min_output, max_output, input_price, output_price, "
+                            "cache_write_price, cache_read_price) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                            (
+                                cmid,
+                                slot,
+                                t.tier_index,
+                                t.min_input,
+                                t.max_input,
+                                t.min_output,
+                                t.max_output,
+                                t.input_price,
+                                t.output_price,
+                                t.cache_write_price,
+                                t.cache_read_price,
+                            ),
+                        )
+            for map_ord, mp in enumerate(p.mappings):
+                db.conn.execute(
+                    "INSERT INTO cloud_mappings (provider_id, local_path, target_url, auth_style, ord) "
+                    "VALUES (?,?,?,?,?)",
+                    (pid, mp.local_path, mp.target_url, mp.auth_style, map_ord),
+                )
     except Exception:
         db.conn.rollback()
         raise
@@ -179,6 +248,29 @@ def write_appconfig(db: Db, cfg: AppConfig) -> None:
     with db.write_lock:
         _write_appconfig_locked(db, cfg)
         db.conn.commit()
+
+
+def _read_cloud_tiers(db: Db, cmid: int, slot: str) -> tuple[PricingTier, ...]:
+    """云模型某 slot 的阶梯行(复用 PricingTier.from_dict)。"""
+    return tuple(
+        PricingTier.from_dict(
+            {
+                "tier_index": tr["tier_index"],
+                "min_input": tr["min_input"],
+                "max_input": tr["max_input"],
+                "min_output": tr["min_output"],
+                "max_output": tr["max_output"],
+                "input_price": tr["input_price"],
+                "output_price": tr["output_price"],
+                "cache_write_price": tr["cache_write_price"],
+                "cache_read_price": tr["cache_read_price"],
+            }
+        )
+        for tr in db.conn.execute(
+            "SELECT * FROM cloud_price_tiers WHERE model_id=? AND slot=? ORDER BY tier_index",
+            (cmid, slot),
+        )
+    )
 
 
 def _read_appconfig_locked(db: Db) -> AppConfig:
@@ -263,7 +355,51 @@ def _read_appconfig_locked(db: Db) -> AppConfig:
             schemes=schemes,
             pricing=pricing,
         )
-    return AppConfig(program=program, models=models, wol=wol, claude_configs=claude_configs)
+    cloud_providers: dict[str, CloudProvider] = {}
+    for prow in db.conn.execute("SELECT * FROM cloud_providers ORDER BY ord"):
+        pid = prow["id"]
+        model_list: list[CloudModel] = []
+        for mrow in db.conn.execute(
+            "SELECT * FROM cloud_models WHERE provider_id=? ORDER BY ord", (pid,)
+        ):
+            model_list.append(
+                CloudModel(
+                    model_name=mrow["model_name"],
+                    support_cache=bool(mrow["support_cache"]),
+                    dual_pricing=bool(mrow["dual_pricing"]),
+                    offpeak_windows=tuple(
+                        TimeWindow(w["start_min"], w["end_min"])
+                        for w in json.loads(mrow["offpeak_windows"] or "[]")
+                    ),
+                    tiers_base=_read_cloud_tiers(db, mrow["id"], "base"),
+                    tiers_offpeak=_read_cloud_tiers(db, mrow["id"], "offpeak"),
+                )
+            )
+        mapping_list: list[CloudMapping] = []
+        for maprow in db.conn.execute(
+            "SELECT * FROM cloud_mappings WHERE provider_id=? ORDER BY ord", (pid,)
+        ):
+            mapping_list.append(
+                CloudMapping(maprow["local_path"], maprow["target_url"], maprow["auth_style"])
+            )
+        cloud_providers[prow["name"]] = CloudProvider(
+            name=prow["name"],
+            api_key=prow["api_key"],
+            enabled=bool(prow["enabled"]),
+            openai_base=prow["openai_base"],
+            responses_base=prow["responses_base"],
+            claude_base=prow["claude_base"],
+            extra_headers=tuple(json.loads(prow["extra_headers"] or "{}").items()),
+            models=tuple(model_list),
+            mappings=tuple(mapping_list),
+        )
+    return AppConfig(
+        program=program,
+        models=models,
+        wol=wol,
+        claude_configs=claude_configs,
+        cloud_providers=cloud_providers,
+    )
 
 
 class ModelNotFound(KeyError):
