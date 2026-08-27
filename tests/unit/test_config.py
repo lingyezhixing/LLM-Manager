@@ -344,3 +344,37 @@ def test_validate_local_name_forbids_slash():
     m = ModelConfig(aliases=("m/x",), mode="Chat", port=1)
     cfg = AppConfig(program=_prog(), models={"m": m}, wol=None, claude_configs={})
     assert any("must not contain '/'" in e for e in validate(cfg))
+
+
+def test_validate_local_name_conflicts_with_provider():
+    """本地模型名/别名禁与云服务商名冲突:服务商级用量锚点 {provider} 不含 '/',
+    撞名时会与本地锚点共用 models 行 → 成本 local/cloud 拆分串档。"""
+    prog = ProgramConfig(host="0.0.0.0", port=8080, alive_time=60, log_level="INFO")
+    clash_alias = AppConfig(
+        program=prog,
+        models={"m": ModelConfig(aliases=("m1", "ds"), mode="Chat", port=1, schemes={})},
+        wol=None,
+        claude_configs={},
+        cloud_providers={"ds": _cloud_provider()},
+    )
+    errs = [e for e in validate(clash_alias) if "must not equal a cloud provider name" in e]
+    assert len(errs) == 1 and "alias 'ds'" in errs[0]
+
+    clash_key = AppConfig(
+        program=prog,
+        models={"ds": ModelConfig(aliases=("x",), mode="Chat", port=1, schemes={})},
+        wol=None,
+        claude_configs={},
+        cloud_providers={"ds": _cloud_provider()},
+    )
+    errs2 = [e for e in validate(clash_key) if "must not equal a cloud provider name" in e]
+    assert any(e.startswith("Model name 'ds'") for e in errs2)
+
+    clean = AppConfig(
+        program=prog,
+        models={"other": ModelConfig(aliases=("clean",), mode="Chat", port=1, schemes={})},
+        wol=None,
+        claude_configs={},
+        cloud_providers={"ds": _cloud_provider()},
+    )
+    assert all("must not equal a cloud provider name" not in e for e in validate(clean))

@@ -244,7 +244,14 @@ def validate(cfg: AppConfig) -> list[str]:
     seen_ports: dict[int, str] = {}
     seen_aliases: dict[str, str] = {}
     valid_modes = {m.value for m in ModelMode}
+    # 服务商名是云端用量锚点(映射缺 model 请求记到 {provider}),与本地锚点同在
+    # models.original_name 命名空间:撞名会共用行、成本 source 拆分串档,故互斥。
+    provider_names = set(cfg.cloud_providers)
     for name, m in cfg.models.items():
+        if name in provider_names:
+            errors.append(
+                f"Model name '{name}' must not equal a cloud provider name (usage anchor would collide)"
+            )
         if "/" in name:
             errors.append(
                 f"Model name '{name}' must not contain '/' (reserved for cloud providers)"
@@ -260,6 +267,8 @@ def validate(cfg: AppConfig) -> list[str]:
         if not m.aliases:
             errors.append(f"Model '{name}' has no aliases")  # aliases[0]=下游 served name 必须
         for a in m.aliases:
+            if a in provider_names:
+                errors.append(f"Model '{name}' alias '{a}' must not equal a cloud provider name")
             if "/" in a:
                 errors.append(
                     f"Model '{name}' alias '{a}' must not contain '/' (reserved for cloud providers)"
