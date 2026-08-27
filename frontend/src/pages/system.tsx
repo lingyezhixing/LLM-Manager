@@ -10,7 +10,7 @@ import { useConfig, useRestartApp, useRestartStatus, useUpdateProgram } from "@/
 type SystemZone = "general" | "models" | "database";
 const ZONES: readonly { key: SystemZone; label: string }[] = [
   { key: "general", label: "系统配置" },
-  { key: "models", label: "模型配置" },
+  { key: "models", label: "本地模型配置" },
   { key: "database", label: "数据库管理" },
 ];
 
