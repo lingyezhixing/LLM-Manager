@@ -1,10 +1,12 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Field, Select, Switch, TextInput } from "@/components/ui/form";
 import { KeyValueEditor } from "@/components/ui/repeatable-fields";
 import { TierEditor } from "@/components/system/tier-editor";
 import { errMsg } from "@/lib/format";
-import { type CloudMapping, type CloudModel, type ProviderDef } from "@/lib/api";
+import { updateProvider, type CloudMapping, type CloudModel, type ProviderDef } from "@/lib/api";
+import { useConfirm } from "@/lib/hooks/use-confirm";
+import { useToast } from "@/lib/hooks/use-toast";
 import { useCreateProvider, useUpdateProvider } from "@/lib/hooks/use-providers";
 import { useSyncedForm } from "@/lib/hooks/use-synced-form";
 import { clone, deepEqual, emptyCloudModel, emptyProvider } from "@/lib/provider-def";
@@ -38,6 +40,10 @@ export function ProviderDefForm({ provider, onSaved, onDirtyChange }: ProviderDe
   const create = useCreateProvider();
   const update = useUpdateProvider(provider?.name ?? "");
   const mutation = isCreate ? create : update;
+  const confirm = useConfirm();
+  const toast = useToast();
+  const [confirming, setConfirming] = useState(false);
+  const saving = mutation.isPending || confirming;
   const set = <K extends keyof ProviderDef>(k: K, v: ProviderDef[K]) => setForm({ ...form, [k]: v });
 
   // 模型区编辑 helper(峰谷控件延后,v3.3.0 不渲染,见设计 §14)。
@@ -50,15 +56,52 @@ export function ProviderDefForm({ provider, onSaved, onDirtyChange }: ProviderDe
 
   const canSave = form.name.trim() !== "";
 
-  const onSave = () => {
-    if (isCreate) {
-      create.mutate(form, {
-        onSuccess: () => { commit(clone(form)); onSaved({ affected_routing: [], hint: null }, form.name); },
-      });
-    } else {
-      update.mutate({ body: form, migrate: false }, {
-        onSuccess: () => { commit(clone(form)); onSaved({ affected_routing: [], hint: null }, form.name); },
-      });
+  // 编辑态保存:先 dry_run 预检(不落库,复用真实写的一切校验 → 异常直接反馈,不吞),
+  // 通过后落库;baseline 仅在保存成功后推进,失败时 dirty 不丢。
+  const doUpdate = async (migrate: boolean) => {
+    const payload = clone(form);
+    try {
+      await updateProvider(provider!.name, payload, false, true);
+    } catch (e) {
+      toast.error(errMsg(e));
+      return;
+    }
+    update.mutate({ body: payload, migrate }, {
+      onSuccess: (result) => {
+        commit(clone(payload));
+        onSaved(result, payload.name);   // 传新名:改名后 panel 切到新名
+      },
+    });
+  };
+
+  const onSave = async () => {
+    if (saving) return;   // 防重复提交(保存按钮已 disable,此为函数级双保险)
+    setConfirming(true);
+    try {
+      if (isCreate) {
+        create.mutate(form, {
+          onSuccess: () => {
+            commit(clone(form));
+            onSaved({ affected_routing: [], hint: null }, form.name);
+          },
+        });
+        return;
+      }
+      // 编辑态改名(精确比较,与后端 body.name != name 一致——单边 trim 会造成前后端判定不一致):
+      // 询问是否迁移历史数据(二元;false=不迁移但仍保存)
+      if (form.name !== provider!.name) {
+        const migrate = await confirm({
+          title: "改名:是否迁移历史数据?",
+          description: "两种都会保存改名。迁移 → 用量/成本归到新名,统计连续;不迁移 → 旧名变孤立模型。",
+          confirmText: "迁移",
+          cancelText: "不迁移(保留旧名)",
+        });
+        await doUpdate(migrate);
+      } else {
+        await doUpdate(false);
+      }
+    } finally {
+      setConfirming(false);
     }
   };
 
@@ -162,8 +205,8 @@ export function ProviderDefForm({ provider, onSaved, onDirtyChange }: ProviderDe
           )}
           <div className="flex gap-2">
             <Button type="button" variant="outline" onClick={() => reset()}>重置</Button>
-            <Button type="button" onClick={onSave} disabled={mutation.isPending || !canSave}>
-              {mutation.isPending ? "保存中…" : "保存"}
+            <Button type="button" onClick={onSave} disabled={saving || !canSave}>
+              {saving ? "保存中…" : "保存"}
             </Button>
           </div>
         </div>
