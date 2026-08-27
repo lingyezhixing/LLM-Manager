@@ -632,3 +632,42 @@ def test_open_db_creates_flat_config_tables(tmp_path):
     assert {"pricing_type", "hourly_price", "support_cache"} <= md_cols
     fks = {row[2] for row in db.conn.execute("PRAGMA foreign_key_list(pricing_tiers)")}
     assert fks == {"model_defs"}
+
+
+def test_open_db_creates_cloud_tables(tmp_path):
+    db = open_db(tmp_path / "t.db")
+    tables = {r[0] for r in db.conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    for t in ("cloud_providers", "cloud_models", "cloud_price_tiers", "cloud_mappings"):
+        assert t in tables
+
+
+def test_open_db_new_db_model_requests_has_source(tmp_path):
+    db = open_db(tmp_path / "t.db")
+    cols = {r[1] for r in db.conn.execute("PRAGMA table_info(model_requests)")}
+    assert "source" in cols
+
+
+def test_open_db_ensures_source_column_on_old_db(tmp_path):
+    """全库首个列级前向迁移:旧库缺 source 列 → open_db 后自动补列,旧行 source='local'。"""
+    import sqlite3
+
+    p = tmp_path / "old.db"
+    conn = sqlite3.connect(p)
+    conn.execute(
+        "CREATE TABLE model_requests (id INTEGER PRIMARY KEY AUTOINCREMENT, model_id INTEGER NOT NULL, "
+        "start_time REAL NOT NULL, end_time REAL NOT NULL, input_tokens INTEGER NOT NULL, "
+        "output_tokens INTEGER NOT NULL, cache_n INTEGER NOT NULL, prompt_n INTEGER NOT NULL)"
+    )
+    conn.commit()
+    conn.close()
+
+    db = open_db(p)
+    cols = {r[1] for r in db.conn.execute("PRAGMA table_info(model_requests)")}
+    assert "source" in cols
+    db.conn.execute("INSERT INTO models (original_name) VALUES ('m')")
+    db.conn.execute(
+        "INSERT INTO model_requests (model_id, start_time, end_time, input_tokens, output_tokens, cache_n, prompt_n) "
+        "VALUES (1, 1, 2, 3, 4, 0, 3)"
+    )
+    db.conn.commit()
+    assert db.conn.execute("SELECT source FROM model_requests").fetchone()["source"] == "local"

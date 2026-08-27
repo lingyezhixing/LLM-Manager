@@ -11,6 +11,13 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 
+def _ensure_column(conn: sqlite3.Connection, table: str, column: str, ddl: str) -> None:
+    """列级前向迁移:表缺该列则 ADD COLUMN(幂等;旧库守护只拒不迁,新列默认值恒向后兼容)。"""
+    cols = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+    if column not in cols:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {ddl}")
+
+
 class LegacySchemaError(RuntimeError):
     """v2 旧库结构(model_requests.ts 列 / model_pricing / model_scripts 表);v3.1 起迁移链退役,不再支持。"""
 
@@ -60,6 +67,7 @@ def open_db(path: Path) -> Db:
             output_tokens INTEGER NOT NULL,
             cache_n INTEGER NOT NULL,
             prompt_n INTEGER NOT NULL,
+            source TEXT NOT NULL DEFAULT 'local',
             FOREIGN KEY (model_id) REFERENCES models(id) ON DELETE CASCADE
         );
         CREATE INDEX IF NOT EXISTS idx_model_requests_model_id ON model_requests(model_id);
@@ -138,7 +146,47 @@ def open_db(path: Path) -> Db:
             UNIQUE (session_id, seq)
         );
         CREATE INDEX IF NOT EXISTS idx_log_lines_session ON log_lines(session_id, id);
+        CREATE TABLE IF NOT EXISTS cloud_providers (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT UNIQUE NOT NULL,
+            api_key TEXT NOT NULL DEFAULT '',
+            enabled INTEGER NOT NULL DEFAULT 1,
+            openai_base TEXT NOT NULL DEFAULT '',
+            responses_base TEXT NOT NULL DEFAULT '',
+            claude_base TEXT NOT NULL DEFAULT '',
+            extra_headers TEXT NOT NULL DEFAULT '{}',
+            ord INTEGER NOT NULL DEFAULT 0,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS cloud_models (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            provider_id INTEGER NOT NULL REFERENCES cloud_providers(id) ON DELETE CASCADE,
+            model_name TEXT NOT NULL,
+            support_cache INTEGER NOT NULL DEFAULT 0,
+            dual_pricing INTEGER NOT NULL DEFAULT 0,
+            offpeak_windows TEXT NOT NULL DEFAULT '[]',
+            ord INTEGER NOT NULL DEFAULT 0,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(provider_id, model_name)
+        );
+        CREATE TABLE IF NOT EXISTS cloud_price_tiers (
+            model_id INTEGER NOT NULL REFERENCES cloud_models(id) ON DELETE CASCADE,
+            slot TEXT NOT NULL,
+            tier_index INTEGER NOT NULL,
+            min_input INTEGER, max_input INTEGER, min_output INTEGER, max_output INTEGER,
+            input_price REAL, output_price REAL, cache_write_price REAL, cache_read_price REAL,
+            PRIMARY KEY (model_id, slot, tier_index)
+        );
+        CREATE TABLE IF NOT EXISTS cloud_mappings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            provider_id INTEGER NOT NULL REFERENCES cloud_providers(id) ON DELETE CASCADE,
+            local_path TEXT NOT NULL UNIQUE,
+            target_url TEXT NOT NULL,
+            auth_style TEXT NOT NULL DEFAULT 'bearer',
+            ord INTEGER NOT NULL DEFAULT 0
+        );
     """)
+    _ensure_column(conn, "model_requests", "source", "source TEXT NOT NULL DEFAULT 'local'")
     conn.commit()
     return Db(conn=conn, write_lock=threading.Lock())
 
