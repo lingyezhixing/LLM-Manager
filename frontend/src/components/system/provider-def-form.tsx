@@ -4,12 +4,12 @@ import { Field, Select, Switch, TextInput } from "@/components/ui/form";
 import { KeyValueEditor } from "@/components/ui/repeatable-fields";
 import { TierEditor } from "@/components/system/tier-editor";
 import { errMsg } from "@/lib/format";
-import { updateProvider, type CloudMapping, type CloudModel, type ProviderDef } from "@/lib/api";
+import { updateProvider, type CloudMapping, type CloudModel, type CloudTimeWindow, type ProviderDef } from "@/lib/api";
 import { useConfirm } from "@/lib/hooks/use-confirm";
 import { useToast } from "@/lib/hooks/use-toast";
 import { useCreateProvider, useUpdateProvider } from "@/lib/hooks/use-providers";
 import { useSyncedForm } from "@/lib/hooks/use-synced-form";
-import { clone, deepEqual, emptyCloudModel, emptyProvider } from "@/lib/provider-def";
+import { clone, deepEqual, emptyCloudModel, emptyProvider, hhmmToMinutes, minutesToHhmm } from "@/lib/provider-def";
 
 interface ProviderDefFormProps {
   // 编辑态:服务端 ProviderDef(非空)。创建态:null。
@@ -46,10 +46,25 @@ export function ProviderDefForm({ provider, onSaved, onDirtyChange }: ProviderDe
   const saving = mutation.isPending || confirming;
   const set = <K extends keyof ProviderDef>(k: K, v: ProviderDef[K]) => setForm({ ...form, [k]: v });
 
-  // 模型区编辑 helper(峰谷控件未实现,不渲染双价结构)。
+  // 模型区编辑 helper。
   const setModel = (i: number, next: CloudModel) => setForm({ ...form, models: form.models.map((m, idx) => idx === i ? next : m) });
   const removeModel = (i: number) => setForm({ ...form, models: [...form.models.slice(0, i), ...form.models.slice(i + 1)] });
   const addModel = () => setForm({ ...form, models: [...form.models, emptyCloudModel()] });
+  // 谷时段:HH:MM 严格解析,非法输入忽略该次变更(值恒由分钟反推,非法态进不了状态)。
+  const setWindow = (i: number, wi: number, k: "start_min" | "end_min", raw: string) => {
+    const min = hhmmToMinutes(raw);
+    if (min === null) return;
+    const m = form.models[i];
+    setModel(i, { ...m, offpeak_windows: m.offpeak_windows.map((w, idx) => (idx === wi ? ({ ...w, [k]: min } as CloudTimeWindow) : w)) });
+  };
+  const addWindow = (i: number) => {
+    const m = form.models[i];
+    setModel(i, { ...m, offpeak_windows: [...m.offpeak_windows, { start_min: 1320, end_min: 420 }] });
+  };
+  const removeWindow = (i: number, wi: number) => {
+    const m = form.models[i];
+    setModel(i, { ...m, offpeak_windows: m.offpeak_windows.filter((_, idx) => idx !== wi) });
+  };
   const setMapping = (i: number, next: CloudMapping) => setForm({ ...form, mappings: form.mappings.map((m, idx) => idx === i ? next : m) });
   const removeMapping = (i: number) => setForm({ ...form, mappings: [...form.mappings.slice(0, i), ...form.mappings.slice(i + 1)] });
   const addMapping = () => setForm({ ...form, mappings: [...form.mappings, { local_path: "", target_url: "", auth_style: "bearer" }] });
@@ -188,12 +203,48 @@ export function ProviderDefForm({ provider, onSaved, onDirtyChange }: ProviderDe
                   <Switch checked={m.support_cache} onChange={(v) => setModel(i, { ...m, support_cache: v })} />
                 </div>
               </Field>
+              <Field label="峰谷双价">
+                <div className="flex h-9 items-center gap-2">
+                  <Switch checked={m.dual_pricing} onChange={(v) => setModel(i, { ...m, dual_pricing: v })} />
+                  {m.dual_pricing && <span className="text-xs text-primary-accent">峰谷双价</span>}
+                </div>
+              </Field>
               <button type="button" className="h-9 shrink-0 px-2 text-xs text-muted-foreground hover:text-destructive"
                 onClick={() => removeModel(i)}>✕</button>
             </div>
-            <div className="mt-2 text-xs text-muted-foreground">阶梯价格(元/百万 token)</div>
+            <div className="mt-2 text-xs text-muted-foreground">阶梯价格 / 峰价(元/百万 token)</div>
             <TierEditor tiers={m.tiers_base} supportCache={m.support_cache}
               onChange={(next) => setModel(i, { ...m, tiers_base: next })} />
+            {m.dual_pricing && (
+              <>
+                <div className="mt-3 flex items-center justify-between">
+                  <span className="text-xs text-muted-foreground">谷时段(服务器本地时间;开始 &gt; 结束 = 跨午夜)</span>
+                  <Button type="button" size="sm" variant="ghost" onClick={() => addWindow(i)}>+ 添加时段</Button>
+                </div>
+                <div className="flex flex-col gap-2">
+                  {m.offpeak_windows.map((w, wi) => (
+                    <div key={wi} className="flex flex-wrap items-end gap-x-3 gap-y-2 rounded-md border border-border px-3 py-2">
+                      <Field label="开始(HH:MM)" className="w-32">
+                        <TextInput value={minutesToHhmm(w.start_min) ?? ""} placeholder="23:00"
+                          onChange={(e) => setWindow(i, wi, "start_min", e.target.value)} />
+                      </Field>
+                      <Field label="结束(HH:MM)" className="w-32">
+                        <TextInput value={minutesToHhmm(w.end_min) ?? ""} placeholder="05:00"
+                          onChange={(e) => setWindow(i, wi, "end_min", e.target.value)} />
+                      </Field>
+                      {w.start_min > w.end_min && (
+                        <span className="mb-2 text-xs text-primary-accent">跨午夜(结束时刻在次日)</span>
+                      )}
+                      <button type="button" className="mb-1 h-9 shrink-0 px-2 text-xs text-muted-foreground hover:text-destructive"
+                        onClick={() => removeWindow(i, wi)}>✕</button>
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-2 text-xs text-muted-foreground">谷价阶梯(元/百万 token;请求完成时刻落在任一时段内按此计价,整单判定)</div>
+                <TierEditor tiers={m.tiers_offpeak} supportCache={m.support_cache}
+                  onChange={(next) => setModel(i, { ...m, tiers_offpeak: next })} />
+              </>
+            )}
           </div>
         ))}
       </div>
