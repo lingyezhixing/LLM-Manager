@@ -51,6 +51,12 @@ export function SessionStats() {
           <span className="text-xs text-muted-foreground">本次启动消耗</span>
           <span className="font-semibold text-primary-accent">{formatCost(data.total_cost)}</span>
         </div>
+        <div className="mt-1 flex items-baseline justify-between text-xs">
+          <span className="text-muted-foreground">本地</span>
+          <span className="font-mono tabular-nums">{formatCost(data.local_cost)}</span>
+          <span className="ml-3 text-muted-foreground">云端</span>
+          <span className="font-mono tabular-nums">{formatCost(data.cloud_cost)}</span>
+        </div>
       </div>
     </Card>
   );
