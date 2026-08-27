@@ -500,6 +500,22 @@ def register_config_routes(api: APIRouter) -> None:
         db = get_db(request)
         store = get_config_store(request)
         is_rename = body.name != name
+        # UNIQUE 预检:迁移时新名不得已被孤立数据占用(否则 UPDATE models 撞 UNIQUE → 500)。
+        # 覆盖两条迁移写入目标:original_name 精确 = new(服务商级锚点)与前缀 new/(模型级锚点)。
+        # 与模型改名口径一致;guard 在 dry_run 分支之前 → dry_run 同样报告。
+        if (
+            is_rename
+            and migrate_data
+            and db.conn.execute(
+                "SELECT 1 FROM models WHERE original_name = ? OR substr(original_name, 1, ?) = ?",
+                (body.name, len(body.name) + 1, body.name + "/"),
+            ).fetchone()
+        ):
+            raise HTTPException(
+                422,
+                f"new name '{body.name}' is occupied by orphaned data; "
+                "clean it in data management first",
+            )
         post = _provider_rename_migrator(name, body.name) if (is_rename and migrate_data) else None
         try:
             if dry_run:

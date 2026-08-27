@@ -998,3 +998,43 @@ def test_delete_provider_removes(tmp_path):
         r = c.delete("/api/config/providers/deepseek")
         assert r.status_code == 200
         assert c.get("/api/config/providers").json() == []
+
+
+def test_put_provider_rename_migrate_new_name_occupied_422(tmp_path):
+    """迁移时新名已被孤立数据占用(精确名)→ 422(避免 UPDATE models 撞 UNIQUE → 500)。"""
+    from llm_manager.data.usage import record_usage, resolve_model_id
+
+    app = _app(tmp_path)
+    with TestClient(app) as c:
+        c.post("/api/config/providers", json=_provider_body())
+        record_usage(app.state.db, "deepseek", 1, 2, 1, 1, 0, 1)  # 旧名锚点(迁移会把它写成 ds)
+        resolve_model_id(app.state.db, "ds")  # 孤立数据先占了 ds → 迁移撞 UNIQUE
+        r = c.put(
+            "/api/config/providers/deepseek?migrate_data=true",
+            json=_provider_body(name="ds"),
+        )
+        assert r.status_code == 422
+        # guard 在 dry_run 分支之前 → dry_run 同样报告
+        r2 = c.put(
+            "/api/config/providers/deepseek?migrate_data=true&dry_run=true",
+            json=_provider_body(name="ds"),
+        )
+        assert r2.status_code == 422
+
+
+def test_put_provider_rename_migrate_new_prefix_occupied_422(tmp_path):
+    """迁移时新名前缀(新名/...)已被孤立数据占用 → 422(避免前缀 UPDATE 撞 UNIQUE → 500)。"""
+    from llm_manager.data.usage import record_usage, resolve_model_id
+
+    app = _app(tmp_path)
+    with TestClient(app) as c:
+        c.post("/api/config/providers", json=_provider_body())
+        record_usage(
+            app.state.db, "deepseek/deepseek-chat", 1, 2, 1, 1, 0, 1
+        )  # 旧名前缀锚点(迁移会写成 ds/deepseek-chat)
+        resolve_model_id(app.state.db, "ds/deepseek-chat")  # 孤立数据先占了 → 前缀迁移撞 UNIQUE
+        r = c.put(
+            "/api/config/providers/deepseek?migrate_data=true",
+            json=_provider_body(name="ds"),
+        )
+        assert r.status_code == 422
