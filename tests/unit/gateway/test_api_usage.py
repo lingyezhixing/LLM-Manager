@@ -354,7 +354,7 @@ def test_usage_session_cost_split(tmp_path):
 
 
 def test_usage_session_source_param(tmp_path):
-    """spec §6.3:session 端点亦属 /api/usage/* 全系 source 参数;过滤后三拆恒等。"""
+    """session 端点亦属 /api/usage/* 全系 source 参数;过滤后三拆恒等。"""
     import time
 
     from llm_manager.config import (

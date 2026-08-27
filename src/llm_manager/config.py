@@ -138,7 +138,7 @@ class Pricing:
 
 @dataclass(frozen=True, slots=True)
 class TimeWindow:
-    start_min: int  # 当日分钟 0–1439(跨午夜窗口 start > end 合法,延后 v3.4+ 消费)
+    start_min: int  # 当日分钟 0–1439;start > end 表示跨午夜窗口
     end_min: int
 
 
@@ -153,10 +153,10 @@ class CloudMapping:
 class CloudModel:
     model_name: str
     support_cache: bool = False
-    dual_pricing: bool = False  # v3.3.0 惰性:恒 False,延后 v3.4+ 消费
-    offpeak_windows: tuple[TimeWindow, ...] = ()  # v3.3.0 惰性:恒 (),延后 v3.4+ 消费
+    dual_pricing: bool = False  # 峰谷双定价开关(峰谷计价未实现,读取方忽略)
+    offpeak_windows: tuple[TimeWindow, ...] = ()  # 谷时段窗口(峰谷计价未实现,读取方忽略)
     tiers_base: tuple[PricingTier, ...] = ()
-    tiers_offpeak: tuple[PricingTier, ...] = ()  # v3.3.0 惰性:恒 (),延后 v3.4+ 消费
+    tiers_offpeak: tuple[PricingTier, ...] = ()  # 谷时段阶梯(峰谷计价未实现,计费恒用 base)
 
 
 @dataclass(frozen=True, slots=True)

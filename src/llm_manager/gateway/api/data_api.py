@@ -18,7 +18,7 @@ from llm_manager.gateway.api.common import (
 
 
 def _configured_names(cfg) -> set[str]:
-    """已配置名集合 = 本地模型名 ∪ 服务商名 ∪ 云目录全名(孤儿判定用;spec §4.4)。"""
+    """已配置名集合 = 本地模型名 ∪ 服务商名 ∪ 云目录全名(孤儿判定用)。"""
     names = set(cfg.models.keys())
     providers = getattr(cfg, "cloud_providers", {})
     for pname, p in providers.items():

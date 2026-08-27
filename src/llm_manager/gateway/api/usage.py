@@ -150,7 +150,7 @@ def register_usage_routes(router: APIRouter) -> None:
                 )
                 total_cost = cs.total_cost
                 # 三拆:local/cloud 由 by_model 的 source 推导,总账 = local + cloud 恒等
-                # (source 过滤后仅含单侧行,另一侧自然为 0,spec §6.3)
+                # (source 过滤后仅含单侧行,另一侧自然为 0)
                 local_cost = sum(c.cost for c in cs.by_model if c.source == "local")
                 cloud_cost = sum(c.cost for c in cs.by_model if c.source == "cloud")
             except Exception:

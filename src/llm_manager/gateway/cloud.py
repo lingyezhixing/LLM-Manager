@@ -1,6 +1,6 @@
 """云端代理纯逻辑:族分类 / URL 拼接 / 鉴权头 / 映射解析。无 IO、无副作用,单测友好。
 
-spec §5.1/§5.2/§5.3 的实现载体;proxy.py 只做编排,URL/鉴权/映射决策全部收敛于此。
+proxy.py 只做编排,URL/鉴权/映射决策全部收敛于此。
 """
 
 from __future__ import annotations
@@ -88,7 +88,7 @@ def resolve_global_mapping(cfg: AppConfig, path: str) -> tuple[CloudProvider, Cl
 def build_auth_headers(
     provider: CloudProvider, family: str | None, auth_style: str
 ) -> dict[str, str]:
-    """族默认鉴权头注入(spec §5.2):api_key 空或 auth_style=none → 不注入;Claude 补 anthropic-version。
+    """族默认鉴权头注入:api_key 空或 auth_style=none → 不注入;Claude 族补 anthropic-version。
     键名一律小写,与 apply_extra_headers 的键归一约定一致(大小写变体不会并存)。"""
     if auth_style == "none" or not provider.api_key:
         return {}

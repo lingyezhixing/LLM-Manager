@@ -40,7 +40,7 @@ def usage_series(
 ) -> UsageSeries:
     """按模型 + 总计聚合 token 消耗(input + output),按墙钟 end_time(请求完成
     时刻——用量记录时点)分桶。source='all' 不过滤,否则按 r.source 过滤
-    ('local'/'cloud';见 spec §6.3)。
+    ('local'/'cloud')。
 
     桶是**绝对**的(时钟对齐到 ``bucket_seconds`` 的倍数),而非相对窗口起点——
     故请求的桶固定,滑动 live 窗口滚动图表而不是重塑它。返回完整桶轴,缺桶补 0

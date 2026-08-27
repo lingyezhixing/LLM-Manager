@@ -40,7 +40,7 @@ def pricing_for(cfg: AppConfig, name: str) -> Pricing | None:
         if p is not None:
             for cm in p.models:
                 if cm.model_name == model_name:
-                    # v3.3.0 恒 base 槽(峰谷延后 v3.4+,见 spec §14)
+                    # 峰谷双定价延后实现:当前恒用 base 槽(offpeak 槽数据已入库但不消费)
                     return Pricing(
                         pricing_type="tier", support_cache=cm.support_cache, tiers=cm.tiers_base
                     )
