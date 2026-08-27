@@ -280,7 +280,9 @@ async def test_stream_wrapper_forwards_chunks_records_usage_ends_request():
 
 
 # ---------- forward ----------
-def _make_request(method, path, json_body, content_type="application/json", query_string=b""):
+def _make_request(
+    method, path, json_body, content_type="application/json", query_string=b"", extra_headers=()
+):
     from starlette.requests import Request as StarletteRequest
 
     body = json.dumps(json_body).encode() if json_body is not None else b""
@@ -291,7 +293,8 @@ def _make_request(method, path, json_body, content_type="application/json", quer
         "raw_path": path.encode(),
         "query_string": query_string,
         "headers": [(b"content-type", content_type.encode()), (b"host", b"x")]
-        + ([(b"content-length", str(len(body)).encode())] if body else []),
+        + ([(b"content-length", str(len(body)).encode())] if body else [])
+        + list(extra_headers),
     }
 
     async def receive():
@@ -821,7 +824,7 @@ async def test_cloud_forward_extra_headers_case_variant_does_not_duplicate_auth(
 
 
 async def test_cloud_mapping_target_url_query_params_win_over_client():
-    """I2 回归(spec §5.3):target_url 自带 query 与客户端 query 同名冲突时目标参数优先,
+    """target_url 自带 query 与客户端 query 同名冲突时目标参数优先,
     客户端未冲突参数仍透传。"""
     state._reset()
     cfg = _cloud_cfg()
@@ -860,4 +863,37 @@ async def test_cloud_mapping_target_url_query_params_win_over_client():
     qs = parse_qs(seen["url"].split("?", 1)[1])
     assert qs["tz"] == ["server"]  # target_url 参数优先
     assert qs["x"] == ["1"]  # 客户端未冲突参数透传
+    await client.aclose()
+
+
+async def test_cloud_forward_strips_case_variant_auth_headers():
+    """客户端鉴权头的 wire 大小写变体(Authorization/X-API-Key)必须剥离:
+    starlette Headers 保留原始大小写,按小写键 pop 不命中 → 客户端凭证与
+    服务商凭证双发出站(上游取头顺序不定 → 401 或密钥泄漏)。"""
+    state._reset()
+    seen = {}
+
+    def handler(req):
+        seen["authorization"] = req.headers.get_list("authorization")
+        seen["x-api-key"] = req.headers.get_list("x-api-key")
+        return httpx.Response(
+            200,
+            json={"usage": {"prompt_tokens": 1, "completion_tokens": 1}},
+            headers={"content-type": "application/json"},
+        )
+
+    client = _cloud_client(handler)
+    db = open_db(Path(":memory:"))
+    req = _make_request(
+        "POST",
+        "v1/chat/completions",
+        {"model": "ds/deepseek-chat"},
+        extra_headers=[(b"Authorization", b"local-secret"), (b"X-API-Key", b"local-k")],
+    )
+    resp = await proxy.forward(
+        req, "v1/chat/completions", FakeLifecycle(), _cloud_cfg(), db, {}, cloud_client=client
+    )
+    assert resp.status_code == 200
+    assert seen["authorization"] == ["Bearer SK"]
+    assert seen["x-api-key"] == []
     await client.aclose()

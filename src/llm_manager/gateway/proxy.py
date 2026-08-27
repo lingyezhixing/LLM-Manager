@@ -292,14 +292,15 @@ async def forward_cloud(
         request_data = body if isinstance(body, bytes) else b""
 
     request_start = time.time()
-    headers = _strip_headers(request.headers, extra=("host",))
-    headers.pop("authorization", None)
-    headers.pop("x-api-key", None)
+    # 客户端鉴权头并入剥离集合(而非按小写键 pop):starlette Headers 保留 wire
+    # 原始大小写,pop("authorization") 对 "Authorization"/"X-API-Key" 变体不命中,
+    # 会与注入的服务商凭证双发出站(上游取头顺序不定 → 401 或密钥泄漏)。
+    headers = _strip_headers(request.headers, extra=("host", "authorization", "x-api-key"))
     headers.update(build_auth_headers(provider, family, auth_style))
     apply_extra_headers(headers, provider)
 
     logger.info("CLOUD REQ %s %s provider=%s", request.method, url, provider_name)
-    # spec §5.3:target_url 自带 query 与客户端 query 同名冲突时目标参数优先
+    # target_url 自带 query 与客户端 query 同名冲突时目标参数优先
     # (httpx 默认以客户端 params 覆盖 URL 自带 query);客户端未冲突参数仍透传。
     # 做法:URL 拆出自带 query 剥离重发,统一经 params 合并(客户端打底、目标覆盖)。
     params = request.query_params
