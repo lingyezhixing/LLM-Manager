@@ -12,8 +12,8 @@ type SystemZone = "general" | "models" | "database" | "providers";
 const ZONES: readonly { key: SystemZone; label: string }[] = [
   { key: "general", label: "系统配置" },
   { key: "models", label: "本地模型配置" },
-  { key: "database", label: "数据库管理" },
   { key: "providers", label: "云服务商配置" },
+  { key: "database", label: "数据库管理" },
 ];
 
 export default function SystemPage() {

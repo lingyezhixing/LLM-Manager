@@ -17,7 +17,7 @@ export interface CloudTier {
   cache_read_price: number;
 }
 
-// 峰谷时段:start_min/end_min 为当天分钟数(0-1439),start==end 表示跨午夜。
+// 峰谷时段:start_min/end_min 为当天分钟数(0-1439),start > end 表示跨午夜窗口。
 export interface CloudTimeWindow {
   start_min: number;
   end_min: number;
@@ -33,8 +33,8 @@ export interface CloudModel {
 }
 
 export interface CloudMapping {
-  local_path: string;       // 本地模型名(路由匹配)
-  target_url: string;       // 上游模型名/路径
+  local_path: string;       // 本地请求路径(全局唯一,精确匹配)
+  target_url: string;       // 完整云端 URL(含协议,可带 query)
   auth_style: "bearer" | "x-api-key" | "none";
 }
 

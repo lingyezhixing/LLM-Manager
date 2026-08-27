@@ -1,7 +1,7 @@
 // 云服务商表单纯逻辑:空草稿/深拷贝/深相等(与 lib/model-def.ts 同构)。
 import { type CloudModel, type ProviderDef } from "@/lib/api";
 
-// 空云端模型(模型区新增共用):峰谷控件延后(见设计 §14),先建双价结构为空。
+// 空云端模型(模型区新增共用):峰谷结构先建为空,UI 暂不提供双价编辑。
 export function emptyCloudModel(): CloudModel {
   return {
     model_name: "",

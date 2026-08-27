@@ -46,7 +46,7 @@ export function ProviderDefForm({ provider, onSaved, onDirtyChange }: ProviderDe
   const saving = mutation.isPending || confirming;
   const set = <K extends keyof ProviderDef>(k: K, v: ProviderDef[K]) => setForm({ ...form, [k]: v });
 
-  // 模型区编辑 helper(峰谷控件延后,v3.3.0 不渲染,见设计 §14)。
+  // 模型区编辑 helper(峰谷控件未实现,不渲染双价结构)。
   const setModel = (i: number, next: CloudModel) => setForm({ ...form, models: form.models.map((m, idx) => idx === i ? next : m) });
   const removeModel = (i: number) => setForm({ ...form, models: [...form.models.slice(0, i), ...form.models.slice(i + 1)] });
   const addModel = () => setForm({ ...form, models: [...form.models, emptyCloudModel()] });

@@ -28,8 +28,8 @@ export function UsageChartCard({
 }) {
   const [view, setView] = useState<View>("models");
   const [source, setSource] = useState<UsageSource>("all");
-  // 「按模型」视图不过滤(模型名即归属);总量/成本视图并入 source 过滤
-  const filteredParams = view === "models" ? params : { ...params, source };
+  // 三视图共用 source 过滤(服务端参数;「按模型」视图每条线本就带归属)
+  const filteredParams: UsageSeriesParams = { ...params, source };
   const { data, isLoading, isError, error, refetch: refetchSeries } = useQuery({
     queryKey: qk.usageSeries(filteredParams),
     queryFn: () => fetchUsageSeries(filteredParams),
@@ -66,12 +66,8 @@ export function UsageChartCard({
               </button>
             ))}
           </div>
-          {view !== "models" && (
-            <>
-              <span className="h-4 w-px bg-border" />
-              <SourcePills value={source} onChange={setSource} />
-            </>
-          )}
+          {view !== "models" && <span className="h-4 w-px bg-border" />}
+          <SourcePills value={source} onChange={setSource} />
         </div>
       </div>
       {view === "cost" ? (
