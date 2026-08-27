@@ -10,6 +10,8 @@ export const qk = {
   updateStatus: ["update", "status"] as const,
   modelDefs: ["model-defs"] as const,
   modelDef: (name: string) => ["model-defs", name] as const,
+  providerDefs: ["provider-defs"] as const,
+  providerDef: (name: string) => ["provider-defs", name] as const,
   sessionsList: (tab: string, model: string) => ["sessions", "list", tab, model] as const,
   sessionModelOptions: ["sessions", "model-options"] as const,
   sessionUsage: ["usage", "session"] as const,

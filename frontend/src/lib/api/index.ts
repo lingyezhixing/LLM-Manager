@@ -1,4 +1,5 @@
 export * from "./models";
+export * from "./providers";
 export * from "./usage";
 export * from "./logs";
 export * from "./config";
