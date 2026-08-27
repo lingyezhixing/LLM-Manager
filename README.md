@@ -1,6 +1,6 @@
 # LLM-Manager
 
-本地多 LLM 模型管理工具：按需启动 / 空闲回收本地模型进程（llama.cpp / lmdeploy / vLLM 等），对外暴露 OpenAI / Anthropic / Responses 兼容 API，记录用量与计费，并提供 WebUI 完成配置、模型、统计、日志管理。完全离线运行，无任何云端依赖（唯一联网点是系统页的「自更新」，且仅在你手动点击时联网）。
+本地多 LLM 模型管理工具：按需启动 / 空闲回收本地模型进程（llama.cpp / lmdeploy / vLLM 等），对外暴露 OpenAI / Anthropic / Responses 兼容 API，记录用量与计费，并提供 WebUI 完成配置、模型、统计、日志管理。默认零配置零出网（自更新只在启动时自动检查一次，此后仅手动点击才联网）；也可选配置云服务商代理转发 OpenAI / Anthropic / Responses 兼容的云 API，仅当启用的服务商收到请求时才出网。
 
 > 注意：
 > - 这是个人开发工具，面向本地实验环境，请自行评估稳定性。
@@ -83,6 +83,8 @@ curl http://localhost:8080/v1/chat/completions \
 
 Embedding / Reranker 模型同样走 OpenAI 路径。
 
+配置云服务商后，请求模型填 `{provider}/{model}`（如 `openrouter/deepseek-v3`）即可转发到对应云服务商；`/v1/models` 会把启用服务商的云模型一并列出（禁用服务商不暴露）。详见下文「云服务商配置」。
+
 ## 配置
 
 所有配置存放在 SQLite（`data/llm_manager.db`），通过 WebUI 修改，没有配置文件。
@@ -107,6 +109,20 @@ Embedding / Reranker 模型同样走 OpenAI 路径。
 ### 数据库管理（系统 → 数据库管理）
 
 查看各模型的数据量、删除模型数据（级联 + 空间回收）、清理孤立模型。
+
+### 云服务商配置（系统 → 云服务商配置）
+
+把 OpenAI / Anthropic / Responses 兼容的云端 API 透传给客户端。每个服务商包含：
+
+- 名称、启用开关、API Key
+- 三族端点 base（OpenAI 传统 / Responses / Claude，留空 = 该接口族不支持）
+- 模型目录：服务商下的云模型清单（对外以 `{provider}/{model}` 请求）
+- 自定义映射：把本地路径映射到任意云端 URL（可绕过三族，适合非标准接口）
+- 高级：额外请求头（值里 `{key}` 会替换为 API Key）
+
+端点 base 约定（厂商文档原样粘贴即用）：OpenAI 传统 / Responses 族 base 含版本段（如 `https://api.openai.com/v1`，请求路径的 `v1/` 会被剥掉再拼到 base 后）；Claude 族 base 不含 `/v1`（如 `https://api.anthropic.com`，请求路径 `v1/messages` 原样拼接）。
+
+改服务商配置即时生效，无需重启。出网纪律：仅当「已配置且启用」的服务商收到对应请求时才出网，默认零配置零出网、无任何自动外呼。
 
 ### 环境变量
 
@@ -173,6 +189,7 @@ docker compose up -d           # 日常：改代码 / 配置后重启即可
 ## 升级注意
 
 - v3.x 之间：如无特别说明，任意 v3.x 均可无感升级到任意更高的 v3.x（不保证降级）
+- v3.3.0 起本地模型名 / 别名不得含 `/`（该字符保留给云服务商命名空间 `{provider}/{model}`）；旧库若已有含 `/` 的本地模型名，升级前先改名
 - v2.x 用户：v2 的配置（config.yaml）与计费数据不会迁移，需在网页重新录入；v2 数据库请备份后删库重建。详见 v3.0.0 发布说明
 - 升级通过「自更新」或 `git pull` 完成
 

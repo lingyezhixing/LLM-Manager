@@ -7,11 +7,12 @@
 
 本地多 LLM 模型的代理网关 + WebUI:按需启动/空闲回收本地模型进程(llama.cpp /
 lmdeploy / vLLM …),对外暴露 OpenAI / Anthropic / Responses 兼容 API,记录用量与计费,
-提供系统配置、模型管理、用量统计、日志查看的前端。**运行时完全离线**(无云端依赖)。
-**运行时唯一联网点 = 自更新**(系统页「更新」区,git fetch/merge 本项目仓库:程序启动时
-自动检测一次,此后仅用户显式点击检查/应用按钮才联网;见 §5.1)。
+提供系统配置、模型管理、用量统计、日志查看的前端。**默认零配置零出网,无任何自动外呼**。
+**运行时联网点 = 自更新 + 云服务商代理**:云服务商代理仅当「已配置且启用」的服务商收到对应
+请求时才出网(见 §2 gateway 层与 README「云服务商配置」);自更新(系统页「更新」区,git
+fetch/merge 本项目仓库)程序启动时自动检测一次,此后仅用户显式点击检查/应用按钮才联网;见 §5.1。
 注意:**开发基础设施**(GitHub Actions CI,见 §6)是仓库侧的联网点,与运行时互不干扰
-——「完全离线」一律指产品运行时。
+——上述联网点即产品运行时全部出网场景。
 
 - 后端:Python 3 + FastAPI + uvicorn + SQLite(单连接 + `write_lock`)。`src/llm_manager/`
 - 前端:React 19 + Vite + TS + Tailwind v4 + TanStack Query。`frontend/`
@@ -32,7 +33,7 @@ runtime  ── lifecycle(编排)/scheduling(纯函数资源决策)/background(�
   ↓
 data     ── persistence(schema + 旧库守护)/logs(会话/行 SQL + 捕获/广播/flush)/usage(计费 + 会话计数)/config_store(DB 配置)
   ↓
-gateway  ── proxy(流式代理 + 用量计量)+ api/*(REST/SSE 端点,含 tools_api)+ aliases(别名解析)
+gateway  ── proxy(流式代理 + 用量计量 + 云端转发分支 gateway/cloud.py)+ api/*(REST/SSE 端点,含 tools_api)+ aliases(别名解析)
   ↓
 tray     ── 系统托盘(自重启触发 / WOL / Claude 预设应用)
 ```
@@ -89,6 +90,8 @@ tray     ── 系统托盘(自重启触发 / WOL / Claude 预设应用)
 
 - **模型 CRUD**:`mutate_appconfig` 全量替换模型世界(DELETE+INSERT,id churn 可接受),
   validate 失败 raise `ConfigValidationFailed`(→422,不落脏数据)。
+- **服务商 CRUD**(`/api/config/providers` POST/PUT/DELETE):同 `mutate_appconfig`,改名
+  迁移经 post_write(与模型改名一致);validate 失败同样 →422,不落脏数据。
 - **`required_devices ⊄ memory_mb`** 合法、不告警:缺条目的设备按 0 需求调度(该设备
   不做显存检查)——「设备仅用于方案匹配、真运行在别处」是合法用法,`{}` 与 `{dev:0}`
   调度语义等价;前端保存时会把 required 设备的缺省显存显式写 0(所见即所存)。
@@ -129,7 +132,7 @@ tray     ── 系统托盘(自重启触发 / WOL / Claude 预设应用)
   HTTPS 重写(`-c url.<https>.insteadOf=<ssh前缀>`,免认证拉公开仓库,不碰宿主推送配置)。
   root 容器下宿主仓库须为 root 属主,否则 git "dubious ownership" 拒绝 → 功能隐藏
   (这层拒绝是有意为之:root 写非 root 属主 bind-mount 会改宿主文件属主)。
-- **网络纪律**:唯一联网点——程序启动时自动检测一次(worker 启动后台 fetch 一次),
+- **网络纪律**:自更新的唯一联网点——程序启动时自动检测一次(worker 启动后台 fetch 一次),
   此后无任何自动联网,仅用户显式按钮触发(系统页「更新」区)。
 - 注意:更新后依赖若变,editable 安装不会自动重装(pip 层自理)。
 
