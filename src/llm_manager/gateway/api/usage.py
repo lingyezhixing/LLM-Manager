@@ -16,6 +16,7 @@ from __future__ import annotations
 import datetime
 import logging
 import time
+from typing import Literal
 
 from fastapi import APIRouter, Request
 from pydantic import BaseModel
@@ -43,6 +44,8 @@ class SessionUsageResponse(BaseModel):
     total_cost: float = (
         0.0  # 本次启动消耗金额(compute-on-read 窗口 [started_at, now),见模块 docstring)
     )
+    local_cost: float = 0.0  # 本地模型部分(by_model.source == "local")
+    cloud_cost: float = 0.0  # 云端模型部分(by_model.source == "cloud")
 
 
 class UsageSeriesResponse(BaseModel):
@@ -69,17 +72,21 @@ class ByModelEntryResponse(BaseModel):
     hit_rate: float
     share: float
     latency_ms: float
+    source: str = "local"  # 行来源("local"/"cloud")
 
 
 class CostByModelResponse(BaseModel):
     model: str
     pricing_type: str
     cost: float
+    source: str = "local"  # "local" | "cloud"(计费来源)
 
 
 class CostSummaryResponse(BaseModel):
     total_cost: float
     by_model: list[CostByModelResponse]
+    local_cost: float = 0.0  # by_model 中 source=="local" 的成本和
+    cloud_cost: float = 0.0  # by_model 中 source=="cloud" 的成本和
 
 
 def _bucket_for_span(span: float) -> int:
@@ -123,15 +130,21 @@ def register_usage_routes(router: APIRouter) -> None:
         started = getattr(request.app.state, "started_at", None) or time.time()
         s = session_snapshot(started)
         total_cost = 0.0
+        local_cost = 0.0
+        cloud_cost = 0.0
         store = getattr(request.app.state, "config_store", None)
         if store is not None:
             try:
                 # 本次启动消耗 = 窗口 [started_at, now) 的成本(compute-on-read,与用量页同口径;
                 # 上一进程的请求/段 end_time < started_at 自然落在窗外)。best-effort:
                 # 计费计算失败仅降级为 0,不影响 token 面板。
-                total_cost = usage_cost(
+                cs = usage_cost(
                     get_db(request), store.snapshot(), start_ts=started, end_ts=time.time()
-                ).total_cost
+                )
+                total_cost = cs.total_cost
+                # 三拆:local/cloud 由 by_model 的 source 推导,总账 = local + cloud 恒等
+                local_cost = sum(c.cost for c in cs.by_model if c.source == "local")
+                cloud_cost = sum(c.cost for c in cs.by_model if c.source == "cloud")
             except Exception:
                 logger.warning("session cost computation failed", exc_info=True)
         return SessionUsageResponse(
@@ -142,6 +155,8 @@ def register_usage_routes(router: APIRouter) -> None:
             cache_miss=s.cache_miss,
             hit_rate=s.hit_rate,
             total_cost=total_cost,
+            local_cost=local_cost,
+            cloud_cost=cloud_cost,
         )
 
     @router.get("/usage/series", response_model=UsageSeriesResponse)
@@ -150,10 +165,13 @@ def register_usage_routes(router: APIRouter) -> None:
         period: str = "7d",
         start: float | None = None,
         end: float | None = None,
+        source: Literal["all", "local", "cloud"] = "all",
     ) -> UsageSeriesResponse:
         db = get_db(request)
         start_ts, end_ts, bucket = _resolve_range(period, start, end)
-        result = usage_series(db, start_ts=start_ts, end_ts=end_ts, bucket_seconds=bucket)
+        result = usage_series(
+            db, start_ts=start_ts, end_ts=end_ts, bucket_seconds=bucket, source=source
+        )
         return UsageSeriesResponse(buckets=result.buckets, total=result.total, models=result.models)
 
     @router.get("/usage/summary", response_model=UsageSummaryResponse)
@@ -162,10 +180,11 @@ def register_usage_routes(router: APIRouter) -> None:
         period: str = "7d",
         start: float | None = None,
         end: float | None = None,
+        source: Literal["all", "local", "cloud"] = "all",
     ) -> UsageSummaryResponse:
         db = get_db(request)
         s_ts, e_ts = _resolve_window(period, start, end)
-        s = usage_summary(db, start_ts=s_ts, end_ts=e_ts)
+        s = usage_summary(db, start_ts=s_ts, end_ts=e_ts, source=source)
         return UsageSummaryResponse(
             input_tokens=s.input_tokens,
             output_tokens=s.output_tokens,
@@ -181,10 +200,11 @@ def register_usage_routes(router: APIRouter) -> None:
         period: str = "7d",
         start: float | None = None,
         end: float | None = None,
+        source: Literal["all", "local", "cloud"] = "all",
     ) -> list[ByModelEntryResponse]:
         db = get_db(request)
         s_ts, e_ts = _resolve_window(period, start, end)
-        rows = usage_by_model(db, start_ts=s_ts, end_ts=e_ts)
+        rows = usage_by_model(db, start_ts=s_ts, end_ts=e_ts, source=source)
         return [
             ByModelEntryResponse(
                 model=r.model,
@@ -195,6 +215,7 @@ def register_usage_routes(router: APIRouter) -> None:
                 hit_rate=r.hit_rate,
                 share=r.share,
                 latency_ms=r.latency_ms,
+                source=r.source,
             )
             for r in rows
         ]
@@ -205,17 +226,22 @@ def register_usage_routes(router: APIRouter) -> None:
         period: str = "7d",
         start: float | None = None,
         end: float | None = None,
+        source: Literal["all", "local", "cloud"] = "all",
     ) -> CostSummaryResponse:
         db = get_db(request)
         cfg = get_config_store(request).snapshot()
         s_ts, e_ts = _resolve_window(period, start, end)
-        s = usage_cost(db, cfg, start_ts=s_ts, end_ts=e_ts)
+        s = usage_cost(db, cfg, start_ts=s_ts, end_ts=e_ts, source=source)
         return CostSummaryResponse(
             total_cost=s.total_cost,
             by_model=[
-                CostByModelResponse(model=r.model, pricing_type=r.pricing_type, cost=r.cost)
+                CostByModelResponse(
+                    model=r.model, pricing_type=r.pricing_type, cost=r.cost, source=r.source
+                )
                 for r in s.by_model
             ],
+            local_cost=sum(r.cost for r in s.by_model if r.source == "local"),
+            cloud_cost=sum(r.cost for r in s.by_model if r.source == "cloud"),
         )
 
     @router.get("/usage/cost-series", response_model=UsageSeriesResponse)
@@ -224,9 +250,12 @@ def register_usage_routes(router: APIRouter) -> None:
         period: str = "7d",
         start: float | None = None,
         end: float | None = None,
+        source: Literal["all", "local", "cloud"] = "all",
     ) -> UsageSeriesResponse:
         db = get_db(request)
         cfg = get_config_store(request).snapshot()
         s_ts, e_ts, bucket = _resolve_range(period, start, end)
-        result = usage_cost_series(db, cfg, start_ts=s_ts, end_ts=e_ts, bucket_seconds=bucket)
+        result = usage_cost_series(
+            db, cfg, start_ts=s_ts, end_ts=e_ts, bucket_seconds=bucket, source=source
+        )
         return UsageSeriesResponse(buckets=result.buckets, total=result.total, models=result.models)
