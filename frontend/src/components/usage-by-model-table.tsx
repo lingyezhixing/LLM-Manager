@@ -36,18 +36,15 @@ export function UsageByModelTable({
   });
   const costOf = new Map((costQ.data?.by_model ?? []).map((r) => [r.model, r.cost]));
 
-  if (isError) return <Card><ErrorState message={errMsg(error)} onRetry={() => refetchByModel()} /></Card>;
-  if (isLoading) return <Card><Skeleton rows={6} /></Card>;
-  if (!data || data.length === 0) return <Card><Empty label={EMPTY_REQUESTS} /></Card>;
-
-  const rows = [...data].sort((a, b) => {
+  // 排序仅对已加载数据生效;空/加载/错误态不参与
+  const rows = data ? [...data].sort((a, b) => {
     if (sortKey === "cost") {
       const d = (costOf.get(a.model) ?? 0) - (costOf.get(b.model) ?? 0);
       return desc ? -d : d;
     }
     const d = a[sortKey] - b[sortKey];
     return desc ? -d : d;
-  });
+  }) : [];
   const onSort = (k: SortKey) => {
     if (k === sortKey) setDesc(!desc);
     else {
@@ -64,48 +61,56 @@ export function UsageByModelTable({
       <div className="mb-3 flex justify-end">
         <SourcePills value={source} onChange={setSource} />
       </div>
-      <table className="w-full text-sm">
-        <thead>
-          <tr>
-            <Th label="模型 / 归属" />
-            <ThNum label="输入" k="input_tokens" sortKey={sortKey} desc={desc} onSort={onSort} />
-            <ThNum label="输出" k="output_tokens" sortKey={sortKey} desc={desc} onSort={onSort} />
-            <ThNum label="缓存命中" k="cache_n" sortKey={sortKey} desc={desc} onSort={onSort} />
-            <ThNum label="请求数" k="request_count" sortKey={sortKey} desc={desc} onSort={onSort} />
-            <th className="p-2 text-left text-xs font-medium text-muted-foreground">占比</th>
-            <ThNum label="命中率" k="hit_rate" sortKey={sortKey} desc={desc} onSort={onSort} />
-            <ThNum label="平均延迟" k="latency_ms" sortKey={sortKey} desc={desc} onSort={onSort} />
-            <ThNum label="成本" k="cost" sortKey={sortKey} desc={desc} onSort={onSort} />
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((r) => (
-            <tr key={r.model} className="border-t border-border">
-              <td className="p-2">
-                <div className="flex items-center gap-2">
-                  {r.model}
-                  <SourceBadge source={r.source} />
-                </div>
-              </td>
-              <td className="p-2 text-right font-mono tabular-nums">{formatTokens(r.input_tokens)}</td>
-              <td className="p-2 text-right font-mono tabular-nums">{formatTokens(r.output_tokens)}</td>
-              <td className="p-2 text-right font-mono tabular-nums text-success">{formatTokens(r.cache_n)}</td>
-              <td className="p-2 text-right font-mono tabular-nums">{formatCount(r.request_count)}</td>
-              <td className="p-2">
-                <div className="flex items-center gap-2">
-                  <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
-                    <div className="h-full rounded-full bg-primary" style={{ width: `${(r.share * 100).toFixed(1)}%` }} />
-                  </div>
-                  <span className="w-9 text-right font-mono text-xs text-muted-foreground">{formatPercent(r.share)}</span>
-                </div>
-              </td>
-              <td className="p-2 text-right font-mono tabular-nums">{formatPercent(r.hit_rate, 1)}</td>
-              <td className="p-2 text-right font-mono tabular-nums">{formatLatency(r.latency_ms)}</td>
-              <td className="p-2 text-right font-mono tabular-nums">{costQ.data ? formatCost(costOf.get(r.model) ?? 0) : "—"}</td>
+      {isError ? (
+        <ErrorState message={errMsg(error)} onRetry={() => refetchByModel()} />
+      ) : isLoading ? (
+        <Skeleton rows={6} />
+      ) : !data || data.length === 0 ? (
+        <Empty label={EMPTY_REQUESTS} />
+      ) : (
+        <table className="w-full text-sm">
+          <thead>
+            <tr>
+              <Th label="模型 / 归属" />
+              <ThNum label="输入" k="input_tokens" sortKey={sortKey} desc={desc} onSort={onSort} />
+              <ThNum label="输出" k="output_tokens" sortKey={sortKey} desc={desc} onSort={onSort} />
+              <ThNum label="缓存命中" k="cache_n" sortKey={sortKey} desc={desc} onSort={onSort} />
+              <ThNum label="请求数" k="request_count" sortKey={sortKey} desc={desc} onSort={onSort} />
+              <th className="p-2 text-left text-xs font-medium text-muted-foreground">占比</th>
+              <ThNum label="命中率" k="hit_rate" sortKey={sortKey} desc={desc} onSort={onSort} />
+              <ThNum label="平均延迟" k="latency_ms" sortKey={sortKey} desc={desc} onSort={onSort} />
+              <ThNum label="成本" k="cost" sortKey={sortKey} desc={desc} onSort={onSort} />
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.model} className="border-t border-border">
+                <td className="p-2">
+                  <div className="flex items-center gap-2">
+                    {r.model}
+                    <SourceBadge source={r.source} />
+                  </div>
+                </td>
+                <td className="p-2 text-right font-mono tabular-nums">{formatTokens(r.input_tokens)}</td>
+                <td className="p-2 text-right font-mono tabular-nums">{formatTokens(r.output_tokens)}</td>
+                <td className="p-2 text-right font-mono tabular-nums text-success">{formatTokens(r.cache_n)}</td>
+                <td className="p-2 text-right font-mono tabular-nums">{formatCount(r.request_count)}</td>
+                <td className="p-2">
+                  <div className="flex items-center gap-2">
+                    <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
+                      <div className="h-full rounded-full bg-primary" style={{ width: `${(r.share * 100).toFixed(1)}%` }} />
+                    </div>
+                    <span className="w-9 text-right font-mono text-xs text-muted-foreground">{formatPercent(r.share)}</span>
+                  </div>
+                </td>
+                <td className="p-2 text-right font-mono tabular-nums">{formatPercent(r.hit_rate, 1)}</td>
+                <td className="p-2 text-right font-mono tabular-nums">{formatLatency(r.latency_ms)}</td>
+                <td className="p-2 text-right font-mono tabular-nums">{costQ.data ? formatCost(costOf.get(r.model) ?? 0) : "—"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
     </Card>
   );
 }
