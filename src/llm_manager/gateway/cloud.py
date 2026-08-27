@@ -85,6 +85,13 @@ def resolve_global_mapping(cfg: AppConfig, path: str) -> tuple[CloudProvider, Cl
     return None
 
 
+def family_default_auth_style(family: str | None) -> str:
+    """族规则路径的默认鉴权风格:OpenAI 传统/Responses=Bearer(OpenAI 规范),
+    Claude=x-api-key(Anthropic 协议规范,Authorization Bearer 仅限 OAuth)。
+    与各厂商 base「原样粘贴即用」承诺配套;偏离标准的上游经 extra_headers 覆盖。"""
+    return "x-api-key" if family == "claude" else "bearer"
+
+
 def build_auth_headers(
     provider: CloudProvider, family: str | None, auth_style: str
 ) -> dict[str, str]:

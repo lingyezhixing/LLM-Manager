@@ -122,6 +122,8 @@ Embedding / Reranker 模型同样走 OpenAI 路径。
 
 端点 base 约定（厂商文档原样粘贴即用）：OpenAI 传统 / Responses 族 base 含版本段（如 `https://api.openai.com/v1`，请求路径的 `v1/` 会被剥掉再拼到 base 后）；Claude 族 base 不含 `/v1`（如 `https://api.anthropic.com`，请求路径 `v1/messages` 原样拼接）。
 
+鉴权族默认：OpenAI 传统 / Responses 族发送 `Authorization: Bearer <key>`；Claude 族按 Anthropic 协议规范发送 `x-api-key: <key>` 并自动补 `anthropic-version`。偏离标准的上游可用「高级 → 额外请求头」注入同名头覆盖（键名大小写不敏感）；API Key 留空则族默认头整体不发送（自建聚合器免鉴权场景）。本地模型命名空间限制：本地模型名 / 别名不得含 `/`、也不得与云服务商名相同（用量锚点共用一张表，撞名会导致成本归属混淆）。
+
 改服务商配置即时生效，无需重启。出网纪律：仅当「已配置且启用」的服务商收到对应请求时才出网，默认零配置零出网、无任何自动外呼。
 
 ### 环境变量

@@ -157,3 +157,12 @@ def test_apply_extra_headers_case_variant_key_overrides_family_default():
     h = {"authorization": "Bearer K"}
     cloud.apply_extra_headers(h, p)
     assert h == {"authorization": "Bearer OTHER"}  # 唯一键,值被覆盖
+
+
+def test_family_default_auth_style():
+    """族规则路径的默认鉴权风格:OpenAI 传统/Responses=Bearer(OpenAI 规范),
+    Claude=x-api-key(Anthropic 协议规范,Bearer 仅限 OAuth)。"""
+    assert cloud.family_default_auth_style("openai") == "bearer"
+    assert cloud.family_default_auth_style("responses") == "bearer"
+    assert cloud.family_default_auth_style("claude") == "x-api-key"
+    assert cloud.family_default_auth_style(None) == "bearer"

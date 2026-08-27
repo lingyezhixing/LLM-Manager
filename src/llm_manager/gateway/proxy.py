@@ -24,6 +24,7 @@ from llm_manager.gateway.cloud import (
     apply_extra_headers,
     build_auth_headers,
     classify_path,
+    family_default_auth_style,
     join_url,
     mapping_for,
     resolve_cloud_model,
@@ -268,7 +269,7 @@ async def forward_cloud(
         if not base:
             raise HTTPException(404, f"provider '{provider_name}' 未配置该接口")
         url = join_url(base, path, family)
-        auth_style = "bearer"
+        auth_style = family_default_auth_style(family)
 
     model_anchor = provider_name
     if isinstance(body, dict):

@@ -897,3 +897,41 @@ async def test_cloud_forward_strips_case_variant_auth_headers():
     assert seen["authorization"] == ["Bearer SK"]
     assert seen["x-api-key"] == []
     await client.aclose()
+
+
+async def test_cloud_forward_claude_family_sends_x_api_key():
+    """Claude 族族规则路径默认 x-api-key(Anthropic 协议规范)+ anthropic-version,
+    不发 Bearer;api.anthropic.com 原样粘贴即用。"""
+    state._reset()
+    seen = {}
+
+    def handler(req):
+        seen["authorization"] = req.headers.get_list("authorization")
+        seen["x-api-key"] = req.headers.get_list("x-api-key")
+        seen["anthropic-version"] = req.headers.get("anthropic-version")
+        return httpx.Response(
+            200,
+            json={"usage": {"input_tokens": 2, "output_tokens": 3}},
+            headers={"content-type": "application/json"},
+        )
+
+    client = _cloud_client(handler)
+    cfg = _cloud_cfg()
+    from dataclasses import replace
+
+    ds = replace(
+        cfg.cloud_providers["ds"],
+        openai_base="",
+        claude_base="https://api.deepseek.com/anthropic",
+    )
+    cfg = replace(cfg, cloud_providers={"ds": ds})
+    db = open_db(Path(":memory:"))
+    req = _make_request("POST", "v1/messages", {"model": "ds/deepseek-chat"})
+    resp = await proxy.forward(
+        req, "v1/messages", FakeLifecycle(), cfg, db, {}, cloud_client=client
+    )
+    assert resp.status_code == 200
+    assert seen["x-api-key"] == ["SK"]
+    assert seen["anthropic-version"] == "2023-06-01"
+    assert seen["authorization"] == []
+    await client.aclose()
