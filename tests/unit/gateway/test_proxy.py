@@ -1,6 +1,7 @@
 import asyncio
 import json
 from pathlib import Path
+from urllib.parse import parse_qs
 
 import httpx
 import pytest
@@ -279,7 +280,7 @@ async def test_stream_wrapper_forwards_chunks_records_usage_ends_request():
 
 
 # ---------- forward ----------
-def _make_request(method, path, json_body, content_type="application/json"):
+def _make_request(method, path, json_body, content_type="application/json", query_string=b""):
     from starlette.requests import Request as StarletteRequest
 
     body = json.dumps(json_body).encode() if json_body is not None else b""
@@ -288,7 +289,7 @@ def _make_request(method, path, json_body, content_type="application/json"):
         "method": method,
         "path": path.split("/"),
         "raw_path": path.encode(),
-        "query_string": b"",
+        "query_string": query_string,
         "headers": [(b"content-type", content_type.encode()), (b"host", b"x")]
         + ([(b"content-length", str(len(body)).encode())] if body else []),
     }
@@ -776,4 +777,87 @@ async def test_cloud_forward_unknown_provider_404_via_local_resolve():
             )
         assert ei.value.status_code == 404
         state._reset()
+    await client.aclose()
+
+
+async def test_cloud_forward_extra_headers_case_variant_does_not_duplicate_auth():
+    """I1 回归:extra_headers 键大小写变体('Authorization')不得与族默认
+    ('authorization')并存为两个头——上游只收到一个 authorization,值为 extra_headers
+    覆盖值(否则部分上游 401)。"""
+    state._reset()
+    cfg = _cloud_cfg()
+    cfg = AppConfig(
+        program=cfg.program,
+        models=cfg.models,
+        wol=None,
+        claude_configs={},
+        cloud_providers={
+            "ds": CloudProvider(
+                name="ds",
+                api_key="SK",
+                enabled=True,
+                openai_base="https://api.deepseek.com",
+                models=(CloudModel(model_name="deepseek-chat", support_cache=True),),
+                extra_headers=(("Authorization", "Bearer OTHER"),),
+            ),
+            "off": CloudProvider(name="off", api_key="", enabled=False, openai_base="https://x"),
+        },
+    )
+    seen = {}
+
+    def handler(req):
+        seen["auth"] = req.headers.get_list("authorization")
+        return httpx.Response(200, json={}, headers={"content-type": "application/json"})
+
+    client = _cloud_client(handler)
+    db = open_db(Path(":memory:"))
+    req = _make_request("POST", "v1/chat/completions", {"model": "ds/deepseek-chat"})
+    resp = await proxy.forward(
+        req, "v1/chat/completions", FakeLifecycle(), cfg, db, {}, cloud_client=client
+    )
+    assert resp.status_code == 200
+    assert seen["auth"] == ["Bearer OTHER"]  # 恰一个头,值 = extra_headers 覆盖值
+    await client.aclose()
+
+
+async def test_cloud_mapping_target_url_query_params_win_over_client():
+    """I2 回归(spec §5.3):target_url 自带 query 与客户端 query 同名冲突时目标参数优先,
+    客户端未冲突参数仍透传。"""
+    state._reset()
+    cfg = _cloud_cfg()
+    cfg = AppConfig(
+        program=cfg.program,
+        models=cfg.models,
+        wol=None,
+        claude_configs={},
+        cloud_providers={
+            "ds": CloudProvider(
+                name="ds",
+                api_key="SK",
+                enabled=True,
+                mappings=(
+                    CloudMapping(
+                        local_path="v1/ge",
+                        target_url="https://api.ds/ge?tz=server",
+                        auth_style="none",
+                    ),
+                ),
+            ),
+            "off": CloudProvider(name="off", api_key="", enabled=False, openai_base="https://x"),
+        },
+    )
+    seen = {}
+
+    def handler(req):
+        seen["url"] = str(req.url)
+        return httpx.Response(200, json={}, headers={"content-type": "application/json"})
+
+    client = _cloud_client(handler)
+    db = open_db(Path(":memory:"))
+    req = _make_request("GET", "v1/ge", None, query_string=b"tz=client&x=1")
+    resp = await proxy.forward(req, "v1/ge", FakeLifecycle(), cfg, db, {}, cloud_client=client)
+    assert resp.status_code == 200
+    qs = parse_qs(seen["url"].split("?", 1)[1])
+    assert qs["tz"] == ["server"]  # target_url 参数优先
+    assert qs["x"] == ["1"]  # 客户端未冲突参数透传
     await client.aclose()

@@ -155,7 +155,7 @@ pyright src/llm_manager            # 类型检查(0 errors 基线)
 npm run build        # = tsc -b && vite build;改前端后必跑(8080 serve dist)
 npx oxlint src       # lint(存量 2 warning:toast/dialog 的 only-export-components,已知)
 npx tsc -b           # 仅类型检查
-npm test             # vitest run(核心纯逻辑:日志 reducer 状态机/块划分;11 例基线)
+npm test             # vitest run(核心纯逻辑:日志 reducer 状态机/块划分;14 例基线)
 ```
 
 **CI(`.github/workflows/ci.yml`)**:push main / PR 触发,三 job 与上述命令同一套:

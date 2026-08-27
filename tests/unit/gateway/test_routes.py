@@ -296,4 +296,30 @@ def test_get_mapping_forwards_cloud(tmp_path, monkeypatch):
         assert r2.status_code == 503  # 禁用 → 503
         r3 = c.get("/some/spa/route")
         assert r3.status_code == 200 and "SPA" in r3.text  # 未命中 → SPA 兜底
-    cloud_client.aclose()
+    import asyncio
+
+    asyncio.run(cloud_client.aclose())
+
+
+def test_cloud_post_via_catchall_uses_cloud_client():
+    """C1 回归:POST catch-all(_forward)必须透传 cloud_client,否则真实 app 中
+    云端请求恒 500('cloud client not initialized')。同时覆盖 I3(app 级 POST 测试缺失)。"""
+    import asyncio
+    import json
+
+    seen = {}
+
+    def handler(req):
+        seen["url"] = str(req.url)
+        seen["body"] = json.loads(req.content or b"{}")
+        return httpx.Response(200, json={}, headers={"content-type": "application/json"})
+
+    app = FastAPI()
+    _register(app, _cloud_cfg())
+    app.state.cloud_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    with TestClient(app) as c:
+        r = c.post("/v1/chat/completions", json={"model": "deepseek/deepseek-chat"})
+    assert r.status_code == 200
+    assert seen["url"] == "https://api.deepseek.com/chat/completions"
+    assert seen["body"]["model"] == "deepseek-chat"  # 上游见到改写后的真实模型名
+    asyncio.run(app.state.cloud_client.aclose())

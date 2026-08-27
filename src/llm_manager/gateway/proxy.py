@@ -299,6 +299,15 @@ async def forward_cloud(
     apply_extra_headers(headers, provider)
 
     logger.info("CLOUD REQ %s %s provider=%s", request.method, url, provider_name)
+    # spec §5.3:target_url 自带 query 与客户端 query 同名冲突时目标参数优先
+    # (httpx 默认以客户端 params 覆盖 URL 自带 query);客户端未冲突参数仍透传。
+    # 做法:URL 拆出自带 query 剥离重发,统一经 params 合并(客户端打底、目标覆盖)。
+    params = request.query_params
+    if "?" in url:
+        url, _, target_query = url.partition("?")
+        merged = dict(request.query_params)
+        merged.update(httpx.QueryParams(target_query))
+        params = merged
     resp = None
     try:
         resp = await cloud_client.send(
@@ -307,7 +316,7 @@ async def forward_cloud(
                 url,
                 headers=headers,
                 content=request_data,
-                params=request.query_params,
+                params=params,
             ),
             stream=True,
         )
@@ -474,7 +483,10 @@ def register_proxy_routes(
 
     async def _forward(path: str, request: Request) -> Response:
         cfg = request.app.state.config_store.snapshot()  # 读穿:每请求 fresh(CRUD 后新别名可路由)
-        return await forward(request, path, lifecycle, cfg, db, client_pool)
+        cloud_client = getattr(request.app.state, "cloud_client", None)
+        return await forward(
+            request, path, lifecycle, cfg, db, client_pool, cloud_client=cloud_client
+        )
 
     @app.post("/{path:path}", operation_id="catch_all__path__post")
     async def catch_all_post(path: str, request: Request) -> Response:

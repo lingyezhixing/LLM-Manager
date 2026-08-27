@@ -88,7 +88,8 @@ def resolve_global_mapping(cfg: AppConfig, path: str) -> tuple[CloudProvider, Cl
 def build_auth_headers(
     provider: CloudProvider, family: str | None, auth_style: str
 ) -> dict[str, str]:
-    """族默认鉴权头注入(spec §5.2):api_key 空或 auth_style=none → 不注入;Claude 补 anthropic-version。"""
+    """族默认鉴权头注入(spec §5.2):api_key 空或 auth_style=none → 不注入;Claude 补 anthropic-version。
+    键名一律小写,与 apply_extra_headers 的键归一约定一致(大小写变体不会并存)。"""
     if auth_style == "none" or not provider.api_key:
         return {}
     if auth_style == "x-api-key":
@@ -101,11 +102,13 @@ def build_auth_headers(
 
 
 def apply_extra_headers(headers: dict[str, str], provider: CloudProvider) -> None:
-    """provider 级 extra_headers 统一施加:'{key}' → api_key;替换后空 / 原值为空 → 不发;同名覆盖族默认。"""
+    """provider 级 extra_headers 统一施加:'{key}' → api_key;替换后空 / 原值为空 → 不发;
+    同名覆盖族默认;键名小写归一——用户填 'Authorization' 也写进 'authorization' 同键,
+    避免与族默认并存成双鉴权头(部分上游 401)。"""
     for k, v in provider.extra_headers:
         if not k or not v:
             continue
         val = v.replace("{key}", provider.api_key)
         if val == "":
             continue
-        headers[k] = val
+        headers[k.lower()] = val

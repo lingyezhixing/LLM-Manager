@@ -1,7 +1,7 @@
 import type { UsageSeriesParams } from "./usage";
 
 /** TanStack Query key 单源工厂:全部 key 经此构造,禁散落数组字面量。
- *  形状:[域, ...参数](域名与 API 模块名对齐:config/data/logs/models/usage/tools/update)。 */
+ *  形状:[域, ...参数](域名与 API 模块名对齐:config/data/logs/models/providers/usage/tools/update)。 */
 export const qk = {
   config: ["config"] as const,
   restartStatus: ["restart-status"] as const,

@@ -144,6 +144,16 @@ def test_apply_extra_headers_override_and_placeholder():
     )
     h = {"authorization": "Bearer K"}
     cloud.apply_extra_headers(h, p)
-    assert h["X-A"] == "K"
-    assert "X-B" not in h  # 原值为空 → 不发
+    assert h["x-a"] == "K"  # 键名小写归一
+    assert "X-A" not in h
+    assert "X-B" not in h and "x-b" not in h  # 原值为空 → 不发
     assert h["authorization"] == "Bearer OTHER"  # 同名覆盖族默认
+
+
+def test_apply_extra_headers_case_variant_key_overrides_family_default():
+    """I1:extra_headers 用规范大写 'Authorization' 时,必须覆盖族默认小写
+    'authorization',不得并存两个键(上游收到双鉴权头)。"""
+    p = _provider(api_key="K", extra_headers=(("Authorization", "Bearer OTHER"),))
+    h = {"authorization": "Bearer K"}
+    cloud.apply_extra_headers(h, p)
+    assert h == {"authorization": "Bearer OTHER"}  # 唯一键,值被覆盖
