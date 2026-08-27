@@ -410,6 +410,14 @@ class ModelExists(Exception):
     """CRUD: 指定 name 已存在(→ 409)。"""
 
 
+class ProviderNotFound(KeyError):
+    """CRUD: 指定服务商 name 不存在(→ 404)。"""
+
+
+class ProviderExists(Exception):
+    """CRUD: 指定服务商 name 已存在(→ 409)。"""
+
+
 class ConfigValidationFailed(Exception):
     """CRUD: mutate 后 config.validate 失败(→ 422)。携带 errors 列表。"""
 

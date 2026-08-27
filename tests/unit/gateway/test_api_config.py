@@ -887,3 +887,114 @@ def test_put_program_ignores_removed_log_dir_db_path(tmp_path):
     assert r.json()["needs_restart"] is False
     p = c.get("/api/config").json()["program"]
     assert "log_dir" not in p and "db_path" not in p
+
+
+def _provider_body(name="deepseek", **kw):
+    body = {
+        "name": name,
+        "api_key": "sk-x",
+        "enabled": True,
+        "openai_base": "https://api.deepseek.com",
+        "responses_base": "",
+        "claude_base": "https://api.deepseek.com/anthropic",
+        "extra_headers": {"HTTP-Referer": "{key}"},
+        "models": [
+            {
+                "model_name": "deepseek-chat",
+                "support_cache": True,
+                "dual_pricing": False,
+                "offpeak_windows": [],
+                "tiers_base": [{"tier_index": 1, "input_price": 1.0, "output_price": 2.0}],
+                "tiers_offpeak": [],
+            }
+        ],
+        "mappings": [{"local_path": "v1/x", "target_url": "https://x/api", "auth_style": "none"}],
+    }
+    body.update(kw)
+    return body
+
+
+def test_post_provider_creates_and_lists(tmp_path):
+    with TestClient(_app(tmp_path)) as c:
+        r = c.post("/api/config/providers", json=_provider_body())
+        assert r.status_code == 201
+        listed = c.get("/api/config/providers").json()
+        assert listed[0]["name"] == "deepseek"
+        assert listed[0]["model_count"] == 1 and listed[0]["mapping_count"] == 1
+        one = c.get("/api/config/providers/deepseek").json()
+        assert one["api_key"] == "sk-x"
+        assert one["models"][0]["tiers_base"][0]["input_price"] == 1.0
+        assert one["mappings"][0]["auth_style"] == "none"
+
+
+def test_post_provider_duplicate_409(tmp_path):
+    with TestClient(_app(tmp_path)) as c:
+        c.post("/api/config/providers", json=_provider_body())
+        r = c.post("/api/config/providers", json=_provider_body())
+    assert r.status_code == 409
+
+
+def test_post_provider_bad_url_422(tmp_path):
+    with TestClient(_app(tmp_path)) as c:
+        r = c.post("/api/config/providers", json=_provider_body(openai_base="ftp://x"))
+    assert r.status_code == 422
+
+
+def test_put_provider_updates(tmp_path):
+    with TestClient(_app(tmp_path)) as c:
+        c.post("/api/config/providers", json=_provider_body())
+        r = c.put("/api/config/providers/deepseek", json=_provider_body(api_key="sk-new"))
+        assert r.status_code == 200
+        assert c.get("/api/config/providers/deepseek").json()["api_key"] == "sk-new"
+
+
+def test_put_provider_rename_migrates_anchors(tmp_path):
+    """改名 + migrate_data:models.original_name 前缀 old/ → new/ 迁移。"""
+    from llm_manager.data.usage import record_usage
+
+    app = _app(tmp_path)
+    with TestClient(app) as c:
+        c.post("/api/config/providers", json=_provider_body())
+        record_usage(app.state.db, "deepseek/deepseek-chat", 1, 2, 5, 5, 0, 5)
+        record_usage(app.state.db, "deepseek", 1, 2, 3, 3, 0, 3)  # 服务商级锚点
+        r = c.put(
+            "/api/config/providers/deepseek?migrate_data=true",
+            json=_provider_body(name="ds"),
+        )
+        assert r.status_code == 200
+        names = [
+            row["original_name"]
+            for row in app.state.db.conn.execute("SELECT original_name FROM models")
+        ]
+        assert sorted(names) == ["ds", "ds/deepseek-chat"]
+
+
+def test_put_provider_rename_conflict_409(tmp_path):
+    with TestClient(_app(tmp_path)) as c:
+        c.post("/api/config/providers", json=_provider_body())
+        # 第二个服务商须用不同 mapping local_path(mapping 全局唯一)→ 否则创建即 422,冲突无法成立
+        c.post(
+            "/api/config/providers",
+            json=_provider_body(
+                name="ds",
+                mappings=[
+                    {"local_path": "v1/y", "target_url": "https://x/api", "auth_style": "none"}
+                ],
+            ),
+        )
+        r = c.put("/api/config/providers/deepseek", json=_provider_body(name="ds"))
+    assert r.status_code == 409
+
+
+def test_put_provider_unknown_404(tmp_path):
+    with TestClient(_app(tmp_path)) as c:
+        r = c.put("/api/config/providers/nope", json=_provider_body("nope"))
+    assert r.status_code == 404
+
+
+def test_delete_provider_removes(tmp_path):
+    with TestClient(_app(tmp_path)) as c:
+        c.post("/api/config/providers", json=_provider_body())
+        r = c.delete("/api/config/providers/deepseek")
+        assert r.status_code == 200
+        assert c.get("/api/config/providers").json() == []

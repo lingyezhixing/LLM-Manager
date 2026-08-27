@@ -14,12 +14,15 @@ from dataclasses import replace
 
 from fastapi import APIRouter, HTTPException, Request
 
+from llm_manager import config
 from llm_manager.config import AppConfig
 from llm_manager.data import logs as _logs
 from llm_manager.data.config_store import (
     ConfigValidationFailed,
     ModelExists,
     ModelNotFound,
+    ProviderExists,
+    ProviderNotFound,
     mutate_appconfig,
     set_settings,
 )
@@ -36,7 +39,10 @@ from llm_manager.gateway.api.config_schemas import (
     LogRetentionUpdate,
     ModelDefInput,
     ProgramUpdate,
+    ProviderInput,
+    _to_cloud_provider,
     _to_model_config,
+    cloud_provider_to_dict,
 )
 from llm_manager.version import get_version
 
@@ -135,6 +141,55 @@ def _routing_served(primary: str, cfg: AppConfig) -> list[str]:
     if state.get_status(primary) == ModelStatus.ROUTING:
         return [cfg.models[primary].aliases[0]]
     return []
+
+
+def _create_provider(cfg: AppConfig, body: ProviderInput) -> AppConfig:
+    """fn: AppConfig→AppConfig。name 已存在 → ProviderExists(→ 409)。"""
+    if body.name in cfg.cloud_providers:
+        raise ProviderExists(body.name)
+    return replace(
+        cfg, cloud_providers={**cfg.cloud_providers, body.name: _to_cloud_provider(body)}
+    )
+
+
+def _update_provider(cfg: AppConfig, name: str, body: ProviderInput) -> AppConfig:
+    """fn: 全量替换 name 处服务商定义。
+    - 不存在 → ProviderNotFound(→ 404)
+    - body.name == name → 全量替换该定义
+    - body.name ≠ name(改名)→ 换字典 key;新名已存在 → ProviderExists(→ 409)。
+    数据层迁移(models.original_name 锚点)由端点经 post_write 处理,此纯函数不碰 DB。"""
+    if name not in cfg.cloud_providers:
+        raise ProviderNotFound(name)
+    if body.name == name:
+        return replace(cfg, cloud_providers={**cfg.cloud_providers, name: _to_cloud_provider(body)})
+    if body.name in cfg.cloud_providers:
+        raise ProviderExists(body.name)
+    new_cps = {k: v for k, v in cfg.cloud_providers.items() if k != name}
+    new_cps[body.name] = _to_cloud_provider(body)
+    return replace(cfg, cloud_providers=new_cps)
+
+
+def _delete_provider(cfg: AppConfig, name: str) -> AppConfig:
+    """fn: 删 name。不存在 → ProviderNotFound(→ 404)。"""
+    if name not in cfg.cloud_providers:
+        raise ProviderNotFound(name)
+    return replace(cfg, cloud_providers={k: v for k, v in cfg.cloud_providers.items() if k != name})
+
+
+def _provider_rename_migrator(old: str, new: str) -> Callable:
+    """改名 post_write:用量锚点前缀 old/ → new/(服务商级锚点 old → new)。"""
+
+    def migrate(db, _old_cfg, _new_cfg):
+        db.conn.execute("UPDATE models SET original_name=? WHERE original_name=?", (new, old))
+        db.conn.execute(
+            "UPDATE models SET original_name=? || substr(original_name, ?) "
+            "WHERE substr(original_name, 1, ?) = ?",
+            # substr 起位 = len(old)+1:把前缀 "old/" 整体剥掉(len(old) 个字符 + '/' 分隔符),
+            # 保留余下部分接上 new(如 deepseek/deepseek-chat → ds/deepseek-chat)。
+            (new, len(old) + 1, len(old) + 1, old + "/"),
+        )
+
+    return migrate
 
 
 def register_config_routes(api: APIRouter) -> None:
@@ -394,3 +449,85 @@ def register_config_routes(api: APIRouter) -> None:
         except Exception:
             logger.warning("delete model '%s' log sessions failed", name, exc_info=True)
         return {"affected_routing": [], "hint": None}
+
+    @api.get("/config/providers")
+    def list_providers(request: Request) -> list[dict]:
+        cfg = get_config_store(request).snapshot()
+        return [
+            {
+                "name": p.name,
+                "enabled": p.enabled,
+                "openai_base": p.openai_base,
+                "responses_base": p.responses_base,
+                "claude_base": p.claude_base,
+                "model_count": len(p.models),
+                "mapping_count": len(p.mappings),
+            }
+            for p in cfg.cloud_providers.values()
+        ]
+
+    @api.post("/config/providers", status_code=201)
+    def create_provider(request: Request, body: ProviderInput) -> dict:
+        db = get_db(request)
+        store = get_config_store(request)
+        try:
+            mutate_appconfig(db, lambda c: _create_provider(c, body))
+        except ProviderExists:
+            raise HTTPException(409, f"provider '{body.name}' already exists")
+        except ConfigValidationFailed as e:
+            raise HTTPException(422, detail=e.errors)
+        except ValueError as e:
+            raise HTTPException(422, detail=str(e))
+        store.reload()
+        return {}
+
+    @api.get("/config/providers/{name}")
+    def get_provider(name: str, request: Request) -> dict:
+        cfg = get_config_store(request).snapshot()
+        p = cfg.cloud_providers.get(name)
+        if p is None:
+            raise HTTPException(404, f"provider '{name}' not found")
+        return cloud_provider_to_dict(p)
+
+    @api.put("/config/providers/{name}")
+    def put_provider(
+        name: str,
+        request: Request,
+        body: ProviderInput,
+        migrate_data: bool = False,
+        dry_run: bool = False,
+    ) -> dict:
+        db = get_db(request)
+        store = get_config_store(request)
+        is_rename = body.name != name
+        post = _provider_rename_migrator(name, body.name) if (is_rename and migrate_data) else None
+        try:
+            if dry_run:
+                new_cfg = _update_provider(store.snapshot(), name, body)
+                errors = config.validate(new_cfg)
+                if errors:
+                    raise ConfigValidationFailed(errors)
+            else:
+                mutate_appconfig(db, lambda c: _update_provider(c, name, body), post_write=post)
+        except ProviderNotFound:
+            raise HTTPException(404, f"provider '{name}' not found")
+        except ProviderExists:
+            raise HTTPException(409, f"provider '{body.name}' already exists")
+        except ConfigValidationFailed as e:
+            raise HTTPException(422, detail=e.errors)
+        except ValueError as e:
+            raise HTTPException(422, detail=str(e))
+        if not dry_run:
+            store.reload()
+        return {"affected_routing": [], "hint": None}
+
+    @api.delete("/config/providers/{name}")
+    def delete_provider(name: str, request: Request) -> dict:
+        db = get_db(request)
+        store = get_config_store(request)
+        try:
+            mutate_appconfig(db, lambda c: _delete_provider(c, name))
+        except ProviderNotFound:
+            raise HTTPException(404, f"provider '{name}' not found")
+        store.reload()
+        return {}

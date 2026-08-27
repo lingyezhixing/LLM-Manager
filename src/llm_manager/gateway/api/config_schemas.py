@@ -6,7 +6,16 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from llm_manager.config import ModelConfig, Pricing, Scheme
+from llm_manager.config import (
+    CloudMapping,
+    CloudModel,
+    CloudProvider,
+    ModelConfig,
+    Pricing,
+    PricingTier,
+    Scheme,
+    TimeWindow,
+)
 
 
 class ProgramUpdate(BaseModel):
@@ -84,3 +93,104 @@ def _to_model_config(body: ModelDefInput) -> ModelConfig:
         schemes=schemes,
         pricing=Pricing.from_dict(body.pricing.model_dump()),
     )
+
+
+class CloudTierInput(BaseModel):
+    tier_index: int
+    min_input: int | None = 0
+    max_input: int | None = None
+    min_output: int | None = 0
+    max_output: int | None = None
+    input_price: float = 0.0
+    output_price: float = 0.0
+    cache_write_price: float = 0.0
+    cache_read_price: float = 0.0
+
+
+class CloudTimeWindowInput(BaseModel):
+    start_min: int
+    end_min: int
+
+
+class CloudModelInput(BaseModel):
+    model_name: str
+    support_cache: bool = False
+    dual_pricing: bool = False
+    offpeak_windows: list[CloudTimeWindowInput] = []
+    tiers_base: list[CloudTierInput] = []
+    tiers_offpeak: list[CloudTierInput] = []
+
+
+class CloudMappingInput(BaseModel):
+    local_path: str
+    target_url: str
+    auth_style: Literal["bearer", "x-api-key", "none"] = "bearer"
+
+
+class ProviderInput(BaseModel):
+    name: str
+    api_key: str = ""
+    enabled: bool = True
+    openai_base: str = ""
+    responses_base: str = ""
+    claude_base: str = ""
+    extra_headers: dict[str, str] = {}
+    models: list[CloudModelInput] = []
+    mappings: list[CloudMappingInput] = []
+
+
+def _to_cloud_provider(body: ProviderInput) -> CloudProvider:
+    return CloudProvider(
+        name=body.name,
+        api_key=body.api_key,
+        enabled=body.enabled,
+        openai_base=body.openai_base,
+        responses_base=body.responses_base,
+        claude_base=body.claude_base,
+        extra_headers=tuple(body.extra_headers.items()),
+        models=tuple(
+            CloudModel(
+                model_name=m.model_name,
+                support_cache=m.support_cache,
+                dual_pricing=m.dual_pricing,
+                offpeak_windows=tuple(
+                    TimeWindow(w.start_min, w.end_min) for w in m.offpeak_windows
+                ),
+                tiers_base=tuple(PricingTier.from_dict(t.model_dump()) for t in m.tiers_base),
+                tiers_offpeak=tuple(PricingTier.from_dict(t.model_dump()) for t in m.tiers_offpeak),
+            )
+            for m in body.models
+        ),
+        mappings=tuple(
+            CloudMapping(x.local_path, x.target_url, x.auth_style) for x in body.mappings
+        ),
+    )
+
+
+def cloud_provider_to_dict(p: CloudProvider) -> dict:
+    return {
+        "name": p.name,
+        "api_key": p.api_key,
+        "enabled": p.enabled,
+        "openai_base": p.openai_base,
+        "responses_base": p.responses_base,
+        "claude_base": p.claude_base,
+        "extra_headers": dict(p.extra_headers),
+        "models": [
+            {
+                "model_name": m.model_name,
+                "support_cache": m.support_cache,
+                "dual_pricing": m.dual_pricing,
+                "offpeak_windows": [
+                    {"start_min": w.start_min, "end_min": w.end_min} for w in m.offpeak_windows
+                ],
+                "tiers_base": [t.to_dict() for t in m.tiers_base],
+                "tiers_offpeak": [t.to_dict() for t in m.tiers_offpeak],
+            }
+            for m in p.models
+        ],
+        "mappings": [
+            {"local_path": x.local_path, "target_url": x.target_url, "auth_style": x.auth_style}
+            for x in p.mappings
+        ],
+    }
