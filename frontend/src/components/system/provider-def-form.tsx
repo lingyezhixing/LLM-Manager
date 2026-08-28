@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Field, RemoveButton, Select, Switch, TextInput } from "@/components/ui/form";
 import { KeyValueEditor } from "@/components/ui/repeatable-fields";
@@ -43,6 +44,10 @@ export function ProviderDefForm({ provider, onSaved, onDirtyChange }: ProviderDe
   const confirm = useConfirm();
   const toast = useToast();
   const [confirming, setConfirming] = useState(false);
+  // 高级设置折叠态:默认收起;已有映射/额外请求头时初始展开(配置过的数据不静默藏起)。
+  const [advOpen, setAdvOpen] = useState(
+    () => form.mappings.length > 0 || Object.keys(form.extra_headers).length > 0,
+  );
   const saving = mutation.isPending || confirming;
   const set = <K extends keyof ProviderDef>(k: K, v: ProviderDef[K]) => setForm({ ...form, [k]: v });
 
@@ -154,9 +159,15 @@ export function ProviderDefForm({ provider, onSaved, onDirtyChange }: ProviderDe
         </Field>
       </div>
 
-      {/* 高级设置卡:自定义映射 + 额外请求头两个子区,统一收进一张卡(头部行 + 细线分隔)。 */}
-      <div className="mb-1 mt-4 text-sm font-medium text-foreground">高级设置</div>
-      <div className="overflow-hidden rounded-md border border-border">
+      {/* 高级设置:默认折叠,点标题行展开;动效仅 chevron 旋转(motion token),内容条件渲染不做高度过渡。 */}
+      <button type="button" aria-expanded={advOpen} onClick={() => setAdvOpen((v) => !v)}
+        className="mt-4 flex w-full items-center justify-between text-sm font-medium text-foreground transition-colors duration-(--motion-base) hover:text-primary-accent">
+        高级设置
+        <ChevronDown size={15}
+          className={`text-muted-foreground transition-transform duration-(--motion-base) ${advOpen ? "rotate-0" : "-rotate-90"}`} />
+      </button>
+      {advOpen && (
+        <div className="mt-1 overflow-hidden rounded-md border border-border">
         <div className="flex items-center justify-between border-b border-border-subtle px-3 py-2">
           <span className="text-xs font-medium text-muted-foreground">自定义映射</span>
           <Button type="button" size="sm" variant="ghost" onClick={addMapping}>+ 添加映射</Button>
@@ -194,7 +205,8 @@ export function ProviderDefForm({ provider, onSaved, onDirtyChange }: ProviderDe
           />
           <p className="mt-1 text-xs text-muted-foreground">值支持 {"{key}"} 占位符(替换为 API Key);空值不发送。</p>
         </div>
-      </div>
+        </div>
+      )}
 
       <div className="mb-1 mt-4 flex items-center justify-between">
         <span className="text-sm font-medium text-foreground">模型</span>
