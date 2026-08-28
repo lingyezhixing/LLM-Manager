@@ -1,5 +1,5 @@
 import { Button } from "@/components/ui/button";
-import { NumberInput } from "@/components/ui/form";
+import { NumberInput, RemoveButton } from "@/components/ui/form";
 import { numOrNull as num } from "@/lib/format";
 import type { CloudTier, PricingTier } from "@/lib/api";
 
@@ -58,8 +58,7 @@ export function TierEditor({ tiers, supportCache, onChange }: {
             onChange={(v) => setTier(i, { ...t, cache_read_price: v ?? 0 })} />
           <TierInput label="缓存写" value={t.cache_write_price} disabled={!supportCache}
             onChange={(v) => setTier(i, { ...t, cache_write_price: v ?? 0 })} />
-          <Button type="button" size="sm" variant="ghost" className="mb-0.5 text-destructive"
-            onClick={() => removeTier(i)}>删除</Button>
+          <RemoveButton label={`删除阶梯 ${t.tier_index}`} onClick={() => removeTier(i)} />
         </div>
       ))}
       <Button type="button" size="sm" variant="ghost" onClick={addTier}>+ 添加阶梯</Button>

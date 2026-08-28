@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Field, Select, Switch, TextInput } from "@/components/ui/form";
+import { Field, RemoveButton, Select, Switch, TextInput } from "@/components/ui/form";
 import { KeyValueEditor } from "@/components/ui/repeatable-fields";
 import { TierEditor } from "@/components/system/tier-editor";
 import { errMsg } from "@/lib/format";
@@ -123,18 +123,18 @@ export function ProviderDefForm({ provider, onSaved, onDirtyChange }: ProviderDe
   return (
     <div className="relative pb-6">
       <div className="mb-1 text-sm font-medium text-foreground">基本</div>
-      <div className="grid grid-cols-1 gap-x-6 sm:grid-cols-4">
-        <Field className="sm:col-span-2" label="名称" htmlFor="pf-name">
+      {/* 名称 5 : API Key 5 : 启用 1——开关窄列(无状态文字,位置恒定)。 */}
+      <div className="grid grid-cols-1 gap-x-6 sm:grid-cols-11">
+        <Field className="sm:col-span-5" label="名称" htmlFor="pf-name">
           <TextInput id="pf-name" value={form.name} onChange={(e) => set("name", e.target.value)} />
         </Field>
-        <Field className="sm:col-span-1" label="启用" htmlFor="pf-enabled">
-          <div className="flex h-9 items-center gap-2">
-            <Switch id="pf-enabled" checked={form.enabled} onChange={(v) => set("enabled", v)} />
-            <span className="text-xs text-muted-foreground">{form.enabled ? "开" : "关"}</span>
-          </div>
-        </Field>
-        <Field className="sm:col-span-1" label="API Key" htmlFor="pf-key">
+        <Field className="sm:col-span-5" label="API Key" htmlFor="pf-key">
           <TextInput id="pf-key" type="password" value={form.api_key} onChange={(e) => set("api_key", e.target.value)} />
+        </Field>
+        <Field className="sm:col-span-1" label="启用" htmlFor="pf-enabled">
+          <div className="flex h-9 items-center">
+            <Switch id="pf-enabled" checked={form.enabled} onChange={(v) => set("enabled", v)} />
+          </div>
         </Field>
       </div>
 
@@ -154,38 +154,47 @@ export function ProviderDefForm({ provider, onSaved, onDirtyChange }: ProviderDe
         </Field>
       </div>
 
-      <div className="mb-1 mt-4 flex items-center justify-between">
-        <span className="text-sm font-medium text-foreground">自定义映射</span>
-        <Button type="button" size="sm" variant="ghost" onClick={addMapping}>+ 添加映射</Button>
+      {/* 高级设置卡:自定义映射 + 额外请求头两个子区,统一收进一张卡(头部行 + 细线分隔)。 */}
+      <div className="mb-1 mt-4 text-sm font-medium text-foreground">高级设置</div>
+      <div className="overflow-hidden rounded-md border border-border">
+        <div className="flex items-center justify-between border-b border-border-subtle px-3 py-2">
+          <span className="text-xs font-medium text-muted-foreground">自定义映射</span>
+          <Button type="button" size="sm" variant="ghost" onClick={addMapping}>+ 添加映射</Button>
+        </div>
+        <div className="flex flex-col gap-1 px-3 pb-3 pt-1">
+          {form.mappings.map((m, i) => (
+            <div key={i} className="flex items-end gap-x-3">
+              <Field label="本地路径" className="min-w-40 flex-1">
+                <TextInput value={m.local_path} onChange={(e) => setMapping(i, { ...m, local_path: e.target.value })} />
+              </Field>
+              <Field label="云端 URL" className="min-w-40 flex-1">
+                <TextInput value={m.target_url} onChange={(e) => setMapping(i, { ...m, target_url: e.target.value })} />
+              </Field>
+              <Field label="鉴权" className="w-28">
+                <Select value={m.auth_style} onChange={(e) => setMapping(i, { ...m, auth_style: e.target.value as CloudMapping["auth_style"] })}>
+                  <option value="bearer">Bearer</option>
+                  <option value="x-api-key">x-api-key</option>
+                  <option value="none">无</option>
+                </Select>
+              </Field>
+              <RemoveButton label={`删除映射 ${i + 1}`} className="mb-4" onClick={() => removeMapping(i)} />
+            </div>
+          ))}
+          {form.mappings.length === 0 && (
+            <p className="text-micro leading-relaxed text-muted-foreground">
+              尚未添加映射——把本地路径指向任意云端 URL,可绕过三族端点直连非标准接口。
+            </p>
+          )}
+        </div>
+        <div className="border-t border-border-subtle px-3 pb-3 pt-2">
+          <div className="mb-1 text-xs font-medium text-muted-foreground">额外请求头</div>
+          <KeyValueEditor
+            entries={form.extra_headers as Record<string, string | number>}
+            onChange={(next) => set("extra_headers", Object.fromEntries(Object.entries(next).map(([k, v]) => [k, String(v)])))}
+          />
+          <p className="mt-1 text-xs text-muted-foreground">值支持 {"{key}"} 占位符(替换为 API Key);空值不发送。</p>
+        </div>
       </div>
-      <div className="flex flex-col gap-2">
-        {form.mappings.map((m, i) => (
-          <div key={i} className="flex flex-wrap items-end gap-x-3 gap-y-2 rounded-md border border-border px-3 py-2">
-            <Field label="本地路径" className="min-w-40 flex-1">
-              <TextInput value={m.local_path} onChange={(e) => setMapping(i, { ...m, local_path: e.target.value })} />
-            </Field>
-            <Field label="云端 URL" className="min-w-40 flex-1">
-              <TextInput value={m.target_url} onChange={(e) => setMapping(i, { ...m, target_url: e.target.value })} />
-            </Field>
-            <Field label="鉴权">
-              <Select value={m.auth_style} onChange={(e) => setMapping(i, { ...m, auth_style: e.target.value as CloudMapping["auth_style"] })}>
-                <option value="bearer">Bearer</option>
-                <option value="x-api-key">x-api-key</option>
-                <option value="none">无</option>
-              </Select>
-            </Field>
-            <button type="button" className="mb-1 h-9 shrink-0 px-2 text-xs text-muted-foreground hover:text-destructive"
-              onClick={() => removeMapping(i)}>✕</button>
-          </div>
-        ))}
-      </div>
-
-      <div className="mb-1 mt-4 text-sm font-medium text-foreground">高级</div>
-      <KeyValueEditor
-        entries={form.extra_headers as Record<string, string | number>}
-        onChange={(next) => set("extra_headers", Object.fromEntries(Object.entries(next).map(([k, v]) => [k, String(v)])))}
-      />
-      <p className="mt-1 text-xs text-muted-foreground">值支持 {"{key}"} 占位符(替换为 API Key);空值不发送。</p>
 
       <div className="mb-1 mt-4 flex items-center justify-between">
         <span className="text-sm font-medium text-foreground">模型</span>
@@ -194,34 +203,29 @@ export function ProviderDefForm({ provider, onSaved, onDirtyChange }: ProviderDe
       <div className="flex flex-col gap-3">
         {form.models.map((m, i) => (
           <div key={i} className="overflow-hidden rounded-md border border-border">
-            {/* 身份行:编号并入名称 label(模型 1/2…),开关带状态文字,删除收进行尾;下缘细线与计费体分隔 */}
+            {/* 身份行:编号并入名称 label(模型 1/2…),开关不带文字(位置恒定不漂移),删除收进行尾;
+                下缘细线与计费体分隔 */}
             <div className="flex flex-wrap items-end gap-x-3 gap-y-2 border-b border-border-subtle px-3 pb-1 pt-2">
               <Field label={`模型 ${i + 1}`} className="min-w-44 flex-1">
                 <TextInput value={m.model_name} placeholder="如 deepseek-chat"
                   onChange={(e) => setModel(i, { ...m, model_name: e.target.value })} />
               </Field>
               <Field label="支持缓存">
-                <div className="flex h-9 items-center gap-2">
+                <div className="flex h-9 items-center">
                   <Switch checked={m.support_cache} onChange={(v) => setModel(i, { ...m, support_cache: v })} />
-                  <span className="text-xs text-muted-foreground">{m.support_cache ? "开" : "关"}</span>
                 </div>
               </Field>
               <Field label="峰谷双价">
-                <div className="flex h-9 items-center gap-2">
+                <div className="flex h-9 items-center">
                   <Switch checked={m.dual_pricing} onChange={(v) => setModel(i, { ...m, dual_pricing: v })} />
-                  {m.dual_pricing
-                    ? <span className="text-xs text-primary-accent">峰价启用</span>
-                    : <span className="text-xs text-muted-foreground">关</span>}
                 </div>
               </Field>
-              <button type="button" aria-label={`删除模型 ${i + 1}`}
-                className="mb-4 h-9 shrink-0 px-2 text-xs text-muted-foreground hover:text-destructive"
-                onClick={() => removeModel(i)}>✕</button>
+              <RemoveButton label={`删除模型 ${i + 1}`} className="mb-4" onClick={() => removeModel(i)} />
             </div>
 
             {/* 基础阶梯:峰谷双价关闭时的唯一计价口径(即基础/谷价) */}
             <div className="px-3 pb-2 pt-1">
-              <div className="text-xs text-muted-foreground">基础阶梯价格(即基础/谷价;元/百万 token)</div>
+              <div className="text-xs font-medium text-muted-foreground">基础阶梯价格(即基础/谷价;元/百万 token)</div>
               <TierEditor tiers={m.tiers_base} supportCache={m.support_cache}
                 onChange={(next) => setModel(i, { ...m, tiers_base: next })} />
             </div>
@@ -230,7 +234,7 @@ export function ProviderDefForm({ provider, onSaved, onDirtyChange }: ProviderDe
               /* 峰谷子面板:浅底内嵌区紧随其开关之下,收纳峰时段与峰价,与基础区隔开 */
               <div className="border-t border-dashed border-border-subtle bg-card-2 px-3 pb-2 pt-1">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs text-muted-foreground">峰时段(服务器本地时间;须在同一天内,起 &lt; 止)</span>
+                  <span className="text-xs font-medium text-muted-foreground">峰时段(服务器本地时间;须在同一天内,起 &lt; 止)</span>
                   <Button type="button" size="sm" variant="ghost" onClick={() => addWindow(i)}>+ 添加时段</Button>
                 </div>
                 <div className="flex flex-col gap-1">
@@ -245,9 +249,7 @@ export function ProviderDefForm({ provider, onSaved, onDirtyChange }: ProviderDe
                         <TextInput value={minutesToHhmm(w.end_min) ?? ""} placeholder="22:00"
                           onChange={(e) => setWindow(i, wi, "end_min", e.target.value)} />
                       </Field>
-                      <button type="button" aria-label={`删除时段 ${wi + 1}`}
-                        className="mb-4 h-9 shrink-0 px-2 text-xs text-muted-foreground hover:text-destructive"
-                        onClick={() => removeWindow(i, wi)}>✕</button>
+                      <RemoveButton label={`删除时段 ${wi + 1}`} className="mb-4" onClick={() => removeWindow(i, wi)} />
                     </div>
                   ))}
                   {m.peak_windows.length === 0 && (
@@ -256,7 +258,7 @@ export function ProviderDefForm({ provider, onSaved, onDirtyChange }: ProviderDe
                     </p>
                   )}
                 </div>
-                <div className="text-xs text-muted-foreground">峰价阶梯(元/百万 token;请求完成时刻落在任一峰时段按此计价,整单判定)</div>
+                <div className="text-xs font-medium text-muted-foreground">峰价阶梯(元/百万 token;请求完成时刻落在任一峰时段按此计价,整单判定)</div>
                 <TierEditor tiers={m.tiers_peak} supportCache={m.support_cache}
                   onChange={(next) => setModel(i, { ...m, tiers_peak: next })} />
               </div>

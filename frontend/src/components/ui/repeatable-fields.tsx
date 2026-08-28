@@ -1,7 +1,7 @@
 import type { KeyboardEvent } from "react";
 import { Button } from "@/components/ui/button";
 import { ComboboxInput } from "@/components/ui/combobox";
-import { NumberInput, TextInput } from "@/components/ui/form";
+import { NumberInput, RemoveButton, TextInput } from "@/components/ui/form";
 import { isPendingKey, PENDING_KEY_PREFIX } from "@/lib/pending-keys";
 
 // 可复用行编辑器原子(模型定义 CRUD 用)。
@@ -11,8 +11,6 @@ import { isPendingKey, PENDING_KEY_PREFIX } from "@/lib/pending-keys";
 // 行 key 用 index:行完全受控(value 全由 props 驱动,无内部 state),index key 下删除
 // 中间行显示仍正确(React 复用节点但 value 随 props 更新),仅焦点可能错位——低风险已知
 // 折衷;引入稳定行 id 会污染父级数据模型(需后端类型同步),收益不足,维持现状。
-
-const removeBtn = "shrink-0 h-9 px-2 text-xs text-muted-foreground hover:text-destructive";
 
 let pendingSeq = 0;
 
@@ -47,7 +45,7 @@ export function StringListEditor({
               }
             }}
           />
-          <button type="button" className={removeBtn} onClick={() => remove(i)}>✕</button>
+          <RemoveButton label="删除此项" onClick={() => remove(i)} />
         </div>
       ))}
       <Button type="button" size="sm" variant="ghost" onClick={add}>+ 添加</Button>
@@ -107,7 +105,9 @@ export function KeyValueEditor({
               onChange={(key) => setKey(i, key)}
             />
           ) : (
+            // 键框限 flex-1:裸 w-full 以 100% 基准占满行,把值框挤到 0 宽
             <TextInput
+              className="min-w-0 flex-1"
               value={isPendingKey(k) ? "" : k}
               onChange={(e) => setKey(i, e.target.value)}
             />
@@ -128,7 +128,7 @@ export function KeyValueEditor({
               />
             </div>
           )}
-          <button type="button" className={removeBtn} onClick={() => remove(i)}>✕</button>
+          <RemoveButton label="删除此项" onClick={() => remove(i)} />
         </div>
       ))}
       <Button type="button" size="sm" variant="ghost" onClick={add}>+ 添加</Button>
