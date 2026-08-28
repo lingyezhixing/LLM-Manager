@@ -43,7 +43,7 @@ export function SessionStats() {
       <div className="mt-2 rounded-lg border border-border-subtle bg-card-2 px-3 py-2">
         <div className="flex items-baseline justify-between">
           <span className="text-xs text-muted-foreground">命中率</span>
-          <span className="font-semibold text-primary-accent">{pct}%</span>
+          <span className="font-mono font-semibold text-primary-accent tabular-nums">{pct}%</span>
         </div>
         <div className="mt-1.5 h-1.5 overflow-hidden rounded bg-destructive/25">
           <div className="h-full bg-success transition-[width] duration-(--motion-slow)" style={{ width: `${pct}%` }} />

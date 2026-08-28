@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
-import { Loading } from "@/components/ui/card";
+import { Empty, Loading } from "@/components/ui/card";
 import { useConfirm } from "@/lib/hooks/use-confirm";
 import { ErrorState } from "@/components/ui/error-state";
 import { InfoTile } from "@/components/ui/info-tile";
@@ -90,14 +90,14 @@ export function DatabasePanel() {
       </div>
 
       {/* 孤立模型管理 */}
-      <div className="rounded-lg border border-warning/40 bg-warning/5 p-3">
+      <div className="rounded-md border border-warning/40 bg-warning/10 p-3">
         <div className="text-sm font-medium text-foreground">
           {orphans.length > 0 ? `发现 ${orphans.length} 个孤立模型` : "✓ 没有发现孤立模型"}
         </div>
         {orphans.length > 0 && (
           <ul className="mt-2 flex flex-col gap-2">
             {orphans.map((name) => (
-              <li key={name} className="flex flex-wrap items-center gap-2 rounded-md border border-border bg-background px-3 py-2">
+              <li key={name} className="flex flex-wrap items-center gap-2 rounded-md border border-border-subtle bg-card-2 px-3 py-2">
                 <div className="min-w-0 flex-1">
                   <div className="text-sm font-medium text-foreground">{name}</div>
                   <div className="text-xs text-muted-foreground">此模型不在当前配置中,但数据库中存在数据</div>
@@ -122,11 +122,9 @@ export function DatabasePanel() {
       <div>
         <div className="mb-2 text-sm font-medium text-foreground">模型数据详情</div>
         {entries.length === 0 ? (
-          <div className="rounded-lg border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
-            暂无模型数据
-          </div>
+          <Empty label="暂无模型数据" />
         ) : (
-          <div className="overflow-hidden rounded-lg border border-border">
+          <div className="overflow-hidden rounded-md border border-border">
             <div className="grid grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)] gap-3 bg-muted px-3 py-2 text-xs font-medium text-muted-foreground">
               <div>模型名称</div>
               <div className="text-right">请求数量</div>
@@ -140,8 +138,8 @@ export function DatabasePanel() {
                   )}
                   <span className="truncate text-foreground">{name}</span>
                 </div>
-                <div className="text-right text-muted-foreground">{st.request_count.toLocaleString()}</div>
-                <div className={`text-right ${st.has_runtime_data ? "text-success" : "text-muted-foreground"}`}>
+                <div className="text-right font-mono text-muted-foreground tabular-nums">{st.request_count.toLocaleString()}</div>
+                <div className={`text-right font-mono tabular-nums ${st.has_runtime_data ? "text-success" : "text-muted-foreground"}`}>
                   {st.has_runtime_data ? "✓ 有" : "✗ 无"}
                 </div>
               </div>

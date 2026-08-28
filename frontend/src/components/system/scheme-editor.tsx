@@ -1,7 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
-import { Button } from "@/components/ui/button";
 import { CommandEditor } from "@/components/system/command-editor";
-import { Field, TextInput } from "@/components/ui/form";
+import { Field, RemoveButton, TextInput } from "@/components/ui/form";
 import { KeyValueEditor } from "@/components/ui/repeatable-fields";
 import { isPendingKey } from "@/lib/pending-keys";
 import { apiJson } from "@/lib/api/shared";
@@ -44,10 +43,10 @@ export function SchemeEditor({
   for (const [d, mb] of Object.entries(value.memory_mb)) if (!(d in deviceMem)) deviceMem[d] = mb;
 
   return (
-    <div className="rounded-lg border border-border p-3">
+    <div className="rounded-md border border-border p-3">
       <div className="mb-3 flex items-center justify-between">
         <span className="text-xs font-medium text-muted-foreground">方案 #{index + 1}</span>
-        <Button type="button" size="sm" variant="ghost" onClick={onRemove}>删除方案</Button>
+        <RemoveButton label={`删除方案 ${index + 1}`} onClick={onRemove} />
       </div>
       <Field label="方案名" htmlFor={`sch-src-${index}`}>
         <TextInput

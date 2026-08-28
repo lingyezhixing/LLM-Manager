@@ -84,7 +84,7 @@ export function UsageByModelTable({
           </thead>
           <tbody>
             {rows.map((r) => (
-              <tr key={r.model} className="border-t border-border">
+              <tr key={r.model} className="border-t border-border-subtle">
                 <td className="p-2">
                   <div className="flex items-center gap-2">
                     {r.model}
@@ -100,7 +100,7 @@ export function UsageByModelTable({
                     <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
                       <div className="h-full rounded-full bg-primary" style={{ width: `${(r.share * 100).toFixed(1)}%` }} />
                     </div>
-                    <span className="w-9 text-right font-mono text-xs text-muted-foreground">{formatPercent(r.share)}</span>
+                    <span className="w-9 text-right font-mono text-xs text-muted-foreground tabular-nums">{formatPercent(r.share)}</span>
                   </div>
                 </td>
                 <td className="p-2 text-right font-mono tabular-nums">{formatPercent(r.hit_rate, 1)}</td>
@@ -119,12 +119,13 @@ function Th({ label }: { label: string }) {
   return <th className="p-2 text-left text-xs font-medium text-muted-foreground">{label}</th>;
 }
 
-/** 归属徽标:模型名按命名空间归属,徽标即行 source——本地→灰、云端→primary。 */
+/** 归属徽标:模型名按命名空间归属,徽标即行 source——本地→灰、云端→primary。
+ *  形态对齐 pill 家族(rounded-full + text-ui),色义不变。 */
 function SourceBadge({ source }: { source: string }) {
   const cloud = source === "cloud";
   return (
     <span
-      className={`rounded px-1.5 py-0.5 text-xs ${
+      className={`rounded-full px-2.5 py-0.5 text-ui ${
         cloud ? "bg-primary-accent/12 text-primary-accent" : "bg-muted text-muted-foreground"
       }`}
     >

@@ -54,7 +54,7 @@ export function ModelCard({ m, selected, nowMs, onSelect, index = 0 }: {
           onSelect();
         }
       }}
-      className={`animate-card-in flex items-center gap-2 rounded-lg border p-2.5 cursor-pointer transition-colors duration-(--motion-base) ${
+      className={`animate-card-in flex items-center gap-2 rounded-md border p-2.5 cursor-pointer transition-colors duration-(--motion-base) ${
         selected ? "border-primary-accent bg-primary-accent/12" : "border-border-subtle hover:bg-card-hover"}`}
       style={{ animationDelay: `${Math.min(index, 8) * 24}ms` }}>
       <div className="min-w-0 flex-1">
@@ -72,9 +72,9 @@ export function ModelCard({ m, selected, nowMs, onSelect, index = 0 }: {
       </div>
       <button onClick={(e) => { e.stopPropagation(); onAct(); }} disabled={acting}
         className={`shrink-0 rounded-md border px-3 py-1.5 text-dense font-medium transition-colors disabled:opacity-60 ${
-          btn.cls === "go" ? "border-primary bg-primary text-primary-foreground hover:opacity-90"
-          : btn.cls === "stop" ? "border-destructive bg-destructive text-destructive-foreground hover:opacity-90"
-          : "border-warning bg-warning text-warning-foreground hover:opacity-90"}`}>
+          btn.cls === "go" ? "border-primary bg-primary text-primary-foreground hover:bg-primary-600"
+          : btn.cls === "stop" ? "border-destructive bg-destructive text-destructive-foreground hover:bg-destructive-600"
+          : "border-warning bg-warning text-warning-foreground hover:bg-warning-600"}`}>
         {acting ? btn.acting : btn.label}
       </button>
     </div>

@@ -99,7 +99,7 @@ export function CommandEditor({
         {showAdvanced ? "▾ 高级(exe / args / cwd)" : "▸ 高级(exe / args / cwd)"}
       </Button>
       {showAdvanced && (
-        <div className="mt-3 flex flex-col gap-3 border-t border-border pt-3">
+        <div className="mt-3 flex flex-col gap-3 border-t border-border-subtle pt-3">
           <Field label="exe(可执行文件)" htmlFor="cmd-exe">
             <TextInput id="cmd-exe" value={value.exe} onChange={(e) => set("exe", e.target.value)} />
           </Field>

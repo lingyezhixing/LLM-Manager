@@ -112,7 +112,7 @@ function useFlipDeck(decks: unknown[], listRef: React.RefObject<HTMLDivElement |
         for (const child of el.children) {
           const elc = child as HTMLElement;
           if (elc.style.transform) {
-            elc.style.transition = "transform 240ms var(--motion-ease)";
+            elc.style.transition = "transform var(--motion-base) var(--motion-ease)";
             elc.style.transform = "";
           }
         }

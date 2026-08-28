@@ -6,7 +6,11 @@ import { formatTokens } from "@/lib/format";
 /** 手写 token 曲线图(无第三方库)。平滑(monotone-cubic)曲线。经 currentColor
  *  随主题变色;tooltip 跟随光标。 */
 
-const MODEL_COLORS = ["#f97316", "#a855f7", "#22c55e", "#eab308", "#ec4899", "#06b6d4", "#3b82f6", "#ef4444"];
+// 系列色走 index.css 的 --chart-1..8 token(SVG stroke/fill 与图例 span 均接受 CSS 变量)
+const MODEL_COLORS = [
+  "var(--color-chart-1)", "var(--color-chart-2)", "var(--color-chart-3)", "var(--color-chart-4)",
+  "var(--color-chart-5)", "var(--color-chart-6)", "var(--color-chart-7)", "var(--color-chart-8)",
+];
 
 const W = 760;
 const H = 192;   // 两页曲线图统一缩减高度(视觉平衡)
@@ -268,11 +272,13 @@ export function TokenChart({
       {hover !== null && pos !== null && tipLeft !== null && tipTop !== null && (
         <div
           ref={tooltipRef}
-          className="pointer-events-none absolute z-10 min-w-[120px] rounded-md border border-border bg-card px-2 py-1 text-xs shadow-sm"
+          className="pointer-events-none absolute z-10 min-w-[120px] rounded-md border border-border bg-card px-2 py-1 text-xs shadow-card"
           style={{
             left: tipLeft,
             top: tipTop,
-            transition: flipping ? "left 150ms ease-out, top 150ms ease-out" : "none",
+            transition: flipping
+              ? "left var(--motion-enter) var(--motion-ease), top var(--motion-enter) var(--motion-ease)"
+              : "none",
           }}
         >
           <div className="mb-0.5 text-foreground">{fmtTs(buckets[hover], preset)}</div>

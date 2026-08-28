@@ -29,17 +29,17 @@ function DeviceCard({
 }) {
   const isCpu = d.device_type === "CPU";
   return (
-    <div className="min-w-[150px] flex-1 rounded-lg border border-border-subtle bg-card-2 p-3">
+    <div className="min-w-[150px] flex-1 rounded-md border border-border-subtle bg-card-2 p-3">
       <div className="flex items-center justify-between text-sm font-medium">
         <span className="truncate">{d.device_name}</span>
         <span className="text-xs text-muted-foreground">
           {d.freq_mhz != null ? (
-            <span className="font-mono">{Math.round(d.freq_mhz)} MHz</span>
+            <span className="font-mono tabular-nums">{Math.round(d.freq_mhz)} MHz</span>
           ) : ""}
           {d.temperature_celsius != null ? (
             <>
               {d.freq_mhz != null ? " · " : ""}
-              <span className="font-mono">{Math.round(d.temperature_celsius)}°C</span>
+              <span className="font-mono tabular-nums">{Math.round(d.temperature_celsius)}°C</span>
             </>
           ) : ""}
           {d.freq_mhz != null || d.temperature_celsius != null ? " · " : ""}

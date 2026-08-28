@@ -16,7 +16,7 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, { hasError
           <p className="text-base font-semibold text-foreground">界面出现异常</p>
           <button
             type="button"
-            className="rounded-md border border-primary bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:opacity-90"
+            className="rounded-md border border-primary bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors duration-(--motion-fast) hover:bg-primary-600"
             onClick={() => window.location.reload()}
           >
             刷新页面

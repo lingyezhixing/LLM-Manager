@@ -119,7 +119,7 @@ function ClaudePresetCard({
   };
 
   return (
-    <div className="rounded-lg border border-border p-3">
+    <div className="rounded-md border border-border p-3">
       {/* 头部:折叠后也常驻(应用/删除/生效标记都在)。整条可点切换展开(新建卡除外,内部按钮 stopPropagation)。
           role=button + tabIndex + Enter/Space:键盘可激活(内嵌两个 button,不能用 button 元素实现)。 */}
       <div
@@ -301,6 +301,7 @@ export function ClaudePanel() {
       <Button
         type="button"
         variant="ghost"
+        size="sm"
         className="justify-start self-start"
         disabled={newNonce > 0}
         onClick={() => setNewNonce((n) => n + 1)}

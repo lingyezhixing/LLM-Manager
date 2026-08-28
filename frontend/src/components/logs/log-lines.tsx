@@ -123,10 +123,10 @@ export function LogLines({ h }: { h: LogLinesView }) {
 
   return (
     <>
-      <div className="flex flex-wrap items-center gap-2 border-b border-border bg-muted/30 px-3.5 py-1.5 text-dense">
+      <div className="flex flex-wrap items-center gap-2 border-b border-border-subtle bg-muted/30 px-3.5 py-1.5 text-dense">
         {LOG_LEVEL_FILTERS.map((lv) => (
           <button key={lv} onClick={() => setLevel(lv)} aria-pressed={level === lv}
-            className={`rounded border px-2 py-0.5 transition-colors duration-(--motion-base) ${level === lv ? "border-transparent bg-primary-accent/12 font-medium text-primary-accent" : "border-border bg-card text-muted-foreground hover:text-foreground"}`}>
+            className={`rounded-full px-2.5 py-0.5 text-ui transition-colors duration-(--motion-base) ${level === lv ? "bg-primary-accent/12 font-medium text-primary-accent" : "text-muted-foreground hover:text-foreground"}`}>
             {LOG_LEVEL_FILTER_LABEL[lv]}
           </button>
         ))}
@@ -139,14 +139,14 @@ export function LogLines({ h }: { h: LogLinesView }) {
             if (e.key === "Escape") h.onInput("");
           }}
           placeholder="搜索本次日志…(Enter 搜索)"
-          className="w-44 rounded border border-border bg-background px-2 py-0.5 text-foreground placeholder:text-muted-foreground/60"
+          className="w-44 rounded-md border border-border bg-input px-2 py-0.5 text-foreground placeholder:text-muted-foreground/60"
         />
         {h.searching ? <span className="text-muted-foreground">…</span>
           : h.matches.length > 0 ? (
             <div className="flex items-center gap-1">
-              <button onClick={h.prevMatch} className="rounded border border-border bg-card px-1.5 py-0.5 text-muted-foreground hover:text-foreground">‹</button>
-              <span className="text-muted-foreground tabular-nums">{h.matchIdx + 1}/{h.matches.length}</span>
-              <button onClick={h.nextMatch} className="rounded border border-border bg-card px-1.5 py-0.5 text-muted-foreground hover:text-foreground">›</button>
+              <button onClick={h.prevMatch} className="rounded-md border border-border bg-card px-1.5 py-0.5 text-muted-foreground transition-colors duration-(--motion-base) hover:bg-card-hover">‹</button>
+              <span className="font-mono text-muted-foreground tabular-nums">{h.matchIdx + 1}/{h.matches.length}</span>
+              <button onClick={h.nextMatch} className="rounded-md border border-border bg-card px-1.5 py-0.5 text-muted-foreground transition-colors duration-(--motion-base) hover:bg-card-hover">›</button>
               {h.matchTotal > h.matches.length && (
                 <span className="text-muted-foreground/70" title="后端硬限 500 条,超出部分不可跳转">
                   共{h.matchTotal}条
@@ -158,10 +158,13 @@ export function LogLines({ h }: { h: LogLinesView }) {
       <div ref={h.scroller} onScroll={h.onScroll}
         className="relative flex-1 overflow-auto bg-background p-3 font-mono text-ui leading-relaxed">
         {h.atOldest && <div className="py-1 text-center text-micro text-muted-foreground/60">已加载最早</div>}
+        {h.displayed.length === 0 && (
+          <div className="py-4 text-center text-xs text-muted-foreground">暂无日志</div>
+        )}
         {blocks}
         {showJump && (
           <button onClick={h.backToLive}
-            className="absolute bottom-2.5 right-2 z-20 rounded-full bg-primary px-3 py-1 text-dense font-medium text-primary-foreground shadow-card hover:opacity-90">
+            className="absolute bottom-2.5 right-2 z-20 rounded-full bg-primary px-3 py-1 text-dense font-medium text-primary-foreground shadow-card transition-colors duration-(--motion-fast) hover:bg-primary-600">
             {jumpLabel}
           </button>
         )}

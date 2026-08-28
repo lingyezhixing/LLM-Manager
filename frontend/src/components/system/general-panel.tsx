@@ -37,11 +37,11 @@ const sameForm = (a: GeneralForm, b: GeneralForm) => sameProgram(a.program, b.pr
 const sameFormOrNull = (a: GeneralForm | null, b: GeneralForm | null) =>
   a === b || (a !== null && b !== null && sameForm(a, b));
 
-// 段标题:轻量横线分隔(── 标题 ──────),与模型表单的分区一致。
+// 段标题:与模型表单分区同级(text-sm foreground),横线作轻量分隔。
 function SectionTitle({ children }: { children: ReactNode }) {
   return (
     <div className="mb-3 mt-6 flex items-center gap-3">
-      <span className="text-xs font-medium text-muted-foreground">{children}</span>
+      <span className="text-sm font-medium text-foreground">{children}</span>
       <div className="h-px flex-1 bg-border" />
     </div>
   );
