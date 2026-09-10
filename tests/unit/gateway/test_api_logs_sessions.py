@@ -1,9 +1,8 @@
-"""GET /api/logs/* — persistent session logs (system + model) over SQLite.
+"""GET /api/logs/* —— 基于 SQLite 的持久会话日志(system + model)。
 
-Covers: sessions list (type/model filters, before pagination), per-session line
-paging (level filter / before), SSE live stream (DB backfill + broadcaster tail),
-cross-session text search, deleted-model alias resolution from session history,
-unknown-alias 404, unknown-session 404.
+覆盖:sessions 列表(type/model 过滤、before 分页)、单会话行分页(level 过滤 / before)、
+SSE 实时流(DB 回填 + 广播器尾部)、跨会话文本搜索、已删模型别名从会话历史解析、
+未知别名 404、未知会话 404。
 
 SSE 测试直接驱动 _session_stream 生成器:starlette TestClient 与 httpx ASGITransport
 都会 await app(...) 到 ASGI 应用跑完才返回 —— 无限 SSE 流永不结束,任何客户端
@@ -96,7 +95,7 @@ def test_sessions_list(client):
 def test_running_session_status_survives_heartbeat(client):
     """心跳把运行中会话的 end_time 写成非 NULL(每 30s),status 仍应为 running。
 
-    回归 7279319 解耦语义:运行中由内存 live 集合判定,end_time 只管时间——
+    回归解耦语义:运行中由内存 live 集合判定,end_time 只管时间——
     API 响应层的 status 必须用 SQL 算好的 status 字段,不能回退到 end_time 判断
     (否则心跳一写 end_time,日志页「运行中」就消失)。"""
     c, db, _sid_sys, sid_m = client
@@ -171,8 +170,7 @@ def test_unknown_model_alias_404(client):
 def test_deleted_model_alias_resolves_from_session_history(client):
     """已删模型的残留会话:alias/model_name 命中会话历史 → 过滤出该模型会话(不再 404)。
 
-    §8 承诺模型下拉含"已删除模型的残留会话";删模型后 config 无此 alias,
-    需回退到 log_sessions 历史按 alias/原名解析。"""
+    删模型后 config 无此 alias,需回退到 log_sessions 历史按 alias/原名解析。"""
     c, db, _sid_sys, _sid_m = client
     sid_del = _logs.log_start_session(db, "model", "deleted_model", "gone", 3000.0)
     _logs.log_insert_lines(db, sid_del, [(1, 3000.1, "model", "info", "residual")])
@@ -208,7 +206,7 @@ def test_session_stream_backfill_and_live(client):
             frame = await anext(gen)  # 实时行经广播
             out.append(json.loads(frame.removeprefix("data: ").strip()))
         finally:
-            await gen.aclose()  # finally → unsubscribe
+            await gen.aclose()  # finally → 退订
         return out
 
     res = asyncio.run(go())

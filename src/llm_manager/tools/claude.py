@@ -1,10 +1,9 @@
-"""Non-destructive Claude settings preset application.
+"""非破坏性的 Claude settings 预设应用。
 
-Claude Code's settings.json nests environment variables under ``data["env"]``
-(not at the top level). ``apply_preset`` writes preset keys there while
-preserving all other top-level and env keys; ``detect_current_preset`` reads the
-current ``ANTHROPIC_BASE_URL`` and matches it against configured presets so the
-tray submenu can mark the active one.
+Claude Code 的 settings.json 把环境变量嵌套在 ``data["env"]`` 下(不在顶层)。
+``apply_preset`` 在那里写入预设键,同时保留其余全部顶层与 env 键;
+``detect_current_preset`` 读取当前 ``ANTHROPIC_BASE_URL`` 并与已配置预设匹配,
+使托盘子菜单能标记当前生效项。
 """
 
 from __future__ import annotations

@@ -17,7 +17,7 @@ function StartupUpdateCheck() {
   return null;
 }
 
-/** Route tree: AppLayout (shell) wraps all 6 pages via <Outlet/>. Order = locked IA. */
+/** 路由树:AppLayout(壳层)经 <Outlet/> 包裹全部 6 个页面。顺序 = 锁定 IA。 */
 export default function App() {
   return (
     <ToastProvider>

@@ -59,7 +59,7 @@ class FakeDevices:
     def __init__(self, online=None, snap=None):
         self._online = set(online) if online else {"rtx 4060"}
         self._snap = dict(snap) if snap is not None else {"rtx 4060": _dev("rtx 4060", 8192)}
-        self.freed_mb: dict[str, int] = {}  # dev -> extra available after kills
+        self.freed_mb: dict[str, int] = {}  # dev -> kill 后额外可用显存
 
     def online_devices(self):
         return set(self._online)
@@ -136,7 +136,7 @@ def _reset():
     state._reset()
 
 
-# ---------- Task 7: cold start ----------
+# ---------- 冷启动 ----------
 async def test_cold_start_reaches_routing():
     life, sup, _, _ = _make()
     status = await life.ensure_running("m1")
@@ -147,7 +147,7 @@ async def test_cold_start_reaches_routing():
     assert sup.spawned[0] == ["run.cmd"]
 
 
-# ---------- Task 8: reconcile ----------
+# ---------- reconcile(协调) ----------
 async def test_reconcile_dead_process_in_routing_marks_failed():
     life, sup, _, _ = _make()
     await life.ensure_running("m1")  # ROUTING, pid 1000
@@ -164,7 +164,7 @@ async def test_reconcile_orphan_starting_with_no_inflight_marks_failed():
     assert status == ModelStatus.ROUTING  # reconcile→FAILED→重启
 
 
-# ---------- Task 9: on_crash ----------
+# ---------- on_crash(崩溃处理) ----------
 async def test_external_crash_marks_failed_then_restart():
     life, sup, _, _ = _make()
     await life.ensure_running("m1")  # ROUTING, pid 1000
@@ -183,7 +183,7 @@ async def test_cooperative_stop_exit_is_not_marked_failed():
     assert state.get_status("m1") == ModelStatus.STOPPED  # 预期退出,不转 FAILED
 
 
-# ---------- Task 10: stop ----------
+# ---------- stop(停止) ----------
 async def test_force_stop_then_restart_core_requirement():
     life, sup, _, _ = _make()
     await life.ensure_running("m1")
@@ -191,7 +191,7 @@ async def test_force_stop_then_restart_core_requirement():
     await life.stop("m1")  # 手动强制关闭
     assert state.get_status("m1") == ModelStatus.STOPPED
     assert state.get_pid("m1") is None
-    status = await life.ensure_running("m1")  # 立即再启动——核心诉求 B3
+    status = await life.ensure_running("m1")  # 立即再启动
     assert status == ModelStatus.ROUTING
     assert len(sup.spawned) == 2
 
@@ -224,7 +224,7 @@ async def test_stop_from_each_running_state_lands_stopped():
         assert s == ModelStatus.STOPPED or (pre == ModelStatus.FAILED and s == ModelStatus.FAILED)
 
 
-# ---------- Task 11: single-dispatch / checkpoints / errors / race / eviction ----------
+# ---------- 单派发 / 检查点 / 错误 / 竞态 / 驱逐 ----------
 async def test_single_dispatch_concurrent_start_spawns_once():
     life, sup, _, _ = _make()
     s1, s2 = await asyncio.gather(life.ensure_running("m1"), life.ensure_running("m1"))
@@ -247,9 +247,9 @@ async def test_stop_starting_winner_self_terminates_no_routing():
 
 
 async def test_slow_probe_then_concurrent_restart_not_clobbered():
-    """Blocker B: orphan winner stuck in un-interruptible probe, stop pops its
-    inflight, a CONCURRENT ensure_running re-claims. Orphan winner's later
-    finish_start(STOPPED) must NOT clobber the new winner (owner-token guard)."""
+    """孤儿 winner 卡在不可中断的 probe 中,stop 弹出其 inflight,
+    并发 ensure_running 重新占位。孤儿 winner 随后的 finish_start(STOPPED)
+    不得覆盖新 winner(owner-token guard)。"""
 
     def slow_probe(alias, port, start_time=None, timeout=60):
         _time.sleep(0.3)
@@ -263,7 +263,7 @@ async def test_slow_probe_then_concurrent_restart_not_clobbered():
     await w1  # 旧 winner probe 返回 → finish_start(STOPPED, owner=fut1) owner-guard no-op
     assert restart_status == ModelStatus.ROUTING
     # owner-token guard 的核心验证:孤儿 winner 的 finish_start(STOPPED) no-op,
-    # 绝不覆盖并发 restart winner 的 ROUTING(不变量①⑤)。若 guard 坏,这里会是 STOPPED。
+    # 绝不覆盖并发 restart winner 的 ROUTING。若 guard 坏,这里会是 STOPPED。
     assert state.get_status("m1") == ModelStatus.ROUTING
     assert len(sup.spawned) == 2
 
@@ -297,8 +297,8 @@ async def test_insufficient_resource_marks_failed():
 
 
 async def test_crash_during_probe_window_does_not_enter_routing():
-    """/#3 probe 窗口内进程崩溃 → exit 回调已在 spawn 后注册(现缺失:注册于 probe
-    成功之后,窗口内崩溃 → 死 pid 假成功进 ROUTING)。期望 FAILED。"""
+    """probe 窗口内进程崩溃 → exit 回调已在 spawn 后即注册(而非等 probe 成功),
+    崩溃兜到 FAILED 而非死 pid 假成功进 ROUTING。期望 FAILED。"""
     sup = FakeSupervisor()
 
     def killed_probe(alias, port, start_time=None, timeout=60):
@@ -338,7 +338,7 @@ async def test_probe_raising_after_spawn_kills_pid_then_failed():
     life, sup, _, _ = _make(probes={"Chat": raising_probe})
     status = await life.ensure_running("m1")
     assert status == ModelStatus.FAILED
-    assert 1000 in sup.killed  # spawned pid reaped, not orphaned (guard D)
+    assert 1000 in sup.killed  # spawn 的 pid 已回收,无孤儿
 
 
 async def test_spawn_exception_marks_failed_no_future_leak():
@@ -346,7 +346,7 @@ async def test_spawn_exception_marks_failed_no_future_leak():
     sup.spawn_raises = RuntimeError("boom")
     status = await life.ensure_running("m1")
     assert status == ModelStatus.FAILED
-    assert state.has_inflight("m1") is False  # 不变量⑤:异常路径不泄漏 Future
+    assert state.has_inflight("m1") is False  # 异常路径不泄漏 Future
 
 
 async def test_pipeline_midstage_exception_clears_inflight():
@@ -361,7 +361,7 @@ async def test_pipeline_midstage_exception_clears_inflight():
 
 
 async def test_eviction_executed_then_cold_start_reaches_routing_g5():
-    """G5: lifecycle 真正执行 check_and_free 决策(m1 被 stop),重快照后 m2 spawn 到 ROUTING。"""
+    """lifecycle 真正执行 check_and_free 决策(m1 被 stop),重快照后 m2 spawn 到 ROUTING。"""
     m1 = _model("m1", port=8000, mem=2048)
     m2 = _model("m2", port=8001, mem=4096)
     sup = FakeSupervisor()
@@ -464,7 +464,6 @@ async def test_scheme_fallback_with_eviction_for_second_scheme():
 
 
 def test_illegal_transition_raises_value_error():
-    # F2: 非法转移(不经 force)抛 ValueError
     state._reset()
     state.set_status("m1", ModelStatus.STARTING, force=True)
     state.set_status("m1", ModelStatus.INIT_SCRIPT)  # STARTING→INIT_SCRIPT 合法
@@ -472,7 +471,7 @@ def test_illegal_transition_raises_value_error():
         state.set_status("m1", ModelStatus.ROUTING)  # INIT_SCRIPT→ROUTING 非法
 
 
-# ---------- Task 12: unload_all + tolerance ----------
+# ---------- unload_all + 容错 ----------
 async def test_unload_all_stops_running_models():
     life, _sup, _, _ = _make(models=[_model("m1", port=8000), _model("m2", port=8001)])
     await life.ensure_running("m1")
@@ -510,7 +509,7 @@ async def test_unload_all_tolerates_one_stop_failure():
     assert state.get_status("m1") == ModelStatus.STOPPED
 
 
-# ---------- Task 6: cancel-safe hardening ----------
+# ---------- cancel-safe 加固 ----------
 async def test_ensure_running_cancelled_after_spawn_kills_pid_clears_slot():
     """cancel-safe:ensure_running 被 cancel 落在 post-spawn 阶段(spawn 后 probe 中)→
     kill_tree 被调(无孤儿)+ finish_start 清 slot(状态 FAILED、inflight 释放)+ CancelledError 传播。"""
@@ -533,7 +532,7 @@ async def test_ensure_running_cancelled_after_spawn_kills_pid_clears_slot():
     assert state.get_status("m1") == ModelStatus.FAILED
 
 
-# ---------- Task 2 (Plan 7): spawn lock ----------
+# ---------- spawn 锁 ----------
 async def test_spawn_lock_serializes_concurrent_spawns():
     import time as _t
 
@@ -567,7 +566,7 @@ async def test_spawn_lock_serializes_concurrent_spawns():
 
 
 async def test_spawn_lock_preserves_inflight_eviction_protection():
-    # 回归:spawn 锁不破坏 inflight 保护(pending>0 不被 eviction 驱;spec §3.3)
+    # 回归:spawn 锁不破坏 inflight 保护(pending>0 不被 eviction 驱)
     models = [_model("a", dev="rtx 4060", mem=4096), _model("b", dev="rtx 4060", mem=8192)]
     life, sup, _d, _c = _make(
         sup=FakeSupervisor(),
@@ -584,7 +583,7 @@ async def test_spawn_lock_preserves_inflight_eviction_protection():
 
 
 async def test_ensure_running_inc_pending_closes_idle_reclaim_tocou():
-    """#2:ensure_running(inc_pending=True) 在返回 ROUTING 的同一无 await 临界段内 inc pending,
+    """ensure_running(inc_pending=True) 在返回 ROUTING 的同一无 await 临界段内 inc pending,
     使 idle 回收 loop(查 pending==0)在 ensure_running 返回后看到 pending>=1,不会误回收在途请求的模型。"""
     life, _sup, _d, _c = _make()
     await life.ensure_running("m1")  # 冷启动到 ROUTING(默认不 inc)
@@ -607,11 +606,11 @@ async def test_ensure_running_inc_pending_skips_when_not_routing():
     assert state.pending_count("m1") == 0
 
 
-# ---------- Task 3 (Plan): wire on_output to logs.capture + stop ends session ----------
+# ---------- 接线 on_output 到 logs.capture + stop 收口会话 ----------
 
 
 class _CapturingSupervisor(FakeSupervisor):
-    """FakeSupervisor that records the on_output callback lifecycle passes to spawn."""
+    """记录 lifecycle 传给 spawn 的 on_output 回调的 FakeSupervisor。"""
 
     on_output: Callable[[str, str], None] | None
 
@@ -677,7 +676,7 @@ async def test_stop_ends_log_session(tmp_path):
         logs.reset()
 
 
-# ---------- conda_env argv wrapping (Windows cmd /c) ----------
+# ---------- conda_env argv 包装 (Windows cmd /c) ----------
 async def test_pipeline_conda_env_wraps_with_cmd_on_windows():
     import os as _os
 
@@ -702,11 +701,11 @@ async def test_pipeline_conda_env_wraps_with_cmd_on_windows():
         assert spawned[:3] == ["cmd", "/c", "conda"]
     else:
         assert spawned[:1] == ["conda"]
-    assert spawned[-2:] == ["serve", "x"]  # exe args tail
-    assert "-n" in spawned and "lmdeploy" in spawned  # conda env passed
+    assert spawned[-2:] == ["serve", "x"]  # exe 参数尾部
+    assert "-n" in spawned and "lmdeploy" in spawned  # conda 环境已传入
 
 
-# ---------- get_cfg read-through ----------
+# ---------- get_cfg 读穿 ----------
 async def test_lifecycle_reads_fresh_cfg_each_call():
     """get_cfg 返回值变化后,_cfg_model/_runnable/unload_all 反映新模型集(读穿)。"""
     current = {"cfg": _cfg(_model("m1", port=8000))}
@@ -727,7 +726,7 @@ async def test_lifecycle_reads_fresh_cfg_each_call():
     assert "m2" in runnable
 
 
-# ---------- Task 7: lifecycle runtime hooks ----------
+# ---------- 生命周期运行时钩子 ----------
 async def test_runtime_session_recorded_on_start_and_stop(tmp_path):
     from llm_manager.data.persistence import open_db
 
@@ -748,13 +747,13 @@ async def test_runtime_session_recorded_on_start_and_stop(tmp_path):
 
 
 async def test_runtime_not_recorded_when_db_absent(tmp_path):
-    # default _make() (no db) must not crash and must not record
+    # 默认 _make()(无 db)不得崩溃、不得记录
     life, _sup, _, _ = _make()
     await life.ensure_running("m1")
     assert state.get_status("m1") == ModelStatus.ROUTING
     await life.stop("m1")
     assert state.get_status("m1") == ModelStatus.STOPPED
-    # no assertion crash = pass (db is None path guarded)
+    # 无断言崩溃即通过(db 为 None 的分支已有守卫)
 
 
 async def test_runtime_session_closed_on_crash(tmp_path):
@@ -762,39 +761,39 @@ async def test_runtime_session_closed_on_crash(tmp_path):
 
     db = open_db(tmp_path / "t.db")
     life, sup, _, _ = _make(db=db)
-    await life.ensure_running("m1")  # ROUTING → open session
-    sup.trigger_exit(1000, code=1)  # external crash → _on_crash
+    await life.ensure_running("m1")  # ROUTING → 会话打开
+    sup.trigger_exit(1000, code=1)  # 外部崩溃 → _on_crash
     assert state.get_status("m1") == ModelStatus.FAILED
     rows = db.conn.execute(
         "SELECT end_time FROM model_runtime r JOIN models m ON r.model_id=m.id "
         "WHERE m.original_name='m1'"
     ).fetchall()
-    assert len(rows) == 1 and rows[0]["end_time"] is not None  # session closed exactly once
-    await life.stop("m1")  # stop on FAILED → no double-record
+    assert len(rows) == 1 and rows[0]["end_time"] is not None  # 会话恰好收口一次
+    await life.stop("m1")  # FAILED 上 stop → 不重复记录
     rows2 = db.conn.execute("SELECT COUNT(*) AS n FROM model_runtime").fetchone()
     assert rows2["n"] == 1
 
 
 async def test_runtime_session_closed_on_reconcile_dead(tmp_path):
-    """Fix 2 pin:exit cb 丢失(进程死但 on_exit 未触发)→ _reconcile 关旧会话、重启开新会话。"""
+    """exit cb 丢失(进程死但 on_exit 未触发)→ _reconcile 关旧会话、重启开新会话。"""
     from llm_manager.data.persistence import open_db
 
     db = open_db(tmp_path / "t.db")
     life, sup, _, _ = _make(db=db)
-    await life.ensure_running("m1")  # ROUTING → session 1 open
-    sup.alive_pids.discard(1000)  # process dead, exit cb never fired
-    status = await life.ensure_running("m1")  # reconcile → _runtime_end → restart
+    await life.ensure_running("m1")  # ROUTING → 会话 1 打开
+    sup.alive_pids.discard(1000)  # 进程已死但 exit 回调从未触发
+    status = await life.ensure_running("m1")  # reconcile → _runtime_end → 重启
     assert status == ModelStatus.ROUTING
     rows = db.conn.execute(
         "SELECT end_time FROM model_runtime r JOIN models m ON r.model_id=m.id "
         "WHERE m.original_name='m1' ORDER BY r.id"
     ).fetchall()
-    assert len(rows) == 2  # old closed + new open
+    assert len(rows) == 2  # 旧已关 + 新开
     assert rows[0]["end_time"] is not None
     assert rows[1]["end_time"] is None
 
 
-# ---------- Task 5: model log sessions (DB-backed) ----------
+# ---------- 模型日志会话(DB 支撑) ----------
 async def test_model_log_session_open_on_spawn_closed_on_stop(tmp_path):
     """spawn 后:resolve_session 非 None + DB 有进行中会话(行可落库);
     stop 后:end_time 落库 + resolve_session 返回 None。"""

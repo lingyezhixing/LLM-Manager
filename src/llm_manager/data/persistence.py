@@ -1,4 +1,4 @@
-"""DB open/schema/migration + storage stats & orphaned-model maintenance。usage 聚合在 data/usage.py,日志存储 in data/logs.py。"""
+"""DB 打开/schema/迁移 + 存储统计与孤立模型维护。"""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 
 class LegacySchemaError(RuntimeError):
-    """Round-2 时代旧库(v3.1 迁移链退役后不再支持)。"""
+    """v2 旧库结构(model_requests.ts 列 / model_pricing / model_scripts 表);v3.1 起迁移链退役,不再支持。"""
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,7 +44,7 @@ def open_db(path: Path) -> Db:
     conn.execute("PRAGMA busy_timeout = 5000")
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA journal_mode = WAL")
-    _migrate(conn)  # Must check legacy schema BEFORE CREATE IF NOT EXISTS
+    _migrate(conn)  # 必须在 CREATE IF NOT EXISTS 之前检查旧库 schema
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS models (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -144,11 +144,9 @@ def open_db(path: Path) -> Db:
 
 
 def _migrate(conn: sqlite3.Connection) -> None:
-    """v3.1 起迁移链退役(2026-08-14,用户确认全部署均为新库):只检测、不迁移。
-
-    检测 Round-2 时代遗留特征(model_requests.ts 列 / model_pricing / model_scripts
+    """只检测、不迁移:检测旧库结构特征(model_requests.ts 列 / model_pricing / model_scripts
     表)→ LegacySchemaError(明确诊断,优于静默半迁移)。新库 CREATE IF NOT EXISTS
-    即终态。若未来需要再兼容,历史实现见 git(840a4ac 前)。"""
+    即终态。"""
     legacy = conn.execute(
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name IN ('model_pricing','model_scripts')"
     ).fetchone()

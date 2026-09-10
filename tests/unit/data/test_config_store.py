@@ -194,7 +194,7 @@ def test_config_store_snapshot_and_reload(tmp_path):
     store = ConfigStore(db)
     assert "M" in store.snapshot().models
 
-    # 直接改 DB,reload 后看到新值(P1 写回将走同一路径)
+    # 直接改 DB,reload 后看到新值(写回将走同一路径)
     set_setting(db, "port", "9999")
     snap = store.reload()
     assert snap.program.port == 9999
@@ -422,7 +422,7 @@ def test_pricing_round_trips_through_config_store(tmp_path):
 
 
 def test_pricing_survives_unrelated_model_world_rewrite(tmp_path):
-    """CASCADE landmine: rewriting the model world must not wipe pricing that round-trips."""
+    """CASCADE 陷阱:重写模型世界不得抹掉随模型往返的 pricing。"""
     from dataclasses import replace
 
     from llm_manager.config import Pricing, PricingTier
@@ -446,11 +446,11 @@ def test_pricing_survives_unrelated_model_world_rewrite(tmp_path):
             claude_configs={},
         ),
     )
-    # mutate program only (triggers full model-world delete+reinsert)
+    # 仅改 program(触发完整模型世界 delete+reinsert)
     cfg2 = read_appconfig(db)
     write_appconfig(db, replace(cfg2, program=replace(cfg2.program, port=9999)))
     out = read_appconfig(db)
-    assert out.models["M"].pricing.tiers[0].input_price == 5.0  # pricing survived
+    assert out.models["M"].pricing.tiers[0].input_price == 5.0  # pricing 幸存
     assert out.program.port == 9999
 
 

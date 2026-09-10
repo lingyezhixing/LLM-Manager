@@ -9,7 +9,7 @@ import { useToast } from "@/lib/hooks/use-toast";
 import { deleteModelData, fetchOrphanedModels, fetchStorageStats } from "@/lib/api";
 import { qk } from "@/lib/api/keys";
 
-// 数据库管理页(迁移 legacy DataManagement):存储统计 + 孤立模型清理 + 模型数据详情。
+// 数据库管理页:存储统计 + 孤立模型清理 + 模型数据详情。
 // 每载入获取一次(refetchOnMount: "always"),不轮询。删除 = 级联清数据 + 自动 VACUUM(后端)。
 function formatBytes(n: number | null): string {
   if (n == null) return "—";

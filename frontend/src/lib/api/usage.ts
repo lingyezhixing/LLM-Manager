@@ -1,9 +1,9 @@
 import { apiJson } from "./shared";
 
-// 用量聚合 + 计费成本。Types hand-defined to match gateway/api/usage.py 的响应模型
+// 用量聚合 + 计费成本。类型手写定义,对齐 gateway/api/usage.py 的响应模型
 // (UsageSummaryResponse / UsageSeriesResponse / CostSummaryResponse)。
 export interface SessionUsage {
-  started_at: number;       // process start (wall-clock epoch seconds) — frontend ticks uptime
+  started_at: number;       // 进程启动时刻(wall-clock epoch 秒)— 前端据此跳动 uptime
   input_tokens: number;
   output_tokens: number;
   cache_hit: number;
@@ -25,9 +25,9 @@ export async function fetchHealth(): Promise<HealthResponse> {
 }
 
 export interface UsageSeries {
-  buckets: number[];                       // bucket-start wall-clock epochs (chart x-axis)
-  total: number[];                         // tokens per bucket, summed across models
-  models: Record<string, number[]>;        // model name → tokens per bucket
+  buckets: number[];                       // 桶起始的墙钟 epoch(图表 x 轴)
+  total: number[];                         // 每桶 token 数,跨模型求和
+  models: Record<string, number[]>;        // 模型名 → 每桶 token 数
 }
 
 export type UsageSeriesParams = { period: string } | { start: number; end: number };
@@ -72,7 +72,7 @@ export async function fetchUsageByModel(params: UsageSeriesParams): Promise<ByMo
   return apiJson<ByModelEntry[]>(`/api/usage/by-model?${qsForParams(params)}`);
 }
 
-// 计费成本 — cost 汇总 + cost 时间序列(序列与 usage/series 同形)。Match gateway/api/usage.py
+// 计费成本 — cost 汇总 + cost 时间序列(序列与 usage/series 同形)。对齐 gateway/api/usage.py
 // 的 CostSummaryResponse / UsageSeriesResponse。
 export interface CostByModel {
   model: string;

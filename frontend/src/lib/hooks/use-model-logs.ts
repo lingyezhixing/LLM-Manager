@@ -65,7 +65,7 @@ const initialState: ViewerState = {
 };
 
 type Action =
-  | { t: "reset" }                       // api/level/runKey 重订阅(H1 代次由 genRef 管,不进 state)
+  | { t: "reset" }                       // api/level/runKey 重订阅(代次由 genRef 管,不进 state)
   | { t: "sse"; line: LogLine }          // 实时行(WINDOW 裁剪 + id 守卫防重连重复)
   | { t: "fallback"; page: LogLine[] }   // 已结束会话回退页(仅当前为空时顶上)
   | { t: "following"; v: boolean }
@@ -76,14 +76,14 @@ type Action =
   | { t: "back-live" }
   | { t: "search-start" }
   | { t: "search-done"; matches: number[]; total: number }
-  | { t: "input" }                       // 清搜索回未搜态(bug1)
+  | { t: "input" }                       // 清搜索回未搜态
   | { t: "match-idx"; i: number }
   | { t: "scroll-target"; id: number | null }
   | { t: "at-oldest"; v: boolean }
   | { t: "searching"; v: boolean };
 
 /**
- * Reducer:视图态状态机。各分支 1:1 对应原 setState 逻辑(条件/守卫原样)。
+ * Reducer:视图态状态机。
  */
 export function viewerReducer(state: ViewerState, action: Action): ViewerState {
   switch (action.t) {
@@ -91,7 +91,7 @@ export function viewerReducer(state: ViewerState, action: Action): ViewerState {
       return { ...initialState };
 
     case "sse": {
-      // 原逻辑:防重连回填重复(id 守卫) + WINDOW 裁剪
+      // 防重连回填重复(id 守卫) + WINDOW 裁剪
       const { line } = action;
       const prev = state.liveLines;
       if (prev.length > 0 && line.id <= prev[prev.length - 1].id) return state;
@@ -100,11 +100,11 @@ export function viewerReducer(state: ViewerState, action: Action): ViewerState {
     }
 
     case "fallback":
-      // 原逻辑:仅当前为空时顶上
+      // 仅当前为空时顶上
       return state.liveLines.length === 0 ? { ...state, liveLines: action.page } : state;
 
     case "following":
-      // #8 相等短路:onScroll 每 tick 都 dispatch(值常重复),不改状态引用则无重渲染
+      // 相等短路:onScroll 每 tick 都 dispatch(值常重复),不改状态引用则无重渲染
       return state.following === action.v ? state : { ...state, following: action.v };
 
     case "increment-new":
@@ -114,7 +114,7 @@ export function viewerReducer(state: ViewerState, action: Action): ViewerState {
       return state.newCount === 0 ? state : { ...state, newCount: 0 };
 
     case "prepend": {
-      // 原逻辑:MAX_PREFIX 裁剪 + 去重由调用方过滤(newer)
+      // MAX_PREFIX 裁剪 + 去重由调用方过滤(newer)
       const merged = [...action.lines, ...state.historyPrefix];
       const next = merged.length > MAX_PREFIX ? merged.slice(merged.length - MAX_PREFIX) : merged;
       return { ...state, historyPrefix: next };
@@ -124,7 +124,7 @@ export function viewerReducer(state: ViewerState, action: Action): ViewerState {
       return { ...state, historyPage: action.page };
 
     case "back-live":
-      // 原逻辑:清历史页 + historyPrefix + 重置 following/newCount/atOldest
+      // 清历史页 + historyPrefix + 重置 following/newCount/atOldest
       return {
         ...state,
         historyPage: null,
@@ -135,7 +135,7 @@ export function viewerReducer(state: ViewerState, action: Action): ViewerState {
       };
 
     case "search-start":
-      // 原逻辑:标记已执行搜索(bug1) + 清空匹配
+      // 标记已执行搜索 + 清空匹配
       return {
         ...state,
         hasSearched: true,
@@ -145,7 +145,7 @@ export function viewerReducer(state: ViewerState, action: Action): ViewerState {
       };
 
     case "search-done":
-      // 原逻辑:设置匹配 + matchTotal(F9) + 初始索引
+      // 设置匹配 + matchTotal + 初始索引
       return {
         ...state,
         matches: action.matches,
@@ -154,7 +154,7 @@ export function viewerReducer(state: ViewerState, action: Action): ViewerState {
       };
 
     case "input":
-      // 原逻辑:清搜索 + 回未搜态(bug1) + 清历史页 + scrollTarget;#9 一并熄灯(输入变更时在途搜索作废)
+      // 清搜索 + 回未搜态 + 清历史页 + scrollTarget;输入变更时在途搜索作废
       return {
         ...state,
         matches: [],
@@ -176,7 +176,7 @@ export function viewerReducer(state: ViewerState, action: Action): ViewerState {
       return { ...state, atOldest: action.v };
 
     case "searching":
-      // #8 相等短路(onInput#9 会重复 dispatch false)
+      // 相等短路(onInput 会重复 dispatch false)
       return state.searching === action.v ? state : { ...state, searching: action.v };
 
     default:
@@ -208,11 +208,11 @@ export function useLogViewer(api: LogApi | null, runKey: number | null) {
 
   const scroller = useRef<HTMLDivElement | null>(null);
   const pendingTopFixRef = useRef<{ h: number; t: number } | null>(null); // prepend 视口维持基准
-  const loadingTopRef = useRef(false);   // F5:向上加载重入守卫(同步 ref,防触顶连续滚动重入)
+  const loadingTopRef = useRef(false);   // 向上加载重入守卫(同步 ref,防触顶连续滚动重入)
   const followingRef = useRef(true);
   const liveRef = useRef(true);
-  const genRef = useRef(0);  // H1:视图代次——api/runKey 重订阅时 ++,在途异步(回退/翻页/搜索)先比对再 dispatch
-  const searchGenRef = useRef(0);  // #9:私有搜索代次——与 SSE 代次分离,专管搜索四路失效面(搜索对搜索/输入变更/空查询/finally 熄灯)
+  const genRef = useRef(0);  // 视图代次——api/runKey 重订阅时 ++,在途异步(回退/翻页/搜索)先比对再 dispatch
+  const searchGenRef = useRef(0);  // 私有搜索代次——与 SSE 代次分离,专管搜索四路失效面(搜索对搜索/输入变更/空查询/finally 熄灯)
   useEffect(() => { followingRef.current = state.following; }, [state.following]);
   useEffect(() => { liveRef.current = state.historyPage === null; }, [state.historyPage]);
 
@@ -228,17 +228,17 @@ export function useLogViewer(api: LogApi | null, runKey: number | null) {
   useEffect(() => {
     dispatch({ t: "reset" });
     if (!api) return;   // 无会话(模型未启动 / 定位中):视图已重置,保持空态
-    const gen = ++genRef.current;   // H1:代次递增——旧代次在途回调发现代次不符即丢弃
+    const gen = ++genRef.current;   // 代次递增——旧代次在途回调发现代次不符即丢弃
     let receivedAny = false;   // 本次订阅是否收到过行
     // 已结束会话:跳过 SSE,回退页顶替(消除流端点 404 噪音)。onerror 回退逻辑复用
     // fetchPage(MAX, WINDOW) 路径——两者同形,gen 守卫一致防代次错位。
     const fallback = () => {
       api.fetchPage(Number.MAX_SAFE_INTEGER, WINDOW, levelParam)
         .then((page) => {
-          if (genRef.current !== gen) return;  // H1:代次已变(重订阅),丢弃旧回退页
+          if (genRef.current !== gen) return;  // 代次已变(重订阅),丢弃旧回退页
           dispatch({ t: "fallback", page });
         })
-        .catch(() => { /* best-effort */ });
+        .catch(() => { /* 尽力而为 */ });
     };
     if (api.ended) {
       fallback();
@@ -269,7 +269,7 @@ export function useLogViewer(api: LogApi | null, runKey: number | null) {
     }
   }, [state.liveLines, state.following, mode]);
 
-  // bug2:prepend 后维持视口位置(DOM 更新后同步调整 scrollTop,在 paint 前)。
+  // prepend 后维持视口位置(DOM 更新后同步调整 scrollTop,在 paint 前)。
   useLayoutEffect(() => {
     const fix = pendingTopFixRef.current;
     const el = scroller.current;
@@ -287,8 +287,8 @@ export function useLogViewer(api: LogApi | null, runKey: number | null) {
     dispatch({ t: "scroll-target", id: null });
   }, [displayed, state.scrollTargetId]);
 
-  // bug2:向上加载更早日志——prepend 到 historyPrefix,维持视口,防抖,上限,到顶。
-  // F5:重入守卫用同步 ref(置位即生效)——触顶连续滚动若用 state 判定,更新生效前会
+  // 向上加载更早日志——prepend 到 historyPrefix,维持视口,防抖,上限,到顶。
+  // 重入守卫用同步 ref(置位即生效)——触顶连续滚动若用 state 判定,更新生效前会
   // 用旧闭包重入,导致同页历史重复 prepend + key 冲突。
   const loadMoreAbove = useCallback(async () => {
     if (!api || loadingTopRef.current || mode !== "live") return;
@@ -298,15 +298,15 @@ export function useLogViewer(api: LogApi | null, runKey: number | null) {
     const el = scroller.current;
     if (el) pendingTopFixRef.current = { h: el.scrollHeight, t: el.scrollTop }; // prepend 前基准
     loadingTopRef.current = true;                 // 同步置位 ref 守卫
-    const gen = genRef.current;                   // H1:比对代次,防重订阅后旧页混入新视图
+    const gen = genRef.current;                   // 比对代次,防重订阅后旧页混入新视图
     try {
       const page = await api.fetchPage(firstId, WINDOW, levelParam);
-      if (genRef.current !== gen) return;         // H1:代次已变,丢弃
+      if (genRef.current !== gen) return;         // 代次已变,丢弃
       const newer = page.filter((l) => l.id < firstId);   // 去重(后端返回 id<firstId 的最近 WINDOW 行)
       if (newer.length === 0) { dispatch({ t: "at-oldest", v: true }); return; }
       dispatch({ t: "prepend", lines: newer });
       if (newer[0].id <= 1) dispatch({ t: "at-oldest", v: true });             // 加载到最早(id=1)
-    } catch { /* best-effort */ } finally {
+    } catch { /* 尽力而为 */ } finally {
       loadingTopRef.current = false;
     }
   }, [api, levelParam, mode, state.historyPrefix, state.liveLines]);
@@ -315,14 +315,14 @@ export function useLogViewer(api: LogApi | null, runKey: number | null) {
     if (mode === "history") return;          // 历史页不自动跟进/加载
     const el = scroller.current;
     if (!el) return;
-    if (el.scrollTop <= TOP_THRESHOLD) loadMoreAbove();    // bug2:触顶 → 加载更早
+    if (el.scrollTop <= TOP_THRESHOLD) loadMoreAbove();    // 触顶 → 加载更早
     const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < STICKY_THRESHOLD;
     dispatch({ t: "following", v: atBottom });
     if (atBottom) dispatch({ t: "clear-new" });
   }, [mode, loadMoreAbove]);
 
   // 跳到 all[idx]:在当前窗口则滚动定位,否则翻页载入(target 为页底)再定位。
-  // #9:在途翻页以双代次校验(视图代次 + 搜索代次)——输入变更/新搜索后旧跳转不落回。
+  // 在途翻页以双代次校验(视图代次 + 搜索代次)——输入变更/新搜索后旧跳转不落回。
   const jumpToMatch = useCallback((all: number[], idx: number) => {
     if (!api || idx < 0 || idx >= all.length) return;
     const target = all[idx];
@@ -330,27 +330,27 @@ export function useLogViewer(api: LogApi | null, runKey: number | null) {
     if (inView) {
       dispatch({ t: "scroll-target", id: target });
     } else {
-      const gen = genRef.current;              // H1:重订阅后旧翻页不落新视图
-      const sgen = searchGenRef.current;       // #9:搜索代次快照(输入变更/新搜索作废)
+      const gen = genRef.current;              // 重订阅后旧翻页不落新视图
+      const sgen = searchGenRef.current;       // 搜索代次快照(输入变更/新搜索作废)
       api.fetchPage(target + 1, WINDOW, levelParam)
         .then((page) => {
           if (genRef.current !== gen || searchGenRef.current !== sgen) return;
           dispatch({ t: "history-page", page });
           dispatch({ t: "scroll-target", id: target });
         })
-        .catch(() => { /* best-effort */ });
+        .catch(() => { /* 尽力而为 */ });
     }
   }, [api, levelParam, state.historyPage, liveView]);
 
   const runSearch = useCallback(async (q: string) => {
     if (!api) return;
-    dispatch({ t: "search-start" });                    // bug1:标记已执行搜索(无论 q 是否空)
+    dispatch({ t: "search-start" });                    // 标记已执行搜索(无论 q 是否空)
     if (!q.trim()) {
-      searchGenRef.current++;  // #9 空查询:作废一切在途搜索结果
+      searchGenRef.current++;  // 空查询:作废一切在途搜索结果
       dispatch({ t: "searching", v: false });
       return;
     }
-    const gen = ++searchGenRef.current;  // #9 新代次:旧在途搜索(搜索对搜索/输入变更)比对后丢弃
+    const gen = ++searchGenRef.current;  // 新代次:旧在途搜索(搜索对搜索/输入变更)比对后丢弃
     dispatch({ t: "searching", v: true });
     try {
       const res = await api.search(q, levelParam);
@@ -359,15 +359,15 @@ export function useLogViewer(api: LogApi | null, runKey: number | null) {
       const idx = res.matches.length ? 0 : -1;
       if (idx >= 0) jumpToMatch(res.matches, idx);
     } finally {
-      if (searchGenRef.current === gen) dispatch({ t: "searching", v: false });  // #9 非陈旧 finally 才熄灯
+      if (searchGenRef.current === gen) dispatch({ t: "searching", v: false });  // 非陈旧 finally 才熄灯
     }
   }, [api, levelParam, jumpToMatch]);
 
-  // bug1:用户改输入 → 更新输入框文本 + 清上次搜索结果 + hasSearched(回「未搜索」态,不显示「无匹配」)。
+  // 用户改输入 → 更新输入框文本 + 清上次搜索结果 + hasSearched(回「未搜索」态,不显示「无匹配」)。
   // 若在 history 模式(搜索跳转过),回 live 起始。historyPrefix(向上加载的历史)保留。
   const onInput = useCallback((v: string) => {
     setInput(v);
-    searchGenRef.current++;  // #9 输入变更:作废在途搜索(旧响应不得落回)
+    searchGenRef.current++;  // 输入变更:作废在途搜索(旧响应不得落回)
     dispatch({ t: "input" });
   }, []);
 

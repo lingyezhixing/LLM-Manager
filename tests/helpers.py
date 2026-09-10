@@ -1,6 +1,6 @@
 """测试用 AppConfig 程序化构建器(DB 接管后无 YAML;直接构造 frozen dataclasses)。
 
-替代已删除的 ``config.load()``(YAML→AppConfig):按需组装模型/程序参数,配合
+按需组装模型/程序参数,配合
 ``config_store.write_appconfig(db, cfg)`` 在测试里预置 DB 状态。经 pyproject
 ``pythonpath=["tests"]`` 以 ``from helpers import cfg, model, scheme`` 导入。
 """

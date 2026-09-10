@@ -15,7 +15,7 @@ from llm_manager.state import ModelStatus
 
 
 def _usage_rows(db, name="m1"):
-    """model_requests JOIN models 按 original_name 直查(测试用;与已删 fetch_usage 查询同构)。"""
+    """model_requests JOIN models 按 original_name 直查(测试用)。"""
     return db.conn.execute(
         "SELECT input_tokens FROM model_requests r JOIN models m ON r.model_id = m.id "
         "WHERE m.original_name = ?",
@@ -40,7 +40,7 @@ def _cfg():
     )
 
 
-# ---------- helpers ----------
+# ---------- 辅助函数 ----------
 def test_strip_headers_removes_hop_by_hop():
     out = proxy._strip_headers(
         {
@@ -301,7 +301,7 @@ class FakeLifecycle:
 
 
 async def test_forward_rejects_absolute_url_in_path():
-    """#1 SSRF:catch-all 路由 {path:path} 剥前导 / 后,path 可为绝对 URL
+    """SSRF:catch-all 路由 {path:path} 剥前导 / 后,path 可为绝对 URL
     (httpx build_request 对绝对 URL 原样外发,绕开 base_url)。入口必须 400 拒绝,
     且拒绝发生在 begin_request 之前(pending 不被触碰)。"""
     state._reset()
@@ -343,7 +343,7 @@ async def test_forward_allows_relative_subpath():
 
 
 async def test_stream_wrapper_never_started_guard_closes_on_disconnect():
-    """#2 客户端在首帧前断连:生成器从未被迭代 → finally 不可达 → pending 永久>0
+    """客户端在首帧前断连:生成器从未被迭代 → finally 不可达 → pending 永久>0
     (idle 回收失效)。guard 断连监听(receive → http.disconnect)必须即时收尾,
     不依赖生成器启动/GC。"""
     state._reset()
@@ -375,7 +375,7 @@ async def test_stream_wrapper_never_started_guard_closes_on_disconnect():
 
 
 async def test_stream_wrapper_aclose_raises_still_ends_request():
-    """#2 收尾顺序:finally 中 await(aclose/record)任一个抛异常,不得连带丢掉
+    """收尾顺序:finally 中 await(aclose/record)任一个抛异常,不得连带丢掉
     end_request——同步收尾必须最先。"""
     state._reset()
     state.set_status("m1", ModelStatus.ROUTING, force=True)

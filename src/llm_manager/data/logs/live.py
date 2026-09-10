@@ -1,5 +1,5 @@
-"""日志 live 层:level 推断、LogLine/_Session、内存 live 集、捕获入口、广播订阅
-(自 logs 单文件拆出,2026-08-14)。模块级单例语义见 AGENTS.md §7。"""
+"""日志 live 层:level 推断、LogLine/_Session、内存 live 集、捕获入口、广播订阅。
+模块级单例语义见 AGENTS.md §7。"""
 
 from __future__ import annotations
 
@@ -151,7 +151,7 @@ def current_system_session_id() -> int | None:
 
 def live_session_ids() -> set[int]:
     """公开只读访问器:当前内存中所有直播会话 id(flusher 仍在接收行的会话)。
-    log_retention 用它排除直播会话(此前直接读私有 _sessions)。"""
+    log_retention 用它排除直播会话。"""
     return set(_sessions)
 
 

@@ -47,9 +47,9 @@ def test_score_excludes_pending():
 
 def test_score_mem_floor_applies_floor_for_tiny_mem():
     now = 1000.0
-    # 1MB occupancy → mem_gb = max(0.5, 1/1024) = 0.5 (floor); occ>0 so still a
-    # candidate, and no div-by-zero. (occ==0 models are excluded as evicting
-    # them frees nothing — covered by test_score_only_models_on_deficit_devices.)
+    # 1MB 占用 → mem_gb = max(0.5, 1/1024) = 0.5(下限);occ>0 仍是候选,
+    # 且无除零。(occ==0 的模型被排除,驱逐它们腾不出任何空间——
+    # 见 test_score_only_models_on_deficit_devices。)
     runnable = {"a": RunnableInfo(mem_mb={"d": 1}, pending=0, last_access=900.0)}
     assert score_candidates(runnable, {"d"}, now) == ["a"]
 
@@ -73,7 +73,7 @@ def test_check_and_free_no_eviction_when_no_deficit():
 
 
 def test_check_and_free_evicts_until_satisfied():
-    snap = {"d": _dev("d", 0)}  # avail 0, need 4096
+    snap = {"d": _dev("d", 0)}  # avail 0,需 4096
     runnable = {
         "a": RunnableInfo(mem_mb={"d": 2048}, pending=0, last_access=0.0),  # idle1000/2=500
         "b": RunnableInfo(mem_mb={"d": 2048}, pending=0, last_access=100.0),  # idle900/2=450
@@ -82,8 +82,8 @@ def test_check_and_free_evicts_until_satisfied():
 
 
 def test_check_and_free_stops_as_soon_as_satisfied():
-    # score = idle_sec / mem_gb desc. b: 900/2.0=450 > a: 1000/4.0=250, so b is
-    # evicted first; one eviction frees 2048 == deficit 2048 → stop early.
+    # score = idle_sec / mem_gb 降序。b: 900/2.0=450 > a: 1000/4.0=250,故 b 先被驱逐;
+    # 一次驱逐释放 2048 == deficit 2048 → 提前停止。
     snap = {"d": _dev("d", 0)}
     runnable = {
         "a": RunnableInfo(mem_mb={"d": 4096}, pending=0, last_access=0.0),

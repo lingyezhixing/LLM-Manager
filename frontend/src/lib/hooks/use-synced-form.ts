@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 
-// 服务端快照 → 本地表单 的同步抽象(AGENTS.md §9-S5)。收敛 general/wol/claude-path/
+// 服务端快照 → 本地表单 的同步抽象。收敛 general/wol/claude-path/
 // model-def 四处手写变体,固化契约:
 // - 外部刷新(serverValue 变化)仅在「表单未编辑(form == baseline)」时跟随;
-// - baseline 只在保存成功时推进(commit/advance),失败不丢 dirty(F1);
+// - baseline 只在保存成功时推进(commit/advance),失败不丢 dirty;
 // - dirty = form != baseline(alwaysDirty 用于创建态恒脏)。
 // 实现细节:baseline 存 state(dirty 依赖它反应式更新)+ ref 镜像(回调里读最新值),
 // form 用 ref 镜像给跟随 effect 读,避免把 form 加进依赖导致编辑中反复触发。

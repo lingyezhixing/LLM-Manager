@@ -1,10 +1,9 @@
-"""GET /api/models/stream (SSE, event-driven push) + start/stop/restart.
+"""GET /api/models/stream (SSE,事件驱动推送)+ start/stop/restart。
 
-The stream pushes a full snapshot on change (status/pid/pending/failure/last_access),
-driven by the subscriber-gated ``ModelFeed``. idle/uptime are intentionally NOT in the
-snapshot (they're time-derived): the frontend ticks them locally from ``started_at`` and
-``last_access`` (wall-clock epochs). Pydantic schemas → OpenAPI (types hand-mirrored
-in frontend/src/lib/api/models.ts).
+流在变更时推送完整快照(status/pid/pending/failure/last_access),由订阅者门控的
+``ModelFeed`` 驱动。idle/uptime 有意不进快照(它们是时间派生值):前端本地从
+``started_at`` 与 ``last_access``(墙上时钟 epoch)自算。Pydantic schema → OpenAPI
+(类型手写镜像于 frontend/src/lib/api/models.ts)。
 """
 
 from __future__ import annotations
@@ -22,16 +21,16 @@ from llm_manager.realtime import ModelFeed
 
 
 class ModelInfo(BaseModel):
-    alias: str  # cfg.aliases[0] — external identity (same as /v1/models)
+    alias: str  # cfg.aliases[0] — 外部身份(与 /v1/models 相同)
     mode: str
     port: int
     auto_start: bool
-    status: str  # state.ModelStatus value
+    status: str  # state.ModelStatus 值
     pid: int | None
     pending: int
     failure_reason: str | None
-    started_at: float | None  # wall-clock epoch when entered ROUTING (None if not routing)
-    last_access: float  # wall-clock epoch of last activity (0.0 if never)
+    started_at: float | None  # 进入 ROUTING 时的墙上时钟 epoch(未 routing 则为 None)
+    last_access: float  # 最近活动的墙上时钟 epoch(从未有活动则为 0.0)
 
 
 class ModelsResponse(BaseModel):
@@ -39,11 +38,10 @@ class ModelsResponse(BaseModel):
 
 
 def build_models_response(cfg: config.AppConfig) -> ModelsResponse:
-    """Current model snapshot from module-level state + cfg. Shared by ModelFeed snapshot
-    + SSE first frame.
+    """模块级 state + cfg 的当前模型快照。ModelFeed 快照与 SSE 首帧共用。
 
-    No time-derived fields (idle/uptime) — the frontend derives those from the wall-clock
-    timestamps so the SSE change-detect only fires on real state changes."""
+    无时间派生字段(idle/uptime)——前端从墙上时钟时间戳自行派生,SSE 变更检测
+    只在真实状态变化时触发。"""
     items: list[ModelInfo] = []
     for name, m in cfg.models.items():
         items.append(
@@ -64,10 +62,10 @@ def build_models_response(cfg: config.AppConfig) -> ModelsResponse:
 
 
 async def _models_stream(feed: ModelFeed[ModelsResponse]) -> AsyncIterator[str]:
-    """Infinite SSE generator: initial current snapshot, then each change."""
+    """无限 SSE 生成器:先发当前快照,之后每次变更各发一帧。"""
     q = feed.subscribe()
     try:
-        yield sse_frame(feed.current_snapshot())  # immediate, so the list isn't empty
+        yield sse_frame(feed.current_snapshot())  # 立即发一帧,列表不至于为空
         while True:
             yield sse_frame(await q.get())
     finally:

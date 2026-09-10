@@ -1,4 +1,4 @@
-"""GET /api/usage/session + GET /api/usage/series (token time-series)."""
+"""GET /api/usage/session + GET /api/usage/series(token 时间序列)。"""
 
 from __future__ import annotations
 
@@ -113,7 +113,7 @@ def test_usage_session_total_cost_since_start(tmp_path) -> None:
 
 
 def test_usage_series_endpoint_custom_range(tmp_path) -> None:
-    # 2h span → _bucket_for_span returns 600s buckets (12 of them)
+    # 2h 跨度 → _bucket_for_span 返回 600s 桶(共 12 个)
     db = open_db(tmp_path / "t.db")
     record_usage(
         db, "m1", start=99, end=100, input_tokens=5, output_tokens=5, cache_n=0, prompt_n=0

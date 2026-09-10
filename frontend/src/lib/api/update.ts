@@ -1,5 +1,5 @@
-// 自更新 — git 标签版本身份 + 严格 ff-only(仅向前,无回退)。Types hand-defined
-// to match gateway/api/update_api.py (UpdateStatus / UpdateTarget)。
+// 自更新 — git 标签版本身份 + 严格 ff-only(仅向前,无回退)。类型手写定义,
+// 对齐 gateway/api/update_api.py (UpdateStatus / UpdateTarget)。
 //
 // 检测语义:程序启动时后端后台检测一次并缓存,前端 GET 只读缓存(刷新/进页不再
 // 触发检测);手动点「检查更新」走 POST /check 触发一次全新检测。

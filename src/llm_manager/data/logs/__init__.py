@@ -1,8 +1,8 @@
-"""data.logs 包(2026-08-14 自单文件拆分,公开面不变)。
+"""data.logs 包。
 
 live=内存 live 集/捕获/广播,pipeline=flush 串行链,queries=纯 SQL。
-再导出保持 `from llm_manager.data import logs` / `from llm_manager.data.logs import X`
-两条导入路径与拆分前完全一致(含测试用的下划线名)。"""
+再导出 `from llm_manager.data import logs` / `from llm_manager.data.logs import X`
+两条导入路径(含测试用的下划线名)。"""
 
 from llm_manager.data.logs.live import (
     BATCH_SIZE,

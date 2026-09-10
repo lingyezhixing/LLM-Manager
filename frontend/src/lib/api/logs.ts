@@ -1,8 +1,8 @@
 import { apiJson } from "./shared";
 
-// 日志查看页 — persistent session logs (/api/logs/*)。LogLine matches the SSE frame the
-// backend emits on /api/logs/sessions/{id}/stream (LogLineResponse in gateway/api/logs_schemas.py;
-// captured/leveled in data/logs.py)。
+// 日志查看页 — 持久化会话日志(/api/logs/*)。LogLine 与后端在 /api/logs/sessions/{id}/stream 上
+// 发出的 SSE 帧同形(见 gateway/api/logs.py 的 LogLineResponse;
+// 捕获/分级见 data/logs)。
 export interface LogLine {
   id: number; ts: number; stream: "out" | "err" | "sys";
   level: "info" | "ok" | "warn" | "error"; text: string;

@@ -1,7 +1,7 @@
-"""Session usage aggregate (since process start): input/output/cache-hit/miss + hit-rate.
+"""进程启动以来的会话用量聚合:input/output/cache-hit/miss + hit-rate。
 
-Metering semantics (all parsers): cache_tokens = hit, prompt_tokens = miss,
-input_tokens = cache + prompt. So hit_rate = cache_hit / (cache_hit + cache_miss)."""
+计量语义(所有解析器):cache_tokens = hit,prompt_tokens = miss,
+input_tokens = cache + prompt。故 hit_rate = cache_hit / (cache_hit + cache_miss)。"""
 
 from __future__ import annotations
 
@@ -36,7 +36,7 @@ def test_reset_clears_counters() -> None:
 
 
 def test_snapshot_includes_started_at_epoch() -> None:
-    """started_at = caller-provided wall-clock epoch; echoed verbatim across snapshots."""
+    """started_at = 调用方提供的墙钟 epoch;跨快照原样回显。"""
     _reset()
     s = snapshot(123.0)
     assert isinstance(s.started_at, float)

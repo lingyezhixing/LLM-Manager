@@ -1,12 +1,10 @@
-"""Model lifecycle: start/stop coroutine pipeline + asyncio.Event cooperative
-interruption + single-dispatch + crash->FAILED + reconcile safety net.
+"""模型生命周期:启动/停止协程 pipeline + asyncio.Event 协作式
+中断 + 单派发 + crash→FAILED + reconcile 安全网。
 
-Single-threaded event loop -> state access needs no locks; "check stop-signal +
-mutate state" sequences are await-free critical sections (atomic by cooperation).
-ensure_running ALWAYS returns the real status (stop's force can overwrite).
-finish_start carries an owner-token: a stale winner whose slot was popped by
-stop (and possibly re-claimed by a concurrent restart) becomes a no-op instead
-of clobbering the new owner."""
+单事件循环 → state 访问无需锁;"检查停止信号 + 变更 state" 序列是无 await
+临界段(协作式原子)。ensure_running 始终返回真实状态(stop 的 force 可覆盖)。
+finish_start 携带 owner-token:slot 被 stop 弹出(可能又被并发 restart 抢占)的
+过期 winner 变为 no-op,而非覆盖新 owner。"""
 
 from __future__ import annotations
 
@@ -265,8 +263,8 @@ class Lifecycle:
             except Exception:
                 logger.warning("log session start failed for %s", alias, exc_info=True)
 
-            # === exit 回调立即注册:#3 probe 窗口内崩溃 → 回调兜到 FAILED,
-            # 而非死 pid 假成功进 ROUTING;亦无迟注册(表清后重建《永清条目》)。 ===
+            # === exit 回调立即注册:probe 窗口内崩溃 → 回调兜到 FAILED,
+            # 而非死 pid 假成功进 ROUTING;亦无迟注册(表清后重建)。 ===
             self._supervisor.on_exit(rec.pid, lambda code: self._on_crash(alias, code))
 
             # === post-spawn 无-await 临界段 ===
@@ -281,8 +279,8 @@ class Lifecycle:
             )  # stop 在 spawn await 中到达(会话于其 _log_end 之后才开)→ 必须在此收口,防泄漏 running 会话
             return ModelStatus.STOPPED
 
-        # Any raise below must kill the spawned pid before propagating;
-        # ensure_running's outer except has no rec.pid reference.
+        # 下面任何异常在向上传播前必须先杀掉已 spawn 的 pid;
+        # ensure_running 的外层 except 没有 rec.pid 引用。
         try:
             if ev.is_set():
                 return await self._abort_spawned(rec.pid)
@@ -312,7 +310,7 @@ class Lifecycle:
             if ev.is_set():
                 return await self._abort_spawned(rec.pid)
             if not self._supervisor.alive(rec.pid):
-                # #3 复查存活:probe 假成功(端口被占但进程已死)→ 不得置 ROUTING。
+                # 复查存活:probe 假成功(端口被占但进程已死)→ 不得置 ROUTING。
                 await self._supervisor.kill_tree(rec.pid)
                 self._log_end(alias)  # 与 cb 收口对称,幂等
                 if state.get_status(alias) != ModelStatus.FAILED:

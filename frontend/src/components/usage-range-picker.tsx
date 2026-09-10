@@ -3,7 +3,7 @@ import { useState } from "react";
 import { CalendarRangePicker } from "@/components/calendar-range-picker";
 import { fmtRange, rangeForState, USAGE_PRESETS, type UsageRangeState } from "@/lib/usage-range";
 
-/** Preset capsules + custom calendar range picker. Drives the whole usage page. */
+/** 预设胶囊 + 自定义日历范围选择器。驱动整个用量页。 */
 export function UsageRangePicker({
   value,
   onChange,

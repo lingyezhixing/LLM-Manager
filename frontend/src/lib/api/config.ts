@@ -1,10 +1,10 @@
-// 系统配置 — config 写回 + system info. Types hand-defined to match
+// 系统配置 — config 写回 + 系统信息。类型手写定义,对齐
 // gateway/api/config_api.py (ProgramUpdate / GET /api/config / GET /api/system/info)。
 import { apiJson } from "./shared";
 
 export interface SystemInfo {
   version: string;
-  started_at: number;        // epoch seconds (time.time())
+  started_at: number;        // epoch 秒(time.time())
   uptime_s: number;
   db_size_bytes: number | null;
 }

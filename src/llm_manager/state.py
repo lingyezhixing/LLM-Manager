@@ -1,8 +1,7 @@
-"""State: model lifecycle status machine + activity + single-dispatch start dedup.
+"""状态:模型生命周期状态机 + 活跃度 + 单派发启动去重。
 
-Module-level functions over a private dict. asyncio single-thread event loop →
-loop-resident state needs no locks (cross-thread resources like sqlite are
-locked separately)."""
+对私有 dict 的模块级函数操作。asyncio 单线程事件循环 → loop-resident 状态
+无需锁(跨线程资源如 sqlite 单独加锁)。"""
 
 from __future__ import annotations
 
@@ -21,7 +20,7 @@ class ModelStatus(str, Enum):
     FAILED = "failed"
 
 
-# Allowed NON-force transitions. STOPPED via force=True bypasses (cooperative stop).
+# 允许的非强制转移。经 force=True 的 STOPPED 绕过(协作式停止)。
 _ALLOWED: dict[ModelStatus, frozenset[ModelStatus]] = {
     ModelStatus.STOPPED: frozenset({ModelStatus.STARTING}),
     ModelStatus.STARTING: frozenset({ModelStatus.INIT_SCRIPT, ModelStatus.FAILED}),
@@ -36,11 +35,11 @@ _ALLOWED: dict[ModelStatus, frozenset[ModelStatus]] = {
 class _Record:
     status: ModelStatus = ModelStatus.STOPPED
     failure_reason: str | None = None
-    last_access: float = 0.0  # monotonic — internal idle reclamation
+    last_access: float = 0.0  # 单调时钟 — 内部空闲回收
     pending: int = 0
     pid: int | None = None
-    started_at: float | None = None  # wall-clock epoch when entered ROUTING (frontend uptime)
-    last_access_wall: float = 0.0  # wall-clock epoch of last activity (frontend idle)
+    started_at: float | None = None  # 墙钟时间戳:进入 ROUTING 的时刻(前端 uptime)
+    last_access_wall: float = 0.0  # 墙钟时间戳:上次活跃时刻(前端 idle)
 
 
 _state: dict[str, _Record] = {}
@@ -48,7 +47,7 @@ _inflight: dict[str, asyncio.Future] = {}
 
 
 def _reset() -> None:
-    """Test helper: clear all state."""
+    """测试辅助:清空全部状态。"""
     _state.clear()
     _inflight.clear()
 
@@ -76,7 +75,7 @@ def set_status(
         rec.failure_reason = reason
     else:
         rec.failure_reason = (
-            None  # 离开 FAILED(成功重启/停止)→ 清陈旧原因(B3);失败原因只在 FAILED 态有意义
+            None  # 离开 FAILED(成功重启/停止)→ 清陈旧原因;失败原因只在 FAILED 态有意义
         )
     if status == ModelStatus.ROUTING:
         now_wall = time.time()
@@ -84,7 +83,7 @@ def set_status(
         rec.last_access_wall = now_wall
         rec.started_at = now_wall
     else:
-        rec.started_at = None  # uptime only while ROUTING
+        rec.started_at = None  # 仅 ROUTING 期间有 uptime
 
 
 def is_runnable(name: str) -> bool:
@@ -114,12 +113,12 @@ def get_last_access(name: str) -> float:
 
 
 def get_started_at(name: str) -> float | None:
-    """Wall-clock epoch when the model entered ROUTING (None when not routing). Frontend ticks uptime."""
+    """模型进入 ROUTING 时的墙钟时间戳(未路由时为 None)。前端据此累加 uptime。"""
     return _rec(name).started_at
 
 
 def get_last_access_wall(name: str) -> float:
-    """Wall-clock epoch of last activity (0.0 if never). Frontend ticks idle locally, no push."""
+    """上次活跃的墙钟时间戳(从未活跃为 0.0)。前端本地累加 idle,不推送。"""
     return _rec(name).last_access_wall
 
 
@@ -168,9 +167,9 @@ def end_request(name: str) -> None:
 
 
 def claim_start(name: str) -> tuple[asyncio.Future, bool]:
-    """Atomic single-dispatch. Returns (future, won).
-    won=True → caller runs the start pipeline, then finish_start(name, status).
-    won=False → caller lost: await future for the final status. Never spawns twice."""
+    """原子单派发。返回 (future, won)。
+    won=True → caller 运行启动 pipeline,然后 finish_start(name, status)。
+    won=False → caller 落选:await future 等最终状态。绝不会 spawn 两次。"""
     existing = _inflight.get(name)
     if existing is not None:
         return existing, False
@@ -179,19 +178,17 @@ def claim_start(name: str) -> tuple[asyncio.Future, bool]:
     _inflight[name] = fut
     rec = _rec(name)
     rec.status = ModelStatus.STARTING
-    rec.failure_reason = None  # 新一轮启动:清上次失败原因(B3),防 SSE 携带陈旧 reason
+    rec.failure_reason = None  # 新一轮启动:清上次失败原因,防 SSE 携带陈旧 reason
     return fut, True
 
 
 def finish_start(name: str, status: ModelStatus, *, owner: asyncio.Future | None = None) -> None:
-    """Winner calls this when the pipeline ends (ROUTING/FAILED/STOPPED).
+    """pipeline 结束时(ROUTING/FAILED/STOPPED)由 winner 调用。
 
-    owner: the future this winner obtained from claim_start. If given and the
-    current _inflight[name] is a DIFFERENT future (stop already popped ours, or
-    a concurrent restart re-claimed), this call is a no-op — we must NOT clobber
-    the new owner's inflight or overwrite rec.status. Guards the owner-token
-    single-dispatch invariant
-    against the slow-probe + concurrent-restart interleaving (orphan winner)."""
+    owner:该 winner 从 claim_start 拿到的 future。若传入且当前 _inflight[name]
+    已是另一个 future(stop 已弹出我们的,或并发重启重新认领),本调用为 no-op
+    ——绝不能覆盖新 owner 的 inflight 或覆写 rec.status。守护 owner-token
+    单派发不变量,防 slow-probe + 并发重启交错产生孤儿 winner。"""
     rec = _rec(name)
     if owner is not None and _inflight.get(name) is not owner:
         return
@@ -201,7 +198,7 @@ def finish_start(name: str, status: ModelStatus, *, owner: asyncio.Future | None
         if rec.failure_reason is None:
             rec.failure_reason = "startup failed"
     else:
-        rec.failure_reason = None  # 成功(ROUTING)/STOPPED → 清陈旧失败原因(B3)
+        rec.failure_reason = None  # 成功(ROUTING)/STOPPED → 清陈旧失败原因
     if fut is not None and not fut.done():
         fut.set_result(status)
 
@@ -215,6 +212,5 @@ def clear_inflight(name: str) -> None:
 
 
 def pop_inflight(name: str) -> asyncio.Future | None:
-    """Atomically remove + return the inflight future (stop releases the slot
-    so the model can restart immediately)."""
+    """原子移除并返回 inflight future(stop 释放槽位,模型可立即重启)。"""
     return _inflight.pop(name, None)

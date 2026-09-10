@@ -217,7 +217,7 @@ def test_capture_system_from_worker_thread(store):
     assert sorted(r["seq"] for r in rows) == list(range(1, 501))  # seq 无重复(递增持锁)
 
 
-# ---- log_sessions / log_lines (SQL 存储层测试,自 test_persistence 并入) ----
+# ---- log_sessions / log_lines (SQL 存储层测试) ----
 
 
 def test_log_session_crud(tmp_path):

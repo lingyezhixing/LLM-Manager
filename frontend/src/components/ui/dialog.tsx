@@ -126,7 +126,7 @@ function ConfirmBody({ opts, onConfirm, onCancel }: {
  * 不变量:shown === (queue[0] ?? null) 恒成立——据此可读 queue[0] 作当前项。
  * setState updater 必须纯(只读 queue,无 shift/resolve 副作用):React dev StrictMode
  * 双调用 updater 并取第二次返回值,旧代码在 updater 内 shift() 会丢队首、resolve 永不触发
- * → 删除/清除等 confirm 流在 dev 下永久挂起(F2)。副作用移到 callback body(仅跑一次)。 */
+ * → 删除/清除等 confirm 流在 dev 下永久挂起。副作用移到 callback body(仅跑一次)。 */
 export function ConfirmProvider({ children }: { children: ReactNode }) {
   const queue = useRef<Pending[]>([]);
   const [shown, setShown] = useState<Pending | null>(null);

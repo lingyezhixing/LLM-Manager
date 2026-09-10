@@ -171,7 +171,7 @@ def test_not_a_git_repo(tmp_path: Path) -> None:
 
 
 def test_annotated_tag_not_false_positive(repo: Path) -> None:
-    """HEAD 恰在最新带注释标签的提交上时,不得误报可更新(H1:裸 rev-parse 返回 tag
+    """HEAD 恰在最新带注释标签的提交上时,不得误报可更新(裸 rev-parse 返回 tag
     对象 SHA → 误判 tag_full != head → 点击后无谓重启)。"""
     _git(repo, "tag", "-a", "v1.0.1", "-m", "annotated release")  # 带注释标签
     _git(repo, "push", "origin", "main", "--tags")
@@ -182,7 +182,7 @@ def test_annotated_tag_not_false_positive(repo: Path) -> None:
 
 
 def test_apply_noop_when_up_to_date_refuses(repo: Path) -> None:
-    """已是最新时 apply 不得静默 no-op 并触发重启(M3)。"""
+    """已是最新时 apply 不得静默 no-op 并触发重启。"""
     with pytest.raises(UpdateError, match="无需更新"):
         apply_update(repo, target="commit")
     with pytest.raises(UpdateError, match="无需更新"):

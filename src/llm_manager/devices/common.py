@@ -150,7 +150,7 @@ def _lhm_computer():
 
 
 def _aggregate_sensors(device_name: str, sensors: Iterator[tuple[str, str, float]]) -> DeviceInfo:
-    """Pure: fold LHM sensor tuples into DeviceInfo. Port semantics from legacy amd_780m.py.
+    """纯函数:把 LHM 传感器元组折叠成 DeviceInfo。
     跨设备共享(Intel/AMD 的 LHM Gpu 折叠同一实现);各自遍历骨架在各设备文件。
     温度取同硬件所有温度传感器最大值;频率取 Clock/Core 传感器(LHM 的 "GPU Core",
     对齐 nvidia-smi clocks.gr / intel_gpu_top frequency.actual 的核心频率语义)。"""

@@ -1,7 +1,6 @@
-"""Data management API: storage stats, orphaned models, delete model data.
+"""数据管理 API:存储统计、孤立模型、删除模型数据。
 
-迁移自 legacy(api_server.py 1048-1115 + data_manager.py 数据管理段)。孤立判定:
-models.original_name ∉ AppConfig.models.keys()(usage/runtime 记录的均为 primary_name)。
+孤立判定:models.original_name ∉ AppConfig.models.keys()(usage/runtime 记录的均为 primary_name)。
 """
 
 from __future__ import annotations

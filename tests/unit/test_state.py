@@ -66,7 +66,7 @@ def test_illegal_transition_raises():
     set_status("M", ModelStatus.STARTING)
     set_status("M", ModelStatus.INIT_SCRIPT)
     with pytest.raises(ValueError):
-        set_status("M", ModelStatus.ROUTING)  # INIT_SCRIPT→ROUTING illegal
+        set_status("M", ModelStatus.ROUTING)  # INIT_SCRIPT→ROUTING 非法
 
 
 def test_force_stop_from_any_state():
@@ -225,7 +225,7 @@ def test_get_failure_reason():
 
 
 def test_failure_reason_cleared_on_restart():
-    """B3:失败后再启动成功,陈旧 failure_reason 必须清除(SSE 不再携带上次失败原因)。"""
+    """失败后再启动成功,陈旧 failure_reason 必须清除(SSE 不再携带上次失败原因)。"""
     from llm_manager import state
 
     state._reset()
@@ -270,7 +270,7 @@ def test_set_last_access_test_helper():
 
 
 def test_record_failure_clears_stale_pid():
-    """#1:record_failure 清 stale pid——FAILED 模型的 pid 已死/将死,清掉防 _reconcile 漏清 + stop 误 kill 被复用 pid。"""
+    """record_failure 清 stale pid——FAILED 模型的 pid 已死/将死,清掉防 _reconcile 漏清 + stop 误 kill 被复用 pid。"""
     from llm_manager import state
 
     state._reset()
@@ -298,13 +298,13 @@ def test_started_at_none_unless_routing():
     from llm_manager.state import ModelStatus
 
     state._reset()
-    assert state.get_started_at("m1") is None  # default
+    assert state.get_started_at("m1") is None  # 默认
     state.set_status("m1", ModelStatus.STARTING, force=True)
-    assert state.get_started_at("m1") is None  # not routing yet
+    assert state.get_started_at("m1") is None  # 尚未 routing
     state.set_status("m1", ModelStatus.ROUTING, force=True)
     assert state.get_started_at("m1") is not None
     state.set_status("m1", ModelStatus.STOPPED, force=True)
-    assert state.get_started_at("m1") is None  # cleared on leaving routing
+    assert state.get_started_at("m1") is None  # 离开 routing 时清除
 
 
 def test_record_failure_clears_started_at():

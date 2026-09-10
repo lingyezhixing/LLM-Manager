@@ -4,7 +4,7 @@ import { ComboboxInput } from "@/components/ui/combobox";
 import { NumberInput, TextInput } from "@/components/ui/form";
 import { isPendingKey, PENDING_KEY_PREFIX } from "@/lib/pending-keys";
 
-// 可复用行编辑器原子(模型定义 CRUD 用;后续其它键值/列表字段可复用)。
+// 可复用行编辑器原子(模型定义 CRUD 用)。
 // StringListEditor:有序字符串列表(args / required_devices / aliases)。
 // KeyValueEditor:键=值(env str→str / memory_mb str→int)。
 // 受控:父级持数组/对象,onChange 回传新值。全部不可变更新(无原地改)。

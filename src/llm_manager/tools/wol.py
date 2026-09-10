@@ -1,4 +1,4 @@
-"""Wake-on-LAN magic packet + send."""
+"""Wake-on-LAN 魔术包构造与发送。"""
 
 from __future__ import annotations
 

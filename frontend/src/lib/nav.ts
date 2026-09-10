@@ -2,17 +2,16 @@ import type { LucideIcon } from "lucide-react";
 import { BarChart3, Boxes, LayoutDashboard, ScrollText, Settings, Wrench } from "lucide-react";
 
 interface NavItem {
-  /** Full label shown in the expanded sidebar (讨论简写的扩充版). */
+  /** 展开侧边栏中显示的完整标签。 */
   label: string;
-  /** Route path. */
+  /** 路由路径。 */
   path: string;
-  /** Monochrome line icon (lucide) — bundled inline, offline-safe. */
+  /** 单色线框图标(lucide)— 内联打包,离线安全。 */
   icon: LucideIcon;
 }
 
 /**
- * Single source of truth for sidebar navigation.
- * Order: 概览 / 模型管理 / 用量统计 / 日志查看 / 工具箱 / 系统.
+ * 侧边栏导航的单一事实源。
  */
 export const NAV_ITEMS: readonly NavItem[] = [
   { label: "概览", path: "/", icon: LayoutDashboard },

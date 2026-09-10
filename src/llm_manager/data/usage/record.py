@@ -11,19 +11,19 @@ from llm_manager.data.persistence import Db, push_end_times
 
 
 def _resolve_model_id_locked(db: Db, model_name: str) -> int:
-    """Insert-or-return model id. Caller MUST already hold db.write_lock
-    (threading.Lock is non-reentrant, so we cannot re-acquire here)."""
+    """取或插 model id。调用方必须已持有 db.write_lock
+    (threading.Lock 不可重入,此处不能再取)。"""
     row = db.conn.execute("SELECT id FROM models WHERE original_name = ?", (model_name,)).fetchone()
     if row:
         return row["id"]
     cur = db.conn.execute("INSERT INTO models (original_name) VALUES (?)", (model_name,))
     db.conn.commit()
-    assert cur.lastrowid is not None  # AUTOINCREMENT PK always yields an int on INSERT
+    assert cur.lastrowid is not None  # AUTOINCREMENT 主键在 INSERT 时总会产生 int
     return cur.lastrowid
 
 
 def resolve_model_id(db: Db, model_name: str) -> int:
-    """Public entry: takes the lock itself for standalone callers."""
+    """公共入口:独立调用方自行取锁。"""
     with db.write_lock:
         return _resolve_model_id_locked(db, model_name)
 
@@ -59,8 +59,8 @@ def live_segment_ids() -> set[int]:
 
 
 def record_runtime_start(db: Db, model_name: str, start: float) -> int:
-    """Begin a model-loaded billing session (model reached ROUTING);返回段 id。
-    Auto-creates the models row (a model can load before any request)。段 id 记入
+    """开启一次模型加载计费会话(模型达到 ROUTING);返回段 id。
+    自动创建 models 行(模型可在任何请求前加载)。段 id 记入
     _live_segments(心跳/关闭用);end_time 由心跳维持,不兼任「运行中」标识。"""
     with db.write_lock:
         mid = _resolve_model_id_locked(db, model_name)
@@ -85,7 +85,7 @@ def runtime_heartbeat_live(db: Db, now: float) -> int:
 
 
 def record_runtime_end(db: Db, segment_id: int, end: float) -> None:
-    """Close a billing session by id(模型停止/崩溃;lifecycle 持 alias→segment_id 映射)。
+    """按 id 关闭计费会话(模型停止/崩溃;lifecycle 持 alias→segment_id 映射)。
     幂等:segment_id 不在 _live_segments(已关/未知)→ no-op。"""
     if segment_id not in _live_segments:
         return

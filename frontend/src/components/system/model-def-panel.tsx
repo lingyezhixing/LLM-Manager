@@ -9,7 +9,6 @@ import { ModelDefForm } from "@/components/system/model-def-form";
 import { useDeleteModelDef, useModelDef, useModelDefs } from "@/lib/hooks/use-model-defs";
 import type { ModelWriteResult } from "@/lib/api";
 
-// 模型定义 CRUD 面板:顶部选择带 + 下方详情(新建/编辑/删除)。
 // 「保存是否需重启模型」由 ModelDefForm 保存流内预检确认(先检测后落库),panel 只管
 // 列表与切换;编辑保存后若涉及重启,form 内链式发起 restart(状态经 SSE 回映)。
 // selected:undefined=未选(默认第一个);null=创建态;string=已选模型。
@@ -26,7 +25,7 @@ export function ModelDefPanel() {
   const detail = useModelDef(effSelected);
   const del = useDeleteModelDef();
 
-  // 切换前 dirty 守卫(M9):dirty 则确认。
+  // 切换前 dirty 守卫:dirty 则确认。
   const guard = async (): Promise<boolean> =>
     !dirtyRef.current
     || await confirm({

@@ -1,4 +1,4 @@
-// 模型/设备类型 + 模型控制 + 模型定义 CRUD。Types hand-defined to match
+// 模型/设备类型 + 模型控制 + 模型定义 CRUD。类型手写定义,对齐
 // gateway/api/{models,devices}.py + config_api.py (ModelDefInput / GET /api/config/models[/{name}])。
 import { apiJson, parseApiError } from "./shared";
 
@@ -11,12 +11,12 @@ export interface ModelInfo {
   pid: number | null;
   pending: number;
   failure_reason: string | null;
-  started_at: number | null;   // wall-clock epoch when entered ROUTING (null if not routing)
-  last_access: number;         // wall-clock epoch of last activity (0 if never)
+  started_at: number | null;   // 进入 ROUTING 时的墙钟 epoch(null 表示未 routing)
+  last_access: number;         // 最近活动的墙钟 epoch(从未活动为 0)
 }
 export interface ModelsResponse { data: ModelInfo[]; }
 
-// Device types hand-defined (match gateway/api/devices.py)。
+// 设备类型手写定义(对齐 gateway/api/devices.py)。
 export interface DeviceInfo {
   device_name: string;
   device_type: string;
@@ -32,7 +32,7 @@ export interface DeviceInfo {
 export interface DevicesResponse { data: DeviceInfo[]; }
 
 // 模型控制:start/stop/restart。restart = stop→ensure_running(读穿取新配置)。202 异步;
-// 运行态经 SSE 反映,无需失效查询键。错误统一走 parseApiError(F7);start 对 409(已运行)
+// 运行态经 SSE 反映,无需失效查询键。错误统一走 parseApiError;start 对 409(已运行)
 // 幂等放行——启动一个已在运行的模型对用户不是错误。
 export async function startModel(alias: string): Promise<void> {
   const res = await fetch(`/api/models/${encodeURIComponent(alias)}/start`, { method: "POST" });
@@ -48,7 +48,7 @@ export async function restartModel(alias: string): Promise<void> {
   if (!res.ok) throw await parseApiError(res);
 }
 
-// 模型定义 CRUD — types + fetchers. Match gateway/api/config_api.py
+// 模型定义 CRUD — 类型 + 取数函数,对齐 gateway/api/config_api.py
 // (ModelDefInput / GET /api/config/models[/{name}])。
 // 读(GET 详情)与写(ModelDefInput)同形,前端用单一 ModelDef 表达两者。
 export interface CommandDef {

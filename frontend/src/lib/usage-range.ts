@@ -1,8 +1,8 @@
-// Usage-page range state, presets, refetch cadence, params derivation, and the shared
-// date-range math. Single source for BOTH range pickers (usage page + overview token
-// card) — keeps preset semantics aligned with the backend _resolve_range (current-moment,
-// NOT day-boundary). Separated from component files so they only export components
-// (React Fast Refresh — see oxlint react/only-export-components).
+// 用量页的区间状态、预设、refetch 节奏、参数推导与共享的
+// 日期区间计算。两个区间选择器(用量页 + 概览 token
+// 卡)的单一事实源——保证预设语义与后端 _resolve_range 对齐(当前时刻语义,
+// 非按日边界)。与组件文件分离,使它们只导出组件
+// (React Fast Refresh — 见 oxlint react/only-export-components)。
 import type { UsageSeriesParams } from "@/lib/api";
 
 export interface DateRange {
@@ -24,7 +24,7 @@ export const USAGE_PRESETS: { key: Exclude<UsagePreset, "custom">; label: string
   { key: "30d", label: "30天" },
 ];
 
-/** Refetch cadence for auto-refresh modules (KPI/chart/by-model). Custom = manual. */
+/** 自动刷新模块的 refetch 节奏(KPI/图表/按模型)。Custom = 手动。 */
 export const USAGE_REFETCH: Record<UsagePreset, number | false> = {
   "10m": 10_000,
   today: 30_000,

@@ -1,6 +1,5 @@
-"""Path-keyed token parsers + 共享用量指标(hit_rate)。Plain-dict registry + @_safe
-total exception safety (a raise in stream-finally truncates the client stream).
-Ported from legacy core/token_parsers.py (behavior preserved verbatim)。
+"""按路径索引的 token 解析器 + 共享用量指标(hit_rate)。纯字典注册表 + @_safe
+总体异常安全(在 stream-finally 中抛异常会截断客户端流)。
 
 未知路径默认回退 parse_generic(保守按字段分类,非顺序盲试;仅无歧义信号
 返回非零,宁可漏计也不误记)。三大 API 显式注册;此外 parse_generic 还识别
@@ -58,7 +57,7 @@ def _is_sse(s: str) -> bool:
 
 
 def iter_blocks(s: str):
-    """Yield each 'data: <payload>' payload string (skip [DONE])."""
+    """逐个产出 'data: <payload>' payload 字符串(跳过 [DONE])。"""
     for line in s.splitlines():
         line = line.strip()
         if line.startswith("data: "):

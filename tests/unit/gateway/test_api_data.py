@@ -1,5 +1,5 @@
-"""Data management API: GET /api/data/storage-stats, GET /api/data/models/orphaned,
-DELETE /api/data/models/{name}. Mirror of test_api_usage.py fixtures."""
+"""数据管理 API:GET /api/data/storage-stats、GET /api/data/models/orphaned、
+DELETE /api/data/models/{name}。fixture 与 test_api_usage.py 同构。"""
 
 from __future__ import annotations
 

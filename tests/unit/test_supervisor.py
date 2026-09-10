@@ -12,12 +12,12 @@ def test_supervisor_implements_process_runner():
 def test_spawn_returns_process_record_and_exits():
     async def main():
         sup = Supervisor()
-        # cross-platform trivial command
+        # 跨平台简单命令
         cmd = [sys.executable, "-c", "print('hi')"]
         rec = await sup.spawn(cmd)
         assert isinstance(rec, ProcessRecord)
         assert rec.pid > 0
-        # let it finish + wait-task fire
+        # 等它结束 + wait-task 触发
         await asyncio.sleep(1.0)
 
     asyncio.run(main())
@@ -32,7 +32,7 @@ def test_on_exit_callback_fires_when_process_exits():
     async def main():
         sup = Supervisor()
         seen = []
-        # placeholder pid 0 registration (real one set at spawn below)
+        # 占位 pid 0 注册(真实 pid 在下方 spawn 时设置)
         sup.on_exit(0, lambda code: seen.append(code))
         cmd = [sys.executable, "-c", "print('hi')"]
         rec = await sup.spawn(cmd)
@@ -45,7 +45,7 @@ def test_on_exit_callback_fires_when_process_exits():
 
 
 def test_on_exit_late_registration_after_cleanup_is_noop():
-    """/#3 迟注册(进程已退出、表已清)不得重建《永清条目》:on_exit 幂等拒绝,否则
+    """迟注册(进程已退出、表已清)不得重建:on_exit 幂等拒绝,否则
     _exit_cbs 中有永不触发回调的键,且 kill_tree/_wait 的清表逻辑被绕开。"""
 
     seen = []
@@ -66,7 +66,7 @@ def test_on_exit_late_registration_after_cleanup_is_noop():
 
 
 def test_kill_tree_blocking_sync_runs_in_thread():
-    """#5 kill_tree 的 psutil 同步段(枚举 + wait_procs ≤3s)必须在 asyncio.to_thread
+    """kill_tree 的 psutil 同步段(枚举 + wait_procs ≤3s)必须在 asyncio.to_thread
     执行:若直接跑在协程体内,阻塞期间事件循环冻结(心跳/idle/日志广播全部停滞)。"""
 
     async def main():
@@ -118,7 +118,7 @@ def test_kill_tree_blocking_sync_runs_in_thread():
 
 
 def test_kill_tree_clears_process_tables():
-    """#5:kill_tree 后 _procs/_exit_cbs 清(_wait 自清 _wait_tasks),防 start/stop 循环累积 Popen 句柄/内存。"""
+    """kill_tree 后 _procs/_exit_cbs 清(_wait 自清 _wait_tasks),防 start/stop 循环累积 Popen 句柄/内存。"""
 
     async def main():
         sup = Supervisor()
@@ -153,8 +153,8 @@ def test_spawn_captures_stdout_and_stderr_via_on_output():
             "import sys; print('out-line'); sys.stderr.write('err-line' + chr(10)); sys.stderr.flush()",
         ]
         rec = await sup.spawn(cmd, on_output=on_output)
-        await sup._wait_tasks[rec.pid]  # wait for process exit → reader EOF
-        await asyncio.sleep(0.05)  # let call_soon_threadsafe callbacks land
+        await sup._wait_tasks[rec.pid]  # 等进程退出 → reader EOF
+        await asyncio.sleep(0.05)  # 让 call_soon_threadsafe 回调落地
 
     asyncio.run(go())
     assert ("out-line", "out") in received

@@ -1,4 +1,4 @@
-// Claude 预设 env JSON 解析/相等判定(自 claude-panel 拆出,纯函数)。
+// Claude 预设 env JSON 解析/相等判定(纯函数)。
 
 import { errMsg } from "@/lib/format";
 

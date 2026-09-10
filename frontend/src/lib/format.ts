@@ -1,7 +1,7 @@
 /** 通用数值/时长/金额格式化(用量页/模型卡/日志页/计费共用)。
  *  K/M 后缀令牌数;ms/s 延迟;% 命中率/占比;¥ 金额;时长/时间串。 */
 
-/** 令牌数格式化(K/M 后缀)。decimals 同时作用于 M 与 K 分支(统一旧版 2/1/0 位三档);调用方按展示空间传参,默认 1 位。 */
+/** 令牌数格式化(K/M 后缀)。decimals 同时作用于 M 与 K 分支;调用方按展示空间传参,默认 1 位。 */
 export function formatTokens(n: number, decimals = 1): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(decimals)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(decimals)}K`;

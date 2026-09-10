@@ -1,4 +1,4 @@
-"""The device SSE stream generator + one-shot snapshot endpoint."""
+"""设备 SSE 流生成器 + 一次性快照端点。"""
 
 from __future__ import annotations
 
@@ -29,16 +29,16 @@ class _FakeMonitor:
 
 
 async def test_device_stream_yields_initial_then_refreshed() -> None:
-    """Drive the SSE generator directly (TestClient hangs on infinite streams)."""
+    """直接驱动 SSE 生成器(TestClient 会卡死在无限流上)。"""
     feed = DeviceFeed(_FakeMonitor(), interval=0.01)
     gen = _device_stream(feed)
     first = await gen.__anext__()
     assert first.startswith("data:")
     assert "RTX 4060" in first
-    # subsequent frame arrives after the next refresh tick
+    # 下一帧在下一个刷新 tick 后到达
     second = await asyncio.wait_for(gen.__anext__(), timeout=2)
     assert second.startswith("data:")
-    await gen.aclose()  # triggers finally → unsubscribe → loop stops
+    await gen.aclose()  # 触发 finally → 退订 → 循环停止
     assert feed.subscriber_count == 0
 
 

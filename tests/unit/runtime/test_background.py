@@ -22,7 +22,7 @@ class _FakeLife:
     async def stop(self, name):
         state.set_status(
             name, ModelStatus.STOPPED, force=True
-        )  # mirror real lifecycle.stop(lifecycle.py:70):使模型退出 routing_names,防 loop 每 tick 重复 stop
+        )  # mirror real lifecycle.stop:使模型退出 routing_names,防 loop 每 tick 重复 stop
         self.stopped.append(name)
         if self._stop_fn is not None:
             r = self._stop_fn(name)
@@ -167,7 +167,7 @@ async def test_idle_loop_survives_stop_exception(caplog):
 
 
 async def test_idle_loop_reads_fresh_alive_time_each_tick():
-    # alive_time 从 0(禁用)变 1(1min=60s):get_cfg 返回值变化 → loop 行为随之变(P1 写回即时生效)
+    # alive_time 从 0(禁用)变 1(1min=60s):get_cfg 返回值变化 → loop 行为随之变
     state.set_status("m", ModelStatus.ROUTING, force=True)
     state._set_last_access("m", time.monotonic() - 120)
     cur = {"alive": 0}
@@ -187,7 +187,7 @@ async def test_idle_loop_reads_fresh_alive_time_each_tick():
 
 # ---------- auto_start ----------
 def _auto_cfg(models_devs):
-    """构造 AppConfig:每模型单 scheme(required dev)。对抗验证 #4:auto_start 显式接收 cfg(避免 lifecycle.cfg 依赖)。"""
+    """构造 AppConfig:每模型单 scheme(required dev)。auto_start 显式接收 cfg(避免 lifecycle.cfg 依赖)。"""
     from llm_manager.config import AppConfig, Command, ModelConfig, ProgramConfig, Scheme
 
     models = {
@@ -290,7 +290,7 @@ async def test_auto_start_device_isolation_batches():
     assert order.index("m_rtx2") > order.index("m_apu")
 
 
-# ---------- _plan_batches (Task 1) ----------
+# ---------- _plan_batches ----------
 def test_plan_batches_device_isolation():
     from llm_manager.config import Command, Scheme
     from llm_manager.runtime.background import _plan_batches

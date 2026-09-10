@@ -8,7 +8,7 @@ interface PillBarProps {
   onToggleCollapse: () => void;
 }
 
-/** 悬浮胶囊条(替代旧全宽顶条):汉堡 + 当前页名 + 健康 LED。壳层玻璃第二处。全宽(留边距)。 */
+/** 悬浮胶囊条:壳层玻璃第二处。全宽(留边距)。 */
 export function PillBar({ collapsed, onToggleCollapse }: PillBarProps) {
   const online = useHealth();
   const { pathname } = useLocation();

@@ -1,4 +1,4 @@
-"""data.usage 包(2026-08-14 自单文件拆分,公开面不变)。
+"""data.usage 包。
 
 record=用量记录+运行段 live 集,aggregate=token 聚合,cost=计费(compute-on-read),
 counters=进程内会话计数(内存账本)。"""

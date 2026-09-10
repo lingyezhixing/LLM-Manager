@@ -1,6 +1,5 @@
 // 工具 — WOL + Claude 预设的 HTTP 表面(/api/tools/*)。
 // WolConfig / ConfigWriteResult 类型留在 ./config(ConfigResponse 引用 wol;写回形状同款),此处仅函数。
-// 消费方仍可经 @/lib/api barrel 取。
 import { apiJson } from "./shared";
 import type { ConfigWriteResult, WolConfig } from "./config";
 

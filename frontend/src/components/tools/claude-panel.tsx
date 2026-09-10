@@ -45,7 +45,7 @@ function ClaudePresetCard({
   const toast = useToast();
   const queryClient = useQueryClient();
 
-  // F6:保存/删除时从查询缓存读最新 presets 构造 payload,而非用父级传入的 presets 快照——
+  // 保存/删除时从查询缓存读最新 presets 构造 payload,而非用父级传入的 presets 快照——
   // 两卡连续保存时,后保存者的快照可能不含先保存者的改动 → 整组 PUT 覆盖丢失(lost update)。
   const latestPresets = (): Record<string, Record<string, string>> =>
     (queryClient.getQueryData<ConfigResponse>(qk.config)?.claude) ?? {};
@@ -198,7 +198,7 @@ export function ClaudePanel() {
   const confirm = useConfirm();
   const toast = useToast();
   const [confirming, setConfirming] = useState(false);
-  // ── Claude settings 路径行(自通用页移入)──
+  // ── Claude settings 路径行 ──
   // useSyncedForm:外部刷新且未编辑(pathInput == baseline)时跟随,保存成功 commit 推进。
   const serverPath = data?.program.claude_settings_path ?? "";
   const { form: pathInput, setForm: setPathInput, dirty: pathDirty, commit: commitPath } =

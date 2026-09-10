@@ -666,7 +666,7 @@ def test_put_model_def_dry_run_previews_without_writing(tmp_path):
 
 
 def test_delete_model_def_starting_409(tmp_path):
-    """/#4 启动中(STARTING,非 ROUTING)删除 → 409:孤儿进程(活着但无配置、无法手动
+    """启动中(STARTING,非 ROUTING)删除 → 409:孤儿进程(活着但无配置、无法手动
     停)。与改名拦截口径一致:一切非 STOPPED/FAILED 活跃态都拒删。"""
     from llm_manager import state
     from llm_manager.state import ModelStatus
@@ -765,7 +765,7 @@ def test_delete_model_def_routing_409(tmp_path):
 
 
 def test_put_program_log_level_is_restart_class(tmp_path):
-    """L1: log_level 降级为重启字段——改之须出现在 restart_fields。
+    """log_level 降级为重启字段——改之须出现在 restart_fields。
     (现状:PUT 不热生效 + log_level 不在 _RESTART_FIELDS → 静默丢失到下次重启。)"""
     with TestClient(_app(tmp_path)) as c:
         r = c.put("/api/config/program", json={"log_level": "DEBUG"})

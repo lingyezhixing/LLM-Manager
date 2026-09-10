@@ -1,12 +1,12 @@
 import { useEffect, useState } from "react";
 
 /**
- * Subscribe to an SSE endpoint. Returns { data, error }: data = latest event payload
- * (parsed JSON) or null before the first event; error = true while the connection is
- * failing (server down / stream dropped), cleared on next successful (re)connect.
- * EventSource auto-reconnects on drop, so no manual retry is needed. The stream closes
- * on unmount (or url change) — which is what gates the backend subscriber-counted loops
- * (e.g. the device refresh loop stops when the bar unmounts).
+ * 订阅 SSE 端点。返回 { data, error }:data = 最新事件负载
+ * (解析后的 JSON),首个事件前为 null;error 在连接
+ * 失败期间为 true(服务宕机 / 流断开),下次成功(重)连时清除。
+ * EventSource 断流自动重连,无需手动重试。卸载(或 url 变更)时
+ * 关闭流——正是关闭动作让后端按订阅数计数的循环停止
+ * (例如设备刷新循环随 bar 卸载而停止)。
  */
 export function useEventStream<T>(url: string): { data: T | null; error: boolean } {
   const [data, setData] = useState<T | null>(null);
@@ -20,7 +20,7 @@ export function useEventStream<T>(url: string): { data: T | null; error: boolean
       try {
         setData(JSON.parse(ev.data) as T);
       } catch {
-        /* malformed frame — ignore; the next refresh replaces it */
+        /* 帧格式异常 — 忽略;下一次刷新会替换 */
       }
     };
     es.onerror = () => setError(true);   // 瞬断/宕机 → 置错;重连成功 onopen 清错

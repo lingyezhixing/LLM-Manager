@@ -14,7 +14,7 @@ import { usePresence } from "@/lib/hooks/use-presence";
 
 // ---------- 命令式 toast:portal 到 body,右下堆叠,自动消失 ----------
 // 与 ConfirmProvider 同范式(context + 单例队列 + portal)。
-// 动效即反馈:进场右滑、退场淡出(usePresence 驻留,播完才出队);
+// 进场右滑、退场淡出(usePresence 驻留,播完才出队);
 // TTL 与手动关闭同走 dying 态(先动画后移除,堆叠不错位)。
 // 走语义 token(success/destructive),lucide 图标打包内联(离线安全)。
 type ToastType = "success" | "error" | "info";
