@@ -165,9 +165,8 @@ export function ModelDefForm({ model, onSaved, onDirtyChange, onDelete }: ModelD
           <NumberInput id="mdf-port" value={form.port} onChange={(e) => set("port", num(e.target.value))} />
         </Field>
         <Field className="sm:col-span-1" label="自启动" htmlFor="mdf-auto">
-          <div className="flex h-9 items-center gap-2">
+          <div className="flex h-9 items-center">
             <Switch id="mdf-auto" checked={form.auto_start} onChange={(v) => set("auto_start", v)} />
-            <span className="text-xs text-muted-foreground">{form.auto_start ? "开" : "关"}</span>
           </div>
         </Field>
         {onDelete && !isCreate ? (

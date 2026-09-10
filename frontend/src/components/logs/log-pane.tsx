@@ -5,7 +5,7 @@ import { type ReactNode } from "react";
 export function LogPane({ header, children }: { header: ReactNode; children: ReactNode }) {
   return (
     <div className="flex h-full flex-col overflow-hidden rounded-lg border border-border bg-card">
-      <div className="flex items-center justify-between border-b border-border px-3.5 py-2">
+      <div className="flex items-center justify-between border-b border-border-subtle px-3.5 py-2">
         {header}
       </div>
       {children}

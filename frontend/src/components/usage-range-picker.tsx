@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Calendar } from "lucide-react";
 
 import { CalendarRangePicker } from "@/components/calendar-range-picker";
 import { fmtRange, rangeForState, USAGE_PRESETS, type UsageRangeState } from "@/lib/usage-range";
@@ -24,7 +25,7 @@ export function UsageRangePicker({
             onChange({ preset: p.key, custom: value.custom });
             setCalOpen(false);
           }}
-          className={`rounded-full border border-border px-2.5 py-0.5 text-ui ${
+          className={`rounded-full border border-border px-2.5 py-0.5 text-ui transition-colors duration-(--motion-base) ${
             value.preset === p.key ? "bg-primary-accent/12 font-medium text-primary-accent" : "text-muted-foreground hover:text-foreground"
           }`}
         >
@@ -36,11 +37,12 @@ export function UsageRangePicker({
         onClick={() => setCalOpen(true)}
         aria-expanded={calOpen}
         aria-haspopup="dialog"
-        className={`rounded-full border border-border px-2.5 py-0.5 text-ui ${
+        className={`inline-flex items-center gap-1 rounded-full border border-border px-2.5 py-0.5 text-ui transition-colors duration-(--motion-base) ${
           value.preset === "custom" ? "bg-primary-accent/12 font-medium text-primary-accent" : "text-muted-foreground hover:text-foreground"
         }`}
       >
-        📅 {fmtRange(displayed)}
+        <Calendar className="size-3" aria-hidden />
+        {fmtRange(displayed)}
       </button>
       {calOpen && (
         <CalendarRangePicker

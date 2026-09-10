@@ -15,7 +15,7 @@ export function RestartBanner({
   restoring?: boolean;
 }) {
   return (
-    <div className="mb-4 rounded-lg border border-warning/40 bg-warning/10 p-3 text-sm text-foreground">
+    <div className="mb-4 rounded-md border border-warning/40 bg-warning/10 p-3 text-sm text-foreground">
       <div>
         检测到已保存但未生效的程序配置：
         <strong className="font-medium">{restartFields.join(", ")}</strong>。

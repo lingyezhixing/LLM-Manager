@@ -73,7 +73,7 @@ export function UsageByModelTable({
         </thead>
         <tbody>
           {rows.map((r) => (
-            <tr key={r.model} className="border-t border-border">
+            <tr key={r.model} className="border-t border-border-subtle">
               <td className="p-2">{r.model}</td>
               <td className="p-2 text-right font-mono tabular-nums">{formatTokens(r.input_tokens)}</td>
               <td className="p-2 text-right font-mono tabular-nums">{formatTokens(r.output_tokens)}</td>
@@ -84,7 +84,7 @@ export function UsageByModelTable({
                   <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
                     <div className="h-full rounded-full bg-primary" style={{ width: `${(r.share * 100).toFixed(1)}%` }} />
                   </div>
-                  <span className="w-9 text-right font-mono text-xs text-muted-foreground">{formatPercent(r.share)}</span>
+                  <span className="w-9 text-right font-mono text-xs text-muted-foreground tabular-nums">{formatPercent(r.share)}</span>
                 </div>
               </td>
               <td className="p-2 text-right font-mono tabular-nums">{formatPercent(r.hit_rate, 1)}</td>

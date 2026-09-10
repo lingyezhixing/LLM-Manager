@@ -83,3 +83,22 @@ export function Switch({
     </button>
   );
 }
+
+/** 行删除按钮(✕):全站统一样式。className 供不同行内的对齐微调——
+ *  items-end 且行内是 Field(自带 mb-4)时传 "mb-4",无 margin 行留空。 */
+export function RemoveButton({ label, onClick, className = "" }: {
+  label: string;
+  onClick: () => void;
+  className?: string;
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      onClick={onClick}
+      className={`h-9 shrink-0 px-2 text-xs text-muted-foreground hover:text-destructive ${className}`}
+    >
+      ✕
+    </button>
+  );
+}

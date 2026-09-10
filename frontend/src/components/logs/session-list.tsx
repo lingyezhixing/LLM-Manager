@@ -20,7 +20,7 @@ export function SessionList({
             }`}>
             <div className="flex items-center gap-1.5 text-ui font-medium text-foreground">
               {running && <span className="size-1.5 shrink-0 rounded-full bg-success" />}
-              <span className="tabular-nums">{fmtTime(s.start_time)}</span>
+              <span className="font-mono tabular-nums">{fmtTime(s.start_time)}</span>
               <span className="ml-auto font-mono text-micro text-muted-foreground">{s.line_count} 行</span>
             </div>
             <div className="text-micro text-muted-foreground">

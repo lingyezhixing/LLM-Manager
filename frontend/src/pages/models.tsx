@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { Empty, Skeleton } from "@/components/ui/card";
+import { buttonClasses } from "@/components/ui/button-variants";
 import { useEventStream } from "@/lib/hooks/use-event-stream";
 import { useNowTick } from "@/lib/hooks/use-now-tick";
 import { ModelCard } from "@/components/model-card";
@@ -33,10 +34,7 @@ export default function ModelsPage() {
                 ? <Empty
                     label="暂无模型"
                     action={
-                      <Link
-                        to="/system"
-                        className="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90"
-                      >
+                      <Link to="/system" className={buttonClasses("default", "sm")}>
                         去系统配置添加
                       </Link>
                     }
@@ -48,7 +46,7 @@ export default function ModelsPage() {
         </div>
         {selected
           ? <ModelLogPanel m={selected} />
-          : <div className="rounded-lg border border-border p-16 text-center text-sm text-muted-foreground">选择左侧模型查看日志</div>}
+          : <Empty label="选择左侧模型查看日志" className="h-full" />}
       </div>
     </>
   );
