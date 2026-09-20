@@ -1,3 +1,5 @@
+import time
+
 import httpx
 
 from llm_manager.runtime import probes
@@ -41,4 +43,27 @@ def test_probe_returns_failure_when_shallow_never_succeeds(monkeypatch):
     monkeypatch.setattr(probes, "_make_client", lambda port: client)
     result = probes.probe_chat("alias", 9999, timeout=0.5)
     assert result.ok is False
+    client.close()
+
+
+def test_probe_fails_fast_when_process_dead(monkeypatch):
+    """进程已死(is_alive 返回 False)→ probe 首轮即快速失败,不空转到 timeout。
+    回归:启动瞬间崩溃时 probe 曾空转 startup_timeout,卡死 inflight future。"""
+    calls = 0
+
+    def is_alive() -> bool:
+        nonlocal calls
+        calls += 1
+        return False
+
+    client = httpx.Client(
+        base_url="http://127.0.0.1:9999/v1",
+        transport=httpx.MockTransport(lambda r: httpx.Response(503)),
+    )
+    monkeypatch.setattr(probes, "_make_client", lambda port: client)
+    start = time.monotonic()
+    result = probes.probe_chat("alias", 9999, timeout=60, is_alive=is_alive)
+    assert result.ok is False
+    assert calls == 1  # 首轮 liveness check 即返回
+    assert time.monotonic() - start < 5  # 远小于 timeout=60
     client.close()

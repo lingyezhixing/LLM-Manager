@@ -290,7 +290,7 @@ class Lifecycle:
 
             if ev.is_set():
                 return await self._abort_spawned(rec.pid)
-            probe = await asyncio.to_thread(self._probe, alias, model.mode)
+            probe = await asyncio.to_thread(self._probe, alias, model.mode, rec.pid)
             logger.info("probe %s %s", alias, "ok" if probe.ok else "fail: " + str(probe.message))
             if ev.is_set():
                 return await self._abort_spawned(rec.pid)
@@ -387,10 +387,12 @@ class Lifecycle:
             )
         return out
 
-    def _probe(self, alias: str, mode: str) -> ProbeResult:
+    def _probe(self, alias: str, mode: str, pid: int | None) -> ProbeResult:
         model = self._cfg_model(alias)
         served = model.aliases[
             0
         ]  # aliases[0]=主别名=下游 served name(lmdeploy --model-name / llama.cpp -a)
         fn = self._probes[mode]
-        return fn(served, model.port, None, self.startup_timeout)
+        # liveness check:进程死(启动瞬间崩溃)时 probe 快速失败,不空转到 timeout
+        is_alive = (lambda: self._supervisor.alive(pid)) if pid is not None else None
+        return fn(served, model.port, None, self.startup_timeout, is_alive=is_alive)
