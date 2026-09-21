@@ -155,13 +155,15 @@ export function LogLines({ h }: { h: LogLinesView }) {
             </div>
           ) : h.hasSearched ? <span className="text-muted-foreground">无匹配</span> : null}
       </div>
-      <div ref={h.scroller} onScroll={h.onScroll}
-        className="relative flex-1 overflow-auto bg-background p-3 font-mono text-ui leading-relaxed">
-        {h.atOldest && <div className="py-1 text-center text-micro text-muted-foreground/60">已加载最早</div>}
-        {h.displayed.length === 0 && (
-          <div className="py-4 text-center text-xs text-muted-foreground">暂无日志</div>
-        )}
-        {blocks}
+      <div className="relative min-h-0 flex-1">
+        <div ref={h.scroller} onScroll={h.onScroll}
+          className="h-full overflow-auto bg-background p-3 font-mono text-ui leading-relaxed">
+          {h.atOldest && <div className="py-1 text-center text-micro text-muted-foreground/60">已加载最早</div>}
+          {h.displayed.length === 0 && (
+            <div className="py-4 text-center text-xs text-muted-foreground">暂无日志</div>
+          )}
+          {blocks}
+        </div>
         {showJump && (
           <button onClick={h.backToLive}
             className="absolute bottom-2.5 right-2 z-20 rounded-full bg-primary px-3 py-1 text-dense font-medium text-primary-foreground shadow-card transition-colors duration-(--motion-fast) hover:bg-primary-600">
