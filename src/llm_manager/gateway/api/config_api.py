@@ -176,7 +176,11 @@ def register_config_routes(api: APIRouter) -> None:
                 else None
             ),
             "claude": cfg.claude_configs,
-            "logs": {"days": p.log_retention_days, "count": p.log_retention_count},
+            "logs": {
+                "days": p.log_retention_days,
+                "count": p.log_retention_count,
+                "requests": p.request_retention_count,
+            },
             "restart_fields": restart_fields(cfg, boot),
         }
 
@@ -213,6 +217,8 @@ def register_config_routes(api: APIRouter) -> None:
             updates["log_retention_days"] = str(body.days)
         if body.count is not None:
             updates["log_retention_count"] = str(body.count)
+        if body.requests is not None:
+            updates["request_retention_count"] = str(body.requests)
         if updates:
             set_settings(get_db(request), updates)
         get_config_store(request).reload()  # 日志规则已并入 AppConfig 快照;reload 保持新鲜

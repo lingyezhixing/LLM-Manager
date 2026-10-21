@@ -65,7 +65,7 @@ def test_get_config_returns_current_program_wol_claude_logs(tmp_path):
     assert j["program"]["alive_time"] == 60
     assert j["wol"] is None
     assert j["claude"] == {}
-    assert j["logs"] == {"days": 30, "count": 10}
+    assert j["logs"] == {"days": 30, "count": 10, "requests": 20}
     assert j["restart_fields"] == []  # boot == snapshot → 无差异
 
 
@@ -136,7 +136,21 @@ def test_put_logs_updates_retention_rules(tmp_path):
     assert c.get("/api/config").json()["logs"] == {
         "days": 14,
         "count": 20,
+        "requests": 20,
     }
+
+
+def test_put_logs_writes_request_retention_and_does_not_restart(tmp_path):
+    with TestClient(_app(tmp_path)) as c:
+        r = c.put("/api/config/logs", json={"requests": 5})
+        assert r.status_code == 200
+        assert r.json()["restart_fields"] == []
+        assert c.get("/api/config").json()["logs"]["requests"] == 5
+
+
+def test_put_logs_rejects_zero_requests(tmp_path):
+    with TestClient(_app(tmp_path)) as c:
+        assert c.put("/api/config/logs", json={"requests": 0}).status_code == 422
 
 
 def test_restart_status_no_change_no_serving(tmp_path):

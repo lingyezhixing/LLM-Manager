@@ -12,7 +12,10 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from llm_manager.gateway.api import build_api_router
+from llm_manager.gateway.api.requests import build_requests_response
+from llm_manager.gateway.live_requests import RequestRegistry
 from llm_manager.gateway.proxy import register_proxy_routes
+from llm_manager.realtime import ModelFeed
 
 logger = logging.getLogger(__name__)
 
@@ -30,9 +33,17 @@ _CORS = {
 
 
 def register_routes(app: FastAPI, lifecycle, db, client_pool) -> None:
+    # 请求簿记:注册表与列表 feed 挂 app.state(不写 DB)。retention 惰性读配置快照
+    # —— app.state.config_store 在 register_routes 之后才赋值,lambda 只在首次终态时才求值。
+    live_requests = RequestRegistry(
+        retention=lambda: app.state.config_store.snapshot().program.request_retention_count
+    )
+    app.state.live_requests = live_requests
+    app.state.request_feed = ModelFeed(lambda: build_requests_response(live_requests))
+
     app.include_router(build_api_router(lifecycle))  # /api/* 管理 API
     _register_catalog(app)  # /health, /v1/models, OPTIONS 预检
-    register_proxy_routes(app, lifecycle, db, client_pool)  # OpenAI 代理 catch-all
+    register_proxy_routes(app, lifecycle, db, client_pool, live_requests)  # OpenAI 代理 catch-all
     _register_spa(app)  # 前端 SPA(最后注册,GET 兜底不遮蔽前述)
 
 

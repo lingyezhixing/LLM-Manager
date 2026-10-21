@@ -9,6 +9,7 @@ token 记录。无 facade Protocol —— 直接调用 lifecycle + state。
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import time
@@ -19,6 +20,13 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import Response, StreamingResponse
 
 from llm_manager.gateway.aliases import resolve_alias_checked
+from llm_manager.gateway.live_requests import LiveRequest, RequestRegistry, RequestStatus
+from llm_manager.gateway.stream_capture import (
+    StreamTextExtractor,
+    extract_final_text,
+    extract_preview,
+    sanitize_body,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -78,9 +86,11 @@ def _inject_include_usage(body: dict, path: str) -> dict:
     return body
 
 
-async def _record_usage(db, model, path, body_bytes, start, end) -> None:
+async def _record_usage(db, model, path, body_bytes, start, end) -> dict | None:
     """Best-effort:metering 写库失败不污染透传(非 stream 不改 status/body;stream 不截断)
-    也不短路 end_request。吞所有异常 + log。同时累加进程内 session 统计(概览用)。"""
+    也不短路 end_request。吞所有异常 + log。同时累加进程内 session 统计(概览用)。
+
+    返回 usage dict(抓取详情展示用),零 token / 解析失败返回 None。"""
     from llm_manager.data import metering
     from llm_manager.data import usage as _u
 
@@ -89,7 +99,7 @@ async def _record_usage(db, model, path, body_bytes, start, end) -> None:
         if not any(
             [usage.input_tokens, usage.output_tokens, usage.cache_tokens, usage.prompt_tokens]
         ):
-            return
+            return None
         _u.session_add(
             usage.input_tokens, usage.output_tokens, usage.cache_tokens, usage.prompt_tokens
         )
@@ -104,8 +114,15 @@ async def _record_usage(db, model, path, body_bytes, start, end) -> None:
             usage.cache_tokens,
             usage.prompt_tokens,
         )
+        return {
+            "input_tokens": usage.input_tokens,
+            "output_tokens": usage.output_tokens,
+            "cache_tokens": usage.cache_tokens,
+            "prompt_tokens": usage.prompt_tokens,
+        }
     except Exception:
         logger.exception("record_usage failed for model=%s path=%s", model, path)
+        return None
 
 
 class _StreamSample:
@@ -151,10 +168,15 @@ class _StreamGuard:
 
     因此收尾锚定在「事件循环任务」而非「对象生命周期」:asyncio 的 asyncgen
     finalizer 会把从未关闭的生成器挂起到 loop 关闭(宿主进程运行期间不触发),
-    基于 GC()__del__ 的兜底在常驻服务中不可靠,故不使用。"""
+    基于 GC()__del__ 的兜底在常驻服务中不可靠,故不使用。
 
-    def __init__(self, request: Request | None, model: str) -> None:
+    抓取启用(live 非 None)时,守卫是断连路径的**权威终态写入者**:不能指望生成器
+    finally 一定被调度到(取消作用域下第一个 await 就抛 CancelledError)。
+    """
+
+    def __init__(self, request: Request | None, model: str, live: LiveRequest | None = None):
         self._model = model
+        self._live = live
         self._done = False
         self._task: asyncio.Task | None = None
         if request is not None:
@@ -167,7 +189,12 @@ class _StreamGuard:
                 if msg is None:
                     return
                 if msg.get("type") == "http.disconnect":
+                    if self._live is not None:
+                        self._live.mark_client_closed()
                     self.finish()
+                    if self._live is not None:
+                        self._live.finish(RequestStatus.CLIENT_CLOSED)
+                        await self._live.abort_upstream()
                     return
         except asyncio.CancelledError:
             raise
@@ -187,22 +214,117 @@ class _StreamGuard:
             self._task.cancel()
 
 
-async def _stream_wrapper(resp, path, model, db, request_start, guard: _StreamGuard | None = None):
+def _status_from(live: LiveRequest, error: str | None) -> RequestStatus:
+    """终态优先级:cancel > client_closed > failed > completed。"""
+    if live.cancel_requested:
+        return RequestStatus.CANCELLED
+    if live.client_closed:
+        return RequestStatus.CLIENT_CLOSED
+    if live.info.status is RequestStatus.CANCELLED:
+        return RequestStatus.CANCELLED
+    if error is not None:
+        return RequestStatus.FAILED
+    if live.info.http_status is not None and live.info.http_status >= 400:
+        return RequestStatus.FAILED
+    return RequestStatus.COMPLETED
+
+
+async def _finalize(
+    live: LiveRequest,
+    guard: _StreamGuard | None,
+    *,
+    status: RequestStatus,
+    db,
+    path: str,
+    model: str,
+    payload: bytes,
+    request_start: float,
+    resp=None,
+    error: str | None = None,
+    finish_reason: str | None = None,
+    has_reasoning: bool = False,
+    has_tool_calls: bool = False,
+) -> None:
+    """统一收尾:终态**同步**落库在任何 await 之前,之后才补 usage/finish_reason。"""
+    live.begin_finalize()
+    if guard is not None:
+        guard.finish()
+    live.finish(status, error=error)  # 同步、幂等;必须早于下面任何 await
+    try:
+        usage = await _record_usage(db, model, path, payload, request_start, time.time())
+        live.set_usage(usage)
+        live.set_finish_reason(finish_reason)
+        live.set_flags(has_reasoning=has_reasoning, has_tool_calls=has_tool_calls)
+    except Exception:
+        logger.debug("finalize enrichment failed for %s", live.info.id, exc_info=True)
+    finally:
+        if resp is not None:
+            with contextlib.suppress(BaseException):
+                await resp.aclose()
+
+
+async def _stream_wrapper(
+    resp,
+    path,
+    model,
+    db,
+    request_start,
+    guard: _StreamGuard | None = None,
+    live: LiveRequest | None = None,
+    capture: StreamTextExtractor | None = None,
+):
     from llm_manager import state
 
     sample = _StreamSample()
+    error: str | None = None
     try:
         async for chunk in resp.aiter_bytes():
             sample.feed(chunk)
+            if live is not None and capture is not None:
+                try:
+                    text = capture.feed(chunk)
+                    if text:
+                        live.append_text(text)
+                except Exception:
+                    logger.debug("capture failed model=%s path=%s", model, path, exc_info=True)
             yield chunk
+    except Exception as e:
+        error = str(e)
+        raise
     finally:
-        if guard is not None:
-            guard.finish()
-            guard.cancel_watch()
+        if live is None:
+            # 抓取未启用:行为与改动前逐字节一致
+            if guard is not None:
+                guard.finish()
+                guard.cancel_watch()
+            else:
+                state.end_request(model)
+            await _record_usage(db, model, path, sample.sample(), request_start, time.time())
+            await resp.aclose()
         else:
-            state.end_request(model)
-        await _record_usage(db, model, path, sample.sample(), request_start, time.time())
-        await resp.aclose()
+            tail_text = ""
+            if capture is not None:
+                try:
+                    tail_text = capture.flush()
+                except Exception:
+                    logger.debug("capture flush failed for %s", live.info.id, exc_info=True)
+            if tail_text:
+                live.append_text(tail_text)
+            await _finalize(
+                live,
+                guard,
+                status=_status_from(live, error),
+                db=db,
+                path=path,
+                model=model,
+                payload=sample.sample(),
+                request_start=request_start,
+                resp=resp,
+                error=error,
+                finish_reason=capture.finish_reason if capture is not None else None,
+                has_reasoning=capture.has_reasoning if capture is not None else False,
+                has_tool_calls=capture.has_tool_calls if capture is not None else False,
+            )
 
 
 def _reject_absolute_url_path(path: str) -> None:
@@ -213,7 +335,37 @@ def _reject_absolute_url_path(path: str) -> None:
         raise HTTPException(400, "absolute URLs not allowed in proxy path")
 
 
-async def forward(request: Request, path: str, lifecycle, cfg, db, client_pool) -> Response:
+async def _send_with_cancel(client, built_request, live: LiveRequest | None):
+    """可取消的上游发送:与 wait_cancelled 赛跑,覆盖"响应头还没回来"的 pre-header 阶段。"""
+    if live is None:
+        return await client.send(built_request, stream=True)
+    send_task = asyncio.create_task(client.send(built_request, stream=True))
+    cancel_task = asyncio.create_task(live.wait_cancelled())
+    try:
+        done, _pending = await asyncio.wait(
+            {send_task, cancel_task}, return_when=asyncio.FIRST_COMPLETED
+        )
+    finally:
+        cancel_task.cancel()
+        with contextlib.suppress(BaseException):
+            await cancel_task
+    if send_task in done:
+        return send_task.result()
+    send_task.cancel()
+    with contextlib.suppress(BaseException):
+        await send_task
+    raise HTTPException(499, "request cancelled")
+
+
+async def forward(
+    request: Request,
+    path: str,
+    lifecycle,
+    cfg,
+    db,
+    client_pool,
+    registry: RequestRegistry | None = None,
+) -> Response:
     _reject_absolute_url_path(path)
     from llm_manager import state
     from llm_manager.state import ModelStatus
@@ -224,6 +376,36 @@ async def forward(request: Request, path: str, lifecycle, cfg, db, client_pool) 
     primary = resolve_alias_checked(cfg, alias)
     logger.info("REQ %s /%s model=%s", request.method, path, primary)
     served = cfg.models[primary].aliases[0]  # aliases[0]=主别名=下游 served name
+
+    status = await lifecycle.ensure_running(primary, inc_pending=True)
+    if status != ModelStatus.ROUTING:
+        logger.warning("model %s not routing (%s)", primary, status.value)
+        raise HTTPException(503, f"model '{primary}' not routing (status={status.value})")
+
+    # 抓取记录在"真正要发上游"之后建(等待启动/启动失败的请求不进列表),但脱敏副本
+    # 必须在改写 body 之前取 —— 用户要看的是自己发了什么,不是代理改写后的样子。
+    live: LiveRequest | None = None
+    if registry is not None:
+        try:
+            is_dict = isinstance(body, dict)
+            raw = b"" if is_dict else (body if isinstance(body, bytes) else b"")
+            live = registry.start(
+                model=primary,
+                alias=served,
+                method=request.method,
+                path="/" + path.lstrip("/"),
+                stream=_is_stream(body),
+                request_preview=(
+                    extract_preview(body) if is_dict else raw[:300].decode("utf-8", "replace")
+                ),
+                request_body=sanitize_body(body) if is_dict else None,
+                input_text=None if is_dict else raw[:4096].decode("utf-8", "replace"),
+            )
+        except Exception:
+            # 抓取/脱敏失败绝不能变成 500:放弃这条记录,请求照常转发。
+            logger.debug("request capture failed to start", exc_info=True)
+            live = None
+
     if isinstance(body, dict):
         body["model"] = served  # 内部统一用 aliases[0] 调下游
         if _is_stream(body):
@@ -232,18 +414,14 @@ async def forward(request: Request, path: str, lifecycle, cfg, db, client_pool) 
     else:
         request_data = body if isinstance(body, bytes) else b""
 
-    status = await lifecycle.ensure_running(primary, inc_pending=True)
-    if status != ModelStatus.ROUTING:
-        logger.warning("model %s not routing (%s)", primary, status.value)
-        raise HTTPException(503, f"model '{primary}' not routing (status={status.value})")
-
     request_start = time.time()
     resp = None  # 池化 httpx 连接;错误路径必须 aclose 归还(见下两个 except)
     streamed = False  # 流式路径 end_request 由 _stream_wrapper finally 负责,外层跳过
     try:
         port = cfg.models[primary].port
         client = _get_or_create_client(client_pool, port)
-        resp = await client.send(
+        resp = await _send_with_cancel(
+            client,
             client.build_request(
                 request.method,
                 path,
@@ -251,41 +429,98 @@ async def forward(request: Request, path: str, lifecycle, cfg, db, client_pool) 
                 content=request_data,
                 params=request.query_params,
             ),
-            stream=True,
+            live,
         )
+        if live is not None:
+            live.set_http_status(resp.status_code)
         if _detect_sse(resp):
             logger.info(
                 "RESP %d stream model=%s %.2fs", resp.status_code, primary, time.monotonic() - t0
             )
             streamed = True
+            capture = None
+            if live is not None:
+                live.attach_upstream(resp)  # 取消/断连要能关掉这条连接
+                capture = StreamTextExtractor(path)
             return StreamingResponse(
                 _stream_wrapper(
-                    resp, path, primary, db, request_start, guard=_StreamGuard(request, primary)
+                    resp,
+                    path,
+                    primary,
+                    db,
+                    request_start,
+                    guard=_StreamGuard(request, primary, live),
+                    live=live,
+                    capture=capture,
                 ),
                 status_code=resp.status_code,
                 headers=_strip_headers(resp.headers, extra=("connection", "content-encoding")),
             )
+
+        # 非流式:可取消读取循环(取消只在不产生半截响应时才有意义)
+        buf = bytearray()
+        cancelled = False
         try:
-            content = await resp.aread()
+            async for chunk in resp.aiter_bytes():
+                if live is not None and live.cancel_requested:
+                    cancelled = True
+                    break
+                buf.extend(chunk)
         finally:
-            # aread 抛错(上游中断)也要 aclose,否则池化连接泄漏不复用
+            # 读中断(上游错误/取消)也要 aclose,否则池化连接泄漏不复用
             await resp.aclose()
         status_code = resp.status_code
         headers = _strip_headers(resp.headers, extra=("connection", "content-encoding"))
         resp = None  # 已关闭,防 except 重复 aclose
-        await _record_usage(db, primary, path, content, request_start, time.time())
+        if cancelled and live is not None:
+            live.finish(RequestStatus.CANCELLED)
+            raise HTTPException(499, "request cancelled")
+        content = bytes(buf)
+        if live is not None:
+            finish_reason = None
+            has_reasoning = False
+            has_tool_calls = False
+            try:
+                result = extract_final_text(path, content)
+                live.append_text(result.text)
+                finish_reason = result.finish_reason
+                has_reasoning = result.has_reasoning
+                has_tool_calls = result.has_tool_calls
+            except Exception:
+                logger.debug("capture failed for non-stream %s", live.info.id, exc_info=True)
+            await _finalize(
+                live,
+                None,
+                status=(RequestStatus.FAILED if status_code >= 400 else RequestStatus.COMPLETED),
+                db=db,
+                path=path,
+                model=primary,
+                payload=content,
+                request_start=request_start,
+                finish_reason=finish_reason,
+                has_reasoning=has_reasoning,
+                has_tool_calls=has_tool_calls,
+            )
+        else:
+            await _record_usage(db, primary, path, content, request_start, time.time())
         logger.info("RESP %d model=%s %.2fs", status_code, primary, time.monotonic() - t0)
         return Response(content=content, status_code=status_code, headers=headers)
     except HTTPException:
+        if live is not None and live.cancel_requested:
+            live.finish(RequestStatus.CANCELLED)
         raise
     except httpx.HTTPError as e:
         if resp is not None:
             await resp.aclose()
+        if live is not None:
+            live.finish(RequestStatus.FAILED, error=str(e))
         logger.warning("upstream error model=%s: %s", primary, e)
         raise HTTPException(502, f"upstream error: {e}")
     except Exception as e:  # noqa: BLE001
         if resp is not None:
             await resp.aclose()
+        if live is not None:
+            live.finish(RequestStatus.FAILED, error=str(e))
         logger.warning("internal model=%s: %s", primary, e)
         raise HTTPException(500, f"internal: {e}")
     finally:
@@ -298,6 +533,7 @@ def register_proxy_routes(
     lifecycle,
     db,
     client_pool,
+    registry: RequestRegistry | None = None,
 ) -> None:
     """挂载 OpenAI 兼容代理的 catch-all(POST/PUT/DELETE/PATCH)。一方法一 handler,
     各自独立 operationId(单 api_route 4 方法会撞同 operationId,产生重复键破坏
@@ -305,7 +541,7 @@ def register_proxy_routes(
 
     async def _forward(path: str, request: Request) -> Response:
         cfg = request.app.state.config_store.snapshot()  # 读穿:每请求 fresh(CRUD 后新别名可路由)
-        return await forward(request, path, lifecycle, cfg, db, client_pool)
+        return await forward(request, path, lifecycle, cfg, db, client_pool, registry=registry)
 
     @app.post("/{path:path}", operation_id="catch_all__path__post")
     async def catch_all_post(path: str, request: Request) -> Response:

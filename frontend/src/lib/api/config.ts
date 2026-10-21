@@ -17,10 +17,12 @@ export interface ProgramConfig {
   claude_settings_path: string;
 }
 
-// 日志保留规则(GET/PUT /api/config/logs;恒生效:按时间保留 N 天 + 按条数保留 N 条,系统与模型日志同时适用)。
+// 保留规则(GET/PUT /api/config/logs;恒生效:日志按时间保留 N 天 + 按条数保留 N 条,
+// 系统与模型日志同时适用;请求记录按每模型滚动保留 requests 条)。
 export interface LogRetention {
   days: number;
   count: number;
+  requests: number;
 }
 
 export interface ConfigResponse {

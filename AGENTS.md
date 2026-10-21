@@ -82,7 +82,7 @@ tray     ── 系统托盘(自重启触发 / WOL / Claude 预设应用)
 前端 PUT /api/config/*  →  Pydantic 校验(422)  →  set_settings(多键原子写)
                          →  mutate_appconfig(fn):锁内 read→改→validate→write
                          →  ConfigStore.reload()(刷 frozen 快照)
-                         →  消费方:热字段(alive_time/log_retention)每轮读 fresh;
+                         →  消费方:热字段(alive_time/log_retention/request_retention_count)每轮读 fresh;
                                    重启字段(host/port/log_level/claude_settings_path)
                                    需 exit 81 重启生效(顶部横幅提示 restart_fields)
 ```

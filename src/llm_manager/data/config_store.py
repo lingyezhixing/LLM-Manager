@@ -105,6 +105,7 @@ def _write_appconfig_locked(db: Db, cfg: AppConfig) -> None:
         _upsert_locked(db, "log_level", p.log_level)
         _upsert_locked(db, "log_retention_days", str(p.log_retention_days))
         _upsert_locked(db, "log_retention_count", str(p.log_retention_count))
+        _upsert_locked(db, "request_retention_count", str(p.request_retention_count))
         if p.claude_settings_path is not None:
             _upsert_locked(db, "claude_settings_path", p.claude_settings_path)
         if cfg.wol is not None:
@@ -195,6 +196,9 @@ def _read_appconfig_locked(db: Db) -> AppConfig:
         ),
         log_retention_count=_int_setting(
             s, "log_retention_count", int(RETENTION_DEFAULTS["log_retention_count"])
+        ),
+        request_retention_count=_int_setting(
+            s, "request_retention_count", int(RETENTION_DEFAULTS["request_retention_count"])
         ),
     )
     wol = None

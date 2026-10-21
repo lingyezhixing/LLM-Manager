@@ -15,6 +15,8 @@ PROGRAM_DEFAULTS: dict[str, str] = {
 RETENTION_DEFAULTS: dict[str, str] = {
     "log_retention_days": "30",
     "log_retention_count": "10",
+    # 请求记录的滚动保留条数(每模型)。活动与手动取消的不受此限。
+    "request_retention_count": "20",
 }
 
 
@@ -173,6 +175,7 @@ class ProgramConfig:
     claude_settings_path: str | None = None
     log_retention_days: int = int(RETENTION_DEFAULTS["log_retention_days"])
     log_retention_count: int = int(RETENTION_DEFAULTS["log_retention_count"])
+    request_retention_count: int = int(RETENTION_DEFAULTS["request_retention_count"])
 
 
 @dataclass(frozen=True, slots=True)
@@ -194,6 +197,8 @@ def validate(cfg: AppConfig) -> list[str]:
     # 程序级:端口范围(DB 读取/写入的 int() 不查范围,在此兜底)
     if not 1 <= cfg.program.port <= 65535:
         errors.append(f"Program port {cfg.program.port} out of range (1-65535)")
+    if cfg.program.request_retention_count < 1:
+        errors.append("Program request_retention_count must be >= 1")
     seen_ports: dict[int, str] = {}
     seen_aliases: dict[str, str] = {}
     valid_modes = {m.value for m in ModelMode}

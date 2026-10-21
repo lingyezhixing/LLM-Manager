@@ -18,10 +18,11 @@ class ProgramUpdate(BaseModel):
 
 
 class LogRetentionUpdate(BaseModel):
-    """日志保留规则:恒生效的两个参数(按时间保留 N 天 + 按条数保留 N 条,系统与模型日志同时适用)。"""
+    """保留规则:日志按时间/条数,请求记录按每模型滚动条数。三者恒生效。"""
 
     days: int | None = Field(default=None, ge=1)
     count: int | None = Field(default=None, ge=1)
+    requests: int | None = Field(default=None, ge=1)
 
 
 class CommandInput(BaseModel):

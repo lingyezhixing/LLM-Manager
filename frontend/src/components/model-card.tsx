@@ -18,8 +18,9 @@ const STAGE_LABEL: Record<string, string> = {
   init_script: "启动中 · 启动脚本", health_check: "启动中 · 健康检查", routing: "运行中", failed: "失败",
 };
 
-export function ModelCard({ m, selected, nowMs, onSelect, index = 0 }: {
+export function ModelCard({ m, selected, nowMs, onSelect, onOpenRequests, index = 0 }: {
   m: ModelInfo; selected: boolean; nowMs: number; onSelect: () => void;
+  onOpenRequests?: () => void;  // 有在途请求时,计数可点 → 跳到「请求」zone
   index?: number;  // 列表序号:入场 stagger 延迟(cap 8 防长列表拖尾)
 }) {
   const toast = useToast();
@@ -62,7 +63,23 @@ export function ModelCard({ m, selected, nowMs, onSelect, index = 0 }: {
         <div className="mt-0.5 flex items-center gap-1.5 text-dense">
           <span className="rounded border border-border/60 px-1.5 py-px text-muted-foreground">{m.mode}</span>
           <span className={m.pending > 0 ? "text-warning font-semibold" : "text-muted-foreground"}>
-            {m.pending > 0 ? `● ${pendingLabel(m.pending)}` : "0 请求"}
+            {m.pending > 0 && onOpenRequests ? (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onOpenRequests();
+                }}
+                title="查看该模型的请求"
+                className="underline decoration-dotted underline-offset-2 hover:text-warning/80"
+              >
+                ● {pendingLabel(m.pending)}
+              </button>
+            ) : m.pending > 0 ? (
+              `● ${pendingLabel(m.pending)}`
+            ) : (
+              "0 请求"
+            )}
           </span>
         </div>
         <div className="mt-0.5 text-dense text-muted-foreground">
