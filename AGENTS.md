@@ -7,7 +7,8 @@
 
 本地多 LLM 模型的代理网关 + WebUI:按需启动/空闲回收本地模型进程(llama.cpp /
 lmdeploy / vLLM …),对外暴露 OpenAI / Anthropic / Responses 兼容 API,记录用量与计费,
-提供系统配置、模型管理、用量统计、日志查看的前端。**运行时完全离线**(无云端依赖)。
+提供系统配置、模型管理、请求管理(实时看输入输出、取消单条请求而不重启模型)、用量统计、
+日志查看的前端。**运行时完全离线**(无云端依赖)。
 **运行时唯一联网点 = 自更新**(系统页「更新」区,git fetch/merge 本项目仓库:程序启动时
 自动检测一次,此后仅用户显式点击检查/应用按钮才联网;见 §5.1)。
 注意:**开发基础设施**(GitHub Actions CI,见 §6)是仓库侧的联网点,与运行时互不干扰
@@ -32,7 +33,7 @@ runtime  ── lifecycle(编排)/scheduling(纯函数资源决策)/background(�
   ↓
 data     ── persistence(schema + 旧库守护)/logs(会话/行 SQL + 捕获/广播/flush)/usage(计费 + 会话计数)/config_store(DB 配置)
   ↓
-gateway  ── proxy(流式代理 + 用量计量)+ api/*(REST/SSE 端点,含 tools_api)+ aliases(别名解析)
+gateway  ── proxy(流式代理 + 用量计量)+ live_requests(内存请求簿记)+ stream_capture(SSE 文本提取/输入脱敏)+ api/*(REST/SSE 端点,含 tools_api)+ aliases(别名解析)
   ↓
 tray     ── 系统托盘(自重启触发 / WOL / Claude 预设应用)
 ```
