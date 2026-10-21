@@ -58,7 +58,7 @@ export function RequestsPanel({ alias, routing }: { alias: string; routing: bool
       {selected ? (
         <RequestDetail id={selected.id} record={selected} />
       ) : (
-        <div className="flex h-full items-center justify-center rounded-lg border border-dashed border-border text-dense text-muted-foreground">
+        <div className="flex h-full items-center justify-center rounded-lg border border-dashed border-border text-xs text-muted-foreground">
           选择左侧请求查看详情
         </div>
       )}

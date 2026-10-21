@@ -60,7 +60,7 @@ export default function ModelsPage() {
             <NavTabUnderline active={zone === "requests"} onClick={() => setZone("requests")}>
               请求
               {selected && selected.pending > 0 && (
-                <span className="ml-1.5 rounded-full bg-warning/15 px-1.5 py-px text-[10px] text-warning">
+                <span className="ml-1.5 rounded-full bg-warning/15 px-1.5 py-px text-dense text-warning">
                   {selected.pending}
                 </span>
               )}

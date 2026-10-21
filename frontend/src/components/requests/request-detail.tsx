@@ -94,7 +94,7 @@ export function RequestDetail({ id, record }: { id: string; record: RequestRecor
 
   if (!r) {
     return (
-      <div className="flex h-full items-center justify-center rounded-lg border border-dashed border-border text-dense text-muted-foreground">
+      <div className="flex h-full items-center justify-center rounded-lg border border-dashed border-border text-xs text-muted-foreground">
         选择左侧请求查看详情
       </div>
     );
@@ -167,13 +167,13 @@ export function RequestDetail({ id, record }: { id: string; record: RequestRecor
             ) : null}
           </span>
           <span className="ml-auto flex shrink-0 items-center gap-1.5">
-            <span className={`rounded border px-1.5 py-px text-[10px] ${STATUS_CLS[r.status]}`}>
+            <span className={`rounded-full border px-2 py-0.5 text-ui ${STATUS_CLS[r.status]}`}>
               {STATUS_TEXT[r.status]}
             </span>
             <button
               type="button"
               onClick={onCopy}
-              className="rounded-md border border-border px-2 py-1 text-dense text-muted-foreground hover:text-foreground"
+              className="rounded-md border border-border px-2.5 py-1 text-ui text-muted-foreground hover:text-foreground"
             >
               复制
             </button>
@@ -182,7 +182,7 @@ export function RequestDetail({ id, record }: { id: string; record: RequestRecor
                 type="button"
                 disabled={busy}
                 onClick={onCancel}
-                className="rounded-md border border-destructive bg-destructive/10 px-2.5 py-1 text-dense font-medium text-destructive hover:bg-destructive/20 disabled:opacity-60"
+                className="rounded-md border border-destructive bg-destructive/10 px-2.5 py-1 text-ui font-medium text-destructive hover:bg-destructive/20 disabled:opacity-60"
               >
                 {busy ? "取消中…" : "取消请求"}
               </button>
@@ -193,29 +193,29 @@ export function RequestDetail({ id, record }: { id: string; record: RequestRecor
     >
       <div className="flex min-h-0 flex-1 flex-col">
         <div className="shrink-0 border-b border-border-subtle">
-          <div className="flex items-center gap-2 px-3 py-1.5 text-[10px] text-muted-foreground">
+          <div className="flex items-center gap-2 px-3 py-1.5 text-dense text-muted-foreground">
             <span>输入</span>
             <span className="truncate">{inputSummary(detail.input)}</span>
             <button
               type="button"
               onClick={() => setExpanded((v) => !v)}
-              className="ml-auto rounded border border-primary-accent/40 px-1.5 py-px text-[10px] text-primary-accent hover:bg-primary-accent/10"
+              className="ml-auto rounded border border-primary-accent/40 px-2 py-0.5 text-ui text-primary-accent hover:bg-primary-accent/10"
             >
               {expanded ? "收起" : "展开"}
             </button>
           </div>
           {expanded ? (
-            <pre className="max-h-[40vh] overflow-auto whitespace-pre-wrap break-words px-3 pb-2 font-mono text-dense text-foreground/85">
+            <pre className="max-h-[40vh] overflow-auto whitespace-pre-wrap break-words px-3 pb-2 font-mono text-ui leading-relaxed text-foreground/85">
               {inputText || "(无输入)"}
             </pre>
           ) : (
-            <div className="truncate px-3 pb-1.5 font-mono text-dense text-foreground/70">
+            <div className="truncate px-3 pb-1.5 font-mono text-ui text-foreground/70">
               {r.request_preview || "(无输入预览)"}
             </div>
           )}
         </div>
 
-        <div className="flex shrink-0 items-center gap-2 border-b border-border-subtle px-3 py-1.5 text-[10px] text-muted-foreground">
+        <div className="flex shrink-0 items-center gap-2 border-b border-border-subtle px-3 py-1.5 text-dense text-muted-foreground">
           <span>实时输出</span>
           {r.status === "running" && (
             <span className="flex items-center gap-1 text-success">
@@ -230,7 +230,7 @@ export function RequestDetail({ id, record }: { id: string; record: RequestRecor
           <pre
             ref={scroller}
             onScroll={onScroll}
-            className="h-full overflow-auto whitespace-pre-wrap break-words px-3 py-2 font-mono text-dense text-foreground/90"
+            className="h-full overflow-auto whitespace-pre-wrap break-words p-3 font-mono text-ui leading-relaxed text-foreground/90"
           >
             {detail.blocks.length > 0 ? (
               detail.blocks.map((block, i) => <span key={i}>{block}</span>)
@@ -244,7 +244,7 @@ export function RequestDetail({ id, record }: { id: string; record: RequestRecor
             <button
               type="button"
               onClick={jumpToBottom}
-              className="absolute bottom-3 right-3 rounded-full border border-primary-accent/50 bg-primary-accent/20 px-2.5 py-1 text-[10px] text-foreground hover:bg-primary-accent/30"
+              className="absolute bottom-3 right-3 rounded-full border border-primary-accent/50 bg-primary-accent/20 px-2.5 py-1 text-dense text-foreground hover:bg-primary-accent/30"
             >
               回到底部 ↓
             </button>

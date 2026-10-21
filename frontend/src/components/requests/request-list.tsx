@@ -16,6 +16,8 @@ const DOT: Record<RequestRecord["status"], string> = {
 
 const ACTIVE: ReadonlySet<RequestRecord["status"]> = new Set(["running", "cancelling"]);
 
+const shortPath = (p: string) => p.replace(/^\/v1\//, "");
+
 function elapsedSec(r: RequestRecord, nowMs: number): number {
   const end = r.finished_at ?? nowMs / 1000;
   return Math.max(0, Math.round(end - r.started_at));
@@ -37,15 +39,15 @@ function Card({
     ? "border-primary-accent bg-primary-accent/12"
     : r.status === "cancelled"
       ? "border-destructive/30 hover:bg-card-hover"
-      : "border-border-subtle hover:bg-card-hover";
+      : "border-border-subtle bg-card-2 hover:bg-card-hover";
   return (
     <button
       type="button"
       onClick={onSelect}
       aria-pressed={selected}
-      className={`rounded-md border p-2 text-left transition-colors duration-(--motion-base) ${border}`}
+      className={`rounded-md border px-2.5 py-1.5 text-left transition-colors duration-(--motion-base) ${border}`}
     >
-      <div className="truncate text-dense text-foreground">
+      <div className="truncate text-card-title font-medium text-foreground">
         {r.request_preview || "(无输入预览)"}
       </div>
       <div className="mt-1 flex items-center gap-1.5 text-dense text-muted-foreground">
@@ -53,7 +55,7 @@ function Card({
           className={`size-[6px] shrink-0 rounded-full ${r.status === "running" ? "animate-dot-pulse" : ""}`}
           style={{ background: DOT[r.status] }}
         />
-        <span className="truncate">{r.path}</span>
+        <span className="truncate">{shortPath(r.path)}</span>
         <span className="ml-auto shrink-0 tabular-nums">
           {fmtDuration(elapsedSec(r, nowMs))}
           {tokens ? ` · ${tokens}` : ""}
@@ -65,7 +67,7 @@ function Card({
 
 function GroupHead({ label, count }: { label: string; count: number }) {
   return (
-    <div className="mt-1 flex items-center gap-2 px-0.5 text-[10px] text-muted-foreground">
+    <div className="mt-1 flex items-center gap-2 px-0.5 text-dense text-muted-foreground">
       <span>
         {label} {count}
       </span>
@@ -113,7 +115,7 @@ export function RequestList({
 
   return (
     <div className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-border-subtle">
-      <div className="flex shrink-0 items-center gap-2 border-b border-border-subtle px-2.5 py-1.5 text-[10px] text-muted-foreground">
+      <div className="flex shrink-0 items-center gap-2 border-b border-border-subtle px-2.5 py-1.5 text-dense text-muted-foreground">
         <span>
           活动 {active.length} · 已取消 {cancelled.length} · 最近 {recent.length}
         </span>
@@ -121,7 +123,7 @@ export function RequestList({
           <button
             type="button"
             onClick={clear}
-            className="ml-auto rounded border border-destructive/40 px-1.5 py-px text-[10px] text-destructive hover:bg-destructive/10"
+            className="ml-auto rounded border border-destructive/40 px-1.5 py-px text-dense text-destructive hover:bg-destructive/10"
           >
             清空已取消
           </button>
@@ -130,7 +132,7 @@ export function RequestList({
 
       <div className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto p-2">
         {items.length === 0 && (
-          <div className="flex flex-1 items-center justify-center px-3 text-center text-dense text-muted-foreground">
+          <div className="flex flex-1 items-center justify-center px-3 text-center text-xs text-muted-foreground">
             {routing ? "暂无请求" : "模型未运行，无请求"}
           </div>
         )}
