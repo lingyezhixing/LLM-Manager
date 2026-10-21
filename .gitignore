@@ -70,6 +70,8 @@ node_modules/
 
 # 忽略配置文件中的敏感信息
 .env
+.env.local
+.env.*.local
 .config
 
 # 忽略VS Code工作区文件

@@ -208,7 +208,13 @@ pyright src/llm_manager
 前端（`frontend/`）：
 
 ```bash
+npm run dev          # Vite dev server（默认代理到 127.0.0.1:8080；见下）
 npm run build        # tsc -b && vite build；8080 serve 的是 dist 构建产物，改前端后必跑
 npx oxlint src
 npx tsc -b
 ```
+
+`npm run dev` 的后端代理目标按此顺序解析：`frontend/.env.local` 的 `VITE_BACKEND` → 环境变量
+`VITE_BACKEND` → 默认 `http://127.0.0.1:8080`。同时跑多个实例（例如本仓库 8081 + 部署实例 8080）时，
+在 `frontend/.env.local` 写一行 `VITE_BACKEND=http://127.0.0.1:8081` 即可 —— 该文件已 gitignore，
+且 Vite 重启（改 config 触发）后依然生效。
