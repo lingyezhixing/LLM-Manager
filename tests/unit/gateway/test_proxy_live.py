@@ -245,12 +245,81 @@ async def test_cancel_closes_upstream_and_keeps_model_state():
     task = asyncio.create_task(_collect(gen))
     await asyncio.sleep(0)
     assert await reg.cancel(live.info.id) is True
-    with pytest.raises(RuntimeError):
-        await task
+    await task  # 取消是预期收尾:不得把上游读错误抛给 ASGI
 
     assert resp.closed is True
     assert live.info.status is RequestStatus.CANCELLED
     assert state.get_status("m1") is ModelStatus.ROUTING  # 模型没被动
+
+
+async def test_cancel_ends_stream_without_raising():
+    """取消后上游抛的读错误是我们自己关连接造成的,不能冒泡成 ASGI 异常日志。"""
+    state._reset()
+    state.set_status("m1", ModelStatus.ROUTING, force=True)
+    reg = _registry()
+    live = reg.start(
+        model="m1",
+        alias="m1",
+        method="POST",
+        path="/v1/chat/completions",
+        stream=True,
+        request_preview="hi",
+    )
+    chunk = _sse({"choices": [{"delta": {"content": "a"}}]})
+    resp = FakeStreamResp([chunk], hang=True)
+    live.attach_upstream(resp)
+    db = open_db(Path(":memory:"))
+    cap = StreamTextExtractor("v1/chat/completions")
+
+    gen = proxy._stream_wrapper(resp, "v1/chat/completions", "m1", db, 1.0, live=live, capture=cap)
+    task = asyncio.create_task(_collect(gen))
+    for _ in range(50):  # 等第一块真的转出去,再取消
+        if live.text:
+            break
+        await asyncio.sleep(0)
+    assert live.text == "a"
+
+    assert await reg.cancel(live.info.id) is True
+    out = await task  # 关键:不抛异常
+
+    assert out == [chunk]
+    assert live.info.status is RequestStatus.CANCELLED
+    assert resp.closed is True
+
+
+async def test_client_disconnect_ends_stream_without_raising():
+    """客户端断开后我们自己关上游,同样不应把读错误抛成 ASGI 异常。"""
+    state._reset()
+    state.set_status("m1", ModelStatus.ROUTING, force=True)
+    reg = _registry()
+    live = reg.start(
+        model="m1",
+        alias="m1",
+        method="POST",
+        path="/v1/chat/completions",
+        stream=True,
+        request_preview="hi",
+    )
+    chunk = _sse({"choices": [{"delta": {"content": "b"}}]})
+    resp = FakeStreamResp([chunk], hang=True)
+    live.attach_upstream(resp)
+    db = open_db(Path(":memory:"))
+    cap = StreamTextExtractor("v1/chat/completions")
+
+    gen = proxy._stream_wrapper(resp, "v1/chat/completions", "m1", db, 1.0, live=live, capture=cap)
+    task = asyncio.create_task(_collect(gen))
+    for _ in range(50):
+        if live.text:
+            break
+        await asyncio.sleep(0)
+    assert live.text == "b"
+
+    live.mark_client_closed()
+    await live.abort_upstream()
+    out = await task  # 关键:不抛异常
+
+    assert out == [chunk]
+    assert live.info.status is RequestStatus.CLIENT_CLOSED
 
 
 async def test_disconnect_marks_client_closed():

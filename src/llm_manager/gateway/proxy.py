@@ -289,6 +289,13 @@ async def _stream_wrapper(
                     logger.debug("capture failed model=%s path=%s", model, path, exc_info=True)
             yield chunk
     except Exception as e:
+        # 主动中断(用户取消 / 客户端断开)是我们自己关掉上游连接的结果:httpx 会抛
+        # ReadError 一类的读错误。这是预期收尾,不是故障 —— 静默结束生成器即可。
+        # 若在这里 re-raise,Starlette 会把它当未处理异常抛出,uvicorn 每次取消都打
+        # 一整段 "Exception in ASGI application" traceback(功能没错,但日志全是噪音)。
+        if live is not None and (live.cancel_requested or live.client_closed):
+            logger.debug("upstream aborted model=%s path=%s: %s", model, path, e)
+            return
         error = str(e)
         raise
     finally:
