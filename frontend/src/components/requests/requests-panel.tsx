@@ -40,7 +40,7 @@ export function RequestsPanel({ alias, routing }: { alias: string; routing: bool
   }, [items]);
 
   if (error) {
-    return <p className="text-sm text-muted-foreground">{streamErrorText("请求")}</p>;
+    return <p className="text-sm text-muted-foreground">{streamErrorText("请求列表")}</p>;
   }
   if (data === null) return <Loading />;
 

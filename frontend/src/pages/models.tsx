@@ -15,7 +15,7 @@ type Zone = "logs" | "requests";
 
 /**
  * 模型管理 — 操作控制台。左 1 : 右 4:左栏模型卡片(三合一启停按钮 + 状态/模式/请求数,
- * 点卡片体选中),右区顶部切「进程日志 / 请求」两个 zone:
+ * 点卡片体选中),右区顶部切「进程日志 / 请求管理」两个 zone:
  * - 进程日志:选中模型的日志面板(持久会话 API + SSE 实时尾);
  * - 请求:内存请求簿记(列表 + 实时详情 + 单条取消)。
  * 选中态由本页持有,两个 zone 共用;zone 默认 logs(保持原有行为)。
@@ -58,7 +58,7 @@ export default function ModelsPage() {
               进程日志
             </NavTabUnderline>
             <NavTabUnderline active={zone === "requests"} onClick={() => setZone("requests")}>
-              请求
+              请求管理
               {selected && selected.pending > 0 && (
                 <span className="ml-1.5 rounded-full bg-warning/15 px-1.5 py-px text-dense text-warning">
                   {selected.pending}
