@@ -80,22 +80,21 @@ export function WolPanel() {
           <TextInput id="wol-mac" value={form.mac_address} onChange={(e) => set("mac_address", e.target.value)} />
         </Field>
       </div>
-      {dirty && (
-        <ConfigSaveBar
-          saving={update.isPending}
-          error={update.error ? errMsg(update.error) : null}
-          onSave={() =>
-            update.mutate(form, {
-              onSuccess: () => {
-                commit(form);
-                toast.success("网络唤醒配置已保存");
-              },
-            })
-          }
-          onReset={() => reset()}
-          saveDisabled={!macOk || !bcastOk}
-        />
-      )}
+      <ConfigSaveBar
+        open={dirty}
+        saving={update.isPending}
+        error={update.error ? errMsg(update.error) : null}
+        onSave={() =>
+          update.mutate(form, {
+            onSuccess: () => {
+              commit(form);
+              toast.success("网络唤醒配置已保存");
+            },
+          })
+        }
+        onReset={() => reset()}
+        saveDisabled={!macOk || !bcastOk}
+      />
       {hasConfig && (
         <div className="mt-4 flex justify-end gap-2">
           <Button type="button" onClick={onSend} disabled={!macOk || !bcastOk || send.isPending}>

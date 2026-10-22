@@ -34,14 +34,15 @@ export default function SystemPage() {
 
   return (
     <>
-      {rs?.needs_restart && <RestartBanner
-        restartFields={rs.restart_fields}
-        serving={rs.serving}
+      <RestartBanner
+        open={!!rs?.needs_restart}
+        restartFields={rs?.restart_fields ?? []}
+        serving={rs?.serving ?? []}
         onRestart={triggerRestart}
         onRestore={onRestore}
         restarting={restarting || pending}
         restoring={restore.isPending}
-      />}
+      />
       {restartError && (
         <div className="mb-4 flex flex-wrap items-center gap-3 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
           <span>{restartError}</span>
@@ -55,7 +56,7 @@ export default function SystemPage() {
       )}
       <div>
         <ZoneNav zones={ZONES} active={zone} onSelect={setZone} />
-        <div className="mt-6">
+        <div key={zone} className="animate-swap-in mt-6">
           {zone === "general" && <GeneralPanel />}
           {zone === "models" && <ModelDefPanel />}
           {zone === "database" && <DatabasePanel />}

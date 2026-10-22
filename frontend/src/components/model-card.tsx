@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ModelInfo } from "@/lib/api";
 import { startModel, stopModel } from "@/lib/api";
 import { errMsg, idleText, pendingLabel } from "@/lib/format";
@@ -24,7 +24,13 @@ export function ModelCard({ m, selected, nowMs, onSelect, onOpenRequests, index 
   index?: number;  // 列表序号:入场 stagger 延迟(cap 8 防长列表拖尾)
 }) {
   const toast = useToast();
-  const [acting, setActing] = useState(false);  // 启停动作在途(点击→SSE 状态生效的间隙反馈)
+  const [acting, setActing] = useState(false);  // 启停动作在途(防连点 + 半透明反馈)
+  // 状态点只在"真的变化"时弹一下:首次挂载不弹(否则整列卡片会在加载时齐刷刷跳一下)。
+  const prevStatus = useRef(m.status);
+  const statusChanged = prevStatus.current !== m.status;
+  useEffect(() => {
+    prevStatus.current = m.status;
+  }, [m.status]);
   const starting = ["starting", "init_script", "health_check"].includes(m.status);
   const routing = m.status === "routing";
   const idle = idleText(m.last_access, nowMs);
@@ -33,11 +39,13 @@ export function ModelCard({ m, selected, nowMs, onSelect, onOpenRequests, index 
     : m.status === "failed" ? `失败${m.failure_reason ? ` · ${m.failure_reason}` : ""}`
     : STAGE_LABEL[m.status] ?? m.status;
 
+  // 按钮标签只有三态,不设"启动中…"这类中间文案:请求本身是毫秒级返回,
+  // 中间态只会闪一下;真正的进度由卡片状态行(SSE)呈现。acting 仅用于防连点。
   const btn = starting
-    ? { label: "中断", acting: "中断中…", cls: "abort", fn: () => stopModel(m.alias) }
+    ? { label: "中断", cls: "abort", fn: () => stopModel(m.alias) }
     : routing
-      ? { label: "停止", acting: "停止中…", cls: "stop", fn: () => stopModel(m.alias) }
-      : { label: "启动", acting: "启动中…", cls: "go", fn: () => startModel(m.alias) };
+      ? { label: "停止", cls: "stop", fn: () => stopModel(m.alias) }
+      : { label: "启动", cls: "go", fn: () => startModel(m.alias) };
 
   const onAct = () => {
     if (acting) return;
@@ -62,7 +70,7 @@ export function ModelCard({ m, selected, nowMs, onSelect, onOpenRequests, index 
         <div className="text-card-title font-semibold truncate text-foreground">{m.alias}</div>
         <div className="mt-0.5 flex items-center gap-1.5 text-dense">
           <span className="rounded border border-border/60 px-1.5 py-px text-muted-foreground">{m.mode}</span>
-          <span className={m.pending > 0 ? "text-warning font-semibold" : "text-muted-foreground"}>
+          <span className={m.pending > 0 ? "text-warning font-semibold transition-colors duration-(--motion-base)" : "text-muted-foreground transition-colors duration-(--motion-base)"}>
             {m.pending > 0 && onOpenRequests ? (
               <button
                 type="button"
@@ -83,16 +91,21 @@ export function ModelCard({ m, selected, nowMs, onSelect, onOpenRequests, index 
           </span>
         </div>
         <div className="mt-0.5 text-dense text-muted-foreground">
-          <span className={`mr-1 inline-block size-[7px] rounded-full align-middle ${m.status === "routing" ? "animate-dot-pulse" : ""}`} style={{ background: DOT[m.status] ?? "var(--color-muted-foreground)" }} />
+          <span key={m.status} className={`mr-1 inline-block align-middle ${statusChanged ? "animate-status-pop" : ""}`}>
+            <span
+              className={`inline-block size-[7px] rounded-full transition-colors duration-(--motion-base) ${m.status === "routing" ? "animate-dot-pulse" : ""}`}
+              style={{ background: DOT[m.status] ?? "var(--color-muted-foreground)" }}
+            />
+          </span>
           {statusText}
         </div>
       </div>
       <button onClick={(e) => { e.stopPropagation(); onAct(); }} disabled={acting}
-        className={`shrink-0 rounded-md border px-3 py-1.5 text-dense font-medium transition-colors disabled:opacity-60 ${
+        className={`shrink-0 whitespace-nowrap rounded-md border px-3 py-1.5 text-center text-dense font-medium transition-colors disabled:opacity-60 ${
           btn.cls === "go" ? "border-primary bg-primary text-primary-foreground hover:bg-primary-600"
           : btn.cls === "stop" ? "border-destructive bg-destructive text-destructive-foreground hover:bg-destructive-600"
           : "border-warning bg-warning text-warning-foreground hover:bg-warning-600"}`}>
-        {acting ? btn.acting : btn.label}
+        {btn.label}
       </button>
     </div>
   );

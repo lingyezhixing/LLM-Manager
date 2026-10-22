@@ -76,11 +76,13 @@ export default function LogsPage() {
             : <SessionList sessions={sessions} selectedId={selectedId} onSelect={setSelectedId} />}
         </div>
         <div className="min-h-0">
-          {selected ? <LogViewer key={selected.id} session={selected} /> : (
-            <div className="flex h-full items-center justify-center rounded-lg border border-dashed border-border text-sm text-muted-foreground">
-              选择左侧会话查看日志
-            </div>
-          )}
+          <div key={selected?.id ?? "empty"} className="animate-swap-in h-full">
+            {selected ? <LogViewer key={selected.id} session={selected} /> : (
+              <div className="flex h-full items-center justify-center rounded-lg border border-dashed border-border text-sm text-muted-foreground">
+                选择左侧会话查看日志
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>

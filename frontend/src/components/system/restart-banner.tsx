@@ -5,8 +5,9 @@ import { Button } from "@/components/ui/button";
 // 无「知道了」(不允许静默丢弃:要么生效、要么回退到运行中的配置)。
 // onRestore 使用 running_program 值回写(与当前运行实例一致,不触发重启)。
 export function RestartBanner({
-  restartFields, serving, onRestore, onRestart, restarting, restoring,
+  open, restartFields, serving, onRestore, onRestart, restarting, restoring,
 }: {
+  open: boolean;
   restartFields: string[];
   serving: string[];
   onRestore: () => void;
@@ -14,24 +15,35 @@ export function RestartBanner({
   restarting?: boolean;
   restoring?: boolean;
 }) {
+  // 常驻渲染 + grid-rows 过渡:保存后出现/生效后消失都不再顶动下面的分区导航。
   return (
-    <div className="mb-4 rounded-md border border-warning/40 bg-warning/10 p-3 text-sm text-foreground">
-      <div>
-        检测到已保存但未生效的程序配置：
-        <strong className="font-medium">{restartFields.join(", ")}</strong>。
-      </div>
-      {serving.length > 0 && (
-        <div className="mt-1 text-muted-foreground">
-          当前正在服务的模型:{serving.join(", ")}（重启将中断）。
+    <div
+      aria-hidden={!open}
+      inert={!open}
+      className={`grid transition-[grid-template-rows,opacity] duration-(--motion-base) ease-(--motion-ease) ${
+        open ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"
+      }`}
+    >
+      <div className="min-h-0 overflow-hidden">
+        <div className="mb-4 rounded-md border border-warning/40 bg-warning/10 p-3 text-sm text-foreground">
+          <div>
+            检测到已保存但未生效的程序配置：
+            <strong className="font-medium">{restartFields.join(", ")}</strong>。
+          </div>
+          {serving.length > 0 && (
+            <div className="mt-1 text-muted-foreground">
+              当前正在服务的模型:{serving.join(", ")}（重启将中断）。
+            </div>
+          )}
+          <div className="mt-2 flex gap-2">
+            <Button size="sm" onClick={onRestart} disabled={restarting || restoring}>
+              {restarting ? "重启中…" : "重启程序生效"}
+            </Button>
+            <Button size="sm" variant="ghost" onClick={onRestore} disabled={restarting || restoring}>
+              {restoring ? "恢复中…" : "恢复运行中配置"}
+            </Button>
+          </div>
         </div>
-      )}
-      <div className="mt-2 flex gap-2">
-        <Button size="sm" onClick={onRestart} disabled={restarting || restoring}>
-          {restarting ? "重启中…" : "重启程序生效"}
-        </Button>
-        <Button size="sm" variant="ghost" onClick={onRestore} disabled={restarting || restoring}>
-          {restoring ? "恢复中…" : "恢复运行中配置"}
-        </Button>
       </div>
     </div>
   );

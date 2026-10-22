@@ -29,7 +29,7 @@ export function PillBar({ collapsed, onToggleCollapse }: PillBarProps) {
       <div className="ml-auto flex items-center gap-2 pr-1.5">
         <span
           title={online ? "后端已连接" : "后端连接中断"}
-          className={`inline-flex size-3.5 items-center justify-center rounded-[2px] border-2 ${
+          className={`inline-flex size-3.5 items-center justify-center rounded-[2px] border-2 transition-colors duration-(--motion-base) ${
             online ? "border-success-accent" : "border-destructive-accent"
           }`}
         >

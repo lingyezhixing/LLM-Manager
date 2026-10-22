@@ -121,9 +121,11 @@ function ThNum({
       <button
         type="button"
         onClick={() => onSort(k)}
-        className={active ? "text-foreground" : "text-muted-foreground hover:text-foreground"}
+        className={`transition-colors duration-(--motion-fast) ${active ? "text-foreground" : "text-muted-foreground hover:text-foreground"}`}
       >
-        {label}{active ? (desc ? " ↓" : " ↑") : ""}
+        {label}
+        {/* 箭头固定占位:排序切换时不挤动列标题 */}
+        <span className="ml-1 inline-block w-2.5 text-left">{active ? (desc ? "↓" : "↑") : ""}</span>
       </button>
     </th>
   );

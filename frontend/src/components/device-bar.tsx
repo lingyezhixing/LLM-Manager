@@ -92,19 +92,21 @@ export function DeviceBar() {
         <Cpu className="size-4 text-primary-accent" />
         设备
       </h3>
-      {error ? (
-        <p className="text-sm text-muted-foreground">{streamErrorText("设备")}</p>
-      ) : !data ? (
-        <Skeleton rows={4} />
-      ) : devices.length === 0 ? (
-        <Empty label="未检测到设备" />
-      ) : (
-        <div className="flex flex-wrap gap-3">
-          {devices.map((d) => (
-            <DeviceCard key={d.device_name} d={d} unit={unit} onToggleUnit={toggle} />
-          ))}
-        </div>
-      )}
+      <div key={!data ? "loading" : devices.length === 0 ? "empty" : "ready"} className="animate-swap-in">
+        {error ? (
+          <p className="text-sm text-muted-foreground">{streamErrorText("设备")}</p>
+        ) : !data ? (
+          <Skeleton rows={4} />
+        ) : devices.length === 0 ? (
+          <Empty label="未检测到设备" />
+        ) : (
+          <div className="flex flex-wrap gap-3">
+            {devices.map((d) => (
+              <DeviceCard key={d.device_name} d={d} unit={unit} onToggleUnit={toggle} />
+            ))}
+          </div>
+        )}
+      </div>
     </Card>
   );
 }

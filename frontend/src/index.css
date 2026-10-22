@@ -242,6 +242,8 @@
   --animate-skeleton: skeleton 2s ease-in-out infinite;
   --animate-dot-pulse: dot-pulse 2s ease-in-out infinite;
   --animate-card-in: card-in var(--motion-enter) var(--motion-ease) backwards;
+  --animate-swap-in: swap-in var(--motion-enter) var(--motion-ease);
+  --animate-status-pop: status-pop 180ms var(--motion-ease);
 }
 
 /* 页面进入:150ms 淡入 + 4px 上移(仅进入,无退出;CSS-only,无 framer-motion) */
@@ -286,6 +288,20 @@
    stagger 由消费方按 index 设 animationDelay,仅首帧、无常驻动画) */
 @keyframes card-in {
   from { opacity: 0; transform: translateY(4px); }
+}
+
+/* 内容替换(切 zone / tab / 选中项 / 骨架→内容):150ms 淡入 + 2px 上移。
+   单边进场,不做交叉淡入——两个大面板同时挂着比直接换更卡。 */
+@keyframes swap-in {
+  from { opacity: 0; transform: translateY(2px); }
+}
+
+/* 状态点变化:一次轻微放大。只在状态真的变化时播放(由 key 变化重新挂载触发),
+   非循环动画——活性信号由 dot-pulse 负责,这条只负责"刚才变了"。 */
+@keyframes status-pop {
+  0% { transform: scale(1); }
+  45% { transform: scale(1.45); }
+  100% { transform: scale(1); }
 }
 
 /* focus-visible:全站统一 2px 主色描边 + 2px 偏移 */

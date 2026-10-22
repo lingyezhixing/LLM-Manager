@@ -180,15 +180,14 @@ export function GeneralPanel() {
         }
       />
 
-      {dirty && (
-        <ConfigSaveBar
-          saving={saving}
-          error={saveError ? errMsg(saveError) : null}
-          onSave={onSave}
-          onReset={() => commit(initial)}
-          saveDisabled={!portValid || !aliveValid || form.logs.days < 1 || form.logs.count < 1 || form.logs.requests < 1}
-        />
-      )}
+      <ConfigSaveBar
+        open={dirty}
+        saving={saving}
+        error={saveError ? errMsg(saveError) : null}
+        onSave={onSave}
+        onReset={() => commit(initial)}
+        saveDisabled={!portValid || !aliveValid || form.logs.days < 1 || form.logs.count < 1 || form.logs.requests < 1}
+      />
     </div>
   );
 }

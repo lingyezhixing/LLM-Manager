@@ -42,7 +42,13 @@ export function RequestsPanel({ alias, routing }: { alias: string; routing: bool
   if (error) {
     return <p className="text-sm text-muted-foreground">{streamErrorText("请求列表")}</p>;
   }
-  if (data === null) return <Loading />;
+  if (data === null) {
+    return (
+      <div className="animate-swap-in">
+        <Loading />
+      </div>
+    );
+  }
 
   const selected = items.find((i) => i.id === selectedId) ?? null;
 
@@ -55,13 +61,15 @@ export function RequestsPanel({ alias, routing }: { alias: string; routing: bool
         onSelect={setSelectedId}
         routing={routing}
       />
-      {selected ? (
-        <RequestDetail id={selected.id} record={selected} />
-      ) : (
-        <div className="flex h-full items-center justify-center rounded-lg border border-dashed border-border text-xs text-muted-foreground">
-          选择左侧请求查看详情
-        </div>
-      )}
+      <div key={selected?.id ?? "empty"} className="animate-swap-in min-h-0">
+        {selected ? (
+          <RequestDetail id={selected.id} record={selected} />
+        ) : (
+          <div className="flex h-full items-center justify-center rounded-lg border border-dashed border-border text-xs text-muted-foreground">
+            选择左侧请求查看详情
+          </div>
+        )}
+      </div>
     </div>
   );
 }

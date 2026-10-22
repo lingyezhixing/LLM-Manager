@@ -15,7 +15,7 @@ export default function ToolsPage() {
   return (
     <div>
       <ZoneNav zones={ZONES} active={zone} onSelect={setZone} />
-      <div className="mt-6">
+      <div key={zone} className="animate-swap-in mt-6">
         {zone === "network" && <WolPanel />}
         {zone === "claude" && <ClaudePanel />}
       </div>

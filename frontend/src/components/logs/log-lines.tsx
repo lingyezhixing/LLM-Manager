@@ -166,7 +166,7 @@ export function LogLines({ h }: { h: LogLinesView }) {
         </div>
         {showJump && (
           <button onClick={h.backToLive}
-            className="absolute bottom-2.5 right-2 z-20 rounded-full bg-primary px-3 py-1 text-dense font-medium text-primary-foreground shadow-card transition-colors duration-(--motion-fast) hover:bg-primary-600">
+            className="animate-swap-in absolute bottom-2.5 right-2 z-20 rounded-full bg-primary px-3 py-1 text-dense font-medium text-primary-foreground shadow-card transition-colors duration-(--motion-fast) hover:bg-primary-600">
             {jumpLabel}
           </button>
         )}

@@ -167,7 +167,7 @@ export function RequestDetail({ id, record }: { id: string; record: RequestRecor
             ) : null}
           </span>
           <span className="ml-auto flex shrink-0 items-center gap-1.5">
-            <span className={`rounded-full border px-2 py-0.5 text-ui ${STATUS_CLS[r.status]}`}>
+            <span className={`rounded-full border px-2 py-0.5 text-ui transition-colors duration-(--motion-base) ${STATUS_CLS[r.status]}`}>
               {STATUS_TEXT[r.status]}
             </span>
             <button
