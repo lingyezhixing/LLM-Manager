@@ -23,10 +23,10 @@ export function LogRetentionEditor({ value, onChange, head }: { value: LogRetent
           <span className="text-xs text-muted-foreground">条</span>
         </div>
       </Field>
-      <Field label="请求保留条数" htmlFor="lr-requests" error={value.requests < 1 ? "请求保留条数须 ≥ 1" : null}>
+      <Field label="每模型请求保留" htmlFor="lr-requests" error={value.requests < 1 ? "须 ≥ 1" : null}>
         <div className="flex items-center gap-2">
           <NumberInput id="lr-requests" value={value.requests} onChange={(e) => set("requests", num(e.target.value))} className="w-24" />
-          <span className="text-xs text-muted-foreground">条 / 模型</span>
+          <span className="text-xs text-muted-foreground">条</span>
         </div>
       </Field>
     </div>
