@@ -1,8 +1,9 @@
 import type { useLogViewer } from "@/lib/hooks/use-model-logs";
 import { useBlockWindow } from "@/lib/hooks/use-block-window";
+import { JumpPill } from "@/components/ui/jump-pill";
 import { memo, useMemo, useRef, useEffect } from "react";
 
-/** 级别过滤 + 搜索跳转 + 窗口化行渲染 + 返回最新药丸——ModelLogPanel 与 LogViewer 共享核心。
+/** 级别过滤 + 搜索跳转 + 窗口化行渲染 + 跳底药丸(不在底部就显示)——ModelLogPanel 与 LogViewer 共享核心。
  * 头部(标题/会话信息)由两消费方各自渲染;h 来自 useLogViewer(useModelLogs/useSessionLogs 返回同形)。
  * 命名 LOG_LEVEL_FILTERS 以区别于 general-panel 的 LOG_LEVELS(后者为后端大写级别,语义不同)。 */
 const LOG_LEVEL_FILTERS = ["", "info", "ok", "warn", "error"] as const;   // "" = 全部
@@ -31,7 +32,9 @@ const LogRow = memo<{ l: { id: number; ts: number; text: string; level: string }
 );
 LogRow.displayName = "LogRow";
 
-/** 过滤/搜索条 + 行区。h.mode 为 history 时显示返回最新药丸;无匹配仅在 hasSearched 后显示。 */
+/** 过滤/搜索条 + 行区。跳底药丸「不在底部就显示」:live 模式无新行时显示「↓ 回到底部」、
+ * 有新行显示「↓ N 条新日志」,history 模式恒显示「← 返回最新」(点击清历史页);
+ * 无匹配仅在 hasSearched 后显示。 */
 export function LogLines({ h }: { h: LogLinesView }) {
   const { level, setLevel } = h;
   const { visible, blockOf, mount, nBlocks, BLOCK, heights, EST_ROW_H } = useBlockWindow(h.displayed.length, h.scroller);
@@ -71,10 +74,12 @@ export function LogLines({ h }: { h: LogLinesView }) {
     }
   }, [visible, h.displayed, h.scroller]);
 
-  const showJump = h.mode === "history" || h.newCount > 0;
+  // 不在底部就显示(live);history 模式恒显示。点击:history → 返回最新(清历史页),live → 跳底。
+  const showJump = h.mode === "history" || !h.atBottom;
   const jumpLabel = h.mode === "history"
     ? `← 返回最新${h.newCount ? ` (${h.newCount})` : ""}`
-    : `↓ ${h.newCount} 条新日志`;
+    : (h.newCount > 0 ? `↓ ${h.newCount} 条新日志` : "↓ 回到底部");
+  const onJump = () => { if (h.mode === "history") h.backToLive(); else h.jumpToBottom(); };
 
   // 渲染块列表
   const blocks = useMemo(() => {
@@ -164,12 +169,7 @@ export function LogLines({ h }: { h: LogLinesView }) {
           )}
           {blocks}
         </div>
-        {showJump && (
-          <button onClick={h.backToLive}
-            className="animate-swap-in absolute bottom-2.5 right-2 z-20 rounded-full bg-primary px-3 py-1 text-dense font-medium text-primary-foreground shadow-card transition-colors duration-(--motion-fast) hover:bg-primary-600">
-            {jumpLabel}
-          </button>
-        )}
+        {showJump && <JumpPill label={jumpLabel} onClick={onJump} />}
       </div>
     </>
   );

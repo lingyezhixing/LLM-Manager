@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useReducer } from "react";
 import type { LogLine, LogSearch } from "@/lib/api";
 import { fetchSessionLines, fetchSessions, LOG_PAGE_LIMIT, searchSessionLogs } from "@/lib/api";
+import { useStickyFollow } from "@/lib/hooks/use-sticky-follow";
 
 const WINDOW = LOG_PAGE_LIMIT; // 实时尾窗口 + 历史页大小(与 fetchSessionLines 默认 limit 同源)
-const STICKY_THRESHOLD = 24;  // 贴底判定阈值(px)
 const TOP_THRESHOLD = 8;      // 触顶判定阈值(px)——触发向上加载历史
 const MAX_PREFIX = 5000;      // historyPrefix 上限(防卡顿;超过丢最旧)
 
@@ -262,31 +262,6 @@ export function useLogViewer(api: LogApi | null, runKey: number | null) {
     return () => es.close();
   }, [api, levelParam, runKey]);
 
-  // 跟进:live + following → 新行贴底。
-  useEffect(() => {
-    if (mode === "live" && state.following && scroller.current) {
-      scroller.current.scrollTop = scroller.current.scrollHeight;
-    }
-  }, [state.liveLines, state.following, mode]);
-
-  // prepend 后维持视口位置(DOM 更新后同步调整 scrollTop,在 paint 前)。
-  useLayoutEffect(() => {
-    const fix = pendingTopFixRef.current;
-    const el = scroller.current;
-    if (fix && el) {
-      el.scrollTop = fix.t + (el.scrollHeight - fix.h);
-      pendingTopFixRef.current = null;
-    }
-  }, [state.historyPrefix]);
-
-  // 滚动到搜索目标(渲染后)。
-  useEffect(() => {
-    if (state.scrollTargetId == null || !scroller.current) return;
-    const el = scroller.current.querySelector(`[data-line-id="${state.scrollTargetId}"]`);
-    if (el) (el as HTMLElement).scrollIntoView({ block: "center" });
-    dispatch({ t: "scroll-target", id: null });
-  }, [displayed, state.scrollTargetId]);
-
   // 向上加载更早日志——prepend 到 historyPrefix,维持视口,防抖,上限,到顶。
   // 重入守卫用同步 ref(置位即生效)——触顶连续滚动若用 state 判定,更新生效前会
   // 用旧闭包重入,导致同页历史重复 prepend + key 冲突。
@@ -311,15 +286,38 @@ export function useLogViewer(api: LogApi | null, runKey: number | null) {
     }
   }, [api, levelParam, mode, state.historyPrefix, state.liveLines]);
 
-  const onScroll = useCallback(() => {
-    if (mode === "history") return;          // 历史页不自动跟进/加载
+  // 跟随(共享 useStickyFollow):live + following → 新行贴底;上滚释放跟随(following 回调),
+  // atBottom 供「跳底药丸」显隐(不在底部就显示)。onScroll 附加触顶加载与 newCount 清零。
+  const sticky = useStickyFollow({
+    scroller,
+    contentVersion: state.liveLines,
+    following: state.following,
+    onFollowChange: (v) => dispatch({ t: "following", v }),
+    onScroll: (el, atB) => {
+      if (mode !== "live") return;   // 历史页不自动跟进/加载/清零
+      if (el.scrollTop <= TOP_THRESHOLD) loadMoreAbove();    // 触顶 → 加载更早
+      if (atB) dispatch({ t: "clear-new" });
+    },
+    autoFollow: mode === "live",
+  });
+
+  // prepend 后维持视口位置(DOM 更新后同步调整 scrollTop,在 paint 前)。
+  useLayoutEffect(() => {
+    const fix = pendingTopFixRef.current;
     const el = scroller.current;
-    if (!el) return;
-    if (el.scrollTop <= TOP_THRESHOLD) loadMoreAbove();    // 触顶 → 加载更早
-    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < STICKY_THRESHOLD;
-    dispatch({ t: "following", v: atBottom });
-    if (atBottom) dispatch({ t: "clear-new" });
-  }, [mode, loadMoreAbove]);
+    if (fix && el) {
+      el.scrollTop = fix.t + (el.scrollHeight - fix.h);
+      pendingTopFixRef.current = null;
+    }
+  }, [state.historyPrefix]);
+
+  // 滚动到搜索目标(渲染后)。
+  useEffect(() => {
+    if (state.scrollTargetId == null || !scroller.current) return;
+    const el = scroller.current.querySelector(`[data-line-id="${state.scrollTargetId}"]`);
+    if (el) (el as HTMLElement).scrollIntoView({ block: "center" });
+    dispatch({ t: "scroll-target", id: null });
+  }, [displayed, state.scrollTargetId]);
 
   // 跳到 all[idx]:在当前窗口则滚动定位,否则翻页载入(target 为页底)再定位。
   // 在途翻页以双代次校验(视图代次 + 搜索代次)——输入变更/新搜索后旧跳转不落回。
@@ -389,14 +387,21 @@ export function useLogViewer(api: LogApi | null, runKey: number | null) {
     dispatch({ t: "back-live" });
   }, []);
 
+  // live 模式跳底药丸点击:回底 + 恢复跟随 + 清 newCount(history 模式走 backToLive,清历史页)。
+  const jumpToBottom = () => {
+    sticky.jumpToBottom();
+    dispatch({ t: "clear-new" });
+  };
+
   const matchSet = useMemo(() => new Set(state.matches), [state.matches]);
   const currentMatch = state.matchIdx >= 0 ? (state.matches[state.matchIdx] ?? null) : null;
 
   return {
-    displayed, mode, newCount: state.newCount, scroller, onScroll,
+    displayed, mode, newCount: state.newCount, scroller, onScroll: sticky.onScroll,
+    atBottom: sticky.atBottom,
     matches: state.matches, matchTotal: state.matchTotal, matchIdx: state.matchIdx,
     searching: state.searching, hasSearched: state.hasSearched, matchSet, currentMatch,
-    runSearch, onInput, nextMatch, prevMatch, backToLive,
+    runSearch, onInput, nextMatch, prevMatch, backToLive, jumpToBottom,
     atOldest: state.atOldest,
     level, setLevel, input,
   };

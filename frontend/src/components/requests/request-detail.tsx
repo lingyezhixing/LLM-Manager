@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { LogPane } from "@/components/logs/log-pane";
+import { JumpPill } from "@/components/ui/jump-pill";
 import { cancelRequest, type RequestRecord } from "@/lib/api";
 import { errMsg, fmtDuration, formatTokens } from "@/lib/format";
 import { useConfirm } from "@/lib/hooks/use-confirm";
 import { useNowTick } from "@/lib/hooks/use-now-tick";
 import { useRequestDetail } from "@/lib/hooks/use-request-detail";
+import { useStickyFollow } from "@/lib/hooks/use-sticky-follow";
 import { useToast } from "@/lib/hooks/use-toast";
-
-const STICKY_THRESHOLD = 24; // 贴底判定(px),与日志页同值
 
 const STATUS_TEXT: Record<RequestRecord["status"], string> = {
   running: "生成中",
@@ -75,9 +75,9 @@ export function RequestDetail({ id, record }: { id: string; record: RequestRecor
   const toast = useToast();
   const [busy, setBusy] = useState(false);
   const [expanded, setExpanded] = useState(false);
-  const [showJump, setShowJump] = useState(false);
   const scroller = useRef<HTMLPreElement | null>(null);
-  const following = useRef(true);
+  const inputScroller = useRef<HTMLPreElement | null>(null);
+  const [following, setFollowing] = useState(true);
 
   const text = detail.blocks.join("");
 
@@ -86,11 +86,21 @@ export function RequestDetail({ id, record }: { id: string; record: RequestRecor
     setExpanded(false);
   }, [id]);
 
-  // 贴底时跟随新内容;上滚即暂停(不把用户拽回去)。
-  useEffect(() => {
-    const el = scroller.current;
-    if (el && following.current) el.scrollTop = el.scrollHeight;
-  }, [detail.blocks]);
+  // 实时输出区:跟随(共享 useStickyFollow)——贴底跟随新内容,上滚暂停(不把用户拽回去)。
+  const sticky = useStickyFollow({
+    scroller,
+    contentVersion: detail.blocks,
+    following,
+    onFollowChange: setFollowing,
+  });
+  // 输入区:静态内容,不自动跟随——仅上滚后显示「跳到底部」药丸(展开态变化触发复测)。
+  const inputSticky = useStickyFollow({
+    scroller: inputScroller,
+    contentVersion: expanded ? detail.input : null,
+    following: true,
+    onFollowChange: () => {},
+    autoFollow: false,
+  });
 
   if (!r) {
     return (
@@ -104,21 +114,6 @@ export function RequestDetail({ id, record }: { id: string; record: RequestRecor
   const elapsed = fmtDuration(Math.max(0, Math.round(end - r.started_at)));
   const tokens = r.usage ? `${formatTokens(r.usage.output_tokens)} tok` : null;
   const inputText = renderInputText(detail.input, detail.inputText);
-
-  const onScroll = () => {
-    const el = scroller.current;
-    if (!el) return;
-    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < STICKY_THRESHOLD;
-    following.current = atBottom;
-    setShowJump(!atBottom);
-  };
-
-  const jumpToBottom = () => {
-    const el = scroller.current;
-    if (el) el.scrollTop = el.scrollHeight;
-    following.current = true;
-    setShowJump(false);
-  };
 
   const onCopy = async () => {
     try {
@@ -205,9 +200,13 @@ export function RequestDetail({ id, record }: { id: string; record: RequestRecor
             </button>
           </div>
           {expanded ? (
-            <pre className="max-h-[40vh] overflow-auto whitespace-pre-wrap break-words px-3 pb-2 font-mono text-ui leading-relaxed text-foreground/85">
-              {inputText || "(无输入)"}
-            </pre>
+            <div className="relative">
+              <pre ref={inputScroller} onScroll={inputSticky.onScroll}
+                className="max-h-[40vh] overflow-auto whitespace-pre-wrap break-words px-3 pb-2 font-mono text-ui leading-relaxed text-foreground/85">
+                {inputText || "(无输入)"}
+              </pre>
+              {!inputSticky.atBottom && <JumpPill label="↓ 回到底部" onClick={inputSticky.jumpToBottom} />}
+            </div>
           ) : (
             <div className="truncate px-3 pb-1.5 font-mono text-ui text-foreground/70">
               {r.request_preview || "(无输入预览)"}
@@ -229,7 +228,7 @@ export function RequestDetail({ id, record }: { id: string; record: RequestRecor
         <div className="relative min-h-0 flex-1">
           <pre
             ref={scroller}
-            onScroll={onScroll}
+            onScroll={sticky.onScroll}
             className="h-full overflow-auto whitespace-pre-wrap break-words p-3 font-mono text-ui leading-relaxed text-foreground/90"
           >
             {detail.blocks.length > 0 ? (
@@ -240,15 +239,7 @@ export function RequestDetail({ id, record }: { id: string; record: RequestRecor
               "无输出"
             )}
           </pre>
-          {showJump && (
-            <button
-              type="button"
-              onClick={jumpToBottom}
-              className="absolute bottom-3 right-3 rounded-full border border-primary-accent/50 bg-primary-accent/20 px-2.5 py-1 text-dense text-foreground hover:bg-primary-accent/30"
-            >
-              回到底部 ↓
-            </button>
-          )}
+          {!sticky.atBottom && <JumpPill label="↓ 回到底部" onClick={sticky.jumpToBottom} />}
         </div>
       </div>
     </LogPane>
