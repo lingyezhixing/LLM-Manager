@@ -90,6 +90,10 @@ tray     ── 系统托盘(自重启触发 / WOL / Claude 预设应用)
 
 - **模型 CRUD**:`mutate_appconfig` 全量替换模型世界(DELETE+INSERT,id churn 可接受),
   validate 失败 raise `ConfigValidationFailed`(→422,不落脏数据)。
+  PUT 的 restart 提示按**热字段口径**:模型当前 ROUTING 且变更非「仅热字段」才返回
+  `hint: "restart_model"`(前端弹「保存并重启」);热字段 = 计费(请求时读快照)/
+  模式(下次启动生效)/自启动(下次启动生效),仅改这些直接保存免重启;
+  端口/别名(含非首位)/启动方案一律视为需重启(保守口径:非热即重启)。
 - **`required_devices ⊄ memory_mb`** 合法、不告警:缺条目的设备按 0 需求调度(该设备
   不做显存检查)——「设备仅用于方案匹配、真运行在别处」是合法用法,`{}` 与 `{dev:0}`
   调度语义等价;前端保存时会把 required 设备的缺省显存显式写 0(所见即所存)。

@@ -679,6 +679,144 @@ def test_put_model_def_dry_run_previews_without_writing(tmp_path):
     state._reset()
 
 
+def test_hot_only_change_pure_classification():
+    """_hot_only_change:差异仅在热字段(计费/模式/自启动)或无差异 → True;触及任何冷字段 → False。"""
+    from dataclasses import replace
+
+    from llm_manager.config import Command, ModelConfig, Pricing, Scheme
+    from llm_manager.gateway.api.config_api import _hot_only_change
+
+    scheme = Scheme("S", frozenset({"gpu"}), Command("run"), {"gpu": 1})
+    base = ModelConfig(aliases=("m",), mode="Chat", port=8000, schemes={"S": scheme})
+
+    assert _hot_only_change(base, base) is True  # 无差异
+    assert _hot_only_change(base, replace(base, pricing=Pricing(hourly_price=1.0))) is True
+    assert _hot_only_change(base, replace(base, mode="Embedding")) is True
+    assert _hot_only_change(base, replace(base, auto_start=True)) is True
+    assert _hot_only_change(base, replace(base, port=9000)) is False  # 端口(冷)
+    assert _hot_only_change(base, replace(base, aliases=("m", "x"))) is False  # 追加非首位别名(冷)
+    assert (
+        _hot_only_change(base, replace(base, aliases=("m2",))) is False
+    )  # 首位别名=served name(冷)
+    scheme2 = Scheme("S", frozenset({"gpu"}), Command("run", ("--x", "1")), {"gpu": 1})
+    assert _hot_only_change(base, replace(base, schemes={"S": scheme2})) is False  # 启动方案(冷)
+    # 热+冷混合 → 冷字段主导
+    assert (
+        _hot_only_change(base, replace(base, pricing=Pricing(hourly_price=1.0), port=9000)) is False
+    )
+
+
+def test_put_model_def_routing_pricing_only_no_hint(tmp_path):
+    """运行中仅改计费(热字段)→ 无重启提示,直接保存(请求时读快照即生效)。"""
+    from llm_manager import state
+    from llm_manager.state import ModelStatus
+
+    state._reset()
+    with TestClient(_app(tmp_path)) as c:
+        c.post("/api/config/models", json=_def_body("M", 8000, aliases=["m-served"]))
+        state.set_status("M", ModelStatus.ROUTING, force=True)
+        body = _def_body("M", 8000, aliases=["m-served"])
+        body["pricing"] = {"pricing_type": "hourly", "hourly_price": 2.5, "tiers": []}
+        r = c.put("/api/config/models/M", json=body)
+        assert r.status_code == 200
+        assert r.json()["affected_routing"] == []
+        assert r.json()["hint"] is None
+        assert c.get("/api/config/models/M").json()["pricing"]["hourly_price"] == 2.5
+    state._reset()
+
+
+def test_put_model_def_routing_mode_autostart_only_no_hint(tmp_path):
+    """运行中仅改模式+自启动(热字段,下次启动生效)→ 无重启提示。"""
+    from llm_manager import state
+    from llm_manager.state import ModelStatus
+
+    state._reset()
+    with TestClient(_app(tmp_path)) as c:
+        c.post("/api/config/models", json=_def_body("M", 8000))
+        state.set_status("M", ModelStatus.ROUTING, force=True)
+        body = _def_body("M", 8000)
+        body["mode"] = "Embedding"
+        body["auto_start"] = True
+        r = c.put("/api/config/models/M", json=body)
+        assert r.status_code == 200
+        assert r.json()["affected_routing"] == []
+        assert r.json()["hint"] is None
+        one = c.get("/api/config/models/M").json()
+        assert one["mode"] == "Embedding" and one["auto_start"] is True
+    state._reset()
+
+
+def test_put_model_def_routing_extra_alias_still_hints(tmp_path):
+    """非首位别名属非热字段(保守口径:非热即重启)→ 运行中变更仍提示重启。"""
+    from llm_manager import state
+    from llm_manager.state import ModelStatus
+
+    state._reset()
+    with TestClient(_app(tmp_path)) as c:
+        c.post("/api/config/models", json=_def_body("M", 8000, aliases=["m-served"]))
+        state.set_status("M", ModelStatus.ROUTING, force=True)
+        r = c.put("/api/config/models/M", json=_def_body("M", 8000, aliases=["m-served", "extra"]))
+        assert r.status_code == 200
+        assert r.json()["affected_routing"] == ["m-served"]
+        assert r.json()["hint"] == "restart_model"
+    state._reset()
+
+
+def test_put_model_def_routing_scheme_change_still_hints(tmp_path):
+    """启动方案(命令)变更属非热字段 → 运行中仍提示重启。"""
+    from llm_manager import state
+    from llm_manager.state import ModelStatus
+
+    state._reset()
+    with TestClient(_app(tmp_path)) as c:
+        c.post("/api/config/models", json=_def_body("M", 8000))
+        state.set_status("M", ModelStatus.ROUTING, force=True)
+        body = _def_body("M", 8000)
+        body["schemes"][0]["command"]["args"] = ["--port", "9000"]  # 默认 ["--port", "8000"]
+        r = c.put("/api/config/models/M", json=body)
+        assert r.status_code == 200
+        assert r.json()["affected_routing"] == ["M"]
+        assert r.json()["hint"] == "restart_model"
+    state._reset()
+
+
+def test_put_model_def_routing_hot_plus_cold_still_hints(tmp_path):
+    """热字段+冷字段混合变更 → 冷字段主导,仍提示重启。"""
+    from llm_manager import state
+    from llm_manager.state import ModelStatus
+
+    state._reset()
+    with TestClient(_app(tmp_path)) as c:
+        c.post("/api/config/models", json=_def_body("M", 8000))
+        state.set_status("M", ModelStatus.ROUTING, force=True)
+        body = _def_body("M", 9000)  # 端口(冷)
+        body["pricing"] = {"pricing_type": "hourly", "hourly_price": 1.0, "tiers": []}  # 计费(热)
+        r = c.put("/api/config/models/M", json=body)
+        assert r.status_code == 200
+        assert r.json()["affected_routing"] == ["M"]
+        assert r.json()["hint"] == "restart_model"
+    state._reset()
+
+
+def test_put_model_def_dry_run_hot_only_no_hint(tmp_path):
+    """dry_run 仅热字段变更 → 与真实写同形(hint 空),且不落库。"""
+    from llm_manager import state
+    from llm_manager.state import ModelStatus
+
+    state._reset()
+    with TestClient(_app(tmp_path)) as c:
+        c.post("/api/config/models", json=_def_body("M", 8000))
+        state.set_status("M", ModelStatus.ROUTING, force=True)
+        body = _def_body("M", 8000)
+        body["pricing"] = {"pricing_type": "hourly", "hourly_price": 2.5, "tiers": []}
+        r = c.put("/api/config/models/M", json=body, params={"dry_run": "true"})
+        assert r.status_code == 200
+        assert r.json()["affected_routing"] == []
+        assert r.json()["hint"] is None
+        assert c.get("/api/config/models/M").json()["pricing"]["hourly_price"] == 0.0  # 未写入
+    state._reset()
+
+
 def test_delete_model_def_starting_409(tmp_path):
     """启动中(STARTING,非 ROUTING)删除 → 409:孤儿进程(活着但无配置、无法手动
     停)。与改名拦截口径一致:一切非 STOPPED/FAILED 活跃态都拒删。"""

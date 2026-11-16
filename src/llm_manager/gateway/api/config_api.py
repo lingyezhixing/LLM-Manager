@@ -2,6 +2,8 @@
 
 校验层 = Pydantic 请求模型(FastAPI 自动 422)。写经 set_settings(多键原子)→ store.reload()。
 restart 检测:对比 snapshot.program 的 host/port/claude_settings_path/log_level 与 app.state.boot_program(启动期捕获)。
+模型 PUT 的 restart 提示:仅当模型 ROUTING 且变更非「仅热字段」(计费/模式/自启动)时返回
+hint=restart_model——热字段按请求读快照或下次启动生效,免重启。
 读穿仅 system_settings 影响的消费方(idle 循环/tray/logging)——lifecycle/models 随模型 CRUD。
 """
 
@@ -14,7 +16,7 @@ from dataclasses import replace
 
 from fastapi import APIRouter, HTTPException, Request
 
-from llm_manager.config import AppConfig
+from llm_manager.config import AppConfig, ModelConfig
 from llm_manager.data import logs as _logs
 from llm_manager.data.config_store import (
     ConfigValidationFailed,
@@ -126,14 +128,24 @@ def _delete_model(cfg: AppConfig, name: str) -> AppConfig:
     return replace(cfg, models={k: v for k, v in cfg.models.items() if k != name})
 
 
-def _routing_served(primary: str, cfg: AppConfig) -> list[str]:
-    """操作触及的模型若当前 ROUTING,返回其 served name(aliases[0]);用于 PUT 的 restart 提示。
+# 模型定义热字段:改之不影响运行中进程——计费按请求时从快照读取,mode/auto_start
+# 仅下次(模型)启动时消费。只改这些字段 → 模型 ROUTING 时也免重启提示。
+# 其余(端口/别名/启动方案)一律视为需重启(保守口径:非热即重启)。
+def _hot_only_change(old: ModelConfig, new: ModelConfig) -> bool:
+    """old→new 的差异仅落在热字段(或无差异)→ True。
+    以 new 的热字段值替换进 old 后整体相等即热字段独占差异(frozen dataclass 值比较)。"""
+    return replace(old, pricing=new.pricing, mode=new.mode, auto_start=new.auto_start) == new
+
+
+def _routing_served(primary: str, old: ModelConfig, new: ModelConfig) -> list[str]:
+    """操作触及的模型若当前 ROUTING 且变更非「仅热字段」,返回其 served name(aliases[0]);
+    用于 PUT 的 restart 提示(仅热字段变更 → 直接保存,不提示重启)。
     DELETE 的 ROUTING 拦截在端点处(404/409 之前)。"""
     from llm_manager import state
     from llm_manager.state import ModelStatus
 
-    if state.get_status(primary) == ModelStatus.ROUTING:
-        return [cfg.models[primary].aliases[0]]
+    if state.get_status(primary) == ModelStatus.ROUTING and not _hot_only_change(old, new):
+        return [new.aliases[0]]
     return []
 
 
@@ -327,14 +339,14 @@ def register_config_routes(api: APIRouter) -> None:
                     f"new name '{body.name}' is occupied by orphaned data; "
                     "clean it in data management first",
                 )
+        old_cfg = store.snapshot()  # 改前快照:别名同步判定 + restart 提示的热/冷字段比对
         if is_rename:
             # 迁移=数据+日志跟新名;不迁移=旧身份废弃,删旧日志(与 delete_model_def 一致),
             # 请求记录留孤立。两者均在改名同事务内经 post_write 原子执行。
             post = _rename_migrator(name, body.name) if migrate_data else _delete_old_sessions(name)
         else:
             # 非改名但 aliases[0] 变更:同步日志别名快照(日志页按别名显示,不残留旧名)。
-            # 变更判定用改前快照(store.snapshot);sync 用 post_write 传入的 new_cfg 取新别名。
-            old_cfg = store.snapshot()
+            # 变更判定用改前快照 old_cfg;sync 用 post_write 传入的 new_cfg 取新别名。
             if (
                 body.aliases
                 and name in old_cfg.models
@@ -364,14 +376,17 @@ def register_config_routes(api: APIRouter) -> None:
             raise HTTPException(422, detail=e.errors)
         except ValueError as e:
             raise HTTPException(422, detail=str(e))
+        # restart 提示:模型当前 ROUTING 且变更触及非热字段(端口/别名/启动方案)→
+        # 返回 served name,前端弹「保存并重启」。仅热字段(计费/模式/自启动)变更
+        # 不影响运行中进程(计费按请求读快照,mode/auto_start 下次启动生效)→ 直接保存。
+        # 改名已被运行中拦截(409)→ 不可能 ROUTING,affected 必为空。
+        if is_rename:
+            affected: list[str] = []
+        else:
+            affected = _routing_served(name, old_cfg.models[name], new_cfg.models[name])
         if dry_run:
-            primary_for_hint = body.name if is_rename else name
-            affected = _routing_served(primary_for_hint, new_cfg)
             return {"affected_routing": affected, "hint": "restart_model" if affected else None}
         store.reload()
-        # 改名时模型已停(运行中拦截),affected 必为空;非改名维持原 _routing_served 语义
-        primary_for_hint = body.name if is_rename else name
-        affected = _routing_served(primary_for_hint, new_cfg)
         return {"affected_routing": affected, "hint": "restart_model" if affected else None}
 
     @api.delete("/config/models/{name}")
