@@ -168,8 +168,7 @@ export function GeneralPanel() {
 
       <SectionTitle>模型启动</SectionTitle>
       <FieldGrid>
-        <Field label="启动探测超时 (秒)" htmlFor="cfg-startup"
-          hint="慢加载模型(如 30B)需要更久才就绪;超过此时间仍未响应才判定启动失败。"
+        <Field label="启动一阶段探测超时（秒）" htmlFor="cfg-startup"
           error={!startupValid ? "须 ≥ 1" : null}>
           <NumberInput id="cfg-startup" value={form.program.startup_timeout} onChange={(e) => set({ ...form.program, startup_timeout: num(e.target.value) })} />
         </Field>
