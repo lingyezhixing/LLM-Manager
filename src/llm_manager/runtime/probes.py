@@ -49,6 +49,8 @@ def _probe(
     port: int,
     start_time: float | None,
     timeout: float,
+    deep_timeout: float,
+    deep_request_timeout: float,
     is_alive: Callable[[], bool] | None = None,
 ) -> ProbeResult:
     if start_time is None:
@@ -74,31 +76,93 @@ def _probe(
         if deep is None:
             return ProbeResult(False, f"{label}探测器不支持的模式: {mode}")
         path, body = deep
-        while time.monotonic() - start_time < timeout:
+        # 二阶段独立预算:一阶段耗时不再挤占深层检查(反之亦然)。
+        deep_start = time.monotonic()
+        while time.monotonic() - deep_start < deep_timeout:
             if is_alive is not None and not is_alive():
                 return ProbeResult(False, f"{label}探测器: 进程已退出")
             try:
-                resp = client.post(path, json={**body, "model": alias}, timeout=5.0)
+                resp = client.post(
+                    path,
+                    json={**body, "model": alias},
+                    timeout=deep_request_timeout,
+                )
                 if resp.status_code < 400:
                     return ProbeResult(True, f"{label}探测器健康检查成功")
             except Exception:  # noqa: BLE001, S110
                 pass
             time.sleep(1)
-        return ProbeResult(False, f"{label}探测器深层检查超时")
+        return ProbeResult(
+            False, f"{label}探测器深层检查超时: 服务在 {deep_timeout:.0f} 秒内未就绪"
+        )
     finally:
         client.close()
 
 
-def probe_chat(alias, port, start_time=None, timeout=300, is_alive=None) -> ProbeResult:
-    return _probe("Chat", "聊天", alias, port, start_time, timeout, is_alive)
+def probe_chat(
+    alias,
+    port,
+    start_time=None,
+    timeout=180,
+    deep_timeout=60,
+    deep_request_timeout=5,
+    is_alive=None,
+) -> ProbeResult:
+    return _probe(
+        "Chat",
+        "聊天",
+        alias,
+        port,
+        start_time,
+        timeout,
+        deep_timeout,
+        deep_request_timeout,
+        is_alive,
+    )
 
 
-def probe_embedding(alias, port, start_time=None, timeout=300, is_alive=None) -> ProbeResult:
-    return _probe("Embedding", "嵌入", alias, port, start_time, timeout, is_alive)
+def probe_embedding(
+    alias,
+    port,
+    start_time=None,
+    timeout=180,
+    deep_timeout=60,
+    deep_request_timeout=5,
+    is_alive=None,
+) -> ProbeResult:
+    return _probe(
+        "Embedding",
+        "嵌入",
+        alias,
+        port,
+        start_time,
+        timeout,
+        deep_timeout,
+        deep_request_timeout,
+        is_alive,
+    )
 
 
-def probe_reranker(alias, port, start_time=None, timeout=300, is_alive=None) -> ProbeResult:
-    return _probe("Reranker", "重排序", alias, port, start_time, timeout, is_alive)
+def probe_reranker(
+    alias,
+    port,
+    start_time=None,
+    timeout=180,
+    deep_timeout=60,
+    deep_request_timeout=5,
+    is_alive=None,
+) -> ProbeResult:
+    return _probe(
+        "Reranker",
+        "重排序",
+        alias,
+        port,
+        start_time,
+        timeout,
+        deep_timeout,
+        deep_request_timeout,
+        is_alive,
+    )
 
 
 probe_registry: dict[str, Callable[..., ProbeResult]] = {

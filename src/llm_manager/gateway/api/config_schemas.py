@@ -16,6 +16,8 @@ class ProgramUpdate(BaseModel):
     log_level: str | None = None
     claude_settings_path: str | None = None
     startup_timeout: int | None = Field(default=None, ge=1)
+    startup_deep_timeout: int | None = Field(default=None, ge=1)
+    startup_deep_request_timeout: int | None = Field(default=None, ge=1)
 
 
 class LogRetentionUpdate(BaseModel):

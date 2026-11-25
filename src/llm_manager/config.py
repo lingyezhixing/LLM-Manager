@@ -10,8 +10,11 @@ PROGRAM_DEFAULTS: dict[str, str] = {
     "port": "8080",
     "alive_time": "60",
     "log_level": "INFO",
-    # 模型启动探测预算(秒):慢加载的大模型(30B+)需要更久才暴露 /v1/models。
-    "startup_timeout": "300",
+    # 模型启动探测三档预算(秒):一阶段等 /v1/models;二阶段等真实请求成功,
+    # 二阶段内部单次 HTTP 请求另有自己的超时。
+    "startup_timeout": "180",
+    "startup_deep_timeout": "60",
+    "startup_deep_request_timeout": "5",
 }
 
 RETENTION_DEFAULTS: dict[str, str] = {
@@ -180,6 +183,8 @@ class ProgramConfig:
     request_retention_count: int = int(RETENTION_DEFAULTS["request_retention_count"])
     # 热字段:Lifecycle 每次 probe 读最新快照(慢加载模型可放宽)。
     startup_timeout: int = int(PROGRAM_DEFAULTS["startup_timeout"])
+    startup_deep_timeout: int = int(PROGRAM_DEFAULTS["startup_deep_timeout"])
+    startup_deep_request_timeout: int = int(PROGRAM_DEFAULTS["startup_deep_request_timeout"])
 
 
 @dataclass(frozen=True, slots=True)
@@ -203,6 +208,10 @@ def validate(cfg: AppConfig) -> list[str]:
         errors.append(f"Program port {cfg.program.port} out of range (1-65535)")
     if cfg.program.startup_timeout < 1:
         errors.append("Program startup_timeout must be >= 1")
+    if cfg.program.startup_deep_timeout < 1:
+        errors.append("Program startup_deep_timeout must be >= 1")
+    if cfg.program.startup_deep_request_timeout < 1:
+        errors.append("Program startup_deep_request_timeout must be >= 1")
     if cfg.program.request_retention_count < 1:
         errors.append("Program request_retention_count must be >= 1")
     seen_ports: dict[int, str] = {}

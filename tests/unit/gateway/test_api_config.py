@@ -89,22 +89,28 @@ def test_put_program_mains_hot_field_no_restart(tmp_path):
     assert r.json()["restart_fields"] == []
 
 
-def test_put_program_startup_timeout_is_hot_and_exposed(tmp_path):
+def test_put_program_probe_timeouts_are_hot_and_exposed(tmp_path):
+    body = {
+        "startup_timeout": 111,
+        "startup_deep_timeout": 22,
+        "startup_deep_request_timeout": 3,
+    }
     with TestClient(_app(tmp_path)) as c:
-        r = c.put("/api/config/program", json={"startup_timeout": 420})
+        r = c.put("/api/config/program", json=body)
         assert r.status_code == 200
         assert r.json()["needs_restart"] is False  # 热字段:下一次模型启动即生效
         assert r.json()["restart_fields"] == []
     with TestClient(_app(tmp_path)) as c:
         j = c.get("/api/config").json()
-    assert j["program"]["startup_timeout"] == 420
-    assert j["running_program"]["startup_timeout"] == 420
+    assert {k: j["program"][k] for k in body} == body
+    assert {k: j["running_program"][k] for k in body} == body
 
 
-def test_put_program_rejects_non_positive_startup_timeout(tmp_path):
-    with TestClient(_app(tmp_path)) as c:
-        r = c.put("/api/config/program", json={"startup_timeout": 0})
-    assert r.status_code == 422
+def test_put_program_rejects_non_positive_probe_timeouts(tmp_path):
+    for field in ("startup_timeout", "startup_deep_timeout", "startup_deep_request_timeout"):
+        with TestClient(_app(tmp_path)) as c:
+            r = c.put("/api/config/program", json={field: 0})
+        assert r.status_code == 422
 
 
 def test_put_program_dry_run_previews_without_writing(tmp_path):

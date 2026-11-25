@@ -53,7 +53,9 @@ def test_lifespan_starts_and_stops_background(tmp_path, monkeypatch):
     monkeypatch.setitem(
         probe_registry,
         "Chat",
-        lambda alias, port, start_time=None, timeout=300: ProbeResult(False, "test fast-fail"),
+        lambda alias, port, start_time=None, timeout=300, **kwargs: ProbeResult(
+            False, "test fast-fail"
+        ),
     )
     _seed(tmp_path / "t.db", models=_M1())
     app = create_app(db_path=tmp_path / "t.db")

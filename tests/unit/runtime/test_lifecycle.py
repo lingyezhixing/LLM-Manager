@@ -113,7 +113,7 @@ def _cfg(*models):
     )
 
 
-def _ok_probe(alias, port, start_time=None, timeout=60, is_alive=None):
+def _ok_probe(alias, port, start_time=None, timeout=60, is_alive=None, **kwargs):
     return ProbeResult(True, "ok")
 
 
@@ -148,17 +148,17 @@ async def test_cold_start_reaches_routing():
     assert sup.spawned[0] == ["run.cmd"]
 
 
-async def test_probe_reads_fresh_startup_timeout_from_config():
-    """startup_timeout 是热配置:每次 probe 读最新快照,改系统设置无需重启。
+async def test_probe_reads_fresh_probe_timeouts_from_config():
+    """三档探测超时均为热配置:每次 probe 读最新快照,改系统设置无需重启。
 
-    回归:此前 Lifecycle 构造期固化 60s,慢加载模型(如 30B)必然 probe 超时失败。
+    回归:此前 Lifecycle 构造期固化单档 60s,慢加载模型(如 30B)必然 probe 超时失败。
     """
     sup = FakeSupervisor()
     dev = FakeDevices()
-    seen: list[float] = []
+    seen: list[tuple[float, float, float]] = []
 
-    def recording_probe(alias, port, start_time=None, timeout=60, is_alive=None):
-        seen.append(timeout)
+    def recording_probe(alias, port, start_time=None, timeout=60, is_alive=None, **kwargs):
+        seen.append((timeout, kwargs["deep_timeout"], kwargs["deep_request_timeout"]))
         return ProbeResult(True, "ok")
 
     base = _cfg(_model("m1", port=8000), _model("m2", port=8001))
@@ -170,12 +170,20 @@ async def test_probe_reads_fresh_startup_timeout_from_config():
         probes={"Chat": recording_probe},
     )
     await life.ensure_running("m1")
-    assert seen == [300.0]  # 默认 300 秒(不再是硬编码 60)
+    assert seen == [(180.0, 60.0, 5.0)]  # 默认:一阶段 180 / 二阶段 60 / 单次 5
     await life.stop("m1")
 
-    holder["cfg"] = replace(base, program=replace(base.program, startup_timeout=900))
+    holder["cfg"] = replace(
+        base,
+        program=replace(
+            base.program,
+            startup_timeout=900,
+            startup_deep_timeout=120,
+            startup_deep_request_timeout=10,
+        ),
+    )
     await life.ensure_running("m2")
-    assert seen == [300.0, 900.0]  # 改配置即生效,无需重建 Lifecycle
+    assert seen == [(180.0, 60.0, 5.0), (900.0, 120.0, 10.0)]  # 改配置即生效
 
 
 # ---------- reconcile(协调) ----------
@@ -264,7 +272,7 @@ async def test_single_dispatch_concurrent_start_spawns_once():
 
 
 async def test_stop_starting_winner_self_terminates_no_routing():
-    def slow_probe(alias, port, start_time=None, timeout=60, is_alive=None):
+    def slow_probe(alias, port, start_time=None, timeout=60, is_alive=None, **kwargs):
         _time.sleep(0.15)
         return ProbeResult(False, "slow")
 
@@ -282,7 +290,7 @@ async def test_slow_probe_then_concurrent_restart_not_clobbered():
     并发 ensure_running 重新占位。孤儿 winner 随后的 finish_start(STOPPED)
     不得覆盖新 winner(owner-token guard)。"""
 
-    def slow_probe(alias, port, start_time=None, timeout=60, is_alive=None):
+    def slow_probe(alias, port, start_time=None, timeout=60, is_alive=None, **kwargs):
         _time.sleep(0.3)
         return ProbeResult(True, "ok")
 
@@ -332,7 +340,7 @@ async def test_crash_during_probe_window_does_not_enter_routing():
     崩溃兜到 FAILED 而非死 pid 假成功进 ROUTING。期望 FAILED。"""
     sup = FakeSupervisor()
 
-    def killed_probe(alias, port, start_time=None, timeout=60, is_alive=None):
+    def killed_probe(alias, port, start_time=None, timeout=60, is_alive=None, **kwargs):
         sup.alive_pids.clear()  # 进程在 probe 窗口内崩溃(端口仍被占 → 探活假成功)
         return ProbeResult(True, "ok")
 
@@ -372,7 +380,7 @@ async def test_crash_at_startup_concurrent_restart_not_blocked():
 
 
 async def test_probe_failure_marks_failed():
-    def bad_probe(alias, port, start_time=None, timeout=60, is_alive=None):
+    def bad_probe(alias, port, start_time=None, timeout=60, is_alive=None, **kwargs):
         return ProbeResult(False, "unhealthy")
 
     life, sup, _, _ = _make(probes={"Chat": bad_probe})
@@ -382,7 +390,7 @@ async def test_probe_failure_marks_failed():
 
 
 async def test_probe_timeout_marks_failed():
-    def timeout_probe(alias, port, start_time=None, timeout=60, is_alive=None):
+    def timeout_probe(alias, port, start_time=None, timeout=60, is_alive=None, **kwargs):
         _time.sleep(0.1)
         return ProbeResult(False, "探测器深层检查超时")
 
@@ -392,7 +400,7 @@ async def test_probe_timeout_marks_failed():
 
 
 async def test_probe_raising_after_spawn_kills_pid_then_failed():
-    def raising_probe(alias, port, start_time=None, timeout=60, is_alive=None):
+    def raising_probe(alias, port, start_time=None, timeout=60, is_alive=None, **kwargs):
         raise RuntimeError("probe blew up")
 
     life, sup, _, _ = _make(probes={"Chat": raising_probe})
@@ -574,7 +582,7 @@ async def test_ensure_running_cancelled_after_spawn_kills_pid_clears_slot():
     """cancel-safe:ensure_running 被 cancel 落在 post-spawn 阶段(spawn 后 probe 中)→
     kill_tree 被调(无孤儿)+ finish_start 清 slot(状态 FAILED、inflight 释放)+ CancelledError 传播。"""
 
-    def slow_probe(alias, port, start_time=None, timeout=60, is_alive=None):
+    def slow_probe(alias, port, start_time=None, timeout=60, is_alive=None, **kwargs):
         _time.sleep(0.3)
         return ProbeResult(True, "ok")
 

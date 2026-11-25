@@ -67,3 +67,54 @@ def test_probe_fails_fast_when_process_dead(monkeypatch):
     assert calls == 1  # 首轮 liveness check 即返回
     assert time.monotonic() - start < 5  # 远小于 timeout=60
     client.close()
+
+
+def test_deep_phase_uses_own_timeout(monkeypatch):
+    """二阶段有独立预算:浅层立即通过后,深层等满 deep_timeout 即失败,不吃一阶段预算。"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET":  # 浅层 /models
+            return httpx.Response(200, json={"data": []})
+        return httpx.Response(503)
+
+    client = httpx.Client(
+        base_url="http://127.0.0.1:9999/v1", transport=httpx.MockTransport(handler)
+    )
+    monkeypatch.setattr(probes, "_make_client", lambda port: client)
+    start = time.monotonic()
+    result = probes.probe_chat(
+        "alias", 9999, timeout=30.0, deep_timeout=0.2, deep_request_timeout=5.0
+    )
+    elapsed = time.monotonic() - start
+    assert result.ok is False
+    assert "深层" in result.message
+    assert elapsed < 5  # 不空转到一阶段的 timeout=30
+    client.close()
+
+
+def test_deep_request_uses_configured_request_timeout(monkeypatch):
+    """二阶段单次 HTTP 请求使用配置的 deep_request_timeout(默认 5s)。"""
+
+    class _Resp:
+        status_code = 200
+
+    class _Client:
+        post_timeout = None
+
+        def get(self, path, timeout=None):
+            return _Resp()
+
+        def post(self, path, json=None, timeout=None):
+            self.post_timeout = timeout
+            return _Resp()
+
+        def close(self):
+            pass
+
+    fake = _Client()
+    monkeypatch.setattr(probes, "_make_client", lambda port: fake)
+    result = probes.probe_chat(
+        "alias", 9999, timeout=10.0, deep_timeout=5.0, deep_request_timeout=7.0
+    )
+    assert result.ok is True
+    assert fake.post_timeout == 7.0

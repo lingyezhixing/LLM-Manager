@@ -492,21 +492,42 @@ def test_mutate_appconfig_post_write_runs_before_commit(tmp_path):
     assert seen["has_sample"] is True
 
 
-def test_write_appconfig_persists_startup_timeout(tmp_path):
+def test_write_appconfig_persists_probe_timeouts(tmp_path):
     db = open_db(tmp_path / "t.db")
-    cfg = replace(_sample_cfg(), program=replace(_sample_cfg().program, startup_timeout=420))
+    cfg = replace(
+        _sample_cfg(),
+        program=replace(
+            _sample_cfg().program,
+            startup_timeout=111,
+            startup_deep_timeout=22,
+            startup_deep_request_timeout=3,
+        ),
+    )
     write_appconfig(db, cfg)
-    assert get_setting(db, "startup_timeout") == "420"
-    assert read_appconfig(db).program.startup_timeout == 420
+    assert get_setting(db, "startup_timeout") == "111"
+    assert get_setting(db, "startup_deep_timeout") == "22"
+    assert get_setting(db, "startup_deep_request_timeout") == "3"
+    p = read_appconfig(db).program
+    assert (p.startup_timeout, p.startup_deep_timeout, p.startup_deep_request_timeout) == (
+        111,
+        22,
+        3,
+    )
 
 
-def test_startup_timeout_falls_back_to_default_when_key_absent(tmp_path):
-    """旧库(无 startup_timeout 键)直接以 300 秒运行,无需迁移。"""
+def test_probe_timeouts_fall_back_to_defaults_when_keys_absent(tmp_path):
+    """旧库(无三档探测键)直接以默认值运行,无需迁移。"""
     db = open_db(tmp_path / "t.db")
     seed_defaults(db)
-    db.conn.execute("DELETE FROM system_settings WHERE key = 'startup_timeout'")
+    db.conn.execute(
+        "DELETE FROM system_settings WHERE key IN "
+        "('startup_timeout', 'startup_deep_timeout', 'startup_deep_request_timeout')"
+    )
     db.conn.commit()
-    assert read_appconfig(db).program.startup_timeout == 300
+    p = read_appconfig(db).program
+    assert p.startup_timeout == 180
+    assert p.startup_deep_timeout == 60
+    assert p.startup_deep_request_timeout == 5
 
 
 def test_mutate_appconfig_post_write_failure_rolls_back(tmp_path):

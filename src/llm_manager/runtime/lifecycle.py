@@ -62,8 +62,18 @@ class Lifecycle:
 
     @property
     def startup_timeout(self) -> float:
-        """启动探测预算(秒):每次读最新配置快照——热字段,慢加载模型无需重启程序。"""
+        """一阶段探测预算(秒):等 /v1/models 可用。热字段,无需重启程序。"""
         return float(self._get_cfg().program.startup_timeout)
+
+    @property
+    def startup_deep_timeout(self) -> float:
+        """二阶段探测总预算(秒):等真实请求成功。热字段。"""
+        return float(self._get_cfg().program.startup_deep_timeout)
+
+    @property
+    def startup_deep_request_timeout(self) -> float:
+        """二阶段单次 HTTP 请求超时(秒)。热字段。"""
+        return float(self._get_cfg().program.startup_deep_request_timeout)
 
     # ---------- public ----------
     async def ensure_running(self, alias: str, *, inc_pending: bool = False) -> ModelStatus:
@@ -398,4 +408,11 @@ class Lifecycle:
         fn = self._probes[mode]
         # liveness check:进程死(启动瞬间崩溃)时 probe 快速失败,不空转到 timeout
         is_alive = (lambda: self._supervisor.alive(pid)) if pid is not None else None
-        return fn(served, model.port, None, self.startup_timeout, is_alive=is_alive)
+        return fn(
+            served,
+            model.port,
+            timeout=self.startup_timeout,
+            deep_timeout=self.startup_deep_timeout,
+            deep_request_timeout=self.startup_deep_request_timeout,
+            is_alive=is_alive,
+        )

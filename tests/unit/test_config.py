@@ -37,21 +37,32 @@ def test_validate_flags_port_and_alias_clash_and_bad_mode():
     assert any("no device scheme" in e for e in errs)
 
 
-def test_program_config_startup_timeout_default_300():
+def test_program_config_probe_timeout_defaults():
     p = ProgramConfig(host="0.0.0.0", port=8080, alive_time=60, log_level="INFO")
-    assert p.startup_timeout == 300
+    assert p.startup_timeout == 180  # 一阶段:等 /v1/models
+    assert p.startup_deep_timeout == 60  # 二阶段总预算
+    assert p.startup_deep_request_timeout == 5  # 二阶段单次请求
 
 
-def test_validate_rejects_non_positive_startup_timeout():
-    cfg = AppConfig(
-        program=ProgramConfig(
-            host="0.0.0.0", port=8080, alive_time=60, log_level="INFO", startup_timeout=0
-        ),
-        models={},
-        wol=None,
-        claude_configs={},
-    )
-    assert any("startup_timeout" in e for e in validate(cfg))
+def test_validate_rejects_non_positive_startup_timeouts():
+    for field in (
+        "startup_timeout",
+        "startup_deep_timeout",
+        "startup_deep_request_timeout",
+    ):
+        cfg = AppConfig(
+            program=ProgramConfig(
+                host="0.0.0.0",
+                port=8080,
+                alive_time=60,
+                log_level="INFO",
+                **{field: 0},
+            ),
+            models={},
+            wol=None,
+            claude_configs={},
+        )
+        assert any(field in e for e in validate(cfg))
 
 
 def test_validate_passes_clean_config():

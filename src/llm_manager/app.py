@@ -120,7 +120,9 @@ def create_app(db_path: Path | None = None) -> FastAPI:
                 auto_models,
                 cfg,
                 monitor,
-                timeout=lifecycle.startup_timeout + background.AUTO_START_MARGIN,
+                timeout=lifecycle.startup_timeout
+                + lifecycle.startup_deep_timeout
+                + background.AUTO_START_MARGIN,
                 stop_event=stop_event,
             )
         )
@@ -142,7 +144,7 @@ def create_app(db_path: Path | None = None) -> FastAPI:
                 loop=app.state.loop,
                 server=server,
                 settings_path=cfg.program.claude_settings_path,
-                startup_timeout=lifecycle.startup_timeout,
+                startup_timeout=lifecycle.startup_timeout + lifecycle.startup_deep_timeout,
                 auto_start_margin=background.AUTO_START_MARGIN,
             )
             tray.start()

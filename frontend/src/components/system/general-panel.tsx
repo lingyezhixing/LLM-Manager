@@ -85,6 +85,8 @@ export function GeneralPanel() {
   const portValid = portError(form.program.port) === null;
   const aliveValid = form.program.alive_time >= 0;
   const startupValid = form.program.startup_timeout >= 1;
+  const deepValid = form.program.startup_deep_timeout >= 1;
+  const deepReqValid = form.program.startup_deep_request_timeout >= 1;
   const set = (p: ProgramConfig) => setForm({ ...form, program: p });
   const setLogs = (l: LogRetention) => setForm({ ...form, logs: l });
   const saving = update.isPending || updateLogs.isPending || confirming;
@@ -172,6 +174,14 @@ export function GeneralPanel() {
           error={!startupValid ? "须 ≥ 1" : null}>
           <NumberInput id="cfg-startup" value={form.program.startup_timeout} onChange={(e) => set({ ...form.program, startup_timeout: num(e.target.value) })} />
         </Field>
+        <Field label="启动二阶段探测超时（秒）" htmlFor="cfg-startup-deep"
+          error={!deepValid ? "须 ≥ 1" : null}>
+          <NumberInput id="cfg-startup-deep" value={form.program.startup_deep_timeout} onChange={(e) => set({ ...form.program, startup_deep_timeout: num(e.target.value) })} />
+        </Field>
+        <Field label="二阶段单次请求超时（秒）" htmlFor="cfg-startup-deep-req"
+          error={!deepReqValid ? "须 ≥ 1" : null}>
+          <NumberInput id="cfg-startup-deep-req" value={form.program.startup_deep_request_timeout} onChange={(e) => set({ ...form.program, startup_deep_request_timeout: num(e.target.value) })} />
+        </Field>
       </FieldGrid>
 
       <SectionTitle>日志</SectionTitle>
@@ -195,7 +205,7 @@ export function GeneralPanel() {
         error={saveError ? errMsg(saveError) : null}
         onSave={onSave}
         onReset={() => commit(initial)}
-        saveDisabled={!portValid || !aliveValid || !startupValid || form.logs.days < 1 || form.logs.count < 1 || form.logs.requests < 1}
+        saveDisabled={!portValid || !aliveValid || !startupValid || !deepValid || !deepReqValid || form.logs.days < 1 || form.logs.count < 1 || form.logs.requests < 1}
       />
     </div>
   );
