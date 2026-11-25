@@ -10,6 +10,8 @@ PROGRAM_DEFAULTS: dict[str, str] = {
     "port": "8080",
     "alive_time": "60",
     "log_level": "INFO",
+    # 模型启动探测预算(秒):慢加载的大模型(30B+)需要更久才暴露 /v1/models。
+    "startup_timeout": "300",
 }
 
 RETENTION_DEFAULTS: dict[str, str] = {
@@ -176,6 +178,8 @@ class ProgramConfig:
     log_retention_days: int = int(RETENTION_DEFAULTS["log_retention_days"])
     log_retention_count: int = int(RETENTION_DEFAULTS["log_retention_count"])
     request_retention_count: int = int(RETENTION_DEFAULTS["request_retention_count"])
+    # 热字段:Lifecycle 每次 probe 读最新快照(慢加载模型可放宽)。
+    startup_timeout: int = int(PROGRAM_DEFAULTS["startup_timeout"])
 
 
 @dataclass(frozen=True, slots=True)
@@ -197,6 +201,8 @@ def validate(cfg: AppConfig) -> list[str]:
     # 程序级:端口范围(DB 读取/写入的 int() 不查范围,在此兜底)
     if not 1 <= cfg.program.port <= 65535:
         errors.append(f"Program port {cfg.program.port} out of range (1-65535)")
+    if cfg.program.startup_timeout < 1:
+        errors.append("Program startup_timeout must be >= 1")
     if cfg.program.request_retention_count < 1:
         errors.append("Program request_retention_count must be >= 1")
     seen_ports: dict[int, str] = {}

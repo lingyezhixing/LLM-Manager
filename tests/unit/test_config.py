@@ -37,6 +37,23 @@ def test_validate_flags_port_and_alias_clash_and_bad_mode():
     assert any("no device scheme" in e for e in errs)
 
 
+def test_program_config_startup_timeout_default_300():
+    p = ProgramConfig(host="0.0.0.0", port=8080, alive_time=60, log_level="INFO")
+    assert p.startup_timeout == 300
+
+
+def test_validate_rejects_non_positive_startup_timeout():
+    cfg = AppConfig(
+        program=ProgramConfig(
+            host="0.0.0.0", port=8080, alive_time=60, log_level="INFO", startup_timeout=0
+        ),
+        models={},
+        wol=None,
+        claude_configs={},
+    )
+    assert any("startup_timeout" in e for e in validate(cfg))
+
+
 def test_validate_passes_clean_config():
     cfg = AppConfig(
         program=ProgramConfig(host="0.0.0.0", port=8080, alive_time=60, log_level="INFO"),

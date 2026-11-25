@@ -15,6 +15,7 @@ class ProgramUpdate(BaseModel):
     alive_time: int | None = Field(default=None, ge=0)
     log_level: str | None = None
     claude_settings_path: str | None = None
+    startup_timeout: int | None = Field(default=None, ge=1)
 
 
 class LogRetentionUpdate(BaseModel):

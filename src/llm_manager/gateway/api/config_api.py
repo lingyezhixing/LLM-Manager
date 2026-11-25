@@ -172,6 +172,7 @@ def register_config_routes(api: APIRouter) -> None:
                 "alive_time": p.alive_time,
                 "log_level": p.log_level,
                 "claude_settings_path": p.claude_settings_path,
+                "startup_timeout": p.startup_timeout,
             },
             # 当前运行实例的 program(启动期捕获):「保存前预检」与「恢复运行值回退」的
             # 依据(RESTART_FIELDS 比较以它为准,而非库值)。
@@ -181,6 +182,7 @@ def register_config_routes(api: APIRouter) -> None:
                 "alive_time": p.alive_time,
                 "log_level": boot.get("log_level", "INFO"),
                 "claude_settings_path": boot.get("claude_settings_path", ""),
+                "startup_timeout": p.startup_timeout,
             },
             "wol": (
                 {"broadcast_address": cfg.wol.broadcast_address, "mac_address": cfg.wol.mac_address}
@@ -206,7 +208,7 @@ def register_config_routes(api: APIRouter) -> None:
             v = getattr(body, f)
             if v is not None:
                 updates[f] = v
-        for f in ("port", "alive_time"):
+        for f in ("port", "alive_time", "startup_timeout"):
             v = getattr(body, f)
             if v is not None:
                 updates[f] = str(v)
@@ -214,7 +216,7 @@ def register_config_routes(api: APIRouter) -> None:
         if dry_run:
             sim_kwargs: dict[str, str | int] = {}
             for k, v in updates.items():
-                sim_kwargs[k] = int(v) if k in ("port", "alive_time") else v
+                sim_kwargs[k] = int(v) if k in ("port", "alive_time", "startup_timeout") else v
             sim = replace(store.snapshot(), program=replace(store.snapshot().program, **sim_kwargs))
             return config_write_result(request, sim)
         if updates:

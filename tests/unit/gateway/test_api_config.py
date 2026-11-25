@@ -89,6 +89,24 @@ def test_put_program_mains_hot_field_no_restart(tmp_path):
     assert r.json()["restart_fields"] == []
 
 
+def test_put_program_startup_timeout_is_hot_and_exposed(tmp_path):
+    with TestClient(_app(tmp_path)) as c:
+        r = c.put("/api/config/program", json={"startup_timeout": 420})
+        assert r.status_code == 200
+        assert r.json()["needs_restart"] is False  # 热字段:下一次模型启动即生效
+        assert r.json()["restart_fields"] == []
+    with TestClient(_app(tmp_path)) as c:
+        j = c.get("/api/config").json()
+    assert j["program"]["startup_timeout"] == 420
+    assert j["running_program"]["startup_timeout"] == 420
+
+
+def test_put_program_rejects_non_positive_startup_timeout(tmp_path):
+    with TestClient(_app(tmp_path)) as c:
+        r = c.put("/api/config/program", json={"startup_timeout": 0})
+    assert r.status_code == 422
+
+
 def test_put_program_dry_run_previews_without_writing(tmp_path):
     """dry_run:与真实写同形的冲突检测(port → restart_fields),但不落库。"""
     with TestClient(_app(tmp_path)) as c:

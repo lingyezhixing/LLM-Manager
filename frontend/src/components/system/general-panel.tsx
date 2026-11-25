@@ -84,6 +84,7 @@ export function GeneralPanel() {
     : { program: form.program, logs: form.logs };
   const portValid = portError(form.program.port) === null;
   const aliveValid = form.program.alive_time >= 0;
+  const startupValid = form.program.startup_timeout >= 1;
   const set = (p: ProgramConfig) => setForm({ ...form, program: p });
   const setLogs = (l: LogRetention) => setForm({ ...form, logs: l });
   const saving = update.isPending || updateLogs.isPending || confirming;
@@ -165,6 +166,15 @@ export function GeneralPanel() {
         </Field>
       </FieldGrid>
 
+      <SectionTitle>模型启动</SectionTitle>
+      <FieldGrid>
+        <Field label="启动探测超时 (秒)" htmlFor="cfg-startup"
+          hint="慢加载模型(如 30B)需要更久才就绪;超过此时间仍未响应才判定启动失败。"
+          error={!startupValid ? "须 ≥ 1" : null}>
+          <NumberInput id="cfg-startup" value={form.program.startup_timeout} onChange={(e) => set({ ...form.program, startup_timeout: num(e.target.value) })} />
+        </Field>
+      </FieldGrid>
+
       <SectionTitle>日志</SectionTitle>
       <LogRetentionEditor
         value={form.logs}
@@ -186,7 +196,7 @@ export function GeneralPanel() {
         error={saveError ? errMsg(saveError) : null}
         onSave={onSave}
         onReset={() => commit(initial)}
-        saveDisabled={!portValid || !aliveValid || form.logs.days < 1 || form.logs.count < 1 || form.logs.requests < 1}
+        saveDisabled={!portValid || !aliveValid || !startupValid || form.logs.days < 1 || form.logs.count < 1 || form.logs.requests < 1}
       />
     </div>
   );

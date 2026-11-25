@@ -1,6 +1,7 @@
 import asyncio
 import time as _time
 from collections.abc import Callable
+from dataclasses import replace
 
 import pytest
 
@@ -145,6 +146,36 @@ async def test_cold_start_reaches_routing():
     assert state.get_pid("m1") == 1000
     assert "m1" in life._active_schemes
     assert sup.spawned[0] == ["run.cmd"]
+
+
+async def test_probe_reads_fresh_startup_timeout_from_config():
+    """startup_timeout 是热配置:每次 probe 读最新快照,改系统设置无需重启。
+
+    回归:此前 Lifecycle 构造期固化 60s,慢加载模型(如 30B)必然 probe 超时失败。
+    """
+    sup = FakeSupervisor()
+    dev = FakeDevices()
+    seen: list[float] = []
+
+    def recording_probe(alias, port, start_time=None, timeout=60, is_alive=None):
+        seen.append(timeout)
+        return ProbeResult(True, "ok")
+
+    base = _cfg(_model("m1", port=8000), _model("m2", port=8001))
+    holder = {"cfg": base}
+    life = Lifecycle(
+        get_cfg=lambda: holder["cfg"],
+        supervisor=sup,
+        devices=dev,
+        probes={"Chat": recording_probe},
+    )
+    await life.ensure_running("m1")
+    assert seen == [300.0]  # 默认 300 秒(不再是硬编码 60)
+    await life.stop("m1")
+
+    holder["cfg"] = replace(base, program=replace(base.program, startup_timeout=900))
+    await life.ensure_running("m2")
+    assert seen == [300.0, 900.0]  # 改配置即生效,无需重建 Lifecycle
 
 
 # ---------- reconcile(协调) ----------

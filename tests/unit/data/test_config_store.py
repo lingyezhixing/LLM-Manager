@@ -492,6 +492,23 @@ def test_mutate_appconfig_post_write_runs_before_commit(tmp_path):
     assert seen["has_sample"] is True
 
 
+def test_write_appconfig_persists_startup_timeout(tmp_path):
+    db = open_db(tmp_path / "t.db")
+    cfg = replace(_sample_cfg(), program=replace(_sample_cfg().program, startup_timeout=420))
+    write_appconfig(db, cfg)
+    assert get_setting(db, "startup_timeout") == "420"
+    assert read_appconfig(db).program.startup_timeout == 420
+
+
+def test_startup_timeout_falls_back_to_default_when_key_absent(tmp_path):
+    """旧库(无 startup_timeout 键)直接以 300 秒运行,无需迁移。"""
+    db = open_db(tmp_path / "t.db")
+    seed_defaults(db)
+    db.conn.execute("DELETE FROM system_settings WHERE key = 'startup_timeout'")
+    db.conn.commit()
+    assert read_appconfig(db).program.startup_timeout == 300
+
+
 def test_mutate_appconfig_post_write_failure_rolls_back(tmp_path):
     """post_write 抛异常 → 整事务回滚(config 写也不留)。"""
     db = open_db(tmp_path / "t.db")

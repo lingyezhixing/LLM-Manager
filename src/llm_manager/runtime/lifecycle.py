@@ -43,14 +43,12 @@ class Lifecycle:
         supervisor,
         devices,
         probes: dict[str, Callable],
-        startup_timeout: float = 60.0,
         db: Db | None = None,
     ) -> None:
         self._get_cfg = get_cfg
         self._supervisor = supervisor
         self._devices = devices
         self._probes = probes
-        self.startup_timeout = startup_timeout
         self._db = db
         self._stop_events: dict[str, asyncio.Event] = {}
         self._active_schemes: dict[str, Scheme] = {}
@@ -61,6 +59,11 @@ class Lifecycle:
         self._runtime_seg_ids: dict[
             str, int
         ] = {}  # alias → 进行中计费运行段 id(record_runtime_end 按关,不再靠 end_time IS NULL 定位)
+
+    @property
+    def startup_timeout(self) -> float:
+        """启动探测预算(秒):每次读最新配置快照——热字段,慢加载模型无需重启程序。"""
+        return float(self._get_cfg().program.startup_timeout)
 
     # ---------- public ----------
     async def ensure_running(self, alias: str, *, inc_pending: bool = False) -> ModelStatus:

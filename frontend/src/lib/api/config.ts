@@ -15,6 +15,8 @@ export interface ProgramConfig {
   alive_time: number;
   log_level: string;
   claude_settings_path: string;
+  /** 模型启动探测预算(秒);热字段,保存后下一次启动即生效。 */
+  startup_timeout: number;
 }
 
 // 保留规则(GET/PUT /api/config/logs;恒生效:日志按时间保留 N 天 + 按条数保留 N 条,

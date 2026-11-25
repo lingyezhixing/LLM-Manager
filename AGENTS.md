@@ -83,7 +83,7 @@ tray     ── 系统托盘(自重启触发 / WOL / Claude 预设应用)
 前端 PUT /api/config/*  →  Pydantic 校验(422)  →  set_settings(多键原子写)
                          →  mutate_appconfig(fn):锁内 read→改→validate→write
                          →  ConfigStore.reload()(刷 frozen 快照)
-                         →  消费方:热字段(alive_time/log_retention/request_retention_count)每轮读 fresh;
+                         →  消费方:热字段(alive_time/startup_timeout/log_retention/request_retention_count)每轮读 fresh;
                                    重启字段(host/port/log_level/claude_settings_path)
                                    需 exit 81 重启生效(顶部横幅提示 restart_fields)
 ```
@@ -242,4 +242,4 @@ README 是面向用户的文档式操作手册(与 §9 的 release 平铺式不�
 - 环境变量区分两类:`LLM_MANAGER_HOST/PORT/ALIVE_TIME/LOG_LEVEL` 覆写并持久化;`LLM_MANAGER_DB_PATH` 仅决定 DB 路径(不写入配置)。
 
 **维护**
-- 改 WebUI 页面结构、配置字段或默认值时,同步 README 相应小节;默认值须与 `PROGRAM_DEFAULTS` / `RETENTION_DEFAULTS` 一致(host `0.0.0.0:8080`、alive_time 60、日志保留 30 天 / 10 条)。
+- 改 WebUI 页面结构、配置字段或默认值时,同步 README 相应小节;默认值须与 `PROGRAM_DEFAULTS` / `RETENTION_DEFAULTS` 一致(host `0.0.0.0:8080`、alive_time 60、startup_timeout 300、日志保留 30 天 / 10 条)。

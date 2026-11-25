@@ -103,6 +103,7 @@ def _write_appconfig_locked(db: Db, cfg: AppConfig) -> None:
         _upsert_locked(db, "port", str(p.port))
         _upsert_locked(db, "alive_time", str(p.alive_time))
         _upsert_locked(db, "log_level", p.log_level)
+        _upsert_locked(db, "startup_timeout", str(p.startup_timeout))
         _upsert_locked(db, "log_retention_days", str(p.log_retention_days))
         _upsert_locked(db, "log_retention_count", str(p.log_retention_count))
         _upsert_locked(db, "request_retention_count", str(p.request_retention_count))
@@ -191,6 +192,9 @@ def _read_appconfig_locked(db: Db) -> AppConfig:
         alive_time=_int_setting(s, "alive_time", int(PROGRAM_DEFAULTS["alive_time"])),
         log_level=s.get("log_level", PROGRAM_DEFAULTS["log_level"]),
         claude_settings_path=s.get("claude_settings_path"),
+        startup_timeout=_int_setting(
+            s, "startup_timeout", int(PROGRAM_DEFAULTS["startup_timeout"])
+        ),
         log_retention_days=_int_setting(
             s, "log_retention_days", int(RETENTION_DEFAULTS["log_retention_days"])
         ),
