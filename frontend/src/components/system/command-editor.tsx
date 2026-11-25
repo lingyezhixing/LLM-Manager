@@ -13,6 +13,8 @@ import type { CommandDef } from "@/lib/api";
 const COMMON_ENV_VARS = [
   "CUDA_VISIBLE_DEVICES",   // NVIDIA:限定可见 GPU(如 0 或 0,1)
   "HIP_VISIBLE_DEVICES",    // AMD ROCm:限定可见 GPU
+  "TM_GEMM_EXPORT",         // lmdeploy/TurboMind:调优完成后导出 GEMM 结果到文件
+  "TM_GEMM_IMPORT",         // lmdeploy/TurboMind:启动时从文件导入 GEMM 调优结果
 ];
 export function CommandEditor({
   value,
